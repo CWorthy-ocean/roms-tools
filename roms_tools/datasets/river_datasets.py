@@ -511,6 +511,8 @@ class RiverDataset:
         if self.opt_var_names is not None and "vol" in self.opt_var_names:
             volume_values = ds[self.opt_var_names["vol"]].values
             if isinstance(volume_values, np.ndarray):
+                if len(volume_values) == 0:
+                    return ds
                 # Check if all volume values are the same
                 if np.all(volume_values == volume_values[0]):
                     # If all volumes are the same, no need to reverse order
@@ -720,10 +722,12 @@ class RiverDataset:
 
         river_names = list(indices.keys())
 
-        # Ensure the dataset is filtered based on the provided river names
-        ds_filtered = self.ds.where(
-            self.ds[self.var_names["name"]].isin(river_names), drop=True
-        )
+        # Ensure the dataset is filtered based on the provided river names.
+        # Use isel with a boolean mask rather than where(drop=True): the latter
+        # routes through apply_ufunc and unexpectedly collapses unrelated
+        # dimensions (e.g. time) in some xarray versions.
+        mask = self.ds[self.var_names["name"]].isin(river_names).values
+        ds_filtered = self.ds.isel({self.dim_names["station"]: mask})
 
         # Check that all requested rivers exist in the dataset
         filtered_river_names = set(ds_filtered[self.var_names["name"]].values)

@@ -219,9 +219,13 @@ class TestRiverForcingGeneral:
     def test_tracers_are_filled(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
         assert (river_forcing.ds.river_tracer >= 0.0).all()
-        # Test that tracers are constant across rivers and time
+        # Test that tracers are constant across rivers and time.
+        # Cast to float64 before std to avoid catastrophic cancellation in float32
+        # arithmetic when summing O(100) identical large values (e.g. DIC ~1640).
         assert np.allclose(
-            river_forcing.ds.river_tracer.std(dim=["river_time", "nriver"]),
+            river_forcing.ds.river_tracer.astype(float).std(
+                dim=["river_time", "nriver"]
+            ),
             0.0,
             rtol=1e-5,
             atol=1e-5,
@@ -453,8 +457,10 @@ class TestRiverForcingWithPrescribedIndices:
             end_time=self.end_time,
             indices=indices,
         )
-        river_forcing.original_indices == indices
-        river_forcing.indices == indices
+        assert river_forcing.original_indices == indices
+        # indices may be reordered (volume sort) and extended (overlap synthetics);
+        # verify all user-specified rivers are still present
+        assert set(indices.keys()).issubset(set(river_forcing.indices.keys()))
 
     def test_fraction(
         self,
@@ -655,17 +661,23 @@ class TestRiverForcingWithOverlappingIndices:
         rf = RiverForcing.__new__(RiverForcing)
         rf.indices = indices
 
+        name_to_idx = {n: i for i, n in enumerate(ds.river_name.values)}
+        name = "overlap_" + sorted(river_list)[0].replace("GloFAS_", "")
+        new_nriver = ds.sizes["nriver"] + 1  # first overlap group (i=0)
+
         combined_volume, combined_tracer = rf._create_combined_river(
             ds=ds,
-            i=1,
+            name=name,
+            new_nriver=new_nriver,
             idx_pair=idx_pair,
             river_list=river_list,
+            name_to_idx=name_to_idx,
         )
 
         assert combined_volume.sizes["nriver"] == 1
         assert combined_tracer.sizes["nriver"] == 1
-        assert combined_volume.coords["river_name"].item() == "overlap_1"
-        assert combined_tracer.coords["river_name"].item() == "overlap_1"
+        assert combined_volume.coords["river_name"].item() == name
+        assert combined_tracer.coords["river_name"].item() == name
 
         np.testing.assert_allclose(combined_volume.values, expected_volume, rtol=1e-6)
         np.testing.assert_allclose(
@@ -774,12 +786,9 @@ class TestRiverForcingBGCSource:
             "name": "CONSTANTS",
             "fill": {"name": "CONSTANTS"},
         }
-        po4 = river_forcing.ds.river_tracer.sel(
-            ntracers=river_forcing.ds.tracer_name == "PO4"
-        )
-        alk = river_forcing.ds.river_tracer.sel(
-            ntracers=river_forcing.ds.tracer_name == "ALK"
-        )
+        tracer_names = list(river_forcing.ds.tracer_name.values)
+        po4 = river_forcing.ds.river_tracer.isel(ntracers=tracer_names.index("PO4"))
+        alk = river_forcing.ds.river_tracer.isel(ntracers=tracer_names.index("ALK"))
         np.testing.assert_allclose(float(po4.min()), defaults["PO4"], rtol=1e-6)
         np.testing.assert_allclose(float(alk.min()), defaults["ALK"], rtol=1e-6)
 

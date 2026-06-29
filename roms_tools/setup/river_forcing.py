@@ -292,8 +292,13 @@ class RiverForcing:
         else:
             logging.info("Use provided river indices.")
             self.original_indices = self.indices
-            check_river_locations_are_along_coast(self.grid.ds.mask_rho, self.indices)
-            data.extract_named_rivers(self.indices)
+            # Strip synthetic overlap rivers — they are recreated by
+            # _handle_overlapping_rivers and don't exist in the source dataset.
+            source_indices = {
+                k: v for k, v in self.indices.items() if not k.startswith("overlap_")
+            }
+            check_river_locations_are_along_coast(self.grid.ds.mask_rho, source_indices)
+            data.extract_named_rivers(source_indices)
 
         ds = self._create_river_forcing(data)
         ds = self._handle_overlapping_rivers(ds)
@@ -314,8 +319,6 @@ class RiverForcing:
         with ProgressBar():
             ds["river_volume"] = ds["river_volume"].compute(keep_attrs=True)
             ds["river_tracer"] = ds["river_tracer"].compute(keep_attrs=True)
-
-        ds = self._write_indices_into_dataset(ds)
 
         ds = self._write_indices_into_dataset(ds)
         self._validate(ds)
@@ -549,10 +552,13 @@ class RiverForcing:
             if str(tracer_name) in merged:
                 tracer_arrays.append(merged[str(tracer_name)])
             else:
-                tracer_arrays.append(ds["river_tracer"].sel(ntracers=tracer_name))
+                idx = int(np.where(ds.tracer_name.values == tracer_name)[0][0])
+                tracer_arrays.append(ds["river_tracer"].isel(ntracers=idx))
 
-        ds["river_tracer"] = xr.concat(tracer_arrays, dim="ntracers").assign_coords(
-            ntracers=ds["river_tracer"].ntracers
+        ds["river_tracer"] = (
+            xr.concat(tracer_arrays, dim="ntracers")
+            .assign_coords(ntracers=ds["river_tracer"].ntracers)
+            .astype(np.float32)
         )
         return ds
 
@@ -803,7 +809,7 @@ class RiverForcing:
 
             name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
             for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
-                name = "overlap_" + river_list[0].replace("GloFAS_", "")
+                name = "overlap_" + sorted(river_list)[0].replace("GloFAS_", "")
                 logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
                 new_nriver = ds.sizes["nriver"] + i + 1
                 (

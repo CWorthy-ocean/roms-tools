@@ -494,7 +494,7 @@ def initial_conditions_with_unified_bgc_density(
     """Unified-BGC initial conditions using density-space interpolation.
 
     Same as ``initial_conditions_with_unified_bgc_from_climatology`` but with
-    ``use_density_interpolation=True``. The BGC tracers are placed on the model's
+    ``bgc_interpolation_method="density"``. The BGC tracers are placed on the model's
     density surfaces (target T/S come from the physics in the same object).
     """
     grid = Grid(
@@ -519,7 +519,7 @@ def initial_conditions_with_unified_bgc_density(
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
-        use_density_interpolation=True,
+        bgc_interpolation_method="density",
         use_dask=use_dask,
     )
 
@@ -703,7 +703,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
         source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         physics_forcing=physics_bc,
-        use_density_interpolation=True,
+        bgc_interpolation_method="density",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )

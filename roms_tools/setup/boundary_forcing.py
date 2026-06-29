@@ -24,10 +24,12 @@ from roms_tools.regrid import (
     VerticalRegrid,
 )
 from roms_tools.setup.utils import (
+    BGC_INTERPOLATION_METHODS,
     RawDataSource,
     _compute_density_coord,
     _xesmf_available,
     add_time_info_to_ds,
+    build_bgc_vertical_coords,
     check_and_set_boundaries,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
@@ -209,18 +211,29 @@ class BoundaryForcing:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
-    use_density_interpolation : bool, optional
-        If True, BGC tracers are vertically interpolated in density space
-        rather than depth space when ``physics_forcing`` is provided. Preserves
-        water-mass properties. Only used when ``type='bgc'``.
+    bgc_interpolation_method : str, optional
+        Vertical interpolation method for BGC tracers (only used when ``type='bgc'``).
+        One of:
 
-        Interpolation uses ``xgcm.Grid.transform`` with the linear method inside
-        the source density range and edge-value (nearest-neighbor) extrapolation
-        outside (``mask_edges=False``).
+        - ``"depth"`` (default): linear interpolation in depth.
+        - ``"density"``: linear interpolation in potential-density (isopycnal) space,
+          preserving water-mass properties. Density is computed via TEOS-10 sigma-0 from
+          the BGC source's own T/S (source coordinate) and the physics T/S supplied by
+          ``physics_forcing`` (target coordinate).
+        - ``"density_mld"``: the mixed layer depth (MLD) is found in the source and target
+          density fields; the source mixed layer is scaled so its MLD matches the target's,
+          and below the MLD the tracer is interpolated 1:1 in depth. This keeps the mixed
+          layers aligned while preserving the absolute depth of sub-mixed-layer features,
+          and avoids the surface degeneracy of pure density space.
+
+        ``"density"`` and ``"density_mld"`` require ``physics_forcing`` and a BGC source
+        carrying temperature/salinity; otherwise interpolation falls back to depth space.
+        Interpolation uses ``xgcm.Grid.transform`` with the linear method inside the
+        source range and edge-value extrapolation outside (``mask_edges=False``).
     physics_forcing : BoundaryForcing, optional
         A physics ``BoundaryForcing`` object (``type='physics'``) whose T/S fields
-        supply the density coordinate for BGC tracer interpolation. When None and
-        ``use_density_interpolation=True``, falls back to depth-based interpolation.
+        supply the target density coordinate for BGC tracer interpolation. When None and
+        a density method is requested, falls back to depth-based interpolation.
 
 
     Examples
@@ -284,8 +297,9 @@ class BoundaryForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
-    use_density_interpolation: bool = False
-    """Whether to interpolate BGC tracers in density space rather than depth space."""
+    bgc_interpolation_method: str = "depth"
+    """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
+    ``"density_mld"``."""
     physics_forcing: "BoundaryForcing | None" = None
     """Physics BoundaryForcing object supplying T/S for density-based BGC interpolation."""
 
@@ -307,12 +321,13 @@ class BoundaryForcing:
 
         if (
             self.type == "bgc"
-            and self.use_density_interpolation
+            and self.bgc_interpolation_method != "depth"
             and self.physics_forcing is None
         ):
             logging.info(
-                "use_density_interpolation=True but no physics_forcing provided. "
-                "BGC tracers will be interpolated in depth space instead."
+                f"bgc_interpolation_method={self.bgc_interpolation_method!r} but no "
+                "physics_forcing provided. BGC tracers will be interpolated in depth "
+                "space instead."
             )
 
         target_coords = get_target_coords(self.grid)
@@ -608,47 +623,42 @@ class BoundaryForcing:
                         tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
 
                         has_source_ts = len(aux_ts_vars) == 2
-                        use_density = (
-                            self.type == "bgc"
-                            and self.use_density_interpolation
-                            and location == "rho"
-                            and self.physics_forcing is not None
-                            and has_source_ts
-                        )
-                        if (
-                            self.type == "bgc"
-                            and self.use_density_interpolation
-                            and location == "rho"
-                            and not use_density
-                        ):
-                            reason = (
-                                "no physics_forcing provided"
-                                if self.physics_forcing is None
-                                else "the BGC source has no temperature/salinity"
-                            )
-                            logging.info(
-                                f"Density-space interpolation requested but {reason}; "
-                                f"falling back to depth-space interpolation "
-                                f"({direction} boundary)."
-                            )
+                        # Resolve the requested method against availability of the
+                        # physics target T/S and the BGC source T/S; fall back to depth.
+                        method = "depth"
+                        if self.type == "bgc" and location == "rho":
+                            method = self.bgc_interpolation_method
+                            can_use = self.physics_forcing is not None and has_source_ts
+                            if method != "depth" and not can_use:
+                                reason = (
+                                    "no physics_forcing provided"
+                                    if self.physics_forcing is None
+                                    else "the BGC source has no temperature/salinity"
+                                )
+                                logging.info(
+                                    f"{method!r} interpolation requested but {reason}; "
+                                    f"falling back to depth-space interpolation "
+                                    f"({direction} boundary)."
+                                )
+                                method = "depth"
 
-                        source_density = None
-                        target_density = None
-                        if use_density:
-                            source_density, target_density = (
-                                self._compute_bgc_density_coords(
-                                    direction, bdry_data, processed_fields
+                        source_coord = None
+                        target_coord = None
+                        if method != "depth":
+                            source_coord, target_coord = (
+                                self._compute_bgc_vertical_coords(
+                                    method, direction, bdry_data, processed_fields
                                 )
                             )
 
                         for var_name in tracer_vars:
                             if var_name not in processed_fields:
                                 continue
-                            if use_density:
+                            if method != "depth":
                                 processed_fields[var_name] = vertical_regrid.apply(
                                     processed_fields[var_name],
-                                    source_depth_coords=source_density,
-                                    target_depth_coords=target_density,
+                                    source_depth_coords=source_coord,
+                                    target_depth_coords=target_coord,
                                 )
                             else:
                                 processed_fields[var_name] = vertical_regrid.apply(
@@ -741,42 +751,34 @@ class BoundaryForcing:
             self.regrid_method, xesmf_available=xesmf_available
         )
 
-    def _compute_bgc_density_coords(
+    def _compute_bgc_vertical_coords(
         self,
+        method: str,
         direction: str,
         bdry_data,
         processed_fields: dict,
     ) -> tuple[xr.DataArray, xr.DataArray]:
-        """Build source and target density coordinates for density-space BGC
-        interpolation at one boundary.
+        """Build source and target vertical coordinates for non-depth BGC
+        interpolation (``"density"`` or ``"density_mld"``) at one boundary.
 
-        The source density comes from the BGC dataset's OWN temperature/salinity pair
-        (``temp_bgc``/``salt_bgc``, carried at the boundary on the BGC depth and time
-        grid). No regridding or time alignment is needed: the source T/S share the
-        tracers' grid and time axis.
+        The source T/S comes from the BGC dataset's OWN pair (``temp_bgc``/``salt_bgc``,
+        carried at the boundary on the BGC depth and time grid). No regridding or time
+        alignment is needed: it shares the tracers' grid and time axis.
 
-        The target density comes from the model's (physics) sigma-level T/S supplied by
-        ``physics_forcing``, interpolated onto the BGC time axis.
-
-        Both arrays include the small monotonicity perturbation that
-        ``vertical_regrid.apply`` requires for a strictly monotonic coordinate.
+        The target T/S comes from the model's (physics) sigma-level fields supplied by
+        ``physics_forcing``, interpolated onto the BGC time axis. The actual coordinate
+        construction (density vs. MLD-warped depth) is delegated to
+        :func:`build_bgc_vertical_coords`.
 
         Returns
         -------
         tuple[xr.DataArray, xr.DataArray]
-            ``(source_density, target_density)``.
+            ``(source_coord, target_coord)``.
         """
         assert self.physics_forcing is not None
         bgc_climatology = bool(self.source["climatology"])
         bgc_depth_dim = bdry_data.dim_names["depth"]
         temp_key, salt_key = bdry_data.bgc_source_ts
-
-        # --- Source density: the BGC dataset's own T/S pair ---
-        source_density = _compute_density_coord(
-            processed_fields[temp_key],
-            processed_fields[salt_key],
-            bgc_depth_dim,
-        )
 
         # BGC time axis (shared with the tracers) — taken from the source T/S.
         bgc_time_dim = bdry_data.dim_names.get("time")
@@ -814,9 +816,18 @@ class BoundaryForcing:
             salt_sigma = _align_time(salt_sigma, "bry_time")
 
         s_dim = next(d for d in temp_sigma.dims if d.startswith("s_"))
-        target_density = _compute_density_coord(temp_sigma, salt_sigma, s_dim)
 
-        return source_density, target_density
+        return build_bgc_vertical_coords(
+            method,
+            source_temp=processed_fields[temp_key],
+            source_salt=processed_fields[salt_key],
+            source_depth=bdry_data.ds[bgc_depth_dim],
+            source_depth_dim=bgc_depth_dim,
+            target_temp=temp_sigma,
+            target_salt=salt_sigma,
+            target_depth=self.ds_depth_coords[f"layer_depth_rho_{direction}"],
+            target_depth_dim=s_dim,
+        )
 
     def _input_checks(self) -> None:
         """Validate and normalize user-provided input parameters."""
@@ -838,6 +849,12 @@ class BoundaryForcing:
         # -------------------------------------------------------
         if self.type not in {"physics", "bgc"}:
             raise ValueError("`type` must be either 'physics' or 'bgc'.")
+
+        if self.bgc_interpolation_method not in BGC_INTERPOLATION_METHODS:
+            raise ValueError(
+                f"`bgc_interpolation_method` must be one of "
+                f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
+            )
 
         # -------------------------------------------------------
         # Source configuration checks

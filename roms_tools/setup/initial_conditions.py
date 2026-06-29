@@ -36,7 +36,6 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     nan_check,
     pop_grid_data,
-    resolve_deprecated_density_arg,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -136,11 +135,6 @@ class InitialConditions:
         the log. Interpolation uses ``xgcm.Grid.transform`` with the linear method
         inside the source range and edge-value extrapolation outside
         (``mask_edges=False``).
-    use_density_interpolation : bool, optional
-        Deprecated. Use ``bgc_interpolation_method`` instead: ``True`` is equivalent to
-        ``bgc_interpolation_method="density"`` and ``False`` to ``"depth"``.
-
-
 
     Examples
     --------
@@ -192,9 +186,6 @@ class InitialConditions:
     bgc_interpolation_method: str = "depth"
     """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
     ``"density_mld"``."""
-    use_density_interpolation: bool | None = None
-    """Deprecated: use ``bgc_interpolation_method`` instead. ``True`` maps to
-    ``"density"`` and ``False`` to ``"depth"``."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -204,12 +195,6 @@ class InitialConditions:
     """An xarray Dataset containing the depth coordinates."""
 
     def __post_init__(self):
-        # Resolve the deprecated `use_density_interpolation` argument before validation.
-        self.bgc_interpolation_method = resolve_deprecated_density_arg(
-            self.use_density_interpolation, self.bgc_interpolation_method
-        )
-        self.use_density_interpolation = None
-
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
 
@@ -1115,7 +1100,6 @@ class InitialConditions:
                 "ds_depth_coords",
                 "adjust_depth_for_sea_surface_height",
                 "use_dask",
-                "use_density_interpolation",
             ],
         )
         write_to_yaml(forcing_dict, filepath)

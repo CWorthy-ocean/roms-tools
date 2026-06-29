@@ -816,30 +816,6 @@ def test_ic_density_vs_depth_interpolation(use_dask):
         )
 
 
-def test_ic_deprecated_use_density_interpolation_warns(use_dask):
-    """The deprecated ``use_density_interpolation`` bool still works, emits a
-    DeprecationWarning, and maps onto ``bgc_interpolation_method``.
-    """
-    grid = _ic_grid()
-    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
-    common_kwargs = dict(
-        grid=grid,
-        ini_time=datetime(2021, 6, 29),
-        source={"path": fname, "name": "GLORYS"},
-        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
-        use_dask=use_dask,
-    )
-
-    with pytest.warns(DeprecationWarning):
-        ic = InitialConditions(**common_kwargs, use_density_interpolation=True)
-    assert ic.bgc_interpolation_method == "density"
-
-    with pytest.warns(DeprecationWarning):
-        ic = InitialConditions(**common_kwargs, use_density_interpolation=False)
-    assert ic.bgc_interpolation_method == "depth"
-
-
 def test_ic_invalid_interpolation_method_raises(use_dask):
     """An unknown ``bgc_interpolation_method`` is rejected."""
     grid = _ic_grid()

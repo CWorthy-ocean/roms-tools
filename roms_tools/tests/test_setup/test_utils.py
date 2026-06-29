@@ -9,7 +9,6 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
-    BGC_INTERPOLATION_METHODS,
     _compute_density_coord,
     _compute_mld_warp,
     _infer_valid_boundaries_from_mask,
@@ -22,7 +21,6 @@ from roms_tools.setup.utils import (
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
     month_to_time_index,
-    resolve_deprecated_density_arg,
     tile_monthly_climatology_on_calendar,
     validate_names,
 )
@@ -848,21 +846,6 @@ def test_build_bgc_vertical_coords_invalid_method():
             target_depth=da,
             target_depth_dim="dep",
         )
-
-
-def test_resolve_deprecated_density_arg():
-    """The deprecated bool maps onto the method string and warns; an explicit new-style
-    method always wins.
-    """
-    assert resolve_deprecated_density_arg(None, "density_mld") == "density_mld"
-    with pytest.warns(DeprecationWarning):
-        assert resolve_deprecated_density_arg(True, "depth") == "density"
-    with pytest.warns(DeprecationWarning):
-        assert resolve_deprecated_density_arg(False, "depth") == "depth"
-    # explicit new-style argument overrides the deprecated bool
-    with pytest.warns(DeprecationWarning):
-        assert resolve_deprecated_density_arg(True, "density_mld") == "density_mld"
-    assert "density_mld" in BGC_INTERPOLATION_METHODS
 
 
 class TestMonthlyClimatologyExpansion:

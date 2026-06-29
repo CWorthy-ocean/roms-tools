@@ -964,30 +964,6 @@ def build_bgc_vertical_coords(
     )
 
 
-def resolve_deprecated_density_arg(
-    use_density_interpolation: "bool | None",
-    bgc_interpolation_method: str,
-) -> str:
-    """Resolve the deprecated ``use_density_interpolation`` argument.
-
-    Maps the old boolean onto the new ``bgc_interpolation_method`` string and returns
-    the effective method. Emits a ``DeprecationWarning`` when the old argument is set.
-    The boolean only takes effect when ``bgc_interpolation_method`` is left at its
-    ``"depth"`` default, so an explicit new-style argument always wins.
-    """
-    if use_density_interpolation is not None:
-        warnings.warn(
-            "`use_density_interpolation` is deprecated and will be removed in a "
-            "future release; use `bgc_interpolation_method='depth'`, `'density'`, "
-            "or `'density_mld'` instead.",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-        if bgc_interpolation_method == "depth":
-            return "density" if use_density_interpolation else "depth"
-    return bgc_interpolation_method
-
-
 def compute_missing_surface_bgc_variables(bgc_data):
     """Fills in missing surface biogeochemical (BGC) variables in the input dictionary.
 

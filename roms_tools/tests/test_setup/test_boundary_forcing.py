@@ -893,38 +893,6 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         )
 
 
-def test_bgc_bc_deprecated_use_density_interpolation_warns(use_dask):
-    """The deprecated ``use_density_interpolation`` bool still works on BoundaryForcing,
-    warns, and maps onto ``bgc_interpolation_method``.
-    """
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,
-        theta_s=5.0,
-        theta_b=2.0,
-        hc=250.0,
-    )
-    with pytest.warns(DeprecationWarning):
-        bf = BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2012, 1, 1),
-            end_time=datetime(2012, 1, 2),
-            source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
-            type="bgc",
-            use_density_interpolation=False,
-            apply_2d_horizontal_fill=True,
-            use_dask=use_dask,
-        )
-    assert bf.bgc_interpolation_method == "depth"
-
-
 def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
     """An unknown ``bgc_interpolation_method`` is rejected."""
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))

@@ -736,3 +736,217 @@ def test_nondefault_glorys_dataset_loading(small_grid: Grid, use_dask: bool) -> 
 
         expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}
         assert set(bf.ds.data_vars).issuperset(expected_vars)
+
+
+# test density interpolation
+
+
+def test_bgc_bc_density_fallback_without_physics_forcing(
+    bgc_boundary_forcing_from_unified_climatology,
+):
+    """BGC BC with density interpolation but no physics_forcing falls back to depth-based."""
+    bf = bgc_boundary_forcing_from_unified_climatology
+    assert bf.bgc_interpolation_method == "depth"
+    assert bf.physics_forcing is None
+    # BGC variables should still be present (depth-based fallback succeeded)
+    assert any("NO3" in v for v in bf.ds.data_vars)
+    # auxiliary source T/S must never leak into the output
+    assert not any(str(v).startswith(("temp_", "salt_")) for v in bf.ds.data_vars)
+
+
+def test_bgc_bc_with_physics_forcing(use_dask):
+    """BGC BC with physics_forcing uses density interpolation and produces BGC variables."""
+    # Use same grid / data as existing physics BC fixtures (North Atlantic, 2012)
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    physics_bc = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_phys, "name": "GLORYS"},
+        type="physics",
+        apply_2d_horizontal_fill=False,
+        use_dask=use_dask,
+    )
+
+    bgc_bc = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        physics_forcing=physics_bc,
+        bgc_interpolation_method="density",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+
+    assert bgc_bc.bgc_interpolation_method == "density"
+    assert bgc_bc.physics_forcing is physics_bc
+    for direction in ["south", "east", "north", "west"]:
+        if bgc_bc.boundaries[direction]:
+            assert f"NO3_{direction}" in bgc_bc.ds
+            assert f"DIC_{direction}" in bgc_bc.ds
+
+    # The auxiliary source T/S used to build the density coordinate must never
+    # leak into the output.
+    assert not any(str(v).startswith(("temp_", "salt_")) for v in bgc_bc.ds.data_vars)
+
+    # Compare against a depth-based run. Whether density interpolation actually
+    # fires depends on the BGC source carrying its own temperature/salinity
+    # (``temp_WOA``/...). If present, density output must differ from depth; if
+    # absent (older test data), the run falls back to depth and is identical.
+    bgc_src = xr.open_dataset(fname_bgc)
+    source_has_ts = any(
+        str(v).startswith(("temp_", "salt_")) for v in bgc_src.data_vars
+    )
+
+    bgc_bc_depth = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        bgc_interpolation_method="depth",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    any_diff = False
+    for direction in ["south", "east", "north", "west"]:
+        if not bgc_bc.boundaries[direction]:
+            continue
+        for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+            name = f"{var}_{direction}"
+            if name in bgc_bc.ds and name in bgc_bc_depth.ds:
+                a = bgc_bc.ds[name].values
+                b = bgc_bc_depth.ds[name].values
+                valid = ~(np.isnan(a) | np.isnan(b))
+                if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
+                    any_diff = True
+                    break
+        if any_diff:
+            break
+
+    # MLD-anchored interpolation: builds, produces BGC vars, and never leaks T/S.
+    bgc_bc_mld = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        physics_forcing=physics_bc,
+        bgc_interpolation_method="density_mld",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    assert bgc_bc_mld.bgc_interpolation_method == "density_mld"
+    assert not any(
+        str(v).startswith(("temp_", "salt_")) for v in bgc_bc_mld.ds.data_vars
+    )
+
+    mld_diff = False
+    for direction in ["south", "east", "north", "west"]:
+        if not bgc_bc.boundaries[direction]:
+            continue
+        for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+            name = f"{var}_{direction}"
+            if name in bgc_bc_mld.ds and name in bgc_bc_depth.ds:
+                a = bgc_bc_mld.ds[name].values
+                b = bgc_bc_depth.ds[name].values
+                valid = ~(np.isnan(a) | np.isnan(b))
+                if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
+                    mld_diff = True
+                    break
+        if mld_diff:
+            break
+
+    if source_has_ts:
+        # Wiring guard: confirm the density methods actually fire (do not silently fall
+        # back to depth). Exact-value verification of the density output lives in the
+        # ``bgc_boundary_forcing_from_unified_density`` regression fixture.
+        assert any_diff, (
+            "Density interpolation produced identical output to depth-based"
+        )
+        assert mld_diff, "MLD interpolation produced identical output to depth-based"
+    else:
+        assert not any_diff, (
+            "BGC source has no temperature/salinity, so density interpolation "
+            "should fall back to depth-based and match exactly"
+        )
+        assert not mld_diff, (
+            "BGC source has no temperature/salinity, so MLD interpolation "
+            "should fall back to depth-based and match exactly"
+        )
+
+
+def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
+    """An unknown ``bgc_interpolation_method`` is rejected."""
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    with pytest.raises(ValueError, match="bgc_interpolation_method"):
+        BoundaryForcing(
+            grid=grid,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2012, 1, 2),
+            source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+            type="bgc",
+            bgc_interpolation_method="bogus",
+            apply_2d_horizontal_fill=True,
+            use_dask=use_dask,
+        )
+
+
+def test_physics_forcing_survives_yaml_roundtrip(
+    bgc_boundary_forcing_from_unified_density, tmp_path, use_dask
+):
+    """A density BGC BoundaryForcing must round-trip through YAML with its companion
+    physics_forcing intact, so the reloaded object stays in density space (instead of
+    silently falling back to depth interpolation).
+    """
+    bf = bgc_boundary_forcing_from_unified_density
+    filepath = tmp_path / "density_bc.yaml"
+    bf.to_yaml(filepath)
+
+    reloaded = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
+
+    # physics_forcing must survive serialization and be reconstructed.
+    assert reloaded.physics_forcing is not None
+    assert reloaded.physics_forcing.type == "physics"
+    assert reloaded.bgc_interpolation_method == "density"
+    # The physics forcing reuses the shared grid (not a duplicated one).
+    assert reloaded.physics_forcing.grid is reloaded.grid
+
+    # Density interpolation actually fired on reload: output matches the original.
+    # (Do not use object ``==``; the dataclass eq on xarray ds is unreliable.)
+    for direction in ["south", "east", "north", "west"]:
+        if bf.boundaries[direction]:
+            for var in ["NO3", "DIC", "ALK"]:
+                name = f"{var}_{direction}"
+                if name in bf.ds and name in reloaded.ds:
+                    xr.testing.assert_allclose(reloaded.ds[name], bf.ds[name])

@@ -489,6 +489,43 @@ def initial_conditions_with_unified_bgc_from_climatology(
 
 
 @pytest.fixture(scope="session")
+def initial_conditions_with_unified_bgc_density(
+    use_dask: bool,
+) -> InitialConditions:
+    """Unified-BGC initial conditions using density-space interpolation.
+
+    Same as ``initial_conditions_with_unified_bgc_from_climatology`` but with
+    ``bgc_interpolation_method="density"``. The BGC tracers are placed on the model's
+    density surfaces (target T/S come from the physics in the same object).
+    """
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        bgc_interpolation_method="density",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def initial_conditions_from_roms(
     use_dask: bool,
 ) -> InitialConditions:
@@ -614,6 +651,54 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing:
+    """Unified-BGC boundary forcing using density-space interpolation.
+
+    Unlike ``bgc_boundary_forcing_from_unified_climatology`` (depth-space), density
+    interpolation needs the model (physics) T/S as the target density coordinate,
+    supplied via a companion physics ``BoundaryForcing`` passed as ``physics_forcing``.
+    Uses the North Atlantic GLORYS physics so the target T/S overlap the domain.
+    """
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    physics_bc = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_phys, "name": "GLORYS"},
+        type="physics",
+        apply_2d_horizontal_fill=False,
+        use_dask=use_dask,
+    )
+
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        type="bgc",
+        physics_forcing=physics_bc,
+        bgc_interpolation_method="density",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
@@ -887,7 +972,7 @@ def bgc_surface_forcing_from_mbl_co2(use_dask: bool) -> SurfaceForcing:
 def restoring_surface_forcing_from_unified_climatology(
     use_dask: bool,
 ) -> SurfaceForcing:
-    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    """Fixture for creating a SurfaceForcing object with salinity restoring forces from unified climatology."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -919,7 +1004,7 @@ def restoring_surface_forcing_from_unified_climatology(
 def restoring_surface_forcing_from_woa_climatology(
     use_dask: bool,
 ) -> SurfaceForcing:
-    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    """Fixture for creating a SurfaceForcing object with salinity restoring forces from WOA climatology."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -942,6 +1027,38 @@ def restoring_surface_forcing_from_woa_climatology(
         source={"name": "WOA", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="restoring",
         restoring_forces=["sss"],
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def restoring_surface_forcing_from_soda(
+    use_dask: bool,
+) -> SurfaceForcing:
+    """Fixture for creating a SurfaceForcing object with DIC/ALK restoring forces from OceanSODA."""
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
+
+    fname_bgc = Path(download_test_data("coarsened_OceanSODA_dataset.nc"))
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "SODA", "path": fname_bgc},  # type: ignore[dict-item]
+        type="restoring",
+        restoring_forces=["sDIC", "sALK"],
         coarse_grid_mode="never",
         use_dask=use_dask,
     )

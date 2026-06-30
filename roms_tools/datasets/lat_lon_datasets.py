@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Literal, cast
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
 
+import fsspec
 import numpy as np
 import xarray as xr
 
@@ -33,6 +34,7 @@ from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
+    compute_potential_density,
     get_target_coords,
 )
 from roms_tools.utils import (
@@ -653,7 +655,7 @@ class LatLonDataset:
             return coords_ds
 
         if return_copy:
-            return LatLonDataset.from_ds(self, subdomain)
+            return type(self).from_ds(self, subdomain)
         else:
             self.ds = subdomain
             return None
@@ -1396,6 +1398,119 @@ class MBLco2Dataset(MBLDataset):
 
 
 @dataclass(kw_only=True)
+class SODADataset(LatLonDataset):
+    """Represents global gridded marine carbonate system data calculated from machine learning estimates of Total Alkalinity and the fugacity of carbon dioxide. Data taken from NOAA's OceanSODA-ETHZ version 2025. Monthly data for years 1982-2024 at 1 degree resolution for the surface water.
+
+    Notes
+    -----
+    No pre-processing is done so land points are nans. The `needs_lateral_fill` attribute is set to `True`.
+    Both variables `dic` and `talk` have units of micromol/kg, so density is calulated from the `temperature` and `salinity` in the datset to convert to units of mmol/m^3.
+    """
+
+    needs_lateral_fill: bool = True
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """This method calculates density from T and S in the dataset, and then uses it to convert
+        dic and talk from units of micromol/kg to mmol/m^3.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with monthly dic and talk data.
+        """
+        ds = ds.rename({"lon": "longitude", "lat": "latitude"})
+
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "time": "time",
+        }
+
+        ds = ds.assign_coords(
+            {
+                "latitude": ds["latitude"],
+                "longitude": ds["longitude"],
+            }
+        )
+
+        # Confirm the correct dataset is being used
+        if len(ds["time"]) != 516:
+            SODA_URL = "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
+            raise ValueError(f"Please use the OceanSODA dataset provided at {SODA_URL}")
+
+        ds["time"].attrs = {"units": "Datetime", "long_name": "Time"}
+
+        # Calculate density
+        sigma0 = compute_potential_density(ds["temperature"], ds["salinity"])
+        potential_density = sigma0 + 1000  # [kg/m^3]
+
+        # convert from micromol/kg to mmol/m^3
+        ds["dic"] = ds["dic"] * potential_density / 1000
+        ds["talk"] = ds["talk"] * potential_density / 1000
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class SODARestoringSurfaceDataset(SODADataset):
+    dataset_name: ClassVar[str] = (
+        "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
+    )
+    """The SODA dataset url"""
+
+    def __post_init__(self) -> None:
+        if not self.filename:
+            self.filename = self.dataset_name
+        self.ds_loader_fn = self._load_from_soda
+
+        super().__post_init__()
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {"sDIC": "dic", "sALK": "talk"}
+    )
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sDIC": "dic",
+            "sALK": "talk",
+        }
+    )
+
+    def _load_from_soda(self) -> xr.Dataset:
+        """Load a OceanSODA carbonate system dataset.
+
+        This reads in a nedCDF file from NOAA. The carbonate systme is determined via machine learning.
+        Data are available from 1982 through 2024.
+
+        Returns
+        -------
+        xr.Dataset
+            The converted xarray dataset
+        """
+        ds = xr.open_dataset(fsspec.open(self.filename).open(), engine="h5netcdf")
+
+        return ds
+
+    def post_process(self) -> None:
+        """
+        Processes SODAv2025 data values as follows:
+        - drop the year coordinate
+        - Apply a mask to the dataset based on locations of NaN values.
+        """
+        self.ds = self.ds.drop_vars("year")
+
+        condition = self.ds["dic"].isnull().any(dim=self.dim_names["time"])
+        self.ds["mask"] = xr.where(condition, 0, 1)
+
+
+@dataclass(kw_only=True)
 class UnifiedDataset(LatLonDataset):
     """Represents unified BGC data on original grid.
 
@@ -1519,8 +1634,18 @@ class UnifiedBGCDataset(UnifiedDataset):
             "spCaCO3": "spCaCO3",
             "zooC": "zooC",
             "CHL": "CHL",
+            # Source temperature/salinity used to build the density coordinate for
+            # density-space interpolation of BGC tracers, under the stable internal keys
+            # ``temp_bgc``/``salt_bgc`` (declared as the density source in
+            # ``bgc_source_ts`` below). Optional: absent in older files, in which case
+            # interpolation falls back to depth space. If the file renames these
+            # variables, update only the values here.
+            "temp_bgc": "temp_WOA",
+            "salt_bgc": "salt_WOA",
         }
     )
+    # The opt_var_names keys (temp, salt) that supply the density-coordinate source.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
 
     climatology: bool = True
 
@@ -1554,10 +1679,10 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             "latitude": "lat",
         }
     )
-    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt_WOA"})
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "sss": "salt",
+            "sss": "salt_WOA",
         }
     )
 

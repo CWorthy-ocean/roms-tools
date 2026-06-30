@@ -2,6 +2,7 @@ import importlib.metadata
 import logging
 import time
 import typing
+import warnings
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
@@ -11,15 +12,18 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+import gsw
 import numba as nb
 import numpy as np
 import pandas as pd
 import xarray as xr
+import xgcm
 import yaml
 from pydantic import BaseModel
 from scipy.spatial import cKDTree
 
 from roms_tools.constants import R_EARTH
+from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -348,6 +352,8 @@ def get_variable_metadata():
         },
         "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
         "sss": {"long_name": "sea surface salinity", "units": "PSU"},
+        "sDIC": {"long_name": "sea surface DIC", "units": "mmol/m3"},
+        "sALK": {"long_name": "sea surface ALK", "units": "mmol/m3"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -637,6 +643,331 @@ def compute_missing_bgc_variables(bgc_data):
     bgc_data.pop("CHL", None)
 
     return bgc_data
+
+
+def compute_potential_density(
+    temp: "xr.DataArray", salt: "xr.DataArray"
+) -> "xr.DataArray":
+    """Compute sigma-0 potential density anomaly (kg/m³ - 1000) via TEOS-10 (gsw).
+
+    Wraps gsw.sigma0 with apply_ufunc for dask compatibility. Treats practical
+    salinity as Absolute Salinity and in-situ temperature as Conservative
+    Temperature — an approximation sufficient for density-coordinate interpolation.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        In-situ temperature (°C).
+    salt : xr.DataArray
+        Practical salinity (PSU).
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 (kg/m³ - 1000).
+    """
+    density = xr.apply_ufunc(
+        gsw.sigma0,
+        salt,
+        temp,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+    # apply_ufunc preserves the input dim order, but normalize to the package's
+    # canonical order so this public function returns a predictable layout to
+    # users who call it directly.
+    density = transpose_dimensions(density)
+    density.name = "sigma0"
+    density.attrs["long_name"] = "potential density anomaly"
+    density.attrs["units"] = "kg/m^3 - 1000"
+    return density
+
+
+# Internal variable-name keys for the single source temperature/salinity pair used to
+# build the BGC density coordinate. A BGC dataset declares these keys in its
+# ``opt_var_names`` (mapping them to whatever the file calls the fields, e.g.
+# ``temp_WOA``/``salt_WOA``); the density-space interpolation in
+# ``InitialConditions``/``BoundaryForcing`` detects, uses, and then drops them. The keys
+# are deliberately NOT ``temp``/``salt`` so they cannot collide with the physics model
+# T/S that share ``processed_fields`` in ``InitialConditions``.
+BGC_SOURCE_TEMP = "temp_bgc"
+BGC_SOURCE_SALT = "salt_bgc"
+
+
+def _compute_density_coord(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth_dim: str,
+) -> "xr.DataArray":
+    """Build a strictly monotonic potential-density coordinate for density-space
+    interpolation.
+
+    Computes sigma-0 from ``temp``/``salt`` and adds a tiny depth-index perturbation
+    (matching the reference MATLAB implementation) so the profile is strictly
+    increasing along ``depth_dim`` — required by the ``xgcm`` transform that consumes
+    it as a coordinate. The result is single-chunked along ``depth_dim``, which
+    ``xgcm.transform`` also requires.
+
+    The same helper builds both the *source* coordinate (``depth_dim`` = the BGC
+    source depth dimension) and the *target* coordinate (``depth_dim`` = the ROMS
+    ``s_rho`` dimension); the inputs differ (BGC's own T/S for the source, the model's
+    T/S for the target), but the construction is identical.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        Temperature (°C) on the grid whose density coordinate is wanted.
+    salt : xr.DataArray
+        Practical salinity (PSU) on the same grid.
+    depth_dim : str
+        Name of the vertical dimension along which the coordinate must be monotonic.
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 plus monotonicity perturbation, single-
+        chunked along ``depth_dim``.
+    """
+    density = compute_potential_density(temp, salt)
+    n_depth = density.sizes[depth_dim]
+    density = density + xr.DataArray(np.arange(n_depth) * 1e-7, dims=[depth_dim])
+    # xgcm.transform requires a single chunk along the dim being transformed.
+    return density.chunk({depth_dim: -1})
+
+
+# Available BGC vertical-interpolation methods (selected via
+# ``bgc_interpolation_method`` on ``InitialConditions``/``BoundaryForcing``):
+#   "depth"       — linear interpolation in depth (the conservative default).
+#   "density"     — linear interpolation in potential-density (isopycnal) space.
+#   "density_mld" — linear interpolation in depth within two segments split at the
+#                   mixed layer depth (MLD), with the MLD matched between source and
+#                   target. Avoids the surface degeneracy of pure density space.
+BGC_INTERPOLATION_METHODS = ("depth", "density", "density_mld")
+
+# Mixed-layer-depth detection defaults (density-threshold criterion, de Boyer
+# Montégut et al. 2004): the MLD is the depth at which potential density first exceeds
+# the value at ``MLD_REFERENCE_DEPTH`` by ``MLD_DENSITY_THRESHOLD``.
+MLD_DENSITY_THRESHOLD = 0.03  # kg/m^3
+MLD_REFERENCE_DEPTH = 10.0  # m
+
+
+def compute_mld(
+    sigma0: "xr.DataArray",
+    depth: "xr.DataArray",
+    depth_dim: str,
+    reference_depth: float = MLD_REFERENCE_DEPTH,
+    threshold: float = MLD_DENSITY_THRESHOLD,
+) -> "xr.DataArray":
+    """Compute the mixed layer depth (MLD) from a potential-density field.
+
+    Density-threshold criterion (de Boyer Montégut et al. 2004): the MLD is the
+    (positive) depth at which sigma-0 first exceeds its value at ``reference_depth`` by
+    ``threshold`` kg/m³, found by linear interpolation to the crossing. Fully mixed
+    columns (no crossing) return the full water-column depth; all-NaN (land) columns
+    return NaN. Works per horizontal column, so both 1D and spatially varying (3D)
+    ``depth`` coordinates and either vertical orientation (surface-first or
+    surface-last) are supported.
+
+    The crossing is found with ``xgcm.transform`` — the same engine as xroms'
+    ``mld``/``isoslice`` (so results are consistent with xroms; pass
+    ``reference_depth=0`` for the surface-referenced xroms convention). Like all
+    ``xgcm`` linear transforms it assumes a monotonic profile and does an endpoint
+    flip rather than a full sort, so for a non-monotonic upper-ocean profile (a density
+    inversion / barrier layer) it returns the linear-search crossing rather than
+    guaranteeing the shallowest one.
+
+    Parameters
+    ----------
+    sigma0 : xr.DataArray
+        Potential density anomaly (e.g. from :func:`compute_potential_density`) with
+        vertical dimension ``depth_dim``.
+    depth : xr.DataArray
+        Positive-down depth (m) aligned with ``sigma0`` along ``depth_dim``. May be
+        1D (broadcast over the horizontal) or share ``sigma0``'s horizontal dims.
+    depth_dim : str
+        Name of the vertical dimension.
+    reference_depth : float, optional
+        Depth (m) at which the reference density is taken. Default 10 m (de Boyer
+        Montégut). Columns shallower than ``reference_depth`` fall back to the
+        shallowest level. Pass 0 for the surface-referenced xroms convention.
+    threshold : float, optional
+        Density excess (kg/m³) defining the base of the mixed layer. Default 0.03.
+
+    Returns
+    -------
+    xr.DataArray
+        MLD as positive depth (m), with ``depth_dim`` removed.
+
+    References
+    ----------
+    de Boyer Montégut, C., Madec, G., Fischer, A. S., Lazar, A., & Iudicone, D. (2004).
+    Mixed layer depth over the global ocean. J. Geophys. Res. Oceans, 109(C12).
+    See also xroms ``roms_seawater.mld`` and the NCL ``mixed_layer_depth`` routine.
+    """
+    absz = np.abs(depth).broadcast_like(sigma0)
+    if sigma0.chunks is not None:
+        sigma0 = sigma0.chunk({depth_dim: -1})
+        absz = absz.chunk({depth_dim: -1})
+
+    grid = xgcm.Grid(
+        sigma0.to_dataset(name="sigma0"),
+        coords={depth_dim: {"center": depth_dim}},
+        periodic=False,
+        autoparse_metadata=False,
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
+        # Reference density: sigma-0 interpolated to ``reference_depth`` (NaN where the
+        # column does not span it), with a shallowest-level fallback for shallow columns.
+        sig_ref = grid.transform(
+            sigma0,
+            depth_dim,
+            target=np.array([float(reference_depth)]),
+            target_data=absz.rename("zref"),
+            method="linear",
+        ).isel(zref=0, drop=True)
+        surface = sigma0.where(absz == absz.min(depth_dim)).max(depth_dim)
+        sig_ref = sig_ref.where(sig_ref.notnull(), surface)
+
+        # MLD: the depth at which (sigma0 - sig_ref) crosses ``threshold``.
+        iso = (sigma0 - sig_ref).rename("iso")
+        mld = grid.transform(
+            absz,
+            depth_dim,
+            target=np.array([float(threshold)]),
+            target_data=iso,
+            method="linear",
+        ).isel(iso=0, drop=True)
+
+    # No crossing (fully mixed) -> full water-column depth; land (all-NaN) -> NaN.
+    bottom = absz.where(sigma0.notnull()).max(depth_dim)
+    mld = mld.where(mld.notnull(), bottom)
+    mld = mld.where(~sigma0.isnull().all(depth_dim))
+    mld = np.abs(mld)
+    mld.name = "mld"
+    mld.attrs["long_name"] = "mixed layer depth"
+    mld.attrs["units"] = "m"
+    return mld
+
+
+def _compute_mld_warp(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth: "xr.DataArray",
+    depth_dim: str,
+    target_mld: "xr.DataArray",
+    target_H: "xr.DataArray | None" = None,
+    reference_depth: float = MLD_REFERENCE_DEPTH,
+    threshold: float = MLD_DENSITY_THRESHOLD,
+) -> "xr.DataArray":
+    """Build the warped *source* depth coordinate for MLD-anchored interpolation.
+
+    Maps each source depth into the target's depth space so that the source mixed
+    layer depth aligns with the target's:
+
+    - mixed layer ``[surface, MLD_src]`` maps to ``[surface, MLD_tgt]`` (scaled so the
+      source MLD lands on the target MLD), and
+    - below the MLD the map is **1:1 in depth** (``d_warp = MLD_tgt + (|z| - MLD_src)``),
+      preserving the *absolute* depth of sub-mixed-layer features below the MLD.
+
+    Paired in :func:`build_bgc_vertical_coords` with the *real* target depth, this makes
+    ``VerticalRegrid.apply`` interpolate linearly in depth within each segment with the
+    MLD matched. The 1:1 lower segment (rather than stretching the source bottom onto
+    the target bottom) is deliberate: when the target is much shallower than the source
+    it would otherwise compress the entire deep source column into the thin target
+    layer. With 1:1, source water below the target floor is simply edge-clamped/unused.
+
+    Columns lacking a resolved mixed layer — fully mixed source, fully mixed target,
+    NaN MLD, or a degenerate (≈0) source/target MLD — fall back to the identity map
+    (``d_warp = |z|``), i.e. plain depth interpolation for that column. Because
+    ``xgcm.transform`` is per-column independent, stratified and degenerate columns
+    coexist in one call.
+
+    Returns the warped depth plus the same monotonicity perturbation as
+    :func:`_compute_density_coord`, single-chunked along ``depth_dim``.
+    """
+    # ``depth`` is assumed ordered shallow->deep along ``depth_dim`` (surface first),
+    # as for BGC source depth levels; the warp is then co-monotonic with the index-based
+    # perturbation below (same orientation convention as ``_compute_density_coord``).
+    sigma0 = compute_potential_density(temp, salt)
+    absz = np.abs(depth)
+    mld_src = compute_mld(
+        sigma0, depth, depth_dim, reference_depth=reference_depth, threshold=threshold
+    )
+    H_src = absz.where(sigma0.notnull()).max(depth_dim)
+
+    # A resolved mixed layer on both sides is required for a strictly monotonic warp;
+    # otherwise fall back to the identity (depth) map. A fully mixed source has
+    # mld_src == H_src; a fully mixed target has target_mld == target_H.
+    eps = 1e-6
+    can_warp = (
+        (H_src - mld_src > eps)
+        & (mld_src > eps)
+        & (target_mld > eps)
+        & mld_src.notnull()
+        & target_mld.notnull()
+    )
+    if target_H is not None:
+        can_warp = can_warp & (
+            target_H - target_mld > eps
+        )  # fully-mixed target -> identity
+
+    ml = absz <= mld_src
+    warp_mixed = absz * (target_mld / mld_src)
+    warp_below = target_mld + (absz - mld_src)  # 1:1 in depth below the MLD
+    warped = xr.where(ml, warp_mixed, warp_below)
+    d_warp = xr.where(can_warp, warped, absz)
+
+    n_depth = d_warp.sizes[depth_dim]
+    d_warp = d_warp + xr.DataArray(np.arange(n_depth) * 1e-7, dims=[depth_dim])
+    return d_warp.chunk({depth_dim: -1})
+
+
+def build_bgc_vertical_coords(
+    method: str,
+    *,
+    source_temp: "xr.DataArray",
+    source_salt: "xr.DataArray",
+    source_depth: "xr.DataArray",
+    source_depth_dim: str,
+    target_temp: "xr.DataArray",
+    target_salt: "xr.DataArray",
+    target_depth: "xr.DataArray",
+    target_depth_dim: str,
+) -> "tuple[xr.DataArray, xr.DataArray]":
+    """Build the ``(source, target)`` vertical coordinate pair fed to
+    ``VerticalRegrid.apply`` for non-depth BGC interpolation.
+
+    For ``"density"`` both coordinates are potential-density coordinates (the depth
+    arguments are unused). For ``"density_mld"`` the source is a warped depth that
+    aligns the source MLD with the target MLD and the target is its real depth, so the
+    transform interpolates linearly in depth within the two MLD segments.
+    """
+    if method == "density":
+        return (
+            _compute_density_coord(source_temp, source_salt, source_depth_dim),
+            _compute_density_coord(target_temp, target_salt, target_depth_dim),
+        )
+    if method == "density_mld":
+        target_sigma0 = compute_potential_density(target_temp, target_salt)
+        target_mld = compute_mld(target_sigma0, target_depth, target_depth_dim)
+        target_H = (
+            np.abs(target_depth).where(target_sigma0.notnull()).max(target_depth_dim)
+        )
+        source_coord = _compute_mld_warp(
+            source_temp,
+            source_salt,
+            source_depth,
+            source_depth_dim,
+            target_mld,
+            target_H=target_H,
+        )
+        target_coord = np.abs(target_depth).chunk({target_depth_dim: -1})
+        return source_coord, target_coord
+    raise ValueError(
+        f"Unknown BGC interpolation method {method!r}; "
+        f"expected one of {BGC_INTERPOLATION_METHODS}."
+    )
 
 
 def compute_missing_surface_bgc_variables(bgc_data):
@@ -1820,6 +2151,17 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
             f"No {forcing_object_name} configuration found in the YAML file."
         )
 
+    return deserialize_forcing_data(forcing_data)
+
+
+def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
+    """Restore datetimes, paths, and source/bgc_source dicts in a forcing-data block.
+
+    Converts ISO date strings to ``datetime`` objects, path-like strings back to
+    ``Path`` objects, and ``source``/``bgc_source`` nested dictionaries back to their
+    proper form. Used for both the top-level forcing block and nested forcing blocks
+    (e.g. an embedded ``physics_forcing``).
+    """
     # Convert ISO date strings to datetime objects
     for key, value in forcing_data.items():
         forcing_data[key] = deserialize_datetime(value)

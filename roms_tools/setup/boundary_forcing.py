@@ -375,6 +375,7 @@ class BoundaryForcing:
         for direction, is_enabled in self.boundaries.items():
             if not is_enabled:
                 continue
+
             bdry_target_coords = {
                 "lat": target_coords["lat"].isel(
                     **self.bdry_coords["vector"][direction]

@@ -730,90 +730,69 @@ class LatLonDataset:
             case _:
                 raise ValueError(f"Unknown prefill method: {method!r}")
 
-    def apply_lateral_fill(self):
-        """Apply lateral fill to variables using the dataset's mask and grid dimensions.
+    def _iter_fillable_vars(self):
+        """Yield ``(var_name, mask_name)`` for each non-mask data variable.
 
-        This method fills masked values in `self.ds` using `LateralFill` based on
-        the horizontal grid dimensions. A separate mask (`mask_vel`) is used for
-        velocity variables (e.g., `u`, `v`) if available in the dataset.
-
-        Notes
-        -----
-        This method assumes that the variables in the dataset use a dimension
-        ordering where latitude comes before longitude, i.e., ('latitude', 'longitude').
-        Ensure that this convention is followed to avoid unexpected behavior.
-
-        Looping over `self.ds.data_vars` instead of `self.var_names` ensures that each
-        dataset variable is filled only once, even if multiple entries in `self.var_names`
-        point to the same variable in the dataset.
+        Centralizes the mask-selection rule shared by every fill method: a
+        velocity component uses ``"mask_vel"`` when that mask is present and both
+        ``u`` and ``v`` are known source variables; everything else uses
+        ``"mask"``. Iterating over ``self.ds.data_vars`` (not ``self.var_names``)
+        ensures each dataset variable is filled exactly once even when several
+        ``var_names`` entries alias the same variable.
         """
-        if self.needs_lateral_fill:
-            lateral_fill = LateralFill(
-                self.ds["mask"],
-                (self.dim_names["latitude"], self.dim_names["longitude"]),
-            )
+        use_vel_mask = (
+            "mask_vel" in self.ds.data_vars
+            and "u" in self.var_names
+            and "v" in self.var_names
+        )
+        vel_vars = {self.var_names["u"], self.var_names["v"]} if use_vel_mask else set()
+        for var_name in self.ds.data_vars:
+            if var_name.startswith("mask"):
+                continue
+            yield var_name, "mask_vel" if var_name in vel_vars else "mask"
 
-            separate_fill_for_velocities = False
-            # TODO: Replace hardcoded mask detection with a dictionary-based mask selection.
-            # This dictionary could assign which mask to use for what fields.
-            if "mask_vel" in self.ds.data_vars:
-                lateral_fill_vel = LateralFill(
-                    self.ds["mask_vel"],
-                    (self.dim_names["latitude"], self.dim_names["longitude"]),
-                )
-                separate_fill_for_velocities = True
+    def _fill_masked_vars(self, fill_one):
+        """Apply ``fill_one(da, mask_name)`` to every fillable variable.
 
-            for var_name in self.ds.data_vars:
-                if var_name.startswith("mask"):
-                    # Skip variables that are mask types
-                    continue
-                elif (
-                    separate_fill_for_velocities
-                    and "u" in self.var_names
-                    and "v" in self.var_names
-                    and var_name in [self.var_names["u"], self.var_names["v"]]
-                ):
-                    # Apply lateral fill with velocity mask for velocity variables if present
-                    self.ds[var_name] = lateral_fill_vel.apply(self.ds[var_name])
-                else:
-                    # Apply standard lateral fill for other variables
-                    self.ds[var_name] = lateral_fill.apply(self.ds[var_name])
+        ``fill_one`` receives the variable's DataArray and the name of the mask to
+        fill against (``"mask"`` or ``"mask_vel"``, chosen by
+        :meth:`_iter_fillable_vars`) and returns the filled DataArray. No-op when
+        the source is already NaN-free (``needs_lateral_fill`` is False).
+        """
+        if not self.needs_lateral_fill:
+            return
+        for var_name, mask_name in self._iter_fillable_vars():
+            self.ds[var_name] = fill_one(self.ds[var_name], mask_name)
+
+    def apply_lateral_fill(self):
+        """Fill masked values in `self.ds` with the iterative `LateralFill` (AMG).
+
+        A separate mask (`mask_vel`) is used for velocity variables when present;
+        see :meth:`_iter_fillable_vars`. Assumes a ('latitude', 'longitude')
+        dimension ordering.
+        """
+        dims = (self.dim_names["latitude"], self.dim_names["longitude"])
+        fillers: dict[str, LateralFill] = {}
+
+        def fill_one(da, mask_name):
+            if mask_name not in fillers:
+                fillers[mask_name] = LateralFill(self.ds[mask_name], dims)
+            return fillers[mask_name].apply(da)
+
+        self._fill_masked_vars(fill_one)
 
     def apply_nearest_neighbor_fill(self):
         """Fill masked values in `self.ds` using nearest-neighbor lookup.
 
-        This is a cheap alternative to :meth:`apply_lateral_fill` (the iterative
-        Poisson solver). It mirrors that method's mask handling -- a separate
-        mask (`mask_vel`) is used for velocity variables (e.g. `u`, `v`) if
-        available -- but fills each masked cell with the value of the nearest
-        valid (ocean) cell via :func:`roms_tools.fill.nearest_neighbor_fill`.
-
-        Like :meth:`apply_lateral_fill`, this assumes a ('latitude', 'longitude')
-        dimension ordering and loops over `self.ds.data_vars` so each variable is
-        filled only once.
+        A cheap alternative to :meth:`apply_lateral_fill` (the iterative Poisson
+        solver): each masked cell takes the value of the nearest valid (ocean) cell
+        via :func:`roms_tools.fill.nearest_neighbor_fill`, with the same per-variable
+        mask selection (:meth:`_iter_fillable_vars`).
         """
-        if self.needs_lateral_fill:
-            dims = (self.dim_names["latitude"], self.dim_names["longitude"])
-
-            separate_fill_for_velocities = "mask_vel" in self.ds.data_vars
-
-            for var_name in self.ds.data_vars:
-                if var_name.startswith("mask"):
-                    # Skip variables that are mask types
-                    continue
-                elif (
-                    separate_fill_for_velocities
-                    and "u" in self.var_names
-                    and "v" in self.var_names
-                    and var_name in [self.var_names["u"], self.var_names["v"]]
-                ):
-                    self.ds[var_name] = nearest_neighbor_fill(
-                        self.ds[var_name], self.ds["mask_vel"], dims
-                    )
-                else:
-                    self.ds[var_name] = nearest_neighbor_fill(
-                        self.ds[var_name], self.ds["mask"], dims
-                    )
+        dims = (self.dim_names["latitude"], self.dim_names["longitude"])
+        self._fill_masked_vars(
+            lambda da, mask_name: nearest_neighbor_fill(da, self.ds[mask_name], dims)
+        )
 
     def apply_xesmf_source_fill(
         self,
@@ -898,22 +877,14 @@ class LatLonDataset:
                 out = rg(renamed, keep_attrs=True)
             return out.rename({"lat": lat, "lon": lon})
 
-        regridder = _build(self.ds["mask"])
-        separate = "mask_vel" in self.ds.data_vars
-        regridder_vel = _build(self.ds["mask_vel"]) if separate else None
+        regridders: dict[str, xe.Regridder] = {}
 
-        for var_name in self.ds.data_vars:
-            if var_name.startswith("mask"):
-                continue
-            elif (
-                separate
-                and "u" in self.var_names
-                and "v" in self.var_names
-                and var_name in [self.var_names["u"], self.var_names["v"]]
-            ):
-                self.ds[var_name] = _fill(self.ds[var_name], regridder_vel)
-            else:
-                self.ds[var_name] = _fill(self.ds[var_name], regridder)
+        def fill_one(da, mask_name):
+            if mask_name not in regridders:
+                regridders[mask_name] = _build(self.ds[mask_name])
+            return _fill(da, regridders[mask_name])
+
+        self._fill_masked_vars(fill_one)
 
     def extrapolate_deepest_to_bottom(self):
         """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth

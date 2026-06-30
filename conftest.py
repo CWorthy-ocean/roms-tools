@@ -574,6 +574,11 @@ def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
         prefill=None,
+        # Pin to scipy so this regression fixture is deterministic across platforms
+        # and regardless of whether xESMF is installed (xESMF/ESMPy weights differ
+        # slightly across builds); the xESMF default is covered separately by the
+        # NaN-free and cross-engine tolerance tests.
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -693,6 +698,10 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
         source={"path": fname_phys, "name": "GLORYS"},
         type="physics",
         apply_2d_horizontal_fill=False,
+        # Pin to scipy: this physics BC supplies the target density coordinate for
+        # the BGC density interpolation below, so an engine-dependent physics field
+        # would make the whole fixture non-deterministic across platforms/xESMF.
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -705,6 +714,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
         physics_forcing=physics_bc,
         bgc_interpolation_method="density",
         apply_2d_horizontal_fill=True,
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 

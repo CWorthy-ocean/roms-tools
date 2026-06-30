@@ -8,7 +8,7 @@
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        2,
+        1,
         4
       ]
     }

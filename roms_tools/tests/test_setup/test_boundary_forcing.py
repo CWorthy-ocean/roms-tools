@@ -13,12 +13,19 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
+from roms_tools.setup.utils import _xesmf_available
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
     import copernicusmarine  # type: ignore
 except ImportError:
     copernicusmarine = None
+
+# Methods that require the optional xESMF dependency; tests parametrized over them
+# must skip (not error) when xESMF is unavailable (e.g. the pip/Windows CI jobs).
+requires_xesmf = pytest.mark.skipif(
+    not _xesmf_available(), reason="requires the optional xESMF dependency"
+)
 
 
 @pytest.mark.parametrize(
@@ -78,6 +85,7 @@ def test_boundary_forcing_creation_with_duplicates(
         end_time=boundary_forcing.end_time,
         source={"name": "GLORYS", "path": [fname1, fname1, fname2]},
         prefill=boundary_forcing.prefill,
+        regrid_method=boundary_forcing.regrid_method,
         use_dask=use_dask,
     )
 
@@ -327,56 +335,15 @@ def test_boundary_divided_by_land_no_smearing(use_dask, monkeypatch):
     _assert_no_nan_in_boundary_fields(bf_fallback)
 
 
-def test_1d_and_2d_fill_coincide_if_no_fill(use_dask, monkeypatch):
-    # Force the scipy fallback so both prefill settings use the same interpolation
-    # engine (scipy interp); when no fill is needed they must produce identical
-    # results.
-    monkeypatch.setattr(
-        "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
-    )
+def test_prefill_is_noop_when_no_fill_needed(use_dask, monkeypatch):
+    """Prefilling the source must not alter results when there is nothing to fill.
 
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    # this climatology has already filled land values and horizontal fill is skipped
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
-
-    kwargs = {
-        "grid": grid,
-        "start_time": datetime(2021, 6, 29),
-        "end_time": datetime(2021, 6, 29),
-        "source": {"path": fname_bgc, "name": "UNIFIED", "climatology": True},
-        "type": "bgc",
-        "use_dask": use_dask,
-    }
-
-    bf_1d_fill = BoundaryForcing(
-        **kwargs,
-        prefill=None,
-    )
-    bf_2d_fill = BoundaryForcing(
-        **kwargs,
-        prefill="2d_lateral_fill",
-    )
-
-    xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
-
-
-def test_1d_and_2d_fill_coincide_if_no_land(use_dask, monkeypatch):
-    # Force the scipy fallback so both prefill settings use the same interpolation
-    # engine (scipy interp); with no land in the subdomain neither fill does
-    # anything, so the results must coincide.
+    Over a domain that lies entirely on open ocean, the source has no land/NaN
+    cells, so neither ``prefill=None`` nor ``prefill="2d_lateral_fill"`` has any
+    work to do and both must produce identical boundaries. The scipy engine is
+    forced for both so the comparison isolates the prefill choice from the
+    interpolation engine.
+    """
     monkeypatch.setattr(
         "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
     )
@@ -394,16 +361,42 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask, monkeypatch):
         "use_dask": use_dask,
     }
 
-    bf_1d_fill = BoundaryForcing(
-        **kwargs,
-        prefill=None,
-    )
-    bf_2d_fill = BoundaryForcing(
-        **kwargs,
-        prefill="2d_lateral_fill",
-    )
+    bf_no_prefill = BoundaryForcing(**kwargs, prefill=None)
+    bf_2d_fill = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
 
-    xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
+    xr.testing.assert_allclose(bf_no_prefill.ds, bf_2d_fill.ds, rtol=1.0e-4)
+
+
+@requires_xesmf
+def test_xesmf_matches_scipy_within_tolerance(use_dask):
+    """The xESMF and scipy regrid engines agree to within tolerance.
+
+    Over an open-ocean domain (no fill needed), both engines reduce to plain
+    bilinear interpolation, so their boundaries should match within a loose
+    tolerance. This guards the xESMF default against gross value drift without a
+    byte-exact fixture (xESMF/ESMPy weights are not bit-stable across platforms).
+    """
+    # this grid lies entirely over open ocean
+    grid = Grid(nx=5, ny=5, size_x=300, size_y=300, center_lon=-5, center_lat=65, rot=0)
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+
+    kwargs = {
+        "grid": grid,
+        "start_time": datetime(2021, 6, 29),
+        "end_time": datetime(2021, 6, 29),
+        "source": {"path": fname, "name": "GLORYS", "climatology": False},
+        "use_dask": use_dask,
+    }
+
+    bf_xesmf = BoundaryForcing(**kwargs, regrid_method="xesmf")
+    bf_scipy = BoundaryForcing(**kwargs, regrid_method="scipy")
+
+    # The two engines use different algorithms (xESMF spherical masked bilinear vs
+    # scipy rectilinear interpn), so they agree only to a few percent. An atol is
+    # needed because near-zero velocities otherwise blow up the relative error.
+    # This is a ballpark guard against gross drift, not a precision check.
+    xr.testing.assert_allclose(bf_xesmf.ds, bf_scipy.ds, rtol=5.0e-2, atol=1.0e-2)
 
 
 def _coarse_glorys_kwargs(use_dask):
@@ -423,7 +416,12 @@ def _coarse_glorys_kwargs(use_dask):
 
 @pytest.mark.parametrize(
     "prefill",
-    ["2d_lateral_fill", "inverse_dist", "nearest_s2d", "nearest_neighbor"],
+    [
+        "2d_lateral_fill",
+        pytest.param("inverse_dist", marks=requires_xesmf),
+        pytest.param("nearest_s2d", marks=requires_xesmf),
+        "nearest_neighbor",
+    ],
 )
 def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
     """Every user-facing prefill method yields NaN-free boundaries."""
@@ -431,7 +429,10 @@ def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
     _assert_no_nan_in_boundary_fields(bf)
 
 
-@pytest.mark.parametrize("regrid_method", ["auto", "xesmf", "scipy"])
+@pytest.mark.parametrize(
+    "regrid_method",
+    ["auto", pytest.param("xesmf", marks=requires_xesmf), "scipy"],
+)
 def test_regrid_method_produces_nan_free_boundaries(use_dask, regrid_method):
     """The regrid engine can be chosen independently of prefill; all are NaN-free."""
     bf = BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method)

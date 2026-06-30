@@ -8,7 +8,7 @@
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        2,
+        1,
         5
       ]
     }
@@ -37,16 +37,7 @@
   ],
   "attributes": {
     "long_name": "eastern boundary sea surface height",
-    "standard_name": "sea_surface_height_above_geoid",
     "units": "m",
-    "unit_long": "Meters",
-    "cell_methods": "area: mean",
-    "_ChunkSizes": [
-      1,
-      681,
-      1440
-    ],
-    "regrid_method": "bilinear",
     "coordinates": "abs_time",
     "_FillValue": "AAAAAAAA+H8="
   },

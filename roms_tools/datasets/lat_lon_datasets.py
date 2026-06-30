@@ -32,6 +32,7 @@ from roms_tools.datasets.utils import (
     validate_start_end_time,
 )
 from roms_tools.fill import LateralFill, nearest_neighbor_fill
+from roms_tools.processing_methods import METHOD_META, PrefillMethod
 from roms_tools.regrid import _xesmf_extrap_kwargs
 from roms_tools.setup.utils import (
     Timed,
@@ -714,12 +715,15 @@ class LatLonDataset:
                 )
             return
 
-        if method == "2d_lateral_fill":
+        spec = METHOD_META.get(method)
+        if method == PrefillMethod.lateral_fill_2d:
             self.apply_lateral_fill()
-        elif method == "nearest_neighbor":
+        elif method == PrefillMethod.nearest_neighbor:
             self.apply_nearest_neighbor_fill()
-        elif method in ("inverse_dist", "nearest_s2d", "creep_fill"):
-            self.apply_xesmf_source_fill(method=method, **prefill_kwargs)
+        elif spec is not None and spec.requires_xesmf:
+            # xESMF source-on-source fill family (inverse_dist / nearest_s2d /
+            # creep_fill).
+            self.apply_xesmf_source_fill(method=str(method), **prefill_kwargs)
         else:
             raise ValueError(f"Unknown prefill method: {method!r}")
 
@@ -836,8 +840,8 @@ class LatLonDataset:
             - ``"creep_fill"`` -- truncated Laplace-style diffusion; smooth but
               only reaches ``num_levels`` cells from ocean. **Not available in
               current released xESMF** (requires a newer/unreleased xESMF + ESMF);
-              included for forward compatibility and not exposed through
-              ``BoundaryForcing``'s ``prefill`` argument.
+              exposed through ``BoundaryForcing``'s ``prefill`` argument for use
+              once a supporting xESMF is installed.
         num_levels : int
             Number of creep iterations (``creep_fill`` only).
         num_src_pnts : int, optional

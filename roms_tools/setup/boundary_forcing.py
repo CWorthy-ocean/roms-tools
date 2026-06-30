@@ -5,7 +5,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,14 +18,17 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCDataset,
 )
 from roms_tools.plot import line_plot, section_plot
+from roms_tools.processing_methods import (
+    BGC_INTERPOLATION_METHODS,
+    RegridConfig,
+    _xesmf_available,
+)
 from roms_tools.regrid import (
     LateralRegridToROMS,
     VerticalRegrid,
 )
 from roms_tools.setup.utils import (
-    BGC_INTERPOLATION_METHODS,
     RawDataSource,
-    _xesmf_available,
     add_time_info_to_ds,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
@@ -40,11 +42,8 @@ from roms_tools.setup.utils import (
     group_dataset,
     nan_check,
     pop_grid_data,
-    resolve_regrid_engine,
     substitute_nans_by_fillvalue,
     to_dict,
-    validate_extrap,
-    validate_prefill,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -160,12 +159,16 @@ class BoundaryForcing:
             also the automatic fallback when xESMF is unavailable). Use for
             cross-platform reproducibility or when xESMF is unavailable and the
             AMG fill is too slow; not recommended when xESMF is available.
+          - ``"creep_fill"`` -- xESMF truncated Laplace-style diffusion source
+            fill (tunable via ``prefill_kwargs``; requires xESMF). **Not available
+            in current released xESMF** -- requires a newer/unreleased xESMF +
+            ESMF; provided for use once a supporting xESMF is installed.
 
         Defaults to ``None``.
     prefill_kwargs : dict, optional
         Method-specific options for ``prefill``: ``num_src_pnts`` /
-        ``dist_exponent`` for ``"inverse_dist"``. Ignored by the other methods.
-        Defaults to ``None``.
+        ``dist_exponent`` for ``"inverse_dist"``; ``num_levels`` for
+        ``"creep_fill"``. Ignored by the other methods. Defaults to ``None``.
     regrid_method : str or None, optional
         Horizontal regrid engine, chosen independently of ``prefill``:
 
@@ -277,15 +280,6 @@ class BoundaryForcing:
     """Deprecated alias for ``prefill`` (sentinel ``None`` = unset). ``True`` ->
     ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``; emits a DeprecationWarning."""
 
-    _ALLOWED_PREFILL: ClassVar[frozenset] = frozenset(
-        {
-            None,
-            "2d_lateral_fill",
-            "inverse_dist",
-            "nearest_s2d",
-            "nearest_neighbor",
-        }
-    )
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the model."""
     use_dask: bool = False
@@ -333,8 +327,8 @@ class BoundaryForcing:
 
         data = self._get_data()
 
-        # Regrid engine is chosen independently of the prefill via
-        # ``regrid_method`` (resolved in _resolve_prefill_options):
+        # Regrid engine is chosen independently of the prefill via the resolved
+        # ``RegridConfig`` (built in _resolve_prefill_options):
         #   - prefill is None + xESMF      : masked xESMF bilinear regrid + extrap (no fill)
         #   - prefill is None + scipy      : nearest-neighbor pre-fill + scipy interp
         #   - prefill set + xESMF          : whole-domain source fill, then plain
@@ -342,21 +336,17 @@ class BoundaryForcing:
         #   - prefill set + scipy          : whole-domain source fill, then scipy interp
         # On a prefilled (NaN-free) source no mask or extrapolation is needed, so
         # the xESMF regrid is plain bilinear.
+        regrid = self._regrid
         prefill = self.prefill
-        use_xesmf = self._use_xesmf
+        use_xesmf = regrid.use_xesmf
 
-        # Effective destination extrapolation for the default (no-prefill) path.
-        effective_extrap = self.extrap_method or "inverse_dist"
-        user_set_extrap = (
-            self.extrap_method is not None or self.extrap_kwargs is not None
-        )
-        if user_set_extrap and prefill is not None:
+        if regrid.user_set_extrap and prefill is not None:
             logging.info(
                 "extrap_method/extrap_kwargs are ignored because prefill=%r fills "
                 "the source first (the regrid is plain bilinear).",
                 prefill,
             )
-        elif user_set_extrap and not use_xesmf:
+        elif regrid.user_set_extrap and not use_xesmf:
             logging.info(
                 "extrap_method/extrap_kwargs are ignored because the scipy regrid "
                 "engine is in use (xESMF unavailable or regrid_method='scipy'); "
@@ -461,11 +451,9 @@ class BoundaryForcing:
                     vector_mask = None
 
                 # With a prefilled (NaN-free) source, no regrid-time extrapolation
-                # is needed; use plain bilinear.
-                regrid_extrap_method = None if prefill is not None else effective_extrap
-                regrid_extrap_kwargs = (
-                    None if prefill is not None else self.extrap_kwargs
-                )
+                # is needed; use plain bilinear (the config returns ``None`` then).
+                regrid_extrap_method = regrid.regrid_extrap_method
+                regrid_extrap_kwargs = regrid.regrid_extrap_kwargs
 
                 processed_fields = {}
 
@@ -713,14 +701,17 @@ class BoundaryForcing:
         self.ds = ds
 
     def _resolve_prefill_options(self) -> None:
-        """Map the deprecated flag and validate the prefill + regrid options.
+        """Map the deprecated flag and build the validated :class:`RegridConfig`.
 
         ``apply_2d_horizontal_fill`` is a deprecated alias for ``prefill``:
         ``True`` -> ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``.
         After mapping, the deprecated attribute is reset to ``None`` so it is not
-        re-serialized. ``prefill``/``prefill_kwargs`` are then validated against
-        this class's allowed set and xESMF availability, and ``regrid_method`` is
-        resolved to the boolean ``self._use_xesmf``.
+        re-serialized. The flat public string fields (``prefill``,
+        ``prefill_kwargs``, ``regrid_method``, ``extrap_method``, ``extrap_kwargs``)
+        are then handed to a single :class:`RegridConfig`, which owns all
+        cross-field validation and exposes the resolved state (``use_xesmf``,
+        ``effective_extrap``, ...). The public fields stay as the user's plain
+        strings so the YAML round-trip is unchanged.
         """
         if self.apply_2d_horizontal_fill is not None:
             warnings.warn(
@@ -738,16 +729,17 @@ class BoundaryForcing:
             # Reset the sentinel so it is not re-serialized going forward.
             self.apply_2d_horizontal_fill = None
 
-        xesmf_available = _xesmf_available()
-        validate_prefill(
-            self.prefill,
-            self.prefill_kwargs,
-            self._ALLOWED_PREFILL,
-            xesmf_available=xesmf_available,
-        )
-        validate_extrap(self.extrap_method, self.extrap_kwargs)
-        self._use_xesmf = resolve_regrid_engine(
-            self.regrid_method, xesmf_available=xesmf_available
+        # ``allowed_prefill`` defaults to every ``PrefillMethod`` member, which is
+        # exactly the set this class accepts (``creep_fill`` is intentionally not a
+        # prefill). The config validates the prefill/extrap/regrid combination and
+        # raises on an unsupported value or an xESMF-only method without xESMF.
+        self._regrid = RegridConfig(
+            prefill=self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            regrid_engine=self.regrid_method or "auto",
+            extrap_method=self.extrap_method,
+            extrap_kwargs=self.extrap_kwargs,
+            xesmf_available=_xesmf_available(),
         )
 
     def _compute_bgc_vertical_coords(
@@ -1189,8 +1181,8 @@ class BoundaryForcing:
         ds.attrs["source"] = self.source["name"]
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["prefill"] = str(self.prefill)
-        ds.attrs["regrid_method"] = "xesmf" if self._use_xesmf else "scipy"
-        ds.attrs["extrap_method"] = str(self.extrap_method or "inverse_dist")
+        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
         ds.attrs["adjust_depth_for_sea_surface_height"] = str(
             self.adjust_depth_for_sea_surface_height
         )

@@ -421,10 +421,13 @@ def _coarse_glorys_kwargs(use_dask):
         pytest.param("inverse_dist", marks=requires_xesmf),
         pytest.param("nearest_s2d", marks=requires_xesmf),
         "nearest_neighbor",
+        # "creep_fill" is a valid prefill but is not in released xESMF, so it
+        # cannot be exercised end-to-end here; see test_processing_methods.py for
+        # its config-level coverage.
     ],
 )
 def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
-    """Every user-facing prefill method yields NaN-free boundaries."""
+    """Every prefill method runnable with released xESMF yields NaN-free boundaries."""
     bf = BoundaryForcing(**_coarse_glorys_kwargs(use_dask), prefill=prefill)
     _assert_no_nan_in_boundary_fields(bf)
 

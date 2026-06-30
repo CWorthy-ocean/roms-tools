@@ -291,12 +291,13 @@ class RiverForcing:
 
         else:
             logging.info("Use provided river indices.")
-            self.original_indices = self.indices
             # Strip synthetic overlap rivers — they are recreated by
             # _handle_overlapping_rivers and don't exist in the source dataset.
             source_indices = {
                 k: v for k, v in self.indices.items() if not k.startswith("overlap_")
             }
+            self.original_indices = dict(source_indices)
+            self.indices = source_indices
             check_river_locations_are_along_coast(self.grid.ds.mask_rho, source_indices)
             data.extract_named_rivers(source_indices)
 
@@ -311,14 +312,19 @@ class RiverForcing:
             name: self.indices[name] for name in sorted_names if name in self.indices
         }
         ds = ds.isel(nriver=sorted_nriver)
+        # Reassign sequential 1-based IDs in final sorted order so that both the
+        # initial-discovery path (indices=None) and the YAML-roundtrip path
+        # (indices=provided) produce the same river_index values.
+        ds = ds.assign_coords(
+            nriver=xr.DataArray(
+                np.arange(1, ds.sizes["nriver"] + 1),
+                dims="nriver",
+                attrs=ds["nriver"].attrs,
+            )
+        )
 
         if self.include_bgc and self.bgc_source is not None:
             ds = self._apply_bgc_tracers(ds)
-
-        logging.info("Computing river forcing arrays...")
-        with ProgressBar():
-            ds["river_volume"] = ds["river_volume"].compute(keep_attrs=True)
-            ds["river_tracer"] = ds["river_tracer"].compute(keep_attrs=True)
 
         ds = self._write_indices_into_dataset(ds)
         self._validate(ds)
@@ -759,12 +765,7 @@ class RiverForcing:
                     discharge_climatology_attr=DISCHARGE_CLIMATOLOGY_ATTR,
                 )
 
-        if self.include_bgc and self.bgc_source is not None:
-            ds = self._apply_bgc_tracers(ds)
-
-        # add compute on dask arrays to convert to in-memory numpy arrays so
-        # downstream functions work on concrete arrays
-        logging.info("Computing river forcing arrays...")
+        logging.info("Computing river forcing...")
         with ProgressBar():
             ds["river_volume"] = ds["river_volume"].compute(keep_attrs=True)
             ds["river_tracer"] = ds["river_tracer"].compute(keep_attrs=True)

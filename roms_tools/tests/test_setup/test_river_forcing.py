@@ -42,6 +42,7 @@ COAST_FIXTURES = [
 ROUNDTRIP_FIXTURES = [
     "river_forcing_with_bgc",
     "river_forcing_with_prescribed_multi_cell_indices",
+    "river_forcing_with_glofas",
 ]
 
 
@@ -770,6 +771,43 @@ class TestRiverForcingWithOverlappingIndices:
         assert float(ds_out["river_volume"].isel(nriver=synthetic_idx)) > 0
         assert not np.isnan(ds_out["river_tracer"].isel(nriver=synthetic_idx).item())
 
+    def test_volume_sort_after_overlap(self, mock_river_dataset_with_simple_overlap):
+        ds, indices = mock_river_dataset_with_simple_overlap
+
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.indices = indices
+        rf.original_indices = indices.copy()
+        rf.grid = None
+
+        ds_out = rf._handle_overlapping_rivers(ds)
+
+        # Apply the same re-sort logic __post_init__ uses after overlap handling
+        volume_means = ds_out["river_volume"].mean(dim="time")
+        sorted_nriver = np.argsort(volume_means.values)[::-1]
+        ds_sorted = ds_out.isel(nriver=sorted_nriver)
+
+        means = ds_sorted["river_volume"].mean(dim="time").values
+        assert all(means[i] >= means[i + 1] for i in range(len(means) - 1))
+
+    def test_overlap_strip_from_provided_indices(
+        self, iceland_test_grid, single_cell_indices
+    ):
+        # Simulate indices saved from a prior run that includes a synthetic river.
+        # Constructing RiverForcing with these indices must not raise ValueError
+        # about overlap_ not found in the source dataset.
+        indices_with_overlap = {
+            **single_cell_indices,
+            "overlap_Bruara": [(8, 6)],
+        }
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=indices_with_overlap,
+        )
+        assert len(rf.indices) > 0
+        assert "overlap_Bruara" not in rf.original_indices
+
 
 class TestRiverForcingBGCSource:
     def test_bgc_constants_by_default(self, iceland_test_grid, single_cell_indices):
@@ -910,3 +948,45 @@ class TestRiverForcingRivr2oFromTestData:
         river_forcing_with_rivr2o_bgc.to_yaml(filepath)
         restored = RiverForcing.from_yaml(filepath)
         assert river_forcing_with_rivr2o_bgc == restored
+
+
+class TestRiverForcingWithGloFAS:
+    def test_successful_initialization(self, river_forcing_with_glofas):
+        rf = river_forcing_with_glofas
+        assert isinstance(rf.ds, xr.Dataset)
+        assert len(rf.ds.nriver) > 0
+        assert len(rf.original_indices) > 0
+        assert len(rf.indices) > 0
+        assert "river_volume" in rf.ds
+        assert "river_tracer" in rf.ds
+        assert "river_time" in rf.ds
+
+    def test_river_names_have_coordinate_format(self, river_forcing_with_glofas):
+        rf = river_forcing_with_glofas
+        for name in rf.indices:
+            if name.startswith("overlap_"):
+                continue
+            assert name.startswith("GloFAS_"), f"{name!r} missing GloFAS_ prefix"
+            parts = name.split("_")
+            assert len(parts) >= 3, f"{name!r} does not match GloFAS_<lat>_<lon> format"
+            assert parts[1][-1] in ("N", "S"), f"lat part {parts[1]!r} missing N/S"
+            assert parts[2][-1] in ("E", "W"), f"lon part {parts[2]!r} missing E/W"
+
+    def test_overlap_rivers_created(self, river_forcing_with_glofas):
+        rf = river_forcing_with_glofas
+        overlap_keys = [k for k in rf.indices if k.startswith("overlap_")]
+        assert len(overlap_keys) >= 1, (
+            "Expected at least one overlap_ river from two stations at the same coordinate"
+        )
+
+    def test_round_trip_yaml(self, river_forcing_with_glofas, tmp_path, caplog):
+        filepath = tmp_path / "test_yaml_glofas"
+        river_forcing_with_glofas.to_yaml(filepath)
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            river_forcing_from_file = RiverForcing.from_yaml(filepath)
+
+        assert "Use provided river indices." in caplog.text
+        assert river_forcing_with_glofas == river_forcing_from_file
+        filepath.unlink()

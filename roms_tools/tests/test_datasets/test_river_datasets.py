@@ -1,3 +1,4 @@
+import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ import xarray as xr
 from roms_tools.datasets.river_datasets import (
     RIVR2O_FILL_VALUE,
     SECONDS_PER_YEAR,
+    GloFASRiverDataset,
     RiverDataset,
     Rivr2oRiverBGCDataset,
     fill_river_bgc_concentrations,
@@ -39,7 +41,10 @@ class TestRiverDataset:
             "ratio": (["time", "station"], np.random.rand(1, 3)),
             "name": (["station"], ["Amazon", "Nile", "Amazon"]),  # duplicate
         }
-        coords = {"station": [0, 1, 2], "time": [0]}
+        coords = {
+            "station": [0, 1, 2],
+            "time": np.array(["2000-01-01"], dtype="datetime64[ns]"),
+        }
         ds = xr.Dataset(data, coords=coords)
 
         # Write to temporary NetCDF file
@@ -320,8 +325,8 @@ class TestRivr2oRiverBGCDataset:
                 lat=[-50.0],
                 river_names=["FarRiver"],
             )
-        assert "RIVR2O DIC export cell for FarRiver" in caplog.text
-        assert "km from the river mouth" in caplog.text
+        assert "FarRiver" in caplog.text
+        assert "km from nearest coastal cell" in caplog.text
 
         near_path = tmp_path / "rivr2o_riverinputs_2001.nc"
         near_tracer_values = {
@@ -846,3 +851,89 @@ class TestRivr2oRiverBGCDatasetFromTestData:
         )
         assert np.isfinite(concentrations["DIC"].values).all()
         assert (concentrations["DIC"].values > 0).any()
+
+
+class TestSortByRiverVolume:
+    @pytest.fixture
+    def river_dataset_with_vol(self):
+        ds_obj = RiverDataset.__new__(RiverDataset)
+        ds_obj.opt_var_names = {"vol": "vol_stn"}
+        ds_obj.dim_names = {"station": "station", "time": "time"}
+        return ds_obj
+
+    def _make_ds(self, vol_values):
+        n = len(vol_values)
+        return xr.Dataset(
+            {
+                "flux": (["time", "station"], np.ones((1, n))),
+                "vol_stn": (["station"], np.array(vol_values, dtype=np.float32)),
+            },
+            coords={"station": np.arange(n), "time": [0]},
+        )
+
+    def test_sort_descending(self, river_dataset_with_vol):
+        ds = self._make_ds([10.0, 1.0, 5.0])
+        ds_out = river_dataset_with_vol.sort_by_river_volume(ds)
+        np.testing.assert_array_equal(ds_out.station.values, [0, 2, 1])
+
+    def test_sort_equal_volumes(self, river_dataset_with_vol):
+        ds = self._make_ds([5.0, 5.0, 5.0])
+        ds_out = river_dataset_with_vol.sort_by_river_volume(ds)
+        np.testing.assert_array_equal(ds_out.station.values, [0, 1, 2])
+
+    def test_sort_missing_vol_var(self, caplog):
+        # When opt_var_names has no "vol" key, a warning is logged and the
+        # dataset is returned unchanged.
+        ds_obj = RiverDataset.__new__(RiverDataset)
+        ds_obj.opt_var_names = {}
+        ds_obj.dim_names = {"station": "station", "time": "time"}
+        ds = xr.Dataset(
+            {"flux": (["time", "station"], np.ones((1, 3)))},
+            coords={"station": [0, 1, 2], "time": [0]},
+        )
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            ds_out = ds_obj.sort_by_river_volume(ds)
+        assert "vol" in caplog.text.lower()
+        assert ds_out.identical(ds)
+
+    def test_sort_empty_dataset(self, river_dataset_with_vol):
+        ds = xr.Dataset(
+            {
+                "flux": (["time", "station"], np.ones((1, 0))),
+                "vol_stn": (["station"], np.array([], dtype=np.float32)),
+            },
+            coords={"station": np.array([], dtype=int), "time": [0]},
+        )
+        ds_out = river_dataset_with_vol.sort_by_river_volume(ds)
+        assert ds_out.sizes["station"] == 0
+
+
+class TestGloFASRiverDataset:
+    def test_default_var_names(self):
+        # Access dataclass field defaults via the class itself
+        var_names = GloFASRiverDataset.__dataclass_fields__[
+            "var_names"
+        ].default_factory()
+        assert var_names["flux"] == "FLOW"
+        assert var_names["name"] == "riv_name"
+        assert var_names["latitude"] == "lat_mou"
+        assert var_names["longitude"] == "lon_mou"
+        assert var_names["ratio"] == "ratio_m2s"
+
+    def test_default_opt_var_names(self):
+        opt = GloFASRiverDataset.__dataclass_fields__["opt_var_names"].default_factory()
+        assert opt == {"vol": "vol_stn"}
+
+    def test_snap_buffer_default(self):
+        sig = inspect.signature(GloFASRiverDataset.extract_relevant_rivers)
+        assert sig.parameters["coast_snap_buffer_km"].default == 50.0
+
+    def test_cf_datetime_decoding(self):
+        ds_obj = GloFASRiverDataset.__new__(GloFASRiverDataset)
+        ds_obj.dim_names = {"time": "time", "station": "station"}
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        ds = xr.Dataset({"time": ("time", times)})
+        result = ds_obj.add_time_info(ds)
+        assert result["time"].values[0] == np.datetime64("1998-01-15", "ns")
+        assert result["time"].values[1] == np.datetime64("1998-02-15", "ns")

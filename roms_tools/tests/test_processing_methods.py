@@ -6,6 +6,8 @@ string behavior the YAML round-trip relies on, and the resolved state / preserve
 error contract of :class:`RegridConfig`.
 """
 
+import logging
+
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -22,6 +24,7 @@ from roms_tools.processing_methods import (
     PrefillMethod,
     RegridConfig,
     RegridEngine,
+    resolve_bgc_interp_method,
 )
 
 
@@ -211,3 +214,122 @@ class TestRegridConfigErrorContract:
     def test_xesmf_engine_without_xesmf_raises_importerror(self):
         with pytest.raises(ImportError, match="xESMF"):
             RegridConfig(regrid_engine="xesmf", xesmf_available=False)
+
+
+class TestFromOptions:
+    """`RegridConfig.from_options` owns the deprecated-flag mapping."""
+
+    def _opts(self, **over):
+        base = dict(
+            prefill=None,
+            prefill_kwargs=None,
+            regrid_method=None,
+            extrap_method=None,
+            extrap_kwargs=None,
+            xesmf_available=True,
+        )
+        base.update(over)
+        return base
+
+    def test_plain_options_passthrough(self):
+        cfg = RegridConfig.from_options(**self._opts(prefill="nearest_neighbor"))
+        assert cfg.prefill is PrefillMethod.nearest_neighbor
+
+    def test_deprecated_true_maps_to_2d_lateral_fill(self):
+        with pytest.warns(DeprecationWarning):
+            cfg = RegridConfig.from_options(**self._opts(apply_2d_horizontal_fill=True))
+        assert cfg.prefill is PrefillMethod.lateral_fill_2d
+
+    def test_deprecated_false_maps_to_no_prefill(self):
+        with pytest.warns(DeprecationWarning):
+            cfg = RegridConfig.from_options(
+                **self._opts(apply_2d_horizontal_fill=False)
+            )
+        assert cfg.prefill is None
+
+    def test_deprecated_conflicts_with_explicit_prefill(self):
+        with pytest.warns(DeprecationWarning):
+            with pytest.raises(ValueError, match="not both"):
+                RegridConfig.from_options(
+                    **self._opts(prefill="inverse_dist", apply_2d_horizontal_fill=True)
+                )
+
+    def test_regrid_method_none_means_auto(self):
+        cfg = RegridConfig.from_options(**self._opts(regrid_method=None))
+        assert cfg.regrid_engine is RegridEngine.auto
+
+
+class TestIgnoredExtrapNotice:
+    """The "extrap ignored" decision is logged at config build time, not returned."""
+
+    def test_silent_when_extrap_not_user_set(self, caplog):
+        with caplog.at_level(logging.INFO):
+            RegridConfig(xesmf_available=True)
+        assert "ignored" not in caplog.text
+
+    def test_silent_when_extrap_is_honored(self, caplog):
+        with caplog.at_level(logging.INFO):
+            RegridConfig(extrap_method="nearest_s2d", xesmf_available=True)
+        assert "ignored" not in caplog.text
+
+    def test_logs_when_prefill_set(self, caplog):
+        with caplog.at_level(logging.INFO):
+            RegridConfig(
+                prefill="inverse_dist",
+                extrap_method="nearest_s2d",
+                xesmf_available=True,
+            )
+        assert "ignored because prefill" in caplog.text
+
+    def test_logs_when_scipy_engine(self, caplog):
+        with caplog.at_level(logging.INFO):
+            RegridConfig(
+                regrid_engine="scipy",
+                extrap_method="nearest_s2d",
+                xesmf_available=True,
+            )
+        assert "scipy regrid" in caplog.text
+
+
+class TestResolveBgcInterpMethod:
+    def test_depth_passes_through(self):
+        assert (
+            resolve_bgc_interp_method(
+                "depth", has_physics_forcing=False, has_source_ts=False
+            )
+            is BgcInterpMethod.depth
+        )
+
+    def test_density_resolves_when_inputs_present(self, caplog):
+        with caplog.at_level(logging.INFO):
+            method = resolve_bgc_interp_method(
+                "density", has_physics_forcing=True, has_source_ts=True
+            )
+        assert method is BgcInterpMethod.density
+        assert caplog.text == "" or "falling back" not in caplog.text
+
+    def test_falls_back_without_physics_forcing(self, caplog):
+        with caplog.at_level(logging.INFO):
+            method = resolve_bgc_interp_method(
+                "density_mld",
+                has_physics_forcing=False,
+                has_source_ts=True,
+                where="south boundary",
+            )
+        assert method is BgcInterpMethod.depth
+        assert "no physics_forcing provided" in caplog.text
+        assert "south boundary" in caplog.text
+
+    def test_falls_back_without_source_ts(self, caplog):
+        with caplog.at_level(logging.INFO):
+            method = resolve_bgc_interp_method(
+                "density", has_physics_forcing=True, has_source_ts=False
+            )
+        assert method is BgcInterpMethod.depth
+        assert "temperature/salinity" in caplog.text
+
+    def test_invalid_method_raises(self):
+        with pytest.raises(ValueError):
+            resolve_bgc_interp_method(
+                "bogus", has_physics_forcing=True, has_source_ts=True
+            )

@@ -715,17 +715,20 @@ class LatLonDataset:
                 )
             return
 
-        spec = METHOD_META.get(method)
-        if method == PrefillMethod.lateral_fill_2d:
-            self.apply_lateral_fill()
-        elif method == PrefillMethod.nearest_neighbor:
-            self.apply_nearest_neighbor_fill()
-        elif spec is not None and spec.requires_xesmf:
-            # xESMF source-on-source fill family (inverse_dist / nearest_s2d /
-            # creep_fill).
-            self.apply_xesmf_source_fill(method=str(method), **prefill_kwargs)
-        else:
-            raise ValueError(f"Unknown prefill method: {method!r}")
+        # The two non-xESMF fills dispatch to dedicated methods; everything else in
+        # the registry that requires xESMF (inverse_dist / nearest_s2d / creep_fill)
+        # goes through the single source-on-source xESMF fill.
+        match method:
+            case PrefillMethod.lateral_fill_2d:
+                self.apply_lateral_fill()
+            case PrefillMethod.nearest_neighbor:
+                self.apply_nearest_neighbor_fill()
+            case _ if (
+                spec := METHOD_META.get(method)
+            ) is not None and spec.requires_xesmf:
+                self.apply_xesmf_source_fill(method=str(method), **prefill_kwargs)
+            case _:
+                raise ValueError(f"Unknown prefill method: {method!r}")
 
     def apply_lateral_fill(self):
         """Apply lateral fill to variables using the dataset's mask and grid dimensions.

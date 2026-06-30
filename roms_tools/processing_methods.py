@@ -12,6 +12,8 @@ lightweight YAML round-trip is unchanged); these enums are the *internal*
 representation, and the :class:`RegridConfig` model is built behind the constructor.
 """
 
+import logging
+import warnings
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -211,6 +213,54 @@ def resolve_regrid_engine(regrid_method: str | None, *, xesmf_available: bool) -
     return xesmf_available
 
 
+def resolve_bgc_interp_method(
+    requested: str,
+    *,
+    has_physics_forcing: bool,
+    has_source_ts: bool,
+    where: str | None = None,
+) -> "BgcInterpMethod":
+    """Resolve the requested BGC vertical-interpolation method against availability.
+
+    The non-depth methods (``density`` / ``density_mld``) need both a physics
+    target T/S (from ``physics_forcing``) and the BGC source's own T/S; when either
+    is missing this logs the fallback and returns ``depth``.
+
+    Parameters
+    ----------
+    requested : str
+        The user-requested ``bgc_interpolation_method``.
+    has_physics_forcing : bool
+        Whether a physics ``BoundaryForcing`` supplying the target T/S is present.
+    has_source_ts : bool
+        Whether the BGC source carries its own temperature/salinity pair.
+    where : str, optional
+        Context appended to the fallback log message (e.g. ``"south boundary"``).
+
+    Returns
+    -------
+    BgcInterpMethod
+        The effective method (``depth`` when a fallback was logged).
+    """
+    method = BgcInterpMethod(requested)
+    if method == BgcInterpMethod.depth:
+        return BgcInterpMethod.depth
+    if has_physics_forcing and has_source_ts:
+        return method
+
+    reason = (
+        "no physics_forcing provided"
+        if not has_physics_forcing
+        else "the BGC source has no temperature/salinity"
+    )
+    context = f" ({where})" if where else ""
+    logging.info(
+        f"{str(method)!r} interpolation requested but {reason}; falling back to "
+        f"depth-space interpolation{context}."
+    )
+    return BgcInterpMethod.depth
+
+
 def validate_prefill(
     prefill: str | None,
     prefill_kwargs: dict | None,
@@ -303,6 +353,56 @@ class RegridConfig(BaseModel):
         default_factory=lambda: frozenset(PrefillMethod)
     )
 
+    @classmethod
+    def from_options(
+        cls,
+        *,
+        prefill: str | None,
+        prefill_kwargs: dict | None,
+        regrid_method: str | None,
+        extrap_method: str | None,
+        extrap_kwargs: dict | None,
+        apply_2d_horizontal_fill: bool | None = None,
+        xesmf_available: bool,
+        allowed_prefill: "frozenset[PrefillMethod] | None" = None,
+    ) -> "RegridConfig":
+        """Build a config from a setup class's public options, mapping the
+        deprecated ``apply_2d_horizontal_fill`` flag.
+
+        ``apply_2d_horizontal_fill`` is a deprecated alias for ``prefill``
+        (``True`` -> ``"2d_lateral_fill"``, ``False`` -> no prefill). Setting it
+        emits a ``DeprecationWarning`` and it cannot be combined with an explicit
+        ``prefill``. Centralizing it here keeps all "interpret the user's
+        regrid-related options" logic in one place; the caller only needs to read
+        the resolved values back off the returned config (e.g. ``str(cfg.prefill)``)
+        for serialization.
+        """
+        if apply_2d_horizontal_fill is not None:
+            warnings.warn(
+                "`apply_2d_horizontal_fill` is deprecated; use `prefill` instead "
+                "(True -> prefill='2d_lateral_fill', False -> prefill=None).",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            if prefill is not None:
+                raise ValueError(
+                    "Set either the deprecated `apply_2d_horizontal_fill` or "
+                    "`prefill`, not both."
+                )
+            prefill = "2d_lateral_fill" if apply_2d_horizontal_fill else None
+
+        kwargs: dict = dict(
+            prefill=prefill,
+            prefill_kwargs=prefill_kwargs,
+            regrid_engine=regrid_method or RegridEngine.auto,
+            extrap_method=extrap_method,
+            extrap_kwargs=extrap_kwargs,
+            xesmf_available=xesmf_available,
+        )
+        if allowed_prefill is not None:
+            kwargs["allowed_prefill"] = allowed_prefill
+        return cls(**kwargs)
+
     @model_validator(mode="before")
     @classmethod
     def _validate_inputs(cls, data):
@@ -371,3 +471,27 @@ class RegridConfig(BaseModel):
     def regrid_extrap_kwargs(self) -> dict | None:
         """Extrapolation kwargs passed to the regridder (``None`` when prefilled)."""
         return None if self.prefill is not None else self.extrap_kwargs
+
+    @model_validator(mode="after")
+    def _log_ignored_extrap(self) -> "RegridConfig":
+        """Log (once, at build time) when the user's extrapolation options are
+        ignored. Destination extrapolation is only used on the default (no-prefill)
+        xESMF path; a set prefill makes the source NaN-free (plain bilinear) and the
+        scipy path pre-fills instead.
+        """
+        if self.user_set_extrap:
+            if self.prefill is not None:
+                logging.info(
+                    "extrap_method/extrap_kwargs are ignored because "
+                    "prefill=%r fills the source first (the regrid is plain "
+                    "bilinear).",
+                    str(self.prefill),
+                )
+            elif not self.use_xesmf:
+                logging.info(
+                    "extrap_method/extrap_kwargs are ignored because the scipy "
+                    "regrid engine is in use (xESMF unavailable or "
+                    "regrid_method='scipy'); the source is nearest-neighbor "
+                    "pre-filled instead."
+                )
+        return self

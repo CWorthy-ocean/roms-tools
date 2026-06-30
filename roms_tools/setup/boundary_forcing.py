@@ -1,6 +1,5 @@
 import importlib.metadata
 import logging
-import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -20,8 +19,10 @@ from roms_tools.datasets.lat_lon_datasets import (
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.processing_methods import (
     BGC_INTERPOLATION_METHODS,
+    BgcInterpMethod,
     RegridConfig,
     _xesmf_available,
+    resolve_bgc_interp_method,
 )
 from roms_tools.regrid import (
     LateralRegridToROMS,
@@ -312,17 +313,6 @@ class BoundaryForcing:
         self._resolve_prefill_options()
         self._input_checks()
 
-        if (
-            self.type == "bgc"
-            and self.bgc_interpolation_method != "depth"
-            and self.physics_forcing is None
-        ):
-            logging.info(
-                f"bgc_interpolation_method={self.bgc_interpolation_method!r} but no "
-                "physics_forcing provided. BGC tracers will be interpolated in depth "
-                "space instead."
-            )
-
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
@@ -339,19 +329,6 @@ class BoundaryForcing:
         regrid = self._regrid
         prefill = self.prefill
         use_xesmf = regrid.use_xesmf
-
-        if regrid.user_set_extrap and prefill is not None:
-            logging.info(
-                "extrap_method/extrap_kwargs are ignored because prefill=%r fills "
-                "the source first (the regrid is plain bilinear).",
-                prefill,
-            )
-        elif regrid.user_set_extrap and not use_xesmf:
-            logging.info(
-                "extrap_method/extrap_kwargs are ignored because the scipy regrid "
-                "engine is in use (xESMF unavailable or regrid_method='scipy'); "
-                "the source is nearest-neighbor pre-filled instead."
-            )
 
         if prefill is not None:
             # Whole-domain source fill (parallels the legacy AMG path): gives the
@@ -611,27 +588,20 @@ class BoundaryForcing:
 
                         has_source_ts = len(aux_ts_vars) == 2
                         # Resolve the requested method against availability of the
-                        # physics target T/S and the BGC source T/S; fall back to depth.
-                        method = "depth"
+                        # physics target T/S and the BGC source T/S (falls back to
+                        # depth, logging the reason, when either is missing).
+                        method = BgcInterpMethod.depth
                         if self.type == "bgc" and location == "rho":
-                            method = self.bgc_interpolation_method
-                            can_use = self.physics_forcing is not None and has_source_ts
-                            if method != "depth" and not can_use:
-                                reason = (
-                                    "no physics_forcing provided"
-                                    if self.physics_forcing is None
-                                    else "the BGC source has no temperature/salinity"
-                                )
-                                logging.info(
-                                    f"{method!r} interpolation requested but {reason}; "
-                                    f"falling back to depth-space interpolation "
-                                    f"({direction} boundary)."
-                                )
-                                method = "depth"
+                            method = resolve_bgc_interp_method(
+                                self.bgc_interpolation_method,
+                                has_physics_forcing=self.physics_forcing is not None,
+                                has_source_ts=has_source_ts,
+                                where=f"{direction} boundary",
+                            )
 
                         source_coord = None
                         target_coord = None
-                        if method != "depth":
+                        if method != BgcInterpMethod.depth:
                             source_coord, target_coord = (
                                 self._compute_bgc_vertical_coords(
                                     method, direction, bdry_data, processed_fields
@@ -641,7 +611,7 @@ class BoundaryForcing:
                         for var_name in tracer_vars:
                             if var_name not in processed_fields:
                                 continue
-                            if method != "depth":
+                            if method != BgcInterpMethod.depth:
                                 processed_fields[var_name] = vertical_regrid.apply(
                                     processed_fields[var_name],
                                     source_depth_coords=source_coord,
@@ -701,46 +671,32 @@ class BoundaryForcing:
         self.ds = ds
 
     def _resolve_prefill_options(self) -> None:
-        """Map the deprecated flag and build the validated :class:`RegridConfig`.
+        """Build the validated :class:`RegridConfig` from the public options.
 
-        ``apply_2d_horizontal_fill`` is a deprecated alias for ``prefill``:
-        ``True`` -> ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``.
-        After mapping, the deprecated attribute is reset to ``None`` so it is not
-        re-serialized. The flat public string fields (``prefill``,
-        ``prefill_kwargs``, ``regrid_method``, ``extrap_method``, ``extrap_kwargs``)
-        are then handed to a single :class:`RegridConfig`, which owns all
-        cross-field validation and exposes the resolved state (``use_xesmf``,
-        ``effective_extrap``, ...). The public fields stay as the user's plain
-        strings so the YAML round-trip is unchanged.
+        Delegates the deprecated-flag mapping and all prefill/extrap/regrid
+        validation to :meth:`RegridConfig.from_options`, then writes the resolved
+        ``prefill`` back to the public field (and clears the deprecated alias) so
+        the YAML round-trip emits the plain ``prefill`` string. Derived state
+        (``use_xesmf``, ``effective_extrap``, ...) is read off ``self._regrid``.
         """
-        if self.apply_2d_horizontal_fill is not None:
-            warnings.warn(
-                "`apply_2d_horizontal_fill` is deprecated; use `prefill` instead "
-                "(True -> prefill='2d_lateral_fill', False -> prefill=None).",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if self.prefill is not None:
-                raise ValueError(
-                    "Set either the deprecated `apply_2d_horizontal_fill` or "
-                    "`prefill`, not both."
-                )
-            self.prefill = "2d_lateral_fill" if self.apply_2d_horizontal_fill else None
-            # Reset the sentinel so it is not re-serialized going forward.
-            self.apply_2d_horizontal_fill = None
-
-        # ``allowed_prefill`` defaults to every ``PrefillMethod`` member, which is
-        # exactly the set this class accepts (``creep_fill`` is intentionally not a
-        # prefill). The config validates the prefill/extrap/regrid combination and
-        # raises on an unsupported value or an xESMF-only method without xESMF.
-        self._regrid = RegridConfig(
+        # ``RegridConfig.from_options`` owns the deprecation mapping and all
+        # prefill/extrap/regrid validation (``allowed_prefill`` defaults to every
+        # ``PrefillMethod`` member, which is exactly the set this class accepts).
+        self._regrid = RegridConfig.from_options(
             prefill=self.prefill,
             prefill_kwargs=self.prefill_kwargs,
-            regrid_engine=self.regrid_method or "auto",
+            regrid_method=self.regrid_method,
             extrap_method=self.extrap_method,
             extrap_kwargs=self.extrap_kwargs,
+            apply_2d_horizontal_fill=self.apply_2d_horizontal_fill,
             xesmf_available=_xesmf_available(),
         )
+        # Persist the resolved prefill (deprecated alias mapped to a plain string)
+        # so the YAML round-trip emits ``prefill`` and never the deprecated flag.
+        self.prefill = (
+            None if self._regrid.prefill is None else str(self._regrid.prefill)
+        )
+        self.apply_2d_horizontal_fill = None
 
     def _compute_bgc_vertical_coords(
         self,

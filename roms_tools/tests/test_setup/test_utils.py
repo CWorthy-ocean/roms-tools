@@ -21,6 +21,9 @@ from roms_tools.setup.utils import (
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
     month_to_time_index,
+    nan_check,
+    nan_check_batch,
+    nan_flag,
     tile_monthly_climatology_on_calendar,
     validate_names,
 )
@@ -845,6 +848,40 @@ def test_build_bgc_vertical_coords_invalid_method():
             target_salt=da,
             target_depth=da,
             target_depth_dim="dep",
+        )
+
+
+def test_nan_flag_and_nan_check():
+    """nan_flag is True only when a wet point is NaN; nan_check raises accordingly."""
+    mask = xr.DataArray([1, 1, 0], dims="x")
+    clean = xr.DataArray([1.0, 2.0, np.nan], dims="x")  # NaN only at land
+    dirty = xr.DataArray([1.0, np.nan, 3.0], dims="x")  # NaN at a wet point
+
+    assert not bool(nan_flag(clean, mask))
+    assert bool(nan_flag(dirty, mask))
+
+    nan_check(clean, mask)  # no NaN at wet points -> no raise
+    with pytest.raises(ValueError):
+        nan_check(dirty, mask)
+
+
+def test_nan_check_batch():
+    """nan_check_batch evaluates all fields at once and raises the matching message."""
+    mask = xr.DataArray([1, 1, 0], dims="x")
+    clean = xr.DataArray([1.0, 2.0, np.nan], dims="x")
+    dirty = xr.DataArray([1.0, np.nan, 3.0], dims="x")
+
+    # All-clean and empty inputs do not raise.
+    nan_check_batch([(clean, mask, "msg-a"), (clean, mask, None)])
+    nan_check_batch([])
+
+    # A dirty field raises with its own message; works on dask-backed inputs too.
+    with pytest.raises(ValueError, match="boom"):
+        nan_check_batch(
+            [
+                (clean.chunk(), mask, "ok"),
+                (dirty.chunk(), mask, "boom"),
+            ]
         )
 
 

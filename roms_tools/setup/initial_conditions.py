@@ -34,7 +34,7 @@ from roms_tools.setup.utils import (
     from_yaml,
     get_target_coords,
     get_variable_metadata,
-    nan_check,
+    nan_check_batch,
     pop_grid_data,
     substitute_nans_by_fillvalue,
     to_dict,
@@ -889,6 +889,10 @@ class InitialConditions:
         else:
             variable_info = self.variable_info_physics
 
+        # Build the NaN checks lazily and evaluate them in a single computation so a
+        # lazy subgraph shared across variables (e.g. the density/MLD interpolation
+        # coordinate reused across BGC tracers) is computed once, not once per variable.
+        checks = []
         for var_name in variable_info:
             if variable_info[var_name]["validate"]:
                 if variable_info[var_name]["location"] == "rho":
@@ -897,8 +901,9 @@ class InitialConditions:
                     mask = self.grid.ds.mask_u
                 elif variable_info[var_name]["location"] == "v":
                     mask = self.grid.ds.mask_v
-                ds[var_name].load()
-                nan_check(ds[var_name].squeeze(), mask)
+                checks.append((ds[var_name].squeeze(), mask, None))
+
+        nan_check_batch(checks)
 
     def _add_global_metadata(self, ds):
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"

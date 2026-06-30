@@ -34,14 +34,13 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     group_dataset,
-    nan_check,
+    nan_check_batch,
     pop_grid_data,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
 )
 from roms_tools.utils import (
-    interpolate_cyclic_time,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
@@ -57,7 +56,7 @@ def _interpolate_phys_to_bgc_time(
     bgc_time_coord: xr.DataArray,
     bgc_climatology: bool,
 ) -> xr.DataArray:
-    """Linearly interpolate a physics DataArray onto the BGC time coordinate.
+    """Sample a physics DataArray at the BGC times using nearest-time selection.
 
     Parameters
     ----------
@@ -70,29 +69,38 @@ def _interpolate_phys_to_bgc_time(
     bgc_climatology : bool
         Whether the BGC dataset is a climatology. If True, ``bgc_time_coord``
         is expected to be ``timedelta64`` from the start of the year (as set by
-        ``assign_dates_to_climatology``), and physics times are mapped to
-        fractional day-of-year before a cyclic linear interpolation. If False,
-        a straight ``xr.DataArray.interp(method="linear")`` is performed in
+        ``assign_dates_to_climatology``), and the nearest neighbour is taken
+        cyclically in fractional day-of-year space (so an early-January target can
+        match late-December physics). If False, nearest selection is performed in
         ``datetime64`` space.
 
     Returns
     -------
     xr.DataArray
-        ``phys_da`` interpolated to ``bgc_time_coord``, with time dimension
-        still named ``time_dim`` and coordinate set to ``bgc_time_coord``.
+        ``phys_da`` sampled at ``bgc_time_coord``, with time dimension still named
+        ``time_dim`` and coordinate set to ``bgc_time_coord``.
+
+    Notes
+    -----
+    The BGC boundary output is typically a 12-step climatology, and ROMS linearly
+    interpolates boundary records in time at runtime, so sub-monthly precision in the
+    physics T/S used only as the density/MLD anchor is washed out. Nearest-time
+    selection is therefore sufficient and, unlike ``xr.interp``, requires no rechunk of
+    the time axis (which would otherwise pull the entire physics time series into a
+    single in-memory chunk); only the selected slices are read.
     """
     if bgc_climatology:
-        # Map both axes to fractional day-of-year, then cyclic-interpolate.
+        # Circular nearest neighbour in fractional day-of-year space.
         bgc_doy = (bgc_time_coord / np.timedelta64(1, "D")).values + 1.0
         phys_doy = phys_da[time_dim].dt.dayofyear.values.astype(float)
-        phys_for_interp = phys_da.assign_coords(
-            {time_dim: xr.DataArray(phys_doy, dims=[time_dim])}
-        )
-        result = interpolate_cyclic_time(phys_for_interp, time_dim, time_dim, bgc_doy)
+        period = 365.25
+        diff = np.abs(phys_doy[None, :] - np.asarray(bgc_doy)[:, None])
+        nearest = np.minimum(diff, period - diff).argmin(axis=1)
+        result = phys_da.isel({time_dim: nearest})
         return result.assign_coords({time_dim: bgc_time_coord.values})
 
-    # Non-climatology: standard datetime64 linear interpolation
-    return phys_da.interp({time_dim: bgc_time_coord}, method="linear")
+    # Non-climatology: nearest selection in datetime64 space.
+    return phys_da.sel({time_dim: bgc_time_coord}, method="nearest")
 
 
 @dataclass(kw_only=True)
@@ -1085,6 +1093,10 @@ class BoundaryForcing:
         Validation is performed on the initial boundary time step (`bry_time=0`) for each
         variable in the dataset.
         """
+        # Build the NaN checks lazily and evaluate them in a single computation so a
+        # lazy subgraph shared across variables (e.g. the density/MLD interpolation
+        # coordinate reused across BGC tracers) is computed once, not once per variable.
+        checks = []
         for var_name in self.variable_info:
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
@@ -1101,7 +1113,7 @@ class BoundaryForcing:
                     if is_enabled:
                         bdry_var_name = f"{var_name}_{direction}"
 
-                        # Check for NaN values at the first time step using the nan_check function
+                        # Check for NaN values at the first time step
                         if self.apply_2d_horizontal_fill:
                             error_message = None
                         else:
@@ -1112,11 +1124,15 @@ class BoundaryForcing:
                                 f"Try setting `apply_2d_horizontal_fill = True` to resolve this issue."
                             )
 
-                        nan_check(
-                            ds[bdry_var_name].isel(bry_time=0),
-                            mask.isel(**self.bdry_coords[location][direction]),
-                            error_message=error_message,
+                        checks.append(
+                            (
+                                ds[bdry_var_name].isel(bry_time=0),
+                                mask.isel(**self.bdry_coords[location][direction]),
+                                error_message,
+                            )
                         )
+
+        nan_check_batch(checks)
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.

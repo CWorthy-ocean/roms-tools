@@ -541,15 +541,12 @@ class RiverDataset:
     ):
         """Extract rivers within the ROMS domain and assign each to the nearest coastal grid cell.
 
-        Uses a three-step memory-efficient approach to avoid building the full
+        Uses a two-step memory-efficient approach to avoid building the full
         (eta_rho x xi_rho x n_stations) distance matrix, which would require
         hundreds of GiB for large river datasets (like gloFAS):
 
         1. Bounding box pre-filter — coarse reduction using lat/lon comparison to grid boundary.
         2. cKDTree query_ball_point — finds stations within coast_snap_buffer_km of any coastal cell.
-        3. cKDTree nearest-neighbor query — assigns each surviving station to
-        its closest grid cell (any cell, not just coastal). Used for
-        original_indices to show pre-coast-snap positions in plot_locations.
 
         Parameters
         ----------
@@ -583,7 +580,6 @@ class RiverDataset:
         """
         from roms_tools.setup.utils import (
             build_kdtree_from_latlon,
-            query_kdtree_nearest,
         )
 
         # Retrieve longitude and latitude of river mouths
@@ -638,10 +634,6 @@ class RiverDataset:
         )
         bbox_indices = np.where(in_bbox)[0]
 
-        if len(bbox_indices) == 0:
-            self.ds = xr.Dataset()
-            return {}
-
         # Step 2: optional distance filter using query_ball_point
         if coast_snap_buffer_km is not None:
             from roms_tools.setup.utils import latlon_to_xyz
@@ -658,39 +650,17 @@ class RiverDataset:
             tree = build_kdtree_from_latlon(tree_lat, tree_lon)
             final_indices = bbox_indices
 
+        if len(final_indices) == 0:
+            raise ValueError(
+                "No relevant rivers found. Consider increasing domain size or using a different river dataset."
+            )
+
         # Subset dataset and sort first
         ds = self.ds.isel({station_dim: final_indices})
         ds = self.sort_by_river_volume(ds)
         self.ds = ds
 
-        # Step 3: assign each station to nearest any-grid-cell using sorted positions
-        sorted_lat = ds[self.var_names["latitude"]].values
-        sorted_lon = ds[self.var_names["longitude"]].values
-        if target_coords["straddle"]:
-            sorted_lon = np.where(sorted_lon > 180, sorted_lon - 360, sorted_lon)
-        else:
-            sorted_lon = np.where(sorted_lon < 0, sorted_lon + 360, sorted_lon)
-
-        all_eta = np.arange(eta_rho * xi_rho) // xi_rho
-        all_xi = np.arange(eta_rho * xi_rho) % xi_rho
-        all_tree = build_kdtree_from_latlon(
-            target_lat_np.ravel(), target_lon_np.ravel()
-        )
-        eta_argmin, xi_argmin, _ = query_kdtree_nearest(
-            all_tree,
-            sorted_lat,
-            sorted_lon,
-            all_eta,
-            all_xi,
-        )
-
-        names_final = ds[self.var_names["name"]].values
-        river_indices = {
-            str(names_final[i]): [(int(eta_argmin[i]), int(xi_argmin[i]))]
-            for i in range(len(ds[self.dim_names["station"]]))
-        }
-
-        return river_indices
+        return
 
     def extract_named_rivers(self, indices):
         """Extracts a subset of the dataset based on the provided river names in the
@@ -770,6 +740,7 @@ class GloFASRiverDataset(RiverDataset):
         }
     )
     opt_var_names: dict = field(default_factory=lambda: {"vol": "vol_stn"})
+    name_prefix: str = field(default="GloFAS_", init=False)
 
     def extract_relevant_rivers(
         self, target_coords, dx, coast_snap_buffer_km=50.0, domain_edge_buffer=20
@@ -830,6 +801,7 @@ class DaiRiverDataset(RiverDataset):
         }
     )
     climatology: bool = False
+    name_prefix: str = field(default="", init=False)
 
     def load_data(self) -> xr.Dataset:
         """Load dataset from the specified file. Load Dai dataset from the specified file.

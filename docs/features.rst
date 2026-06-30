@@ -24,7 +24,7 @@ Preprocessing and Model Inputs
 
 8. **Tidal Forcing**: Tidal potential, elevation, and velocities derived from **TPXO** :cite:`egbert_efficient_2002` including self-attraction and loading (SAL) corrections.
 
-9. **River Forcing**: Freshwater runoff derived from **Dai & Trenberth** :cite:`dai_estimates_2002` or user-provided custom files.
+9. **River Forcing**: Freshwater runoff derived from **Dai & Trenberth** :cite:`dai_estimates_2002`, **GloFAS** :cite:`glofas_2019`, or user-provided custom files.
 
 10. **CDR Forcing**: User-defined interventions that inject BGC tracers at point sources or as larger-scale Gaussian perturbations to simulate CDR interventions. The CDR forcing is prescribed as volume and tracer fluxes (e.g., alkalinity for ocean alkalinity enhancement, iron for iron fertilization, or other BGC constituents). Users can control the magnitude, spatial footprint, and temporal evolution, allowing flexible representation of CDR interventions.
 

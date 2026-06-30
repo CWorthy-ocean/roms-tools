@@ -248,8 +248,8 @@ class RiverForcing:
     coast_snap_buffer_km: float | None = None
     """Maximum distance (in km) between a river mouth and the nearest coastal
     grid cell. River stations farther than this threshold are excluded in mapping.
-    Can be overridden by the user for domains where the default (50km for GloFAS, None for Dai)
-    is inappropriate."""
+    ``None`` will use the dataset's default (50km for GloFAS, 200km for Dai) or it
+    can be overridden by the user for domains where the default is inappropriate. ."""
 
     domain_edge_buffer: int = 20
     """Number of grid cells to include beyond the domain boundary when
@@ -263,6 +263,7 @@ class RiverForcing:
     def __post_init__(self):
         self._input_checks()
         data = self._get_data()
+        self._river_name_prefix = data.name_prefix
 
         if self.indices is None:
             logging.info(
@@ -279,13 +280,7 @@ class RiverForcing:
             if self.coast_snap_buffer_km is not None:
                 kwargs["coast_snap_buffer_km"] = self.coast_snap_buffer_km
 
-            original_indices = data.extract_relevant_rivers(target_coords, dx, **kwargs)
-
-            if len(original_indices) == 0:
-                raise ValueError(
-                    "No relevant rivers found. Consider increasing domain size or using a different river dataset."
-                )
-            self.original_indices = original_indices
+            data.extract_relevant_rivers(target_coords, dx, **kwargs)
             updated_indices = self._move_rivers_to_closest_coast(target_coords, data)
             self.indices = updated_indices
 
@@ -296,7 +291,6 @@ class RiverForcing:
             source_indices = {
                 k: v for k, v in self.indices.items() if not k.startswith("overlap_")
             }
-            self.original_indices = dict(source_indices)
             self.indices = source_indices
             check_river_locations_are_along_coast(self.grid.ds.mask_rho, source_indices)
             data.extract_named_rivers(source_indices)
@@ -810,7 +804,7 @@ class RiverForcing:
 
             name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
             for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
-                name = "overlap_" + sorted(river_list)[0].replace("GloFAS_", "")
+                name = "overlap_" + river_list[0].replace(self._river_name_prefix, "")
                 logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
                 new_nriver = ds.sizes["nriver"] + i + 1
                 (
@@ -1102,6 +1096,9 @@ class RiverForcing:
             Defaults to "all".
 
         """
+        if self.indices is None:
+            return
+
         valid_river_names = list(self.indices or [])
 
         river_names = _validate_river_names(river_names, valid_river_names)
@@ -1124,38 +1121,29 @@ class RiverForcing:
 
         trans = get_projection(lon_deg, lat_deg)
 
-        fig, axs = plt.subplots(
-            1, 2, figsize=(13, 13), subplot_kw={"projection": trans}
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5), subplot_kw={"projection": trans})
+        plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
+
+        points: dict[str, dict] = {}
+        for name in river_names:
+            if name in self.indices:
+                for i, (eta_index, xi_index) in enumerate(self.indices[name]):
+                    lon = self.grid.ds.lon_rho[eta_index, xi_index].item()
+                    lat = self.grid.ds.lat_rho[eta_index, xi_index].item()
+                    key = name if i == 0 else f"_{name}_{i}"
+                    points[key] = {
+                        "lon": lon,
+                        "lat": lat,
+                        "color": colors[name],
+                    }
+
+        plot_location(
+            grid_ds=self.grid.ds,
+            points=points,
+            ax=ax,
+            include_legend=True,
         )
-
-        for ax in axs:
-            plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
-
-        for j, (ax, indices) in enumerate(
-            [(ax, ind) for ax, ind in zip(axs, [self.original_indices, self.indices])]
-        ):
-            points: dict[str, dict] = {}  # reset for each panel
-            for name in river_names:
-                if name in indices:
-                    for i, (eta_index, xi_index) in enumerate(indices[name]):
-                        lon = self.grid.ds.lon_rho[eta_index, xi_index].item()
-                        lat = self.grid.ds.lat_rho[eta_index, xi_index].item()
-                        key = name if i == 0 else f"_{name}_{i}"
-                        points[key] = {
-                            "lon": lon,
-                            "lat": lat,
-                            "color": colors[name],
-                        }
-
-            plot_location(
-                grid_ds=self.grid.ds,
-                points=points,
-                ax=ax,
-                include_legend=(j == 1),
-            )
-
-        axs[0].set_title("Original river locations")
-        axs[1].set_title("Updated river locations")
+        ax.set_title("River locations")
 
     def plot(
         self,

@@ -377,15 +377,6 @@ Data are available for 1979 to 2025. Downloaded automatically by ROMS-Tools.
 :Available at: `NOAA's GML, MBL <https://gml.noaa.gov/ccgg/mbl/data.php>`_
 
 
-Download Instructions
----------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   datasets
-
-
 OceanSODA
 ~~~~~~~~~~~~~~~
 
@@ -403,3 +394,4 @@ Download Instructions
    :maxdepth: 1
 
    datasets
+   datasets_read

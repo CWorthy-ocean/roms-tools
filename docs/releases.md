@@ -65,6 +65,7 @@
 * `river_forcing.ipynb` documents RIVR2O BGC forcing, including climatological discharge with year-varying tracers ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
 * CDR analysis notebook: describe CO2 uptake (tonnes CO2) and CDR efficiency together, consistent with the metrics and figure. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * Notebooks updated to document density-space BGC interpolation ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620))
+* Added subchunking example code and information on new datasets docs page.
 
 ### Bugfixes
 

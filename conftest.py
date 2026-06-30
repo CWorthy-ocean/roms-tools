@@ -26,6 +26,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.nesting import align_grids, make_nesting_info
+from roms_tools.tests.glofas_test_utils import write_glofas_file
 
 
 class SkippableOptions(enum.StrEnum):
@@ -1117,6 +1118,47 @@ def river_forcing_with_bgc() -> RiverForcing:
 def rivr2o_test_data_paths() -> list[str]:
     """Paths to coarse regional RIVR2O test files (2000-2002) from roms-tools-test-data."""
     return download_rivr2o_test_data()
+
+
+@pytest.fixture(scope="session")
+def glofas_test_file(tmp_path_factory):
+    """Write a minimal synthetic GloFAS-format NetCDF file for integration tests."""
+    import numpy as np
+
+    path = tmp_path_factory.mktemp("glofas") / "glofas_test.nc"
+    times = np.array(
+        ["1998-01-15", "1998-02-15"],
+        dtype="datetime64[ns]",
+    )
+    lats = np.array([65.12, 65.12, 64.82, 65.47, 63.72], dtype=np.float32)
+    lons = np.array([-20.43, -20.43, -22.78, -23.62, -17.53], dtype=np.float32)
+    names = [
+        "GloFAS_65.12N_20.43W",
+        "GloFAS_65.12N_20.43W_b",
+        "GloFAS_64.82N_22.78W",
+        "GloFAS_65.47N_23.62W",
+        "GloFAS_63.72N_17.53W",
+    ]
+    flow = np.tile(
+        np.array([500.0, 200.0, 100.0, 300.0, 400.0], dtype=np.float32), (2, 1)
+    )
+    vol = np.array([500.0, 200.0, 100.0, 300.0, 400.0], dtype=np.float32)
+    write_glofas_file(path, lats, lons, flow, names, times, vol=vol)
+    return path
+
+
+@pytest.fixture(scope="session")
+def river_forcing_with_glofas(glofas_test_file) -> RiverForcing:
+    """RiverForcing using a synthetic GloFAS-format discharge file."""
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+    return RiverForcing(
+        grid=grid,
+        start_time=datetime(1998, 1, 1),
+        end_time=datetime(1998, 3, 1),
+        source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+    )
 
 
 @pytest.fixture(scope="session")

@@ -364,15 +364,13 @@ For practical examples, see [this notebook](boundary_forcing.ipynb).
 
 ## River Forcing
 
-The river forcing is sourced from a provided river dataset containing river volume fluxes. By default, the Dai and Trenberth global river dataset is used.
+The river forcing is sourced from a provided river dataset containing river volume fluxes. Two datasets are supported: the Dai and Trenberth global river dataset (default) and GloFAS v4.0.
 
-1. **Extraction of Relevant Rivers**: For each river in the provided source dataset, the distance between the river mouth and the latitudes and longitudes of the ROMS grid is computed. Only rivers whose mouths are within a specified maximum distance from the grid are retained. This maximum distance is defined as:
+1. **Extraction of Relevant Rivers**: Rivers are filtered down to those relevant to the ROMS domain using a two-step approach:
 
-$$
-max(\sqrt{(\Delta x)^2 + (\Delta y)^2} / 2),
-$$
+   - **Bounding box filter**: Rivers outside the lat/lon bounds of the ROMS grid (plus a configurable buffer of grid cells controlled by `domain_edge_buffer`) are discarded.
+   - **Coastal snap buffer**: Rivers farther than `coast_snap_buffer_km` from any coastal grid cell are discarded. The default is 200 km for Dai & Trenberth and 50 km for GloFAS. This can be overridden by the user.
 
-where $\Delta x$ and $\Delta y$ represent the grid spacing in the x- and y-directions, respectively. This method ensures that only rivers that are geographically relevant to the ROMS grid are included in the forcing.
 
 2. **Placement of Rivers at Coastal Land Points**: ROMS requires rivers to be placed at coastal land points, i.e., land points that are adjacent to wet points. Therefore, `ROMS-Tools` moves the relevant rivers (from Step 1) to the nearest coastal land point, see [here](river_forcing.ipynb#River-locations) for an example.
 3. **Creating the River Forcing**: For the relevant rivers, `ROMS-Tools` extracts the volume flux for the specified time period (as a climatology, if specified). Additionally, constant values of 17$^\circ$C and 1 PSU (pratical salinity units) are assigned for river temperature and salinity, respectively.

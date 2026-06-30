@@ -35,6 +35,7 @@
 * CDR metrics report CO2 uptake as mass in tonnes of CO2 for both the air-sea flux-difference and DIC-difference constructions (using CO2 molar mass and native flux or inventory units when available). ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * The CDR metrics figure from `ROMSOutput.cdr_metrics()` uses twin y-axes: CDR efficiency (dimensionless) and CO2 uptake (tonnes CO2), with title "CO2 uptake and CDR efficiency". ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * `SurfaceForcing` with `type='restoring'` now allows for making DIC and ALK restoring forces files ([#619](https://github.com/CWorthy-ocean/roms-tools/pull/619))
+* Added support for the GloFAS v4.0 global river discharge dataset as an alternative to Dai & Trenberth, along with performance improvements and bug fixes to the river forcing pipeline. ([#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
 
 
 ### Internal Changes
@@ -75,6 +76,7 @@
 * Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region. ([#577](https://github.com/CWorthy-ocean/roms-tools/pull/577))
 * Fix timer logging messages during mask generation so durations render correctly when closing narrow channels and filling enclosed basins
 * Fix for hanging when using the default of streaming from Copernicus for GLORYS output. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
+* Fix for river forcing indexing, sorting and plotting so that river_forcing.plot() and river_forcing.plot_locations() correctly shows top 20 largest rivers when plotting.
 
 ## v3.5.0
 

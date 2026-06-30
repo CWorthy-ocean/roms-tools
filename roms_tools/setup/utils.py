@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+import dask
 import gsw
 import numba as nb
 import numpy as np
@@ -74,6 +75,22 @@ class Timed:
             log_the_separator()
 
 
+_DEFAULT_NAN_CHECK_MESSAGE = (
+    "NaN values found in regridded field. This likely occurs because the ROMS grid, including "
+    "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
+    "dataset covers the entire area required by the ROMS grid."
+)
+
+
+def nan_flag(field, mask):
+    """Lazy boolean: True if ``field`` has any NaN at wet points (``mask == 1``).
+
+    Returns an unevaluated (0-d) DataArray so callers can batch several flags into a
+    single ``dask`` computation; see :func:`nan_check_batch`.
+    """
+    return xr.where(mask == 1, field, 0).isnull().any()
+
+
 def nan_check(field, mask, error_message=None) -> None:
     """Checks for NaN values at wet points in the field.
 
@@ -99,17 +116,40 @@ def nan_check(field, mask, error_message=None) -> None:
         If the field contains NaN values at any of the wet points indicated by the mask.
         The error message will explain the potential cause and suggest ensuring the dataset's coverage.
     """
-    # Replace values in field with 0 where mask is not 1
-    da = xr.where(mask == 1, field, 0)
     if error_message is None:
-        error_message = (
-            "NaN values found in regridded field. This likely occurs because the ROMS grid, including "
-            "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
-            "dataset covers the entire area required by the ROMS grid."
-        )
-    # Check if any NaN values exist in the modified field
-    if da.isnull().any().values:
+        error_message = _DEFAULT_NAN_CHECK_MESSAGE
+    if bool(nan_flag(field, mask).values):
         raise ValueError(error_message)
+
+
+def nan_check_batch(items) -> None:
+    """Validate several fields for NaNs at wet points in a single computation.
+
+    Parameters
+    ----------
+    items : iterable of (field, mask, error_message)
+        One tuple per field to check. ``error_message`` may be ``None`` to use the
+        default message.
+
+    Notes
+    -----
+    All NaN-at-wet-point flags are evaluated in one ``dask.compute`` so that a lazy
+    subgraph shared across fields (e.g. a density/MLD interpolation coordinate reused
+    across BGC tracers) is computed once rather than once per field.
+
+    Raises
+    ------
+    ValueError
+        For the first field (in iteration order) found to contain NaNs at wet points.
+    """
+    items = list(items)
+    if not items:
+        return
+    flags = [nan_flag(field, mask) for field, mask, _ in items]
+    results = dask.compute(*flags)
+    for (_field, _mask, error_message), result in zip(items, results):
+        if bool(np.asarray(result)):
+            raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:

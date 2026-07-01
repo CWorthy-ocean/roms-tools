@@ -21,6 +21,11 @@ from roms_tools.datasets.lat_lon_datasets import (
     WOARestoringSurfaceDataset,
 )
 from roms_tools.plot import plot
+from roms_tools.processing_methods import (
+    PrefillMethod,
+    _xesmf_available,
+    validate_prefill,
+)
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import (
     RawDataSource,
@@ -173,6 +178,15 @@ class SurfaceForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    prefill: str = "auto"
+    """Source-side fill applied to the data before regridding. ``"auto"`` (default)
+    uses the xESMF inverse-distance fill when xESMF is installed, otherwise the cheap
+    nearest-neighbor fill. Other options: ``"2d_lateral_fill"`` (AMG Poisson; the
+    legacy method), ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``,
+    ``"creep_fill"`` (the last three require xESMF)."""
+    prefill_kwargs: dict | None = None
+    """Method-specific keyword arguments for ``prefill`` (e.g. ``num_src_pnts`` /
+    ``dist_exponent`` for ``"inverse_dist"``)."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -182,6 +196,7 @@ class SurfaceForcing:
 
     def __post_init__(self):
         self._input_checks()
+        self._resolve_prefill()
 
         data = self._get_data()
 
@@ -253,7 +268,11 @@ class SurfaceForcing:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
 
-        data.apply_lateral_fill()
+        data.apply_prefill(
+            self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            prefill_was_user_set=True,
+        )
 
         self._set_variable_info(data)
         var_names = {
@@ -320,6 +339,29 @@ class SurfaceForcing:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
+
+    def _resolve_prefill(self) -> None:
+        """Resolve and validate the ``prefill`` selection.
+
+        ``"auto"`` (the default) selects the xESMF inverse-distance fill when xESMF
+        is installed, otherwise the cheap nearest-neighbor fill. An explicit method
+        is validated against the supported set. Unlike ``BoundaryForcing``,
+        ``SurfaceForcing`` regrids with plain ``interp`` and therefore always needs a
+        NaN-free source, so ``prefill=None`` is not accepted.
+        """
+        xesmf_available = _xesmf_available()
+        if self.prefill == "auto":
+            self.prefill = str(
+                PrefillMethod.inverse_dist
+                if xesmf_available
+                else PrefillMethod.nearest_neighbor
+            )
+        validate_prefill(
+            self.prefill,
+            self.prefill_kwargs,
+            allowed=set(PrefillMethod),
+            xesmf_available=xesmf_available,
+        )
 
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is
@@ -639,7 +681,11 @@ class SurfaceForcing:
         correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
         correction_data.ds["mask"] = data.ds["mask"]
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
-        correction_data.apply_lateral_fill()
+        correction_data.apply_prefill(
+            self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            prefill_was_user_set=True,
+        )
 
         # Spatial regrid first: only 12 interpolations per variable regardless of
         # the length of the forcing time series. lateral_regrid.apply() forces eager

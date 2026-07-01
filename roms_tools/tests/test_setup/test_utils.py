@@ -946,7 +946,7 @@ class TestInterpolateDynamicBGCByCalendarYear:
         gap = result["DIC"].sel(river_time=abs_time.dt.year == 2001)
         np.testing.assert_allclose(gap.values, 150.0, rtol=1e-6)
 
-    def test_leading_and_trailing_nan_years_remain_nan(self):
+    def test_leading_and_trailing_nan_years_are_filled_from_nearest(self):
         abs_time = self._monthly_abs_time((2000, 2001, 2002))
         years = abs_time.dt.year.values
         values = np.where(years == 2001, 100.0, np.nan).astype(np.float32)[
@@ -958,8 +958,12 @@ class TestInterpolateDynamicBGCByCalendarYear:
             coords={"river_time": abs_time, "nriver": [0]},
         )
         result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
-        assert np.all(np.isnan(result["DIC"].sel(river_time=abs_time.dt.year == 2000)))
-        assert np.all(np.isnan(result["DIC"].sel(river_time=abs_time.dt.year == 2002)))
+        assert np.all(
+            result["DIC"].sel(river_time=abs_time.dt.year == 2000).values == 100.0
+        )
+        assert np.all(
+            result["DIC"].sel(river_time=abs_time.dt.year == 2002).values == 100.0
+        )
 
     def test_zero_export_year_is_not_interpolated(self):
         abs_time = self._monthly_abs_time((2000, 2001, 2002))

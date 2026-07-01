@@ -14,6 +14,7 @@ from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import _xesmf_available
+from roms_tools.setup.boundary_forcing import _interpolate_phys_to_bgc_time
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -1184,3 +1185,37 @@ def test_physics_forcing_survives_yaml_roundtrip(
                 name = f"{var}_{direction}"
                 if name in bf.ds and name in reloaded.ds:
                     xr.testing.assert_allclose(reloaded.ds[name], bf.ds[name])
+
+
+def test_interpolate_phys_to_bgc_time_nearest_noncyclic():
+    """Non-climatology alignment takes the nearest physics time and works on dask."""
+    ptime = np.array(["2013-01-01", "2013-01-11", "2013-01-21"], dtype="datetime64[ns]")
+    phys = xr.DataArray([10.0, 20.0, 30.0], dims="time", coords={"time": ptime})
+    targets = xr.DataArray(
+        np.array(["2013-01-02", "2013-01-19"], dtype="datetime64[ns]"), dims="time"
+    )
+
+    out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=False)
+    np.testing.assert_array_equal(out.values, [10.0, 30.0])
+
+    # Chunked along time must also work (nearest selection needs no rechunk).
+    out_chunked = _interpolate_phys_to_bgc_time(
+        phys.chunk({"time": 1}), "time", targets, bgc_climatology=False
+    )
+    np.testing.assert_array_equal(out_chunked.values, [10.0, 30.0])
+
+
+def test_interpolate_phys_to_bgc_time_nearest_cyclic_wraps():
+    """Climatology alignment picks the cyclically nearest day-of-year (year wrap)."""
+    # Physics at day-of-year ~10, ~180, ~364 (values encode which slice is chosen).
+    ptime = np.array(["2013-01-10", "2013-06-29", "2013-12-30"], dtype="datetime64[ns]")
+    phys = xr.DataArray([1.0, 2.0, 3.0], dims="time", coords={"time": ptime})
+
+    # Target ~ day-of-year 2 (timedelta of 1 day from year start). The cyclically
+    # nearest physics is late December (doy 364), not early January (doy 10).
+    targets = xr.DataArray(
+        np.array([np.timedelta64(1, "D")], dtype="timedelta64[ns]"), dims="time"
+    )
+
+    out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=True)
+    np.testing.assert_array_equal(out.values, [3.0])

@@ -1,0 +1,59 @@
+name: Update Release Notes
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  update-release-notes:
+    # Only run when the PR was actually merged, not just closed
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history needed so we can switch branches and push
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests packaging
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Checkout or create next_release_notes branch
+        run: |
+          if git ls-remote --exit-code --heads origin next_release_notes; then
+            git checkout -b next_release_notes origin/next_release_notes
+          else
+            git checkout -b next_release_notes
+          fi
+
+      - name: Run release notes script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python ci/update_release_notes.py
+
+      - name: Commit and push if there are changes
+        run: |
+          # Stage release note file
+          git add docs/releases.md
+          if git diff --staged --quiet; then
+            echo "No release note changes — nothing to commit."
+          else
+            git commit -m "Update release notes from merged PR #${{ github.event.pull_request.number }}"
+            git push origin next_release_notes
+          fi

@@ -13,8 +13,8 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
-from roms_tools.setup.utils import _xesmf_available
 from roms_tools.setup.boundary_forcing import _interpolate_phys_to_bgc_time
+from roms_tools.setup.utils import _xesmf_available
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:

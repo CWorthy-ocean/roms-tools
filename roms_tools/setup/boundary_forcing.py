@@ -471,7 +471,7 @@ class BoundaryForcing:
                 if self.adjust_depth_for_sea_surface_height:
                     # Regrid sea surface height ('zeta') onto a 2-cell-wide margin.
                     # This is needed to correctly infer depth coordinates at u- and v-points along the boundary.
-                    # 'zeta' is a tracer, so it uses the tracer mask (not the
+                    # 'zeta' is a scalar, so it uses the tracer mask (not the
                     # velocity mask of the vector regridder); build a dedicated
                     # regridder on the same vector-margin target.
                     zeta_vector_regrid = LateralRegridToROMS(

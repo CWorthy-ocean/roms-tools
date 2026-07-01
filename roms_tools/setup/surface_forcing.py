@@ -9,7 +9,6 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
-    _DEFAULT_LAT_LON_LATERAL_CHUNK,
     CESMBGCSurfaceForcingDataset,
     ERA5ARCODataset,
     ERA5Correction,
@@ -47,6 +46,12 @@ from roms_tools.utils import (
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
+
+# Number of forcing time steps per block when interpolating the radiation-correction
+# climatology onto the forcing time axis. Keeps the interpolated time axis chunked so
+# long records don't build one giant task and slicing a few steps stays cheap. Larger
+# values mean fewer, bigger dask tasks; smaller values mean cheaper per-slice reads.
+_DEFAULT_CLIMATOLOGY_TIME_CHUNK = 100
 
 DEFAULT_MBL_co2_PATH = (
     "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
@@ -652,34 +657,31 @@ class SurfaceForcing:
         )
 
         # Wrap back to dask so that temporal interpolation builds a lazy graph
-        # rather than materialising the full (N, ny, nx) output as numpy. The
-        # source (12-month) time axis must stay in a single chunk to interpolate
-        # across it, but the ROMS spatial dims are chunked so the temporal
-        # interpolation vectorises over spatial blocks. Without this the interp
-        # produces a single (N, ny, nx) chunk, which is prohibitively large for
-        # long forcing records on big grids.
+        # rather than materialising the full (N, ny, nx) output as numpy.
         if self.use_dask:
-            spatial_chunks = {
-                dim: _DEFAULT_LAT_LON_LATERAL_CHUNK
-                for dim in swr_12.dims
-                if dim != time_dim
-            }
-            swr_12 = swr_12.chunk({time_dim: -1, **spatial_chunks})
-            lwr_12 = lwr_12.chunk({time_dim: -1, **spatial_chunks})
+            swr_12 = swr_12.chunk({time_dim: len(swr_12[time_dim])})
+            lwr_12 = lwr_12.chunk({time_dim: len(lwr_12[time_dim])})
 
-        # Single interpolate call per variable — lazy when input is dask-backed.
-        # Produces (N, ny_roms, nx_roms) with one large time chunk.
+        # Interpolate onto the forcing time axis in blocks (when using dask) so the
+        # result stays chunked along time: this bounds peak memory for long forcing
+        # records and makes slicing a few time steps (e.g. validation) cheap, instead
+        # of producing a single (N, ny, nx) chunk.
+        interp_chunk_size = (
+            _DEFAULT_CLIMATOLOGY_TIME_CHUNK if self.use_dask else None
+        )
         swr_corr_factor = interpolate_from_climatology(
             field=swr_12,
             time_dim=time_dim,
             time_coord=time_dim,
             time=swrad.time,
+            interp_chunk_size=interp_chunk_size,
         )
         lwr_corr_factor = interpolate_from_climatology(
             field=lwr_12,
             time_dim=time_dim,
             time_coord=time_dim,
             time=lwrad.time,
+            interp_chunk_size=interp_chunk_size,
         )
 
         # Rechunk time to match the radiation fields so that the element-wise

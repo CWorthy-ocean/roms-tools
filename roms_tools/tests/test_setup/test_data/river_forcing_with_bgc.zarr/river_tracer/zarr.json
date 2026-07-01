@@ -1,16 +1,16 @@
 {
   "shape": [
-    12,
     34,
+    12,
     7
   ],
-  "data_type": "float64",
+  "data_type": "float32",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        12,
         34,
+        12,
         7
       ]
     }
@@ -21,7 +21,7 @@
       "separator": "/"
     }
   },
-  "fill_value": "NaN",
+  "fill_value": 0.0,
   "codecs": [
     {
       "name": "bytes",
@@ -38,13 +38,14 @@
     }
   ],
   "attributes": {
-    "long_name": "River tracer data",
+    "long_name": "River volume flux",
+    "units": "m^3/s",
     "coordinates": "abs_time month river_name tracer_long_name tracer_name tracer_unit",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
-    "river_time",
     "ntracers",
+    "river_time",
     "nriver"
   ],
   "zarr_format": 3,

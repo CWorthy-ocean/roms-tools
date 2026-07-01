@@ -1,7 +1,7 @@
 {
   "shape": [
-    4,
     2,
+    4,
     7
   ],
   "data_type": "float64",
@@ -9,8 +9,8 @@
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        4,
         2,
+        4,
         7
       ]
     }
@@ -21,7 +21,7 @@
       "separator": "/"
     }
   },
-  "fill_value": "NaN",
+  "fill_value": 0.0,
   "codecs": [
     {
       "name": "bytes",
@@ -43,8 +43,8 @@
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
-    "river_time",
     "ntracers",
+    "river_time",
     "nriver"
   ],
   "zarr_format": 3,

@@ -249,7 +249,7 @@ class RiverForcing:
     """Maximum distance (in km) between a river mouth and the nearest coastal
     grid cell. River stations farther than this threshold are excluded in mapping.
     ``None`` will use the dataset's default (50km for GloFAS, 200km for Dai) or it
-    can be overridden by the user for domains where the default is inappropriate. ."""
+    can be overridden by the user for domains where the default is inappropriate."""
 
     domain_edge_buffer: int = 20
     """Number of grid cells to include beyond the domain boundary when
@@ -260,14 +260,26 @@ class RiverForcing:
         default=None, init=False, repr=False, compare=False
     )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Build ``self.ds`` from ``source`` (and ``bgc_source``, if BGC is enabled).
+
+        Resolves river locations (auto-discovered or user-provided), builds
+        volume/tracer forcing, resolves overlapping grid cells, re-sorts by
+        final river volume, and reassigns sequential 1-based ``nriver`` IDs in
+        that final order. The reassignment step guarantees that the
+        auto-discovery path (``indices=None``) and the YAML round-trip path
+        (``indices`` provided) produce the same ``river_index`` values for
+        the same physical rivers, even though they reach this point by
+        different routes.
+        """
         self._input_checks()
         data = self._get_data()
         self._river_name_prefix = data.name_prefix
 
         if self.indices is None:
             logging.info(
-                "No river indices provided. Identify all rivers within the ROMS domain and assign each of them to the nearest coastal point."
+                "No river indices provided. Identifying all rivers within the ROMS domain "
+                "and assigning each to the nearest coastal point."
             )
             target_coords = get_target_coords(self.grid)
             target_coords["mask"] = self.grid.ds.mask_rho
@@ -276,11 +288,19 @@ class RiverForcing:
                 np.sqrt((1 / self.grid.ds.pm) ** 2 + (1 / self.grid.ds.pn) ** 2) / 2
             ).max()
 
-            kwargs = {"domain_edge_buffer": self.domain_edge_buffer}
             if self.coast_snap_buffer_km is not None:
-                kwargs["coast_snap_buffer_km"] = self.coast_snap_buffer_km
-
-            data.extract_relevant_rivers(target_coords, dx, **kwargs)
+                data.extract_relevant_rivers(
+                    target_coords,
+                    dx,
+                    coast_snap_buffer_km=self.coast_snap_buffer_km,
+                    domain_edge_buffer=self.domain_edge_buffer,
+                )
+            else:
+                data.extract_relevant_rivers(
+                    target_coords,
+                    dx,
+                    domain_edge_buffer=self.domain_edge_buffer,
+                )
             updated_indices = self._move_rivers_to_closest_coast(target_coords, data)
             self.indices = updated_indices
 
@@ -306,9 +326,7 @@ class RiverForcing:
             name: self.indices[name] for name in sorted_names if name in self.indices
         }
         ds = ds.isel(nriver=sorted_nriver)
-        # Reassign sequential 1-based IDs in final sorted order so that both the
-        # initial-discovery path (indices=None) and the YAML-roundtrip path
-        # (indices=provided) produce the same river_index values.
+        # Reassign sequential 1-based IDs in final sorted order
         ds = ds.assign_coords(
             nriver=xr.DataArray(
                 np.arange(1, ds.sizes["nriver"] + 1),
@@ -339,7 +357,21 @@ class RiverForcing:
         self._validate_indices()
 
     def _normalized_source(self) -> RawDataSource:
-        """Apply defaults to ``source`` and validate its required keys."""
+        """Apply defaults to ``source`` and validate its required keys.
+
+        Returns
+        -------
+        RawDataSource
+            ``source`` with a ``"climatology"`` key always present, defaulting
+            to ``False`` if not provided.
+
+        Raises
+        ------
+        ValueError
+            If ``source`` has no ``"name"``, an unrecognized ``"name"``
+            (must be ``"DAI"`` or ``"GLOFAS"``), or is missing ``"path"``
+            for a source other than ``"DAI"``.
+        """
         source: RawDataSource = (
             self.source if self.source is not None else {"name": "DAI"}
         )
@@ -440,21 +472,53 @@ class RiverForcing:
                 )
             seen_tuples.add(idx_pair)
 
-    def _get_data(self):
-        data_dict = {
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-        }
+    def _get_data(self) -> RiverDataset:
+        """Instantiate the discharge dataset for the configured ``source``.
+
+        Returns
+        -------
+        RiverDataset
+            A :class:`DaiRiverDataset` or :class:`GloFASRiverDataset`,
+            depending on ``self.source["name"]``.
+
+        Raises
+        ------
+        ValueError
+            If ``self.source`` is ``None``.
+        ValueError
+            If ``self.source["name"]`` is not ``"DAI"`` or ``"GLOFAS"``.
+        ValueError
+            If ``self.source["name"]`` is ``"GLOFAS"`` and ``"path"`` is not
+            provided in ``self.source``.
+        """
+        if self.source is None:
+            raise ValueError("No source provided.")
+
+        data: DaiRiverDataset | GloFASRiverDataset
 
         if self.source["name"] == "DAI":
-            if "path" in self.source.keys():
-                data_dict["filename"] = self.source["path"]
-            data = DaiRiverDataset(**data_dict)
+            if "path" in self.source:
+                data = DaiRiverDataset(
+                    start_time=self.start_time,
+                    end_time=self.end_time,
+                    climatology=bool(self.source["climatology"]),
+                    filename=str(self.source["path"]),
+                )
+            else:
+                data = DaiRiverDataset(
+                    start_time=self.start_time,
+                    end_time=self.end_time,
+                    climatology=bool(self.source["climatology"]),
+                )
         elif self.source["name"] == "GLOFAS":
-            if "path" in self.source.keys():
-                data_dict["filename"] = self.source["path"]
-            data = GloFASRiverDataset(**data_dict)
+            if "path" not in self.source:
+                raise ValueError('GloFAS source requires a "path" to be specified.')
+            data = GloFASRiverDataset(
+                start_time=self.start_time,
+                end_time=self.end_time,
+                climatology=bool(self.source["climatology"]),
+                filename=str(self.source["path"]),
+            )
         else:
             raise ValueError(
                 'Only "DAI" and GLOFAS are valid options for source["name"].'
@@ -804,7 +868,12 @@ class RiverForcing:
 
             name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
             for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
-                name = "overlap_" + river_list[0].replace(self._river_name_prefix, "")
+                # Sort so the synthetic name doesn't depend on dict-iteration
+                # order, which differs between auto-discovery and the
+                # YAML-roundtrip path even for the same set of overlapping rivers.
+                name = "overlap_" + sorted(river_list)[0].replace(
+                    self._river_name_prefix, ""
+                )
                 logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
                 new_nriver = ds.sizes["nriver"] + i + 1
                 (

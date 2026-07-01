@@ -14,7 +14,12 @@ from roms_tools.datasets.download import (
     download_river_tracer_defaults,
 )
 from roms_tools.datasets.utils import check_dataset, select_relevant_times
-from roms_tools.setup.utils import MARBL_TRACER_NAMES
+from roms_tools.setup.utils import (
+    MARBL_TRACER_NAMES,
+    build_kdtree_from_latlon,
+    latlon_to_xyz,
+    query_kdtree_nearest,
+)
 from roms_tools.utils import _get_file_matches, load_data
 
 RiverBGCTemporalInterpolation = Literal["none", "calendar_year"]
@@ -308,6 +313,7 @@ class RiverDataset:
     opt_var_names: dict[str, str] | None = field(default_factory=dict)
     climatology: bool = False
     ds: xr.Dataset = field(init=False, repr=False)
+    name_prefix: str = ""
 
     def __post_init__(self):
         # Validate start_time and end_time
@@ -537,8 +543,12 @@ class RiverDataset:
         return ds
 
     def extract_relevant_rivers(
-        self, target_coords, dx, coast_snap_buffer_km=None, domain_edge_buffer=20
-    ):
+        self,
+        target_coords: dict,
+        dx: float,
+        coast_snap_buffer_km: float | None = None,
+        domain_edge_buffer: int = 20,
+    ) -> None:
         """Extract rivers within the ROMS domain and assign each to the nearest coastal grid cell.
 
         Uses a two-step memory-efficient approach to avoid building the full
@@ -574,14 +584,16 @@ class RiverDataset:
 
         Returns
         -------
-        indices : dict[str, list[tuple]]
-            River names as keys, each mapping to a list containing one tuple of
-            (eta_rho, xi_rho) grid indices of the nearest coastal cell.
-        """
-        from roms_tools.setup.utils import (
-            build_kdtree_from_latlon,
-        )
+        None
+            Updates ``self.ds`` in place, subsetting it to the surviving
+            stations and sorting them by river volume.
 
+        Raises
+        ------
+        ValueError
+            If no rivers survive the bounding-box and (optional) coastal
+            snap-buffer filters.
+        """
         # Retrieve longitude and latitude of river mouths
         river_lon = self.ds[self.var_names["longitude"]]
         river_lat = self.ds[self.var_names["latitude"]]
@@ -636,8 +648,6 @@ class RiverDataset:
 
         # Step 2: optional distance filter using query_ball_point
         if coast_snap_buffer_km is not None:
-            from roms_tools.setup.utils import latlon_to_xyz
-
             dx_chord = 2 * np.sin((coast_snap_buffer_km / 6371.0) / 2)
             tree = build_kdtree_from_latlon(tree_lat, tree_lon)
             counts = tree.query_ball_point(
@@ -715,6 +725,7 @@ class RiverDataset:
 @dataclass(kw_only=True)
 class GloFASRiverDataset(RiverDataset):
     """River discharge dataset from GloFAS v4.0.
+
     Expects a NetCDF file preprocessed using the GloFAS Large-scale Drainage
     Direction (LDD) algorithm, which places river mouths on coastal cells.
     Time is encoded as CF-compliant datetime64 and decoded directly.
@@ -741,10 +752,16 @@ class GloFASRiverDataset(RiverDataset):
     )
     opt_var_names: dict = field(default_factory=lambda: {"vol": "vol_stn"})
     name_prefix: str = field(default="GloFAS_", init=False)
+    """Prefix prepended to GloFAS river names, stripped back off when naming
+    synthetic ``overlap_`` rivers."""
 
     def extract_relevant_rivers(
-        self, target_coords, dx, coast_snap_buffer_km=50.0, domain_edge_buffer=20
-    ):
+        self,
+        target_coords: dict,
+        dx: float,
+        coast_snap_buffer_km: float | None = 50.0,
+        domain_edge_buffer: int = 20,
+    ) -> None:
         """Extract relevant rivers, defaulting to a 50 km coastal snap buffer.
 
         GloFAS river mouths are preprocessed using the LDD algorithm to lie on
@@ -802,6 +819,7 @@ class DaiRiverDataset(RiverDataset):
     )
     climatology: bool = False
     name_prefix: str = field(default="", init=False)
+    """Prefix prepended to Dai river names. Empty, since Dai names carry no prefix."""
 
     def load_data(self) -> xr.Dataset:
         """Load dataset from the specified file. Load Dai dataset from the specified file.
@@ -851,12 +869,17 @@ class DaiRiverDataset(RiverDataset):
         return ds
 
     def extract_relevant_rivers(
-        self, target_coords, dx, coast_snap_buffer_km=200.0, domain_edge_buffer=20
-    ):
+        self,
+        target_coords: dict,
+        dx: float,
+        coast_snap_buffer_km: float | None = 200.0,
+        domain_edge_buffer: int = 20,
+    ) -> None:
         """Extract relevant rivers, defaulting to a 200 km coastal snap buffer.
 
         Dai river mouths may be placed far inland relative to the actual river
         mouth, so a generous buffer is used to avoid excluding legitimate rivers.
+        See :meth:`RiverDataset.extract_relevant_rivers` for full documentation.
         """
         return super().extract_relevant_rivers(
             target_coords,
@@ -1222,7 +1245,6 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         """RIVR2O ``(lat, lon)`` indices of the nearest cell with positive DIC export."""
         from roms_tools.setup.utils import (
             build_kdtree_from_latlon,
-            query_kdtree_nearest,
         )
 
         query_lon = np.atleast_1d(np.asarray(lon, dtype=float))

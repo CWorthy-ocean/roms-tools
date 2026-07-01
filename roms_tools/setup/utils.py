@@ -258,11 +258,9 @@ def interpolate_dynamic_bgc_by_calendar_year(
     ``river_time`` steps in that year), missing years are inserted, interior NaN
     years are linearly interpolated along the year axis, and the result is
     broadcast back to every ``river_time`` step. Leading and trailing NaN years
-    are left unchanged.
-
-    # TODO: years with very few time steps (e.g. a 1-day buffer before start_time of Jan 1)
-    # produce unrealistic annual means. Consider excluding years with fewer than
-    # a minimum number of time steps before computing groupby mean.
+    are filled by backward- and forward-fill respectively so partial boundary years
+    use the nearest full year's concentration. This prevents unrealistic concentrations
+    being generated from highly seasonal discharge data.
     """
     calendar_years = abs_time.dt.year
     if time_dim not in calendar_years.dims:
@@ -283,10 +281,19 @@ def interpolate_dynamic_bgc_by_calendar_year(
             )
 
         tagged = values.assign_coords(calendar_year=calendar_years)
-        annual = tagged.groupby("calendar_year").mean(dim=time_dim, skipna=True)
-        annual = annual.reindex(calendar_year=full_years)
-        annual = annual.chunk({"calendar_year": -1})
-        annual = annual.interpolate_na(dim="calendar_year", method="linear")
+        # Treat years with less than a quarter of the year as missing and interpolate.
+        min_fraction: float = 0.25
+        step_counts = tagged.groupby("calendar_year").count(dim=time_dim)
+        annual = (
+            tagged.groupby("calendar_year")
+            .mean(dim=time_dim, skipna=True)
+            .where(step_counts >= min_fraction * step_counts.median())
+            .reindex(calendar_year=full_years)
+            .chunk({"calendar_year": -1})
+            .interpolate_na(dim="calendar_year", method="linear")
+            .ffill(dim="calendar_year")
+            .bfill(dim="calendar_year")
+        )
 
         year_indexer = xr.DataArray(
             year_at_steps,
@@ -1590,10 +1597,24 @@ def _gc_dist_radians(lon1, lat1, lon2, lat2):
 
 
 # --- cKDTree-based spatial lookup helpers ---
-def latlon_to_xyz(lat, lon):
+def latlon_to_xyz(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     """Convert lat/lon coordinates (degrees) to unit-sphere XYZ vectors.
+
     Used to prepare query and candidate points for cKDTree distance queries,
     where chord distance on the unit sphere approximates great-circle distance.
+
+    Parameters
+    ----------
+    lat : np.ndarray
+        Latitudes in degrees.
+    lon : np.ndarray
+        Longitudes in degrees.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(N, 3)`` with unit-sphere XYZ coordinates, one row
+        per input point.
     """
     lat_r = np.deg2rad(lat)
     lon_r = np.deg2rad(lon)

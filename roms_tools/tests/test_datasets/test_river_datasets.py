@@ -18,6 +18,7 @@ from roms_tools.datasets.river_datasets import (
 )
 from roms_tools.setup.river_forcing import _mask_invalid_dynamic_bgc_concentrations
 from roms_tools.setup.utils import interpolate_dynamic_bgc_by_calendar_year
+from roms_tools.tests.glofas_test_utils import write_glofas_file
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 
@@ -937,3 +938,142 @@ class TestGloFASRiverDataset:
         result = ds_obj.add_time_info(ds)
         assert result["time"].values[0] == np.datetime64("1998-01-15", "ns")
         assert result["time"].values[1] == np.datetime64("1998-02-15", "ns")
+
+    def test_post_init_loads_glofas_format(self, tmp_path):
+        path = tmp_path / "glofas.nc"
+        write_glofas_file(
+            path,
+            lats=np.array([65.0, 65.0, 64.0], dtype=np.float32),
+            lons=np.array([-20.0, -20.0, -21.0], dtype=np.float32),
+            flow=np.tile(np.array([100.0, 200.0, 300.0], dtype=np.float32), (4, 1)),
+            river_names=["RiverA", "RiverA", "RiverB"],
+            times=np.array(
+                ["1997-11-15", "1998-01-15", "1998-02-15", "1998-06-15"],
+                dtype="datetime64[ns]",
+            ),
+            vol=np.array([100.0, 200.0, 300.0], dtype=np.float32),
+        )
+        data = GloFASRiverDataset(
+            filename=path,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+
+        # Variable mapping: FLOW/riv_name/vol_stn loaded under var_names/opt_var_names.
+        assert data.var_names["flux"] in data.ds
+        assert data.var_names["name"] in data.ds
+        assert data.opt_var_names["vol"] in data.ds
+
+        # Dedup: "RiverA" appears twice in the source -> "RiverA_1"/"RiverA_2".
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert names.count("RiverA_1") == 1
+        assert names.count("RiverA_2") == 1
+        assert names.count("RiverB") == 1
+
+        # Time subsetting: 1997-11-15 and 1998-06-15 are well outside the
+        # [start_time - 1 day, end_time + 1 day] window applied in load_data.
+        time_dim = data.dim_names["time"]
+        assert len(data.ds[time_dim]) == 2
+        retained = data.ds[time_dim].values
+        assert np.datetime64("1997-11-15") not in retained
+        assert np.datetime64("1998-06-15") not in retained
+
+        # CF time decoded straight to datetime64, no manual YYYYMM parsing.
+        assert np.issubdtype(data.ds[time_dim].dtype, np.datetime64)
+
+
+class TestExtractRelevantRivers:
+    """RiverDataset.extract_relevant_rivers / GloFASRiverDataset.extract_relevant_rivers."""
+
+    @staticmethod
+    def _target_coords(lon2d, lat2d, mask2d=None, straddle=False):
+        return {
+            "lon": xr.DataArray(
+                np.asarray(lon2d, dtype=float), dims=("eta_rho", "xi_rho")
+            ),
+            "lat": xr.DataArray(
+                np.asarray(lat2d, dtype=float), dims=("eta_rho", "xi_rho")
+            ),
+            "straddle": straddle,
+            "mask": (
+                xr.DataArray(np.asarray(mask2d), dims=("eta_rho", "xi_rho"))
+                if mask2d is not None
+                else None
+            ),
+        }
+
+    @staticmethod
+    def _glofas_dataset(tmp_path, lats, lons, names, n_times=2):
+        path = tmp_path / "glofas.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")[:n_times]
+        flow = np.tile(np.full(len(lats), 100.0, dtype=np.float32), (n_times, 1))
+        vol = np.full(len(lats), 100.0, dtype=np.float32)
+        write_glofas_file(
+            path, np.asarray(lats), np.asarray(lons), flow, names, times, vol=vol
+        )
+        return GloFASRiverDataset(
+            filename=path,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+
+    def test_bounding_box_filters_stations(self, tmp_path):
+        # 3x3 grid spanning roughly [-1, 1] degrees in lat/lon (~222 km box).
+        lon2d = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]
+        lat2d = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]]
+        target_coords = self._target_coords(lon2d, lat2d)
+
+        data = self._glofas_dataset(
+            tmp_path,
+            lats=[0.0, 10.0],
+            lons=[0.0, 10.0],
+            names=["Inside", "Outside"],
+        )
+        # coast_snap_buffer_km=None isolates the bounding-box pre-filter (step 1).
+        data.extract_relevant_rivers(
+            target_coords, dx=10_000.0, coast_snap_buffer_km=None, domain_edge_buffer=0
+        )
+
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert names == ["Inside"]
+
+    def test_glofas_default_snap_buffer_50km(self, tmp_path):
+        # Land row (eta=1) borders an ocean row (eta=2) -> coastal cells are
+        # (1, 0), (1, 1), (1, 2), all at lat=1.
+        mask2d = [[0, 0, 0], [0, 0, 0], [1, 1, 1]]
+        lon2d = [[0, 1, 2], [0, 1, 2], [0, 1, 2]]
+        lat2d = [[0, 0, 0], [1, 1, 1], [2, 2, 2]]
+        target_coords = self._target_coords(lon2d, lat2d, mask2d=mask2d)
+
+        # ~30 km from the coast (within the 50 km GloFAS default) and ~80 km
+        # away (outside it); 1 degree of latitude is ~111 km.
+        near_lat = 1.0 + 30.0 / 111.0
+        far_lat = 1.0 + 80.0 / 111.0
+
+        data = self._glofas_dataset(
+            tmp_path,
+            lats=[near_lat, far_lat],
+            lons=[0.0, 0.0],
+            names=["NearRiver", "FarRiver"],
+        )
+        # coast_snap_buffer_km omitted -> GloFASRiverDataset's 50 km default.
+        data.extract_relevant_rivers(target_coords, dx=1_000.0)
+
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert names == ["NearRiver"]
+
+    def test_no_rivers_in_domain_raises(self, tmp_path):
+        lon2d = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]
+        lat2d = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]]
+        target_coords = self._target_coords(lon2d, lat2d)
+
+        data = self._glofas_dataset(
+            tmp_path, lats=[50.0], lons=[50.0], names=["FarAway"]
+        )
+        with pytest.raises(ValueError, match="No relevant rivers found"):
+            data.extract_relevant_rivers(
+                target_coords,
+                dx=10_000.0,
+                coast_snap_buffer_km=None,
+                domain_edge_buffer=0,
+            )

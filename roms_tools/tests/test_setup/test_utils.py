@@ -13,14 +13,17 @@ from roms_tools.setup.utils import (
     _compute_mld_warp,
     _infer_valid_boundaries_from_mask,
     build_bgc_vertical_coords,
+    build_kdtree_from_latlon,
     calendar_midmonth_dates,
     check_and_set_boundaries,
     compute_mld,
     compute_potential_density,
     expand_monthly_climatology_time_axis,
+    gc_dist,
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
     month_to_time_index,
+    query_kdtree_nearest,
     tile_monthly_climatology_on_calendar,
     validate_names,
 )
@@ -977,3 +980,55 @@ class TestInterpolateDynamicBGCByCalendarYear:
         result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
         gap = result["DIC"].sel(river_time=abs_time.dt.year == 2001)
         np.testing.assert_allclose(gap.values, 0.0)
+
+
+class TestQueryKdtreeNearest:
+    """Nearest-coastal-cell assignment used by RiverForcing._move_rivers_to_closest_coast."""
+
+    @staticmethod
+    def _candidates():
+        # Three candidate (coastal) grid cells with known positions.
+        cand_eta = np.array([0, 0, 1])
+        cand_xi = np.array([0, 1, 0])
+        cand_lat = np.array([0.0, 0.0, 1.0])
+        cand_lon = np.array([0.0, 1.0, 0.0])
+        tree = build_kdtree_from_latlon(cand_lat, cand_lon)
+        return tree, cand_eta, cand_xi, cand_lat, cand_lon
+
+    def test_nearest_cell_is_assigned(self):
+        tree, cand_eta, cand_xi, _, _ = self._candidates()
+
+        # Query point very close to candidate 0 (eta=0, xi=0).
+        eta_out, xi_out, distances_km = query_kdtree_nearest(
+            tree, np.array([0.001]), np.array([0.001]), cand_eta, cand_xi
+        )
+        assert eta_out[0] == 0
+        assert xi_out[0] == 0
+        expected_km = gc_dist(0.001, 0.001, 0.0, 0.0) / 1000.0
+        np.testing.assert_allclose(distances_km[0], expected_km, rtol=1e-3)
+
+    def test_nearest_cell_distinguishes_candidates(self):
+        tree, cand_eta, cand_xi, _, _ = self._candidates()
+
+        # Query point closer to candidate 1 (eta=0, xi=1) than to candidate 0 or 2.
+        eta_out, xi_out, _ = query_kdtree_nearest(
+            tree, np.array([0.05]), np.array([0.9]), cand_eta, cand_xi
+        )
+        assert eta_out[0] == 0
+        assert xi_out[0] == 1
+
+    def test_warns_when_nearest_cell_is_far(self, caplog):
+        tree, cand_eta, cand_xi, _, _ = self._candidates()
+
+        # ~1500 km from every candidate, well past the 100 km default warn threshold.
+        with caplog.at_level(logging.WARNING):
+            _, _, distances_km = query_kdtree_nearest(
+                tree,
+                np.array([10.0]),
+                np.array([10.0]),
+                cand_eta,
+                cand_xi,
+                labels=["FarRiver"],
+            )
+        assert distances_km[0] > 100.0
+        assert "FarRiver" in caplog.text

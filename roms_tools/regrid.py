@@ -13,11 +13,15 @@ def _xesmf_extrap_kwargs(method: str | None, kwargs: dict | None) -> dict:
     same user-facing keys; this centralizes the translation to xESMF's
     ``extrap_num_levels`` / ``extrap_num_src_pnts`` / ``extrap_dist_exponent``.
 
+    The set of keys each method accepts comes from the single-source-of-truth
+    registry (``METHOD_META``); each user-facing key ``k`` maps to ``extrap_<k>``.
+
     Parameters
     ----------
     method : str or None
         The xESMF extrapolation method (``"inverse_dist"``, ``"nearest_s2d"``,
-        ``"creep_fill"``). ``None`` returns an empty mapping.
+        ``"creep_fill"``). ``None`` (or any method with no tunable kwargs) returns
+        an empty mapping.
     kwargs : dict or None
         User-facing kwargs: ``num_levels`` (creep_fill), ``num_src_pnts`` /
         ``dist_exponent`` (inverse_dist). ``None``/missing values are skipped so
@@ -28,16 +32,18 @@ def _xesmf_extrap_kwargs(method: str | None, kwargs: dict | None) -> dict:
     dict
         Keyword arguments to splat into ``xe.Regridder(...)``.
     """
+    from roms_tools.processing_methods import METHOD_META
+
+    if not method:
+        return {}
     kwargs = kwargs or {}
+    spec = METHOD_META.get(method)
+    allowed_keys = spec.allowed_kwargs if spec is not None else frozenset()
     out: dict = {}
-    if method == "creep_fill":
-        if kwargs.get("num_levels") is not None:
-            out["extrap_num_levels"] = kwargs["num_levels"]
-    elif method == "inverse_dist":
-        if kwargs.get("num_src_pnts") is not None:
-            out["extrap_num_src_pnts"] = kwargs["num_src_pnts"]
-        if kwargs.get("dist_exponent") is not None:
-            out["extrap_dist_exponent"] = kwargs["dist_exponent"]
+    for key in allowed_keys:
+        value = kwargs.get(key)
+        if value is not None:
+            out[f"extrap_{key}"] = value
     return out
 
 

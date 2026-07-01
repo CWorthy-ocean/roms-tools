@@ -23,6 +23,22 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
+
+# Re-exported from the single-source-of-truth ``processing_methods`` module so that
+# existing ``from roms_tools.setup.utils import ...`` call sites keep working.
+from roms_tools.processing_methods import (  # noqa: F401
+    BGC_INTERPOLATION_METHODS,
+    EXTRAP_METHODS,
+    PREFILL_ALLOWED_KWARGS,
+    REGRID_METHODS,
+    XESMF_PREFILL_METHODS,
+    BgcInterpMethod,
+    RegridConfig,
+    _xesmf_available,
+    resolve_regrid_engine,
+    validate_extrap,
+    validate_prefill,
+)
 from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
@@ -776,8 +792,6 @@ def _compute_density_coord(
 #   "density_mld" — linear interpolation in depth within two segments split at the
 #                   mixed layer depth (MLD), with the MLD matched between source and
 #                   target. Avoids the surface degeneracy of pure density space.
-BGC_INTERPOLATION_METHODS = ("depth", "density", "density_mld")
-
 # Mixed-layer-depth detection defaults (density-threshold criterion, de Boyer
 # Montégut et al. 2004): the MLD is the depth at which potential density first exceeds
 # the value at ``MLD_REFERENCE_DEPTH`` by ``MLD_DENSITY_THRESHOLD``.
@@ -977,12 +991,12 @@ def build_bgc_vertical_coords(
     aligns the source MLD with the target MLD and the target is its real depth, so the
     transform interpolates linearly in depth within the two MLD segments.
     """
-    if method == "density":
+    if method == BgcInterpMethod.density:
         return (
             _compute_density_coord(source_temp, source_salt, source_depth_dim),
             _compute_density_coord(target_temp, target_salt, target_depth_dim),
         )
-    if method == "density_mld":
+    if method == BgcInterpMethod.density_mld:
         target_sigma0 = compute_potential_density(target_temp, target_salt)
         target_mld = compute_mld(target_sigma0, target_depth, target_depth_dim)
         target_H = (

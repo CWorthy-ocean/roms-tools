@@ -9,6 +9,7 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
+    _DEFAULT_LAT_LON_LATERAL_CHUNK,
     CESMBGCSurfaceForcingDataset,
     ERA5ARCODataset,
     ERA5Correction,
@@ -651,10 +652,20 @@ class SurfaceForcing:
         )
 
         # Wrap back to dask so that temporal interpolation builds a lazy graph
-        # rather than materialising the full (N, ny, nx) output as numpy.
+        # rather than materialising the full (N, ny, nx) output as numpy. The
+        # source (12-month) time axis must stay in a single chunk to interpolate
+        # across it, but the ROMS spatial dims are chunked so the temporal
+        # interpolation vectorises over spatial blocks. Without this the interp
+        # produces a single (N, ny, nx) chunk, which is prohibitively large for
+        # long forcing records on big grids.
         if self.use_dask:
-            swr_12 = swr_12.chunk({time_dim: len(swr_12[time_dim])})
-            lwr_12 = lwr_12.chunk({time_dim: len(lwr_12[time_dim])})
+            spatial_chunks = {
+                dim: _DEFAULT_LAT_LON_LATERAL_CHUNK
+                for dim in swr_12.dims
+                if dim != time_dim
+            }
+            swr_12 = swr_12.chunk({time_dim: -1, **spatial_chunks})
+            lwr_12 = lwr_12.chunk({time_dim: -1, **spatial_chunks})
 
         # Single interpolate call per variable — lazy when input is dask-backed.
         # Produces (N, ny_roms, nx_roms) with one large time chunk.

@@ -24,7 +24,7 @@ Preprocessing and Model Inputs
 
 8. **Tidal Forcing**: Tidal potential, elevation, and velocities derived from **TPXO** :cite:`egbert_efficient_2002` including self-attraction and loading (SAL) corrections.
 
-9. **River Forcing**: Freshwater runoff derived from **Dai & Trenberth** :cite:`dai_estimates_2002`, **GloFAS** :cite:`glofas_2019`, or user-provided custom files.
+9. **River Forcing**: Freshwater runoff derived from **Dai & Trenberth** :cite:`dai_estimates_2002` (default) or **GloFAS** :cite:`glofas_2019` v4.0 daily discharge. Optional MARBL biogeochemical tracers from recommended constants or the **RIVR2O** annual river export product, with automatic handling of overlapping coastal grid cells and YAML round-trip of river locations.
 
 10. **CDR Forcing**: User-defined interventions that inject BGC tracers at point sources or as larger-scale Gaussian perturbations to simulate CDR interventions. The CDR forcing is prescribed as volume and tracer fluxes (e.g., alkalinity for ocean alkalinity enhancement, iron for iron fertilization, or other BGC constituents). Users can control the magnitude, spatial footprint, and temporal evolution, allowing flexible representation of CDR interventions.
 
@@ -46,7 +46,7 @@ To generate the model inputs, ``ROMS-Tools`` automates several intermediate proc
 
 * **Longitude conventions**: ``ROMS-Tools`` handles differences in longitude conventions, converting between [-180°, 180°] and [0°, 360°] as needed.
 
-* **River locations**: Rivers that fall within the model domain are automatically identified and relocated to the nearest coastal grid cell. Rivers that need to be shifted manually or span multiple cells can be configured by the user.
+* **River locations**: Rivers that fall within the model domain are automatically identified and relocated to the nearest coastal grid cell, with dataset-specific coastal snap buffers (50 km for GloFAS, 200 km for Dai & Trenberth). Overlapping coastal assignments are resolved by synthetic ``overlap_*`` rivers that conserve total freshwater. Rivers that need to be shifted manually or span multiple cells can be configured by the user via ``indices`` or YAML.
 
 * **Data streaming**: ERA5 atmospheric data can be accessed directly from the cloud, removing the need for users to pre-download large datasets locally. Similar streaming capabilities may be implemented for other datasets in the future.
 

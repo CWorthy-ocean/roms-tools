@@ -48,9 +48,21 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - Optional (streaming supported)
      - `Climate Data Store <https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels>`_
    * - Dai & Trenberth
-     - River Forcing
+     - River Forcing (discharge)
      - No (auto-downloaded)
      - `NCAR RDA <https://rda.ucar.edu/datasets/d551000/dataaccess/>`_
+   * - GloFAS
+     - River Forcing (discharge)
+     - Yes
+     - `Copernicus CDS <https://cds.climate.copernicus.eu/datasets/cems-glofas-historical>`_
+   * - RIVR2O
+     - River Forcing (BGC tracers)
+     - Yes
+     - `Zenodo <https://zenodo.org/records/14032712>`_
+   * - River tracer defaults
+     - River Forcing (BGC fill values)
+     - No (auto-downloaded)
+     - roms-tools-data repository
    * - WOA
      - Surface Restoring Forcing, sea surface salinity (`sss`)
      - Yes
@@ -334,10 +346,10 @@ Global 1/4° atmospheric reanalysis from ECMWF providing meteorological surface 
 Dai & Trenberth
 ~~~~~~~~~~~~~~~
 
-Monthly coastal river discharge climatology. Downloaded automatically by ROMS-Tools.
+Monthly coastal river discharge for ~1,000 of the world's largest rivers. Downloaded automatically by ROMS-Tools when ``source={"name": "DAI"}`` (the default).
 
-:Version: 2019
-:Required for: River Forcing
+:Version: May 2019 update
+:Required for: River Forcing (discharge; default source)
 :Available at: `NCAR RDA <https://rda.ucar.edu/datasets/d551000/dataaccess/>`_
 
 .. dropdown:: Required fields
@@ -351,29 +363,97 @@ Monthly coastal river discharge climatology. Downloaded automatically by ROMS-To
       * - ``station``
         - Station index
       * - ``time``
-        - Time
+        - Time (encoded as YYYYMM numeric values)
       * - ``lat_mou``
         - River mouth latitude
       * - ``lon_mou``
         - River mouth longitude
       * - ``FLOW``
-        - Monthly mean volume at station
+        - Monthly mean volume at station (m³/s)
       * - ``ratio_m2s``
         - Ratio of volume between river mouth and station
       * - ``riv_name``
         - River name
       * - ``vol_stn`` (optional)
-        - Annual volume at station
+        - Annual volume at station; used to sort rivers by size
+
+
+GloFAS
+~~~~~~
+
+Global daily river discharge from the Global Flood Awareness System (GloFAS) v4.0. Must be downloaded and preprocessed by the user before use. ROMS-Tools expects a NetCDF file in which river mouths have been placed on coastal cells using the GloFAS Large-scale Drainage Direction (LDD) algorithm.
+
+:Version: v4.0
+:Required for: River Forcing (discharge; ``source={"name": "GLOFAS", "path": ...}``)
+:Available at: `Copernicus CDS <https://cds.climate.copernicus.eu/datasets/cems-glofas-historical>`_
+
+.. dropdown:: Required fields
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Field
+        - Description
+      * - ``station``
+        - Station index
+      * - ``time``
+        - Time (CF-compliant ``datetime64``)
+      * - ``lat_mou``
+        - River mouth latitude
+      * - ``lon_mou``
+        - River mouth longitude
+      * - ``FLOW``
+        - River discharge (m³/s)
+      * - ``ratio_m2s``
+        - Ratio of volume between river mouth and station
+      * - ``riv_name``
+        - River name
+      * - ``vol_stn`` (optional)
+        - Station volume metric; used to sort rivers by size
+
+
+RIVR2O
+~~~~~~
+
+Global annual river biogeochemical export fields on a regular lat/lon grid (~0.5°). One NetCDF file per year; used as the dynamic BGC source when ``include_bgc=True`` and ``bgc_source={"name": "RIVR2O", "path": ...}``. MARBL tracers not provided by RIVR2O are filled from ``river_tracer_defaults.nc``.
+
+:Coverage: 1903–2024
+:Required for: River Forcing (BGC tracers; optional)
+:Available at: `Zenodo <https://zenodo.org/records/14032712>`_
+
+.. dropdown:: Required fields (per yearly file)
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Field
+        - Description
+      * - ``lat``, ``lon``
+        - Regular lat/lon grid coordinates
+      * - ``DIC``, ``DOC_l``, ``DOC_sl``, ``POC``
+        - Carbon export (10⁶ g C yr⁻¹)
+      * - ``DIN``, ``DIP``
+        - Nitrogen and phosphorus export (renamed to ``NO3`` and ``PO4`` internally)
+
+
+River tracer defaults
+~~~~~~~~~~~~~~~~~~~~~
+
+Recommended default MARBL river tracer concentrations. Downloaded automatically by ROMS-Tools. Used as the default BGC source (``bgc_source={"name": "CONSTANTS"}``) and as the fill source for tracers missing from RIVR2O.
+
+:Required for: River Forcing (BGC; optional)
+:Source: roms-tools-data repository (``river_tracer_defaults.nc``)
 
 
 MBL_co2
-~~~~~~~~~~~~~~~
+~~~~~~~
 
 Marine boundary layer values for CO2 (µmol mol⁻¹). Data are from a collection of NOAA's atmospheric sampling sites, and available about weekly.
 Data are available for 1979 to 2025. Downloaded automatically by ROMS-Tools.
 
-:Version: 2019
-:Required for: River Forcing
+:Required for: Surface Forcing (time-varying CO₂)
 :Available at: `NOAA's GML, MBL <https://gml.noaa.gov/ccgg/mbl/data.php>`_
 
 

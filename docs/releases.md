@@ -67,7 +67,8 @@
 * The boundary forcing notebook is updated to describe the new NaN-aware horizontal regridding (masked bilinear with inverse-distance extrapolation), replacing the previous "1D versus 2D horizontal fill" discussion, and adds a section comparing the `prefill` source-fill methods (`2d_lateral_fill`, `inverse_dist`, `nearest_s2d`, `nearest_neighbor`) with a strategy table and side-by-side plots of the pre-filled source.
 * Both the surface forcing and datasets notebooks are updated to reflect `restoring` function and WOA data ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 * The cdr notebook is updated to reflect interpolation option. Default is same as ROMS, no interpolation ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
-* `river_forcing.ipynb` documents RIVR2O BGC forcing, including climatological discharge with year-varying tracers ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
+* `river_forcing.ipynb` documents GloFAS discharge forcing, RIVR2O BGC forcing, and climatological discharge with year-varying tracers ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615), [#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
+* Expanded River Forcing methodology in `methods.md` and dataset pages for GloFAS, RIVR2O, and river BGC options ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615), [#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
 * CDR analysis notebook: describe CO2 uptake (tonnes CO2) and CDR efficiency together, consistent with the metrics and figure. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * Notebooks updated to document density-space BGC interpolation ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620))
 * Added subchunking example code and information on new datasets docs page.

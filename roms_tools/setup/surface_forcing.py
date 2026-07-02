@@ -22,9 +22,8 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.plot import plot
 from roms_tools.processing_methods import (
-    PrefillMethod,
+    RegridConfig,
     _xesmf_available,
-    validate_prefill,
 )
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import (
@@ -178,15 +177,24 @@ class SurfaceForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
-    prefill: str = "auto"
-    """Source-side fill applied to the data before regridding. ``"auto"`` (default)
-    uses the xESMF inverse-distance fill when xESMF is installed, otherwise the cheap
-    nearest-neighbor fill. Other options: ``"2d_lateral_fill"`` (AMG Poisson; the
-    legacy method), ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``,
-    ``"creep_fill"`` (the last three require xESMF)."""
+    regrid_method: str = "auto"
+    """Horizontal regrid engine: ``"auto"`` (xESMF if installed, else scipy),
+    ``"xesmf"``, or ``"scipy"``."""
+    prefill: str | None = None
+    """Source-side fill applied before regridding. ``None`` (default) applies no
+    whole-domain fill: with xESMF the regrid is masked bilinear with inverse-distance
+    destination extrapolation; without xESMF the source is nearest-neighbor pre-filled
+    before scipy interpolation. Set to ``"2d_lateral_fill"`` (legacy AMG Poisson),
+    ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``, or ``"creep_fill"``
+    to fill the whole-domain source first (the last three require xESMF)."""
     prefill_kwargs: dict | None = None
     """Method-specific keyword arguments for ``prefill`` (e.g. ``num_src_pnts`` /
     ``dist_exponent`` for ``"inverse_dist"``)."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation on the default no-prefill path; defaults to
+    ``"inverse_dist"``. Ignored when a ``prefill`` is set or on the scipy path."""
+    extrap_kwargs: dict | None = None
+    """Method-specific keyword arguments for ``extrap_method``."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -196,7 +204,20 @@ class SurfaceForcing:
 
     def __post_init__(self):
         self._input_checks()
-        self._resolve_prefill()
+        # Resolve/validate the regrid engine + source-prefill + extrapolation options
+        # once (mirrors BoundaryForcing); derived decisions are read off self._regrid.
+        self._regrid = RegridConfig.from_options(
+            prefill=self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            regrid_method=self.regrid_method,
+            extrap_method=self.extrap_method,
+            extrap_kwargs=self.extrap_kwargs,
+            xesmf_available=_xesmf_available(),
+        )
+        # Persist the resolved prefill as a plain string (or None) for the YAML round-trip.
+        self.prefill = (
+            None if self._regrid.prefill is None else str(self._regrid.prefill)
+        )
 
         data = self._get_data()
 
@@ -268,11 +289,19 @@ class SurfaceForcing:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
 
-        data.apply_prefill(
-            self.prefill,
-            prefill_kwargs=self.prefill_kwargs,
-            prefill_was_user_set=True,
-        )
+        regrid = self._regrid
+        use_xesmf = regrid.use_xesmf
+        if regrid.prefill is not None:
+            # Whole-domain source fill; the subsequent regrid is plain bilinear.
+            data.apply_prefill(
+                str(regrid.prefill),
+                prefill_kwargs=self.prefill_kwargs,
+                prefill_was_user_set=True,
+            )
+        elif not use_xesmf:
+            # xESMF unavailable + no prefill: nearest-neighbor pre-fill the source so
+            # the subsequent scipy interpolation cannot propagate NaNs.
+            data.apply_nearest_neighbor_fill()
 
         self._set_variable_info(data)
         var_names = {
@@ -282,9 +311,25 @@ class SurfaceForcing:
             if name in data.ds.data_vars
         }
 
+        # On the default (no-prefill) xESMF path, use the source "mask" for masked
+        # bilinear regridding; a set prefill / the scipy path leaves the source
+        # already NaN-free, so no mask is needed (plain bilinear / scipy interp).
+        source_mask = (
+            data.ds["mask"]
+            if use_xesmf and regrid.prefill is None and "mask" in data.ds.data_vars
+            else None
+        )
         processed_fields = {}
         # lateral regridding
-        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
+        lateral_regrid = LateralRegridToROMS(
+            target_coords,
+            data.dim_names,
+            source_ds=data.ds,
+            use_xesmf=use_xesmf,
+            source_mask=source_mask,
+            extrap_method=regrid.regrid_extrap_method,
+            extrap_kwargs=regrid.regrid_extrap_kwargs,
+        )
         for var_name in var_names:
             processed_fields[var_name] = lateral_regrid.apply(
                 data.ds[var_names[var_name]["name"]]
@@ -339,29 +384,6 @@ class SurfaceForcing:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
-
-    def _resolve_prefill(self) -> None:
-        """Resolve and validate the ``prefill`` selection.
-
-        ``"auto"`` (the default) selects the xESMF inverse-distance fill when xESMF
-        is installed, otherwise the cheap nearest-neighbor fill. An explicit method
-        is validated against the supported set. Unlike ``BoundaryForcing``,
-        ``SurfaceForcing`` regrids with plain ``interp`` and therefore always needs a
-        NaN-free source, so ``prefill=None`` is not accepted.
-        """
-        xesmf_available = _xesmf_available()
-        if self.prefill == "auto":
-            self.prefill = str(
-                PrefillMethod.inverse_dist
-                if xesmf_available
-                else PrefillMethod.nearest_neighbor
-            )
-        validate_prefill(
-            self.prefill,
-            self.prefill_kwargs,
-            allowed=set(PrefillMethod),
-            xesmf_available=xesmf_available,
-        )
 
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is
@@ -681,17 +703,39 @@ class SurfaceForcing:
         correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
         correction_data.ds["mask"] = data.ds["mask"]
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
-        correction_data.apply_prefill(
-            self.prefill,
-            prefill_kwargs=self.prefill_kwargs,
-            prefill_was_user_set=True,
+
+        # Use the same regrid engine / source-fill choice as the main data so the
+        # correction climatology is treated consistently.
+        regrid = self._regrid
+        use_xesmf = regrid.use_xesmf
+        if regrid.prefill is not None:
+            correction_data.apply_prefill(
+                str(regrid.prefill),
+                prefill_kwargs=self.prefill_kwargs,
+                prefill_was_user_set=True,
+            )
+        elif not use_xesmf:
+            correction_data.apply_nearest_neighbor_fill()
+
+        source_mask = (
+            correction_data.ds["mask"]
+            if use_xesmf
+            and regrid.prefill is None
+            and "mask" in correction_data.ds.data_vars
+            else None
         )
 
         # Spatial regrid first: only 12 interpolations per variable regardless of
         # the length of the forcing time series. lateral_regrid.apply() forces eager
         # compute on the 12-step climatology, which is acceptable (~MB of data).
         lateral_regrid = LateralRegridToROMS(
-            self.target_coords, correction_data.dim_names
+            self.target_coords,
+            correction_data.dim_names,
+            source_ds=correction_data.ds,
+            use_xesmf=use_xesmf,
+            source_mask=source_mask,
+            extrap_method=regrid.regrid_extrap_method,
+            extrap_kwargs=regrid.regrid_extrap_kwargs,
         )
         time_dim = correction_data.dim_names["time"]
 

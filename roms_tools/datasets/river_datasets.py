@@ -17,6 +17,7 @@ from roms_tools.datasets.utils import check_dataset, select_relevant_times
 from roms_tools.setup.utils import (
     MARBL_TRACER_NAMES,
     build_kdtree_from_latlon,
+    find_coastal_cells,
     latlon_to_xyz,
     query_kdtree_nearest,
 )
@@ -306,6 +307,8 @@ class RiverDataset:
     """
 
     filename: str | Path | list[str | Path]
+    COAST_SNAP_BUFFER_KM: float | None = None
+    DOMAIN_EDGE_BUFFER: int = 20
     start_time: datetime
     end_time: datetime
     dim_names: dict[str, str]
@@ -546,8 +549,9 @@ class RiverDataset:
         self,
         target_coords: dict,
         dx: float,
+        *,
         coast_snap_buffer_km: float | None = None,
-        domain_edge_buffer: int = 20,
+        domain_edge_buffer: int | None = None,
     ) -> None:
         """Extract rivers within the ROMS domain and assign each to the nearest coastal grid cell.
 
@@ -556,7 +560,7 @@ class RiverDataset:
         hundreds of GiB for large river datasets (like gloFAS):
 
         1. Bounding box pre-filter — coarse reduction using lat/lon comparison to grid boundary.
-        2. cKDTree query_ball_point — finds stations within coast_snap_buffer_km of any coastal cell.
+        2. cKDTree query_ball_point — finds stations within ``COAST_SNAP_BUFFER_KM`` (or the overridden value) of any coastal cell.
 
         Parameters
         ----------
@@ -572,15 +576,15 @@ class RiverDataset:
         dx : float
             Maximum distance threshold in meters. Only river mouths within dx
             of any ROMS grid cell are included.
-        coast_snap_buffer_km : float, optional
-            If provided, only river mouths within this distance (in km) of any
-            coastal grid cell are included. Useful for datasets like GloFAS where
-            river mouths may be slightly offshore. If None, all rivers within the
-            bounding box are included.
-        domain_edge_buffer : int, optional
-            Number of grid cells beyond the domain edge to include in the bounding
-            box pre-filter. Catches rivers just outside the domain that may still
-            have relevant freshwater forcing. Default is 20.
+        coast_snap_buffer_km : float or None, optional
+            Override the dataset's default coastal snap buffer (km). If None,
+            the dataset's ``COAST_SNAP_BUFFER_KM`` class constant is used
+            (200 km for Dai, 50 km for GloFAS, None for base class which
+            disables the filter).
+        domain_edge_buffer : int or None, optional
+            Override the number of grid cells beyond the domain edge to include
+            in the bounding box pre-filter. If None, the dataset's
+            ``DOMAIN_EDGE_BUFFER`` class constant is used (default 20).
 
         Returns
         -------
@@ -594,6 +598,17 @@ class RiverDataset:
             If no rivers survive the bounding-box and (optional) coastal
             snap-buffer filters.
         """
+        coast_buffer = (
+            coast_snap_buffer_km
+            if coast_snap_buffer_km is not None
+            else self.COAST_SNAP_BUFFER_KM
+        )
+        edge_buffer = (
+            domain_edge_buffer
+            if domain_edge_buffer is not None
+            else self.DOMAIN_EDGE_BUFFER
+        )
+
         # Retrieve longitude and latitude of river mouths
         river_lon = self.ds[self.var_names["longitude"]]
         river_lat = self.ds[self.var_names["latitude"]]
@@ -605,20 +620,15 @@ class RiverDataset:
             river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
 
         station_dim = self.dim_names["station"]
-
-        # Build candidate point set — coastal cells only if mask provided, else all grid cells
         target_lon_np = target_coords["lon"].values
         target_lat_np = target_coords["lat"].values
         eta_rho, xi_rho = target_lon_np.shape
 
+        # Build the search tree using lat/lon from coastal cells only (if mask provided) to reduce
+        # memory and computation. Without a mask, fall back to all grid cells.
         if target_coords.get("mask") is not None:
             mask_rho = target_coords["mask"].values
-            faces = np.zeros_like(mask_rho)
-            faces[1:, :] += mask_rho[:-1, :]
-            faces[:-1, :] += mask_rho[1:, :]
-            faces[:, 1:] += mask_rho[:, :-1]
-            faces[:, :-1] += mask_rho[:, 1:]
-            coast = (1 - mask_rho) * (faces > 0)
+            coast = find_coastal_cells(mask_rho)
             coast_eta, coast_xi = np.where(coast)
             tree_lat = target_lat_np[coast_eta, coast_xi]
             tree_lon = target_lon_np[coast_eta, coast_xi]
@@ -628,8 +638,9 @@ class RiverDataset:
             tree_lat = target_lat_np.ravel()
             tree_lon = target_lon_np.ravel()
 
-        # Step 1: bounding box pre-filter with buffer to catch rivers just outside the domain
-        buffer_deg = float(dx) / 111000 * (domain_edge_buffer + 1)
+        # Step 1: bounding box pre-filter with buffer to catch rivers just outside the domain.
+        # # dx (meters per cell) / 111000 (meters per degree) * (edge_buffer + 1 cells).
+        buffer_deg = float(dx) / 111000 * (edge_buffer + 1)
         lat_min = target_lat_np.min() - buffer_deg
         lat_max = target_lat_np.max() + buffer_deg
         lon_min = target_lon_np.min() - buffer_deg
@@ -647,9 +658,10 @@ class RiverDataset:
         bbox_indices = np.where(in_bbox)[0]
 
         # Step 2: optional distance filter using query_ball_point
-        if coast_snap_buffer_km is not None:
-            dx_chord = 2 * np.sin((coast_snap_buffer_km / 6371.0) / 2)
-            tree = build_kdtree_from_latlon(tree_lat, tree_lon)
+        tree = build_kdtree_from_latlon(tree_lat, tree_lon)
+
+        if coast_buffer is not None:
+            dx_chord = 2 * np.sin((coast_buffer / 6371.0) / 2)
             counts = tree.query_ball_point(
                 latlon_to_xyz(rlat[bbox_indices], rlon[bbox_indices]),
                 r=dx_chord,
@@ -657,20 +669,17 @@ class RiverDataset:
             )
             final_indices = bbox_indices[counts > 0]
         else:
-            tree = build_kdtree_from_latlon(tree_lat, tree_lon)
-            final_indices = bbox_indices
+            final_indices = bbox_indices  # no coastal snap filter; keep all bbox rivers
 
         if len(final_indices) == 0:
             raise ValueError(
                 "No relevant rivers found. Consider increasing domain size or using a different river dataset."
             )
 
-        # Subset dataset and sort first
+        # Subset to surviving stations and sort by river volume
         ds = self.ds.isel({station_dim: final_indices})
         ds = self.sort_by_river_volume(ds)
         self.ds = ds
-
-        return
 
     def extract_named_rivers(self, indices):
         """Extracts a subset of the dataset based on the provided river names in the
@@ -738,6 +747,9 @@ class GloFASRiverDataset(RiverDataset):
         - name:      ``riv_name``
     """
 
+    COAST_SNAP_BUFFER_KM: float = 50.0
+    DOMAIN_EDGE_BUFFER: int = 20
+
     dim_names: dict = field(
         default_factory=lambda: {"station": "station", "time": "time"}
     )
@@ -754,26 +766,6 @@ class GloFASRiverDataset(RiverDataset):
     name_prefix: str = field(default="GloFAS_", init=False)
     """Prefix prepended to GloFAS river names, stripped back off when naming
     synthetic ``overlap_`` rivers."""
-
-    def extract_relevant_rivers(
-        self,
-        target_coords: dict,
-        dx: float,
-        coast_snap_buffer_km: float | None = 50.0,
-        domain_edge_buffer: int = 20,
-    ) -> None:
-        """Extract relevant rivers, defaulting to a 50 km coastal snap buffer.
-
-        GloFAS river mouths are preprocessed using the LDD algorithm to lie on
-        or very near the coast, so a tight 50 km buffer is appropriate.
-        See :meth:`RiverDataset.extract_relevant_rivers` for full documentation.
-        """
-        return super().extract_relevant_rivers(
-            target_coords,
-            dx,
-            coast_snap_buffer_km=coast_snap_buffer_km,
-            domain_edge_buffer=domain_edge_buffer,
-        )
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Time is CF-compliant datetime64 — decode directly."""
@@ -793,6 +785,9 @@ class DaiRiverDataset(RiverDataset):
     decoded manually in ``add_time_info``. River mouths may be placed inland,
     so a generous coastal snap buffer (200 km default) is used.
     """
+
+    COAST_SNAP_BUFFER_KM: float = 200.0
+    DOMAIN_EDGE_BUFFER: int = 20
 
     filename: str | Path | list[str | Path] = field(
         default_factory=lambda: download_river_data("dai_trenberth_may2019.nc")
@@ -867,26 +862,6 @@ class DaiRiverDataset(RiverDataset):
         ds[time_dim] = dates
 
         return ds
-
-    def extract_relevant_rivers(
-        self,
-        target_coords: dict,
-        dx: float,
-        coast_snap_buffer_km: float | None = 200.0,
-        domain_edge_buffer: int = 20,
-    ) -> None:
-        """Extract relevant rivers, defaulting to a 200 km coastal snap buffer.
-
-        Dai river mouths may be placed far inland relative to the actual river
-        mouth, so a generous buffer is used to avoid excluding legitimate rivers.
-        See :meth:`RiverDataset.extract_relevant_rivers` for full documentation.
-        """
-        return super().extract_relevant_rivers(
-            target_coords,
-            dx,
-            coast_snap_buffer_km=coast_snap_buffer_km,
-            domain_edge_buffer=domain_edge_buffer,
-        )
 
 
 def _parse_rivr2o_year(filename: str | Path) -> int:

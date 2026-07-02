@@ -11,7 +11,7 @@ from conftest import calculate_file_hash
 from roms_tools import Grid, RiverForcing
 from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.setup.utils import get_tracer_defaults
-from roms_tools.tests.glofas_test_utils import write_glofas_file
+from roms_tools.tests.river_test_utils import write_glofas_file
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 STANDARD_RIVER_FIXTURES = [

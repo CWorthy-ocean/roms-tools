@@ -1,4 +1,3 @@
-import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +9,7 @@ import xarray as xr
 from roms_tools.datasets.river_datasets import (
     RIVR2O_FILL_VALUE,
     SECONDS_PER_YEAR,
+    DaiRiverDataset,
     GloFASRiverDataset,
     RiverDataset,
     Rivr2oRiverBGCDataset,
@@ -18,7 +18,7 @@ from roms_tools.datasets.river_datasets import (
 )
 from roms_tools.setup.river_forcing import _mask_invalid_dynamic_bgc_concentrations
 from roms_tools.setup.utils import interpolate_dynamic_bgc_by_calendar_year
-from roms_tools.tests.glofas_test_utils import write_glofas_file
+from roms_tools.tests.river_test_utils import write_dai_file, write_glofas_file
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 
@@ -927,8 +927,7 @@ class TestGloFASRiverDataset:
         assert opt == {"vol": "vol_stn"}
 
     def test_snap_buffer_default(self):
-        sig = inspect.signature(GloFASRiverDataset.extract_relevant_rivers)
-        assert sig.parameters["coast_snap_buffer_km"].default == 50.0
+        assert GloFASRiverDataset.COAST_SNAP_BUFFER_KM == 50.0
 
     def test_cf_datetime_decoding(self):
         ds_obj = GloFASRiverDataset.__new__(GloFASRiverDataset)
@@ -980,6 +979,19 @@ class TestGloFASRiverDataset:
 
         # CF time decoded straight to datetime64, no manual YYYYMM parsing.
         assert np.issubdtype(data.ds[time_dim].dtype, np.datetime64)
+
+
+class TestDaiRiverDataset:
+    def test_snap_buffer_default(self):
+        assert DaiRiverDataset.COAST_SNAP_BUFFER_KM == 200.0
+
+    def test_default_var_names(self):
+        var_names = DaiRiverDataset.__dataclass_fields__["var_names"].default_factory()
+        assert var_names["flux"] == "FLOW"
+        assert var_names["name"] == "riv_name"
+        assert var_names["latitude"] == "lat_mou"
+        assert var_names["longitude"] == "lon_mou"
+        assert var_names["ratio"] == "ratio_m2s"
 
 
 class TestExtractRelevantRivers:
@@ -1061,6 +1073,42 @@ class TestExtractRelevantRivers:
 
         names = [str(n) for n in data.ds[data.var_names["name"]].values]
         assert names == ["NearRiver"]
+
+    def test_dai_default_snap_buffer_200km(self, tmp_path):
+        # Ocean row at lat=5 (eta=5), coastal cells at lat=4 (eta=4). Rivers placed inside the grid south of the coast.
+        lon2d = [[0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2]]
+        lat2d = [[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4], [5, 5, 5]]
+        mask2d = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [1, 1, 1]]
+        target_coords = self._target_coords(lon2d, lat2d, mask2d=mask2d)
+
+        # ~150 km from coast (within Dai's 200 km default) and ~250 km away (outside it).
+        near_lat = 4.0 - 150.0 / 111.0  # ~2.65, inside grid, 150 km from coast at lat=4
+        far_lat = 4.0 - 250.0 / 111.0  # ~1.75, inside grid, 250 km from coast at lat=4
+
+        path = tmp_path / "dai.nc"
+        # Build a minimal Dai-format dataset directly
+        path = tmp_path / "dai.nc"
+        write_dai_file(
+            path,
+            lats=np.array([near_lat, far_lat], dtype=np.float32),
+            lons=np.array([0.0, 0.0], dtype=np.float32),
+            flow=np.array([[100.0, 100.0]], dtype=np.float32),
+            river_names=["NearRiver", "FarRiver"],
+            times=np.array([199801]),
+            vol=np.array([100.0, 100.0], dtype=np.float32),
+        )
+
+        data = DaiRiverDataset(
+            filename=path,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+        # coast_snap_buffer_km omitted -> DaiRiverDataset's 200 km default.
+        data.extract_relevant_rivers(target_coords, dx=1000.0, domain_edge_buffer=0)
+
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert "NearRiver" in names
+        assert "FarRiver" not in names
 
     def test_no_rivers_in_domain_raises(self, tmp_path):
         lon2d = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]

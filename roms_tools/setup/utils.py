@@ -1623,6 +1623,33 @@ def latlon_to_xyz(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     )
 
 
+def find_coastal_cells(mask: np.ndarray) -> np.ndarray:
+    """Identify coastal grid cells using a 4-neighbor convolution.
+
+    A coastal cell is defined as a land cell (mask=0) that is adjacent to
+    at least one ocean cell (mask=1) in the N/S/E/W directions.
+
+    The 4-neighbor kernel counts how many of the cardinal neighbors are ocean.
+    Convolving with this kernel over the mask gives, for each cell, the number
+    of ocean neighbors. Land cells with at least one ocean neighbor are coastal.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2D array of shape (eta_rho, xi_rho) where 1=ocean and 0=land.
+
+    Returns
+    -------
+    np.ndarray
+        2D boolean array of the same shape, True where cells are coastal.
+    """
+    from scipy.ndimage import convolve
+
+    kernel = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
+    faces = convolve(mask, kernel, mode="constant", cval=0.0)
+    return (1 - mask) * (faces > 0)
+
+
 def build_kdtree_from_latlon(lat, lon):
     """Build a cKDTree on the unit sphere from lat/lon arrays."""
     return cKDTree(latlon_to_xyz(lat, lon))

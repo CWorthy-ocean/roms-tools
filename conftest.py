@@ -26,7 +26,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.nesting import align_grids, make_nesting_info
-from roms_tools.tests.glofas_test_utils import write_glofas_file
+from roms_tools.tests.river_test_utils import write_glofas_file
 
 
 class SkippableOptions(enum.StrEnum):

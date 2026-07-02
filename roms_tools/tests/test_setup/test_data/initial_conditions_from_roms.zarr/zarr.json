@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS initial conditions file created by ROMS-Tools",
-    "roms_tools_version": "3.1.2.dev21+g719a5b8c0",
+    "roms_tools_version": "4.0.0a2.dev10+g01456a412.d20260630",
     "ini_time": "1998-01-06 00:00:00",
     "model_reference_date": "2000-01-01 00:00:00",
     "adjust_depth_for_sea_surface_height": "True",

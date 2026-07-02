@@ -2,7 +2,12 @@
   "shape": [
     2
   ],
-  "data_type": "string",
+  "data_type": {
+    "name": "fixed_length_utf32",
+    "configuration": {
+      "length_bytes": 16
+    }
+  },
   "chunk_grid": {
     "name": "regular",
     "configuration": {
@@ -20,8 +25,10 @@
   "fill_value": "",
   "codecs": [
     {
-      "name": "vlen-utf8",
-      "configuration": {}
+      "name": "bytes",
+      "configuration": {
+        "endian": "little"
+      }
     },
     {
       "name": "zstd",

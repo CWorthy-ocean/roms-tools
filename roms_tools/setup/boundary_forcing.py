@@ -20,20 +20,21 @@ from roms_tools.regrid import LateralRegridToROMS, VerticalRegrid
 from roms_tools.setup.bgc_model import bgc_variable_info
 from roms_tools.setup.utils import (
     BGC_DATASET_NAMES,
+    BGC_INTERPOLATION_METHODS,
     RawDataSource,
-    _compute_density_coord,
     _xesmf_available,
     add_time_info_to_ds,
+    build_bgc_vertical_coords,
     check_and_set_boundaries,
     compute_barotropic_velocity,
     deserialize_forcing_data,
-    instantiate_bgc_dataset,
     from_yaml,
     get_boundary_coords,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
-    nan_check,
+    instantiate_bgc_dataset,
+    nan_check_batch,
     pop_grid_data,
     resolve_regrid_engine,
     substitute_nans_by_fillvalue,
@@ -43,7 +44,6 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
-    interpolate_cyclic_time,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
@@ -59,11 +59,7 @@ def _interpolate_phys_to_bgc_time(
     bgc_time_coord: xr.DataArray,
     bgc_climatology: bool,
 ) -> xr.DataArray:
-    """Interpolate a physics DataArray onto the BGC time coordinate.
-
-    For climatology BGC sources (``bgc_climatology=True``) a cyclic linear
-    interpolation is performed in fractional day-of-year space.  Otherwise a
-    standard ``datetime64`` linear interpolation is used.
+    """Sample a physics DataArray at the BGC times using nearest-time selection.
 
     Parameters
     ----------
@@ -74,40 +70,40 @@ def _interpolate_phys_to_bgc_time(
     bgc_time_coord : xr.DataArray
         Target time coordinate from the BGC dataset (1-D).
     bgc_climatology : bool
-        Whether the BGC dataset is a climatology.
+        Whether the BGC dataset is a climatology. If True, ``bgc_time_coord``
+        is expected to be ``timedelta64`` from the start of the year (as set by
+        ``assign_dates_to_climatology``), and the nearest neighbour is taken
+        cyclically in fractional day-of-year space (so an early-January target can
+        match late-December physics). If False, nearest selection is performed in
+        ``datetime64`` space.
 
     Returns
     -------
     xr.DataArray
-        ``phys_da`` interpolated to ``bgc_time_coord``.
+        ``phys_da`` sampled at ``bgc_time_coord``, with time dimension still named
+        ``time_dim`` and coordinate set to ``bgc_time_coord``.
+
+    Notes
+    -----
+    The BGC boundary output is typically a 12-step climatology, and ROMS linearly
+    interpolates boundary records in time at runtime, so sub-monthly precision in the
+    physics T/S used only as the density/MLD anchor is washed out. Nearest-time
+    selection is therefore sufficient and, unlike ``xr.interp``, requires no rechunk of
+    the time axis (which would otherwise pull the entire physics time series into a
+    single in-memory chunk); only the selected slices are read.
     """
     if bgc_climatology:
+        # Circular nearest neighbour in fractional day-of-year space.
         bgc_doy = (bgc_time_coord / np.timedelta64(1, "D")).values + 1.0
         phys_doy = phys_da[time_dim].dt.dayofyear.values.astype(float)
-        phys_for_interp = phys_da.assign_coords(
-            {time_dim: xr.DataArray(phys_doy, dims=[time_dim])}
-        )
-        result = interpolate_cyclic_time(phys_for_interp, time_dim, time_dim, bgc_doy)
+        period = 365.25
+        diff = np.abs(phys_doy[None, :] - np.asarray(bgc_doy)[:, None])
+        nearest = np.minimum(diff, period - diff).argmin(axis=1)
+        result = phys_da.isel({time_dim: nearest})
         return result.assign_coords({time_dim: bgc_time_coord.values})
 
-    # Non-climatology path: linear interpolation within physics range; flat
-    # extrapolation (hold first/last value) outside it so that BGC time windows
-    # that exceed the physics coverage never produce NaN target densities.
-    bgc_times = bgc_time_coord.values
-    phys_times = phys_da[time_dim].values
-    pads = []
-    if len(bgc_times) > 0 and bgc_times[0] < phys_times[0]:
-        pads.append(
-            phys_da.isel({time_dim: [0]}).assign_coords({time_dim: [bgc_times[0]]})
-        )
-    pads.append(phys_da)
-    if len(bgc_times) > 0 and bgc_times[-1] > phys_times[-1]:
-        pads.append(
-            phys_da.isel({time_dim: [-1]}).assign_coords({time_dim: [bgc_times[-1]]})
-        )
-    if len(pads) > 1:
-        phys_da = xr.concat(pads, dim=time_dim)
-    return phys_da.interp({time_dim: bgc_time_coord}, method="linear")
+    # Non-climatology: nearest selection in datetime64 space.
+    return phys_da.sel({time_dim: bgc_time_coord}, method="nearest")
 
 
 @dataclass(kw_only=True)
@@ -218,6 +214,29 @@ class BoundaryForcing:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    bgc_interpolation_method : str, optional
+        Vertical interpolation method for BGC tracers (only used when ``type='bgc'``).
+        One of:
+
+        - ``"depth"`` (default): linear interpolation in depth.
+        - ``"density"``: linear interpolation in potential-density (isopycnal) space,
+          preserving water-mass properties. Density is computed via TEOS-10 sigma-0 from
+          the BGC source's own T/S (source coordinate) and the physics T/S supplied by
+          ``physics_forcing`` (target coordinate).
+        - ``"density_mld"``: the mixed layer depth (MLD) is found in the source and target
+          density fields; the source mixed layer is scaled so its MLD matches the target's,
+          and below the MLD the tracer is interpolated 1:1 in depth. This keeps the mixed
+          layers aligned while preserving the absolute depth of sub-mixed-layer features,
+          and avoids the surface degeneracy of pure density space.
+
+        ``"density"`` and ``"density_mld"`` require ``physics_forcing`` and a BGC source
+        carrying temperature/salinity; otherwise interpolation falls back to depth space.
+        Interpolation uses ``xgcm.Grid.transform`` with the linear method inside the
+        source range and edge-value extrapolation outside (``mask_edges=False``).
+    physics_forcing : BoundaryForcing, optional
+        A physics ``BoundaryForcing`` object (``type='physics'``) whose T/S fields
+        supply the target density coordinate for BGC tracer interpolation. When None and
+        a density method is requested, falls back to depth-based interpolation.
 
 
     Examples
@@ -285,17 +304,18 @@ class BoundaryForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
-    use_density_interpolation: bool = False
-    """Interpolate BGC tracers in density space rather than depth space when True.
-
-    Requires that the BGC source dataset declares ``bgc_source_ts`` (a T/S pair
-    for the source density coordinate) and that ``physics_forcing`` supplies the
-    model T/S for the target density coordinate.  Falls back to depth-space with
-    a log message if either is unavailable.  Only applied when ``type='bgc'``.
-    """
+    bgc_interpolation_method: str = "depth"
+    """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
+    ``"density_mld"``."""
     physics_forcing: "BoundaryForcing | None" = None
-    """Physics BoundaryForcing whose T/S fields supply the target density coordinate
-    for density-space BGC tracer interpolation."""
+    """Physics BoundaryForcing object supplying T/S for density-based BGC interpolation."""
+    use_vars: list[str] | None = None
+    """Optional down-selection of the variables written for a ``type='bgc'`` source.
+    When set, only these variables are kept and a ``ValueError`` is raised if any is
+    not present in this source's own (regridded) data. ``None`` (default) writes all of
+    the source's variables. This is a pure presence check — no MARBL/derivation logic
+    happens here; completion is done separately by
+    :meth:`~roms_tools.setup.bgc_model.BGCMarbl.process_bgc_fields`."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -315,15 +335,16 @@ class BoundaryForcing:
 
         if (
             self.type == "bgc"
-            and self.use_density_interpolation
+            and self.bgc_interpolation_method != "depth"
             and self.physics_forcing is None
         ):
             logging.info(
-                "use_density_interpolation=True but no physics_forcing provided. "
-                "BGC tracers will be interpolated in depth space instead."
+                f"bgc_interpolation_method={self.bgc_interpolation_method!r} but no "
+                "physics_forcing provided. BGC tracers will be interpolated in depth "
+                "space instead."
             )
 
-        # BGC has its own multi-source pipeline; physics continues below
+        # BGC has its own single-source pipeline; physics continues below
         if self.type == "bgc":
             self.ds = self._process_bgc()
             return
@@ -607,8 +628,58 @@ class BoundaryForcing:
                         vertical_regrid = VerticalRegrid(
                             bdry_data.ds, source_dim=bdry_data.dim_names["depth"]
                         )
-                        for var_name in filtered_vars:
-                            if var_name in processed_fields:
+
+                        # The BGC dataset declares its own source T/S pair
+                        # (``bgc_source_ts``, e.g. ``temp_bgc``/``salt_bgc``) that defines
+                        # the source density coordinate; it is not written to output, so it
+                        # is handled separately from the tracers and dropped afterwards.
+                        ts_keys = tuple(getattr(bdry_data, "bgc_source_ts", ()))
+                        aux_ts_vars = [
+                            v
+                            for v in ts_keys
+                            if v in filtered_vars and v in processed_fields
+                        ]
+                        tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
+
+                        has_source_ts = len(aux_ts_vars) == 2
+                        # Resolve the requested method against availability of the
+                        # physics target T/S and the BGC source T/S; fall back to depth.
+                        method = "depth"
+                        if self.type == "bgc" and location == "rho":
+                            method = self.bgc_interpolation_method
+                            can_use = self.physics_forcing is not None and has_source_ts
+                            if method != "depth" and not can_use:
+                                reason = (
+                                    "no physics_forcing provided"
+                                    if self.physics_forcing is None
+                                    else "the BGC source has no temperature/salinity"
+                                )
+                                logging.info(
+                                    f"{method!r} interpolation requested but {reason}; "
+                                    f"falling back to depth-space interpolation "
+                                    f"({direction} boundary)."
+                                )
+                                method = "depth"
+
+                        source_coord = None
+                        target_coord = None
+                        if method != "depth":
+                            source_coord, target_coord = (
+                                self._compute_bgc_vertical_coords(
+                                    method, direction, bdry_data, processed_fields
+                                )
+                            )
+
+                        for var_name in tracer_vars:
+                            if var_name not in processed_fields:
+                                continue
+                            if method != "depth":
+                                processed_fields[var_name] = vertical_regrid.apply(
+                                    processed_fields[var_name],
+                                    source_depth_coords=source_coord,
+                                    target_depth_coords=target_coord,
+                                )
+                            else:
                                 processed_fields[var_name] = vertical_regrid.apply(
                                     processed_fields[var_name],
                                     source_depth_coords=bdry_data.ds[
@@ -618,6 +689,10 @@ class BoundaryForcing:
                                         f"layer_depth_{location}_{direction}"
                                     ],
                                 )
+
+                        # Drop the auxiliary source T/S; not ROMS output variables.
+                        for v in aux_ts_vars:
+                            processed_fields.pop(v, None)
 
                 # compute barotropic velocities
                 if "u" in var_names and "v" in var_names:
@@ -689,6 +764,84 @@ class BoundaryForcing:
             self.regrid_method, xesmf_available=xesmf_available
         )
 
+    def _compute_bgc_vertical_coords(
+        self,
+        method: str,
+        direction: str,
+        bdry_data,
+        processed_fields: dict,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Build source and target vertical coordinates for non-depth BGC
+        interpolation (``"density"`` or ``"density_mld"``) at one boundary.
+
+        The source T/S comes from the BGC dataset's OWN pair (``temp_bgc``/``salt_bgc``,
+        carried at the boundary on the BGC depth and time grid). No regridding or time
+        alignment is needed: it shares the tracers' grid and time axis.
+
+        The target T/S comes from the model's (physics) sigma-level fields supplied by
+        ``physics_forcing``, interpolated onto the BGC time axis. The actual coordinate
+        construction (density vs. MLD-warped depth) is delegated to
+        :func:`build_bgc_vertical_coords`.
+
+        Returns
+        -------
+        tuple[xr.DataArray, xr.DataArray]
+            ``(source_coord, target_coord)``.
+        """
+        assert self.physics_forcing is not None
+        bgc_climatology = bool(self.source["climatology"])
+        bgc_depth_dim = bdry_data.dim_names["depth"]
+        temp_key, salt_key = bdry_data.bgc_source_ts
+
+        # BGC time axis (shared with the tracers) — taken from the source T/S.
+        bgc_time_dim = bdry_data.dim_names.get("time")
+        bgc_time_coord = None
+        src_temp = processed_fields[temp_key]
+        if bgc_time_dim is not None and bgc_time_dim in src_temp.dims:
+            bgc_time_coord = src_temp[bgc_time_dim]
+
+        def _align_time(da: xr.DataArray, time_dim: str) -> xr.DataArray:
+            """Align ``da``'s ``time_dim`` to the BGC time axis, or collapse it."""
+            if time_dim not in da.dims:
+                return da
+            if bgc_time_coord is not None:
+                return _interpolate_phys_to_bgc_time(
+                    da, time_dim, bgc_time_coord, bgc_climatology
+                )
+            return da.mean(time_dim)
+
+        # --- Target density: physics (model) sigma-level T/S, aligned to BGC time ---
+        # Physics BC dataset uses "bry_time" as the time dim with an "abs_time"
+        # datetime64 companion coord. Swap to the datetime view before time-aligning.
+        temp_sigma = self.physics_forcing.ds[f"temp_{direction}"]
+        salt_sigma = self.physics_forcing.ds[f"salt_{direction}"]
+        if "abs_time" in temp_sigma.coords:
+            temp_sigma = temp_sigma.swap_dims({"bry_time": "abs_time"}).rename(
+                {"abs_time": "time"}
+            )
+            salt_sigma = salt_sigma.swap_dims({"bry_time": "abs_time"}).rename(
+                {"abs_time": "time"}
+            )
+            temp_sigma = _align_time(temp_sigma, "time")
+            salt_sigma = _align_time(salt_sigma, "time")
+        else:
+            temp_sigma = _align_time(temp_sigma, "bry_time")
+            salt_sigma = _align_time(salt_sigma, "bry_time")
+
+        s_dim = next(d for d in temp_sigma.dims if d.startswith("s_"))
+
+        return build_bgc_vertical_coords(
+            method,
+            source_temp=processed_fields[temp_key],
+            source_salt=processed_fields[salt_key],
+            source_depth=bdry_data.ds[bgc_depth_dim],
+            source_depth_dim=bgc_depth_dim,
+            target_temp=temp_sigma,
+            target_salt=salt_sigma,
+            target_depth=self.ds_depth_coords[f"layer_depth_rho_{direction}"],
+            target_depth_dim=s_dim,
+        )
+
     def _input_checks(self) -> None:
         """Validate and normalize user-provided input parameters."""
         # -------------------------------------------------------
@@ -709,6 +862,12 @@ class BoundaryForcing:
         # -------------------------------------------------------
         if self.type not in {"physics", "bgc"}:
             raise ValueError("`type` must be either 'physics' or 'bgc'.")
+
+        if self.bgc_interpolation_method not in BGC_INTERPOLATION_METHODS:
+            raise ValueError(
+                f"`bgc_interpolation_method` must be one of "
+                f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
+            )
 
         # -------------------------------------------------------
         # Source configuration checks
@@ -869,6 +1028,25 @@ class BoundaryForcing:
             },
         }
 
+    def _apply_use_vars(self, fields: dict) -> dict:
+        """Down-select ``fields`` to ``self.use_vars`` (presence check only).
+
+        Raises ``ValueError`` if any requested variable is not present in this
+        source's own regridded ``fields``.  No MARBL/derivation logic is applied
+        here — that is handled later by ``BGCMarbl.process_bgc_fields``.
+        """
+        if self.use_vars is None:
+            return fields
+        requested = list(self.use_vars)
+        missing = [v for v in requested if v not in fields]
+        if missing:
+            src_name = self.source.get("name", "?")
+            raise ValueError(
+                f"use_vars requested variable(s) not present in the '{src_name}' BGC "
+                f"source: {sorted(missing)}. Available here: {sorted(fields)}."
+            )
+        return {v: fields[v] for v in requested}
+
     def _process_bgc(self) -> xr.Dataset:
         """Process a single BGC source into boundary forcing.
 
@@ -913,6 +1091,7 @@ class BoundaryForcing:
                 self._get_depth_coordinates(0, direction, "rho", "interface")
 
                 fields = self._extract_bgc_fields(raw_data, direction, target_coords)
+                fields = self._apply_use_vars(fields)
                 for var_name in fields:
                     fields[var_name] = transpose_dimensions(fields[var_name])
 
@@ -1058,40 +1237,40 @@ class BoundaryForcing:
             bdry_data.ds, source_dim=bdry_data.dim_names["depth"]
         )
 
-        # Determine if density-space interpolation is available for this source.
+        # Determine whether non-depth (density / density_mld) interpolation applies.
         ts_keys = tuple(getattr(bdry_data, "bgc_source_ts", ()))
         aux_ts_vars = [v for v in ts_keys if v in partial_fields]
         has_source_ts = len(aux_ts_vars) == 2
-        use_density = (
-            self.use_density_interpolation
+        method = self.bgc_interpolation_method
+        use_non_depth = (
+            method != "depth"
             and self.physics_forcing is not None
             and has_source_ts
         )
-        if self.use_density_interpolation and not use_density:
+        if method != "depth" and not use_non_depth:
             reason = (
                 "no physics_forcing provided"
                 if self.physics_forcing is None
                 else "this BGC source has no temperature/salinity"
             )
             logging.info(
-                f"Density-space interpolation requested but {reason}; "
+                f"bgc_interpolation_method={method!r} requested but {reason}; "
                 f"falling back to depth-space ({direction} boundary)."
             )
 
-        source_density = target_density = None
-        if use_density:
-            source_density, target_density = self._compute_bgc_density_coords(
-                direction, bdry_data, partial_fields,
-                bgc_climatology=bool(self.source.get("climatology", False)),
+        source_coord = target_coord = None
+        if use_non_depth:
+            source_coord, target_coord = self._compute_bgc_vertical_coords(
+                method, direction, bdry_data, partial_fields,
             )
 
         tracer_vars = [v for v in partial_fields if v not in aux_ts_vars]
         for var_name in tracer_vars:
-            if use_density:
+            if use_non_depth:
                 partial_fields[var_name] = vertical_regrid.apply(
                     partial_fields[var_name],
-                    source_depth_coords=source_density,
-                    target_depth_coords=target_density,
+                    source_depth_coords=source_coord,
+                    target_depth_coords=target_coord,
                 )
             else:
                 partial_fields[var_name] = vertical_regrid.apply(
@@ -1107,69 +1286,6 @@ class BoundaryForcing:
             partial_fields.pop(v, None)
 
         return partial_fields
-
-    def _compute_bgc_density_coords(
-        self,
-        direction: str,
-        bdry_data,
-        partial_fields: dict,
-        bgc_climatology: bool = False,
-    ) -> tuple[xr.DataArray, xr.DataArray]:
-        """Build source and target density coordinates for density-space BGC interpolation.
-
-        Source density comes from the BGC dataset's own T/S pair (``bgc_source_ts``),
-        already laterally regridded to this boundary.  Target density comes from
-        ``physics_forcing`` sigma-level T/S, interpolated to the BGC time axis.
-
-        Returns
-        -------
-        tuple[xr.DataArray, xr.DataArray]
-            ``(source_density, target_density)``
-        """
-        assert self.physics_forcing is not None
-        temp_key, salt_key = bdry_data.bgc_source_ts
-        bgc_depth_dim = bdry_data.dim_names["depth"]
-
-        source_density = _compute_density_coord(
-            partial_fields[temp_key],
-            partial_fields[salt_key],
-            bgc_depth_dim,
-        )
-
-        # Determine BGC time coordinate for physics T/S alignment
-        bgc_time_dim = bdry_data.dim_names.get("time")
-        bgc_time_coord = None
-        if bgc_time_dim and bgc_time_dim in partial_fields[temp_key].dims:
-            bgc_time_coord = partial_fields[temp_key][bgc_time_dim]
-
-        def _align_time(da: xr.DataArray, time_dim: str) -> xr.DataArray:
-            if time_dim not in da.dims:
-                return da
-            if bgc_time_coord is not None:
-                return _interpolate_phys_to_bgc_time(
-                    da, time_dim, bgc_time_coord, bgc_climatology
-                )
-            return da.mean(time_dim)
-
-        temp_sigma = self.physics_forcing.ds[f"temp_{direction}"]
-        salt_sigma = self.physics_forcing.ds[f"salt_{direction}"]
-        if "abs_time" in temp_sigma.coords:
-            temp_sigma = temp_sigma.swap_dims({"bry_time": "abs_time"}).rename(
-                {"abs_time": "time"}
-            )
-            salt_sigma = salt_sigma.swap_dims({"bry_time": "abs_time"}).rename(
-                {"abs_time": "time"}
-            )
-            temp_sigma = _align_time(temp_sigma, "time")
-            salt_sigma = _align_time(salt_sigma, "time")
-        else:
-            temp_sigma = _align_time(temp_sigma, "bry_time")
-            salt_sigma = _align_time(salt_sigma, "bry_time")
-
-        s_dim = next(d for d in temp_sigma.dims if d.startswith("s_"))
-        target_density = _compute_density_coord(temp_sigma, salt_sigma, s_dim)
-
-        return source_density, target_density
 
     def _write_into_dataset(self, direction, processed_fields, ds=None):
         if ds is None:
@@ -1388,6 +1504,10 @@ class BoundaryForcing:
         Validation is performed on the initial boundary time step (`bry_time=0`) for each
         variable in the dataset.
         """
+        # Build the NaN checks lazily and evaluate them in a single computation so a
+        # lazy subgraph shared across variables (e.g. the density/MLD interpolation
+        # coordinate reused across BGC tracers) is computed once, not once per variable.
+        checks = []
         for var_name in self.variable_info:
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
@@ -1409,7 +1529,7 @@ class BoundaryForcing:
                         if bdry_var_name not in ds.data_vars:
                             continue
 
-                        # Check for NaN values at the first time step using the nan_check function
+                        # Check for NaN values at the first time step (batched below).
                         src_names = self.source.get("name", "unknown")
                         error_message = (
                             f"{bdry_var_name} consists entirely of NaNs after regridding. "
@@ -1419,11 +1539,15 @@ class BoundaryForcing:
                             f"'2d_lateral_fill') to fill the source before regridding."
                         )
 
-                        nan_check(
-                            ds[bdry_var_name].isel(bry_time=0),
-                            mask.isel(**self.bdry_coords[location][direction]),
-                            error_message=error_message,
+                        checks.append(
+                            (
+                                ds[bdry_var_name].isel(bry_time=0),
+                                mask.isel(**self.bdry_coords[location][direction]),
+                                error_message,
+                            )
                         )
+
+        nan_check_batch(checks)
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.
@@ -1630,8 +1754,9 @@ class BoundaryForcing:
                 "apply_2d_horizontal_fill",
             ],
         )
-        # Embed the companion physics BoundaryForcing as an optional sub-item so
-        # the density-space BGC interpolation survives a YAML round-trip.
+        # Embed the companion physics BoundaryForcing as an optional sub-item so the
+        # density-based BGC interpolation survives a YAML round-trip. The shared grid
+        # is dropped since the physics forcing reuses the same grid on reconstruction.
         if self.physics_forcing is not None:
             physics_dict = to_dict(
                 self.physics_forcing,
@@ -1684,6 +1809,13 @@ class BoundaryForcing:
                 if src_dict and isinstance(src_dict, dict) and src_dict.get("grid") is not None:
                     src_dict["grid"] = Grid(**pop_grid_data(src_dict["grid"]))
             physics_forcing = cls(grid=grid, **physics_data, use_dask=use_dask)
+
+        return cls(
+            grid=grid,
+            **params,
+            physics_forcing=physics_forcing,
+            use_dask=use_dask,
+        )
 
         return cls(
             grid=grid,

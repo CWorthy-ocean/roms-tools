@@ -38,6 +38,7 @@
     }
   ],
   "attributes": {
+    "regrid_method": "bilinear",
     "long_name": "sea surface height",
     "units": "m",
     "coordinates": "abs_time",

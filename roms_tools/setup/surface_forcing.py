@@ -15,6 +15,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Dataset,
     LatLonDataset,
     MBLco2Dataset,
+    SODARestoringSurfaceDataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
@@ -49,6 +50,8 @@ DEFAULT_ERA5_ARCO_PATH = (
 DEFAULT_MBL_co2_PATH = (
     "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
 )
+
+DEFAULT_SODA_PATH = "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
 
 
 @dataclass(kw_only=True)
@@ -95,8 +98,8 @@ class SurfaceForcing:
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
 
     restoring_forces : list[str], optional
-        Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
-        ```['sss',]```.
+        Specifies which variables to apply restoring forces to. Sea surface salinity, DIC and alkalinity are supported:
+        ```['sss', 'sDIC', 'sALK']```.
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -198,6 +201,10 @@ class SurfaceForcing:
             for var in self.restoring_forces:
                 if var == "sss":
                     cppdefs_flags.add("SFLX_CORR")
+                if var == "sDIC":
+                    cppdefs_flags.add("CFLX_CORR")
+                if var == "sALK":
+                    cppdefs_flags.add("CFLX_CORR")
 
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
@@ -339,6 +346,11 @@ class SurfaceForcing:
                     "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
                 )
                 self.source["path"] = DEFAULT_MBL_co2_PATH
+            elif self.source["name"] == "SODA":
+                logging.info(
+                    "No path specified for SODA source; defaulting to the OceanSODA-ETHZ v2025 dataset from NCEI, NOAA."
+                )
+                self.source["path"] = DEFAULT_SODA_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 
@@ -362,18 +374,38 @@ class SurfaceForcing:
                     "When type='restoring', `restoring_forces` must be defined."
                 )
 
-            valid_vars = ["sss"]
+            valid_vars = ["sss", "sDIC", "sALK"]
             for var in self.restoring_forces:
                 if var not in valid_vars:
                     raise ValueError(
                         f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
                     )
+            has_dic = "sDIC" in self.restoring_forces
+            has_alk = "sALK" in self.restoring_forces
+            has_sss = "sss" in self.restoring_forces
+
+            if has_dic != has_alk:
+                raise ValueError(
+                    "'sDIC' and 'sALK' must both be present or both absent"
+                )
+
+            if has_dic and has_sss:
+                raise ValueError(
+                    "'sss' must be called separately from 'sDIC' and 'sALK'."
+                )
 
         # Check that climatology is false for t-varying co2
         if self.type == "bgc" and self.source["name"] == "MBL_co2":
             if self.source["climatology"]:
                 raise ValueError(
                     "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
+                )
+
+        # Check that climatology is false for restoring of 'sDIC' and 'sALK'
+        if self.type == "restoring" and self.source["name"] == "SODA":
+            if self.source["climatology"]:
+                raise ValueError(
+                    "When 'name' is 'SODA', monthly `dic` and `talk` data is expected. 'climatology' must be 'False'"
                 )
 
     def _determine_coarse_grid_usage(self, data):
@@ -454,14 +486,22 @@ class SurfaceForcing:
                 )
 
         elif self.type == "restoring":
-            if self.source["name"] == "WOA":
-                data = WOARestoringSurfaceDataset(**data_dict)
-            elif self.source["name"] == "UNIFIED":
-                data = UnifiedRestoringSurfaceDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring".'
-                )
+            if "sss" in self.restoring_forces:
+                if self.source["name"] == "WOA":
+                    data = WOARestoringSurfaceDataset(**data_dict)
+                elif self.source["name"] == "UNIFIED":
+                    data = UnifiedRestoringSurfaceDataset(**data_dict)
+                else:
+                    raise ValueError(
+                        'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring", and restoring_forces is ["sss"].'
+                    )
+            if "sDIC" in self.restoring_forces:
+                if self.source["name"] == "SODA":
+                    data = SODARestoringSurfaceDataset(**data_dict)
+                else:
+                    raise ValueError(
+                        'Only "SODA" is a valid option for source["name"] when type is "restoring", and restoring_forces is ["sDIC", "sALK"].'
+                    )
 
         return data
 
@@ -544,7 +584,7 @@ class SurfaceForcing:
                 data.opt_var_names.keys()
             ):
                 variable_info[var_name] = default_info
-                if var_name == "sss":
+                if var_name in ["sss", "sDIC", "sALK"]:
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
@@ -725,9 +765,14 @@ class SurfaceForcing:
                     "nhy_time",
                 ]
         elif self.type == "restoring":
-            time_coords = [
-                "sss_time",
-            ]
+            time_coords = []
+            for var in self.restoring_forces:
+                if var == "sss":
+                    time_coords.append("sss_time")
+                if var == "sDIC":
+                    time_coords.append("sDIC_time")
+                if var == "sALK":
+                    time_coords.append("sALK_time")
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
 

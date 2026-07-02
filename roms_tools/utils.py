@@ -819,11 +819,11 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     Returns
     -------
     xarray.DataArray
-        The DataArray with dimensions reordered so that 'time', 's_*', 'eta_*',
+        The DataArray with dimensions reordered so that 'time', 's_*', 'depth', 'eta_*',
         and 'xi_*' are first, in that order, if they exist.
     """
     # List of preferred dimension patterns
-    preferred_order = ["time", "s_", "eta_", "xi_"]
+    preferred_order = ["time", "s_", "depth", "eta_", "xi_"]
 
     # Get the existing dimensions in the DataArray
     dims = list(da.dims)

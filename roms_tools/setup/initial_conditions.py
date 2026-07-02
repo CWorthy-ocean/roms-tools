@@ -25,15 +25,16 @@ from roms_tools.regrid import (
 )
 from roms_tools.setup.utils import (
     BGC_DATASET_NAMES,
+    BGC_INTERPOLATION_METHODS,
     RawDataSource,
-    _compute_density_coord,
     _xesmf_available,
+    build_bgc_vertical_coords,
     compute_barotropic_velocity,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
     instantiate_bgc_dataset,
-    nan_check,
+    nan_check_batch,
     pop_grid_data,
     resolve_regrid_engine,
     substitute_nans_by_fillvalue,
@@ -114,8 +115,27 @@ class InitialConditions:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    bgc_interpolation_method : str, optional
+        Vertical interpolation method for BGC tracers. One of:
 
+        - ``"depth"`` (default): linear interpolation in depth.
+        - ``"density"``: linear interpolation in potential-density (isopycnal) space,
+          preserving water-mass properties. Density is computed from temperature and
+          salinity via TEOS-10 sigma-0 — the BGC source's own T/S for the source
+          coordinate and the physics T/S for the target.
+        - ``"density_mld"``: the mixed layer depth (MLD) is found in the source and
+          target density fields; the source mixed layer is scaled so its MLD matches the
+          target's, and below the MLD the tracer is interpolated 1:1 in depth. This keeps
+          the mixed layers aligned while preserving the absolute depth of sub-mixed-layer
+          features, and avoids the surface degeneracy of pure density space.
 
+        ``"density"`` and ``"density_mld"`` only apply when ``bgc_source`` is provided,
+        the physics source is a lat/lon dataset (not a ROMS restart), and the BGC source
+        carries temperature/salinity (e.g. the unified dataset's ``temp_WOA``/
+        ``salt_WOA``); otherwise interpolation falls back to depth space and notes in
+        the log. Interpolation uses ``xgcm.Grid.transform`` with the linear method
+        inside the source range and edge-value extrapolation outside
+        (``mask_edges=False``).
 
     Examples
     --------
@@ -172,15 +192,18 @@ class InitialConditions:
     """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
-    use_density_interpolation: bool = False
-    """Interpolate BGC tracers in density space rather than depth space when True.
-
-    Requires that the BGC source dataset declares ``bgc_source_ts`` (a T/S pair for
-    the source density coordinate). The target density coordinate is built from the
-    physics source T/S already present in ``processed_fields``. Falls back to
-    depth-space with a log message if the BGC source has no T/S.  Only applied
-    when ``bgc_source`` is provided.
-    """
+    bgc_interpolation_method: str = "depth"
+    """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
+    ``"density_mld"``. ``"density"``/``"density_mld"`` require the BGC source to declare
+    ``bgc_source_ts`` (a source T/S pair); the target coordinate is built from the physics
+    source T/S already in ``processed_fields``. Falls back to depth with a log message if
+    the BGC source has no T/S."""
+    use_vars: list[str] | None = None
+    """Optional down-selection of the variables written from ``bgc_source``. When set,
+    only these variables are kept and a ``ValueError`` is raised if any is not present in
+    the BGC source's own (regridded) data. ``None`` (default) writes all of the source's
+    variables. This is a pure presence check — MARBL completion is done separately by
+    :meth:`~roms_tools.setup.bgc_model.BGCMarbl.process_bgc_fields`."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -204,6 +227,7 @@ class InitialConditions:
                 {}, type="bgc", bgc_source=self.bgc_source,
                 physics_fields=processed_fields,
             )
+            bgc_fields = self._apply_use_vars(bgc_fields)
             # Align BGC time coordinate with the physics time coordinate
             for var_name in list(bgc_fields):
                 if "time" in bgc_fields[var_name].coords:
@@ -233,6 +257,25 @@ class InitialConditions:
 
         self.ds = ds
 
+    def _apply_use_vars(self, fields: dict) -> dict:
+        """Down-select ``fields`` to ``self.use_vars`` (presence check only).
+
+        Raises ``ValueError`` if any requested variable is not present in the BGC
+        source's own regridded ``fields``.  No MARBL/derivation logic is applied
+        here — that is handled later by ``BGCMarbl.process_bgc_fields``.
+        """
+        if self.use_vars is None:
+            return fields
+        requested = list(self.use_vars)
+        missing = [v for v in requested if v not in fields]
+        if missing:
+            src_name = (self.bgc_source or {}).get("name", "?")
+            raise ValueError(
+                f"use_vars requested variable(s) not present in the '{src_name}' BGC "
+                f"source: {sorted(missing)}. Available here: {sorted(fields)}."
+            )
+        return {v: fields[v] for v in requested}
+
     def _process_data(
         self,
         processed_fields: dict,
@@ -253,8 +296,8 @@ class InitialConditions:
             The specific BGC source to process.  Required when ``type="bgc"``.
         physics_fields : dict, optional
             Already-regridded physics fields (temp/salt on sigma levels). When
-            provided and ``use_density_interpolation=True``, used to compute the
-            target density coordinate for BGC vertical interpolation.
+            provided and ``bgc_interpolation_method != "depth"``, used to build the
+            target vertical coordinate for BGC vertical interpolation.
 
         Returns
         -------
@@ -466,9 +509,9 @@ class InitialConditions:
             ``"physics"`` or ``"bgc"``.
         physics_fields : dict, optional
             Already-regridded physics fields (temp/salt on sigma levels). When
-            provided together with ``use_density_interpolation=True`` and a BGC
+            provided together with ``bgc_interpolation_method != "depth"`` and a BGC
             source that declares ``bgc_source_ts``, used to build the target
-            density coordinate.
+            vertical coordinate.
 
         Returns
         -------
@@ -517,56 +560,91 @@ class InitialConditions:
                             mask_edges=False,
                         )
             else:
-                # LatLonDataset: check for density-space interpolation for BGC.
+                # LatLonDataset: BGC vertical interpolation (depth / density / density_mld).
+                # The BGC dataset declares its own source temperature/salinity pair
+                # (``bgc_source_ts``, e.g. ``temp_bgc``/``salt_bgc``) defining the source
+                # coordinate. These are not ROMS output variables, so they are handled
+                # separately from the tracers and dropped afterwards.
                 ts_keys = tuple(getattr(data, "bgc_source_ts", ()))
-                aux_ts_vars = [v for v in ts_keys if v in filtered_vars and v in processed_fields]
+                aux_ts_vars = [
+                    v for v in ts_keys if v in filtered_vars and v in processed_fields
+                ]
+                tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
+
                 has_source_ts = len(aux_ts_vars) == 2
-                use_density = (
-                    type == "bgc"
-                    and self.use_density_interpolation
-                    and has_source_ts
-                    and physics_fields is not None
+                has_target_ts = (
+                    physics_fields is not None
                     and "temp" in physics_fields
                     and "salt" in physics_fields
                 )
-                if type == "bgc" and self.use_density_interpolation and not use_density:
+                # Resolve the requested method against availability of the T/S needed
+                # to build the density/MLD coordinates; fall back to depth otherwise.
+                method = self.bgc_interpolation_method if type == "bgc" else "depth"
+                if method != "depth" and not (has_source_ts and has_target_ts):
                     reason = (
                         "this BGC source has no temperature/salinity"
                         if not has_source_ts
                         else "physics fields are unavailable"
                     )
                     logging.info(
-                        f"Density-space interpolation requested but {reason}; "
+                        f"bgc_interpolation_method={method!r} requested but {reason}; "
                         "falling back to depth-space interpolation."
                     )
-
-                source_density = target_density = None
-                if use_density:
-                    temp_key, salt_key = ts_keys
-                    source_density = _compute_density_coord(
-                        processed_fields[temp_key],
-                        processed_fields[salt_key],
-                        data.dim_names["depth"],
-                    )
-                    s_dim = next(
-                        d for d in physics_fields["temp"].dims if d.startswith("s_")
-                    )
-                    target_density = _compute_density_coord(
-                        physics_fields["temp"], physics_fields["salt"], s_dim
-                    )
+                    method = "depth"
 
                 vertical_regrid = VerticalRegrid(
                     data.ds, source_dim=data.dim_names["depth"]
                 )
-                tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
+
+                source_coord = target_coord = None
+                if method != "depth":
+                    temp_key, salt_key = ts_keys
+                    s_dim = next(
+                        d for d in physics_fields["temp"].dims if d.startswith("s_")
+                    )
+                    # Source coordinate uses the BGC dataset's own T/S (already on its
+                    # source depth grid); target uses the model's (physics) sigma-level
+                    # T/S supplied via ``physics_fields``.
+                    src_temp = processed_fields[temp_key]
+                    target_temp = physics_fields["temp"]
+                    target_salt = physics_fields["salt"]
+                    # For initial conditions both physics (target) and BGC source T/S are
+                    # single-time snapshots, but may carry different ``time`` labels
+                    # (physics datetime vs BGC climatology day-of-year). Align the target
+                    # ``time`` to the BGC source's so the density transform does not fail
+                    # on a mismatched ``time`` coordinate (the BGC time is relabelled to
+                    # the physics time downstream in __post_init__).
+                    if (
+                        "time" in target_temp.dims
+                        and "time" in src_temp.dims
+                        and target_temp.sizes["time"] == src_temp.sizes["time"]
+                    ):
+                        target_temp = target_temp.assign_coords(
+                            time=src_temp["time"].values
+                        )
+                        target_salt = target_salt.assign_coords(
+                            time=src_temp["time"].values
+                        )
+                    source_coord, target_coord = build_bgc_vertical_coords(
+                        method,
+                        source_temp=src_temp,
+                        source_salt=processed_fields[salt_key],
+                        source_depth=data.ds[data.dim_names["depth"]],
+                        source_depth_dim=data.dim_names["depth"],
+                        target_temp=target_temp,
+                        target_salt=target_salt,
+                        target_depth=self.ds_depth_coords[f"layer_depth_{location}"],
+                        target_depth_dim=s_dim,
+                    )
+
                 for var_name in tracer_vars:
                     if var_name not in processed_fields:
                         continue
-                    if use_density:
+                    if method != "depth":
                         processed_fields[var_name] = vertical_regrid.apply(
                             processed_fields[var_name],
-                            source_depth_coords=source_density,
-                            target_depth_coords=target_density,
+                            source_depth_coords=source_coord,
+                            target_depth_coords=target_coord,
                         )
                     else:
                         processed_fields[var_name] = vertical_regrid.apply(
@@ -577,7 +655,7 @@ class InitialConditions:
                             ],
                         )
 
-                # Drop auxiliary T/S — not ROMS output variables.
+                # Drop the auxiliary source T/S; they are not ROMS output variables.
                 for v in aux_ts_vars:
                     processed_fields.pop(v, None)
 
@@ -621,6 +699,11 @@ class InitialConditions:
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
                 f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
+            )
+        if self.bgc_interpolation_method not in BGC_INTERPOLATION_METHODS:
+            raise ValueError(
+                f"`bgc_interpolation_method` must be one of "
+                f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
 
     def _get_data(
@@ -949,6 +1032,10 @@ class InitialConditions:
         else:
             variable_info = self.variable_info_physics
 
+        # Build the NaN checks lazily and evaluate them in a single computation so a
+        # lazy subgraph shared across variables (e.g. the density/MLD interpolation
+        # coordinate reused across BGC tracers) is computed once, not once per variable.
+        checks = []
         for var_name in variable_info:
             if variable_info[var_name]["validate"]:
                 if variable_info[var_name]["location"] == "rho":
@@ -957,8 +1044,9 @@ class InitialConditions:
                     mask = self.grid.ds.mask_u
                 elif variable_info[var_name]["location"] == "v":
                     mask = self.grid.ds.mask_v
-                ds[var_name].load()
-                nan_check(ds[var_name].squeeze(), mask)
+                checks.append((ds[var_name].squeeze(), mask, None))
+
+        nan_check_batch(checks)
 
     def _add_global_metadata(self, ds):
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"

@@ -16,10 +16,13 @@ The design intentionally separates two concerns:
 
 The public entry point is :meth:`BGCMarbl.process_bgc_fields`, which operates on
 one or more *already-built* ``type="bgc"`` :class:`~roms_tools.setup.boundary_forcing.BoundaryForcing`
-or :class:`~roms_tools.setup.initial_conditions.InitialConditions` objects.  Because
-the user now produces a separate file per source, completeness is evaluated across
-the *union* of all supplied objects, and derived/filled tracers are written into
-the object that holds the relevant key fields (``CHL``/``Fe``).
+or :class:`~roms_tools.setup.initial_conditions.InitialConditions` objects.  It makes
+**no prioritization decisions**: the caller is responsible for arranging (via each
+object's ``use_vars``) that variables do not overlap across files.  It only (1) derives
+tracers from the key fields present in each object (``CHL``/``Fe``/``DIC``/``ALK``),
+(2) fills any tracer still missing across the union with a constant default (written
+into the first object — the values are spatially uniform, so which file is arbitrary),
+and (3) warns if the tracer set is still incomplete.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ from typing import Callable
 import numpy as np
 import xarray as xr
 
-from roms_tools.setup.utils import get_variable_metadata
+from roms_tools.setup.utils import get_tracer_defaults, get_variable_metadata
 
 
 def bgc_variable_info(var_names) -> dict[str, dict]:
@@ -167,17 +170,6 @@ class BGCMarbl(BGCModel):
     # Fe → Lig multiplicative factor.
     _FE_TO_LIG = 3.0
 
-    # Constant defaults for tracers with no other source (mmol m-3).
-    _DEFAULTS: dict[str, float] = {
-        "NH4":  1e-6,
-        "DOC":  1e-6,
-        "DON":  1.0,
-        "DOP":  0.1,
-        "DOCr": 1e-6,
-        "DONr": 0.8,
-        "DOPr": 0.003,
-    }
-
     # ------------------------------------------------------------------
     # Pure (dict-level) derivation helpers — dask-safe, individually testable.
     # ------------------------------------------------------------------
@@ -207,115 +199,74 @@ class BGCMarbl(BGCModel):
         """Derive the alternative-CO2 tracers as identity copies of DIC/ALK."""
         return {"DIC_ALT_CO2": dic * 1, "ALK_ALT_CO2": alk * 1}
 
-    def default_values(self) -> dict[str, float]:
-        """Return the constant-default tracer values used to fill gaps."""
-        return dict(self._DEFAULTS)
-
     # ------------------------------------------------------------------
-    # Object-level completion across multiple forcing objects.
+    # Object-level completion across one or more forcing objects.
     # ------------------------------------------------------------------
     def process_bgc_fields(self, forcings, filepath=None):
-        """Complete the MARBL tracer set across a list of forcing objects.
+        """Complete the MARBL tracer set across one or more forcing objects.
 
-        Completeness is evaluated across the *union* of all supplied objects: a
-        tracer is "missing" only if absent from every object.  Derived tracers
-        are written into the object that holds their key field (``CHL``/``Fe``/
-        ``DIC``/``ALK``); the remaining gaps are constant-filled into the
-        *primary* object (the one holding the most key fields).
+        Makes **no prioritization decisions** — the caller is responsible (via each
+        object's ``use_vars``) for arranging that variables do not overlap across
+        files.  This method only:
 
-        The supplied objects must share consistent spatial (and, for initial
-        conditions, depth) dimensions — they describe the same ROMS grid.  Time
-        axes may differ freely (ROMS interpolates each file independently).
-
-        Cross-file conflicts (a tracer present in more than one object) are
-        resolved so each tracer is written exactly once: by default the first
-        object in the list keeps it, but a ``(object, [fields])`` entry marks that
-        object as the preferred source for those fields (dropped from the others).
+        1. **Derives** tracers from the key fields present in each object, in place:
+           ``Fe``→``Lig``, ``DIC``→``DIC_ALT_CO2``, ``ALK``→``ALK_ALT_CO2``, and
+           ``CHL``→ the phytoplankton/zooplankton set (``CHL`` is then dropped). A
+           derived tracer is only added where it is not already present.
+        2. **Fills** any tracer still missing across the union of objects with its
+           constant MARBL default (:func:`~roms_tools.setup.utils.get_tracer_defaults`),
+           written into the *first* object (values are spatially uniform, so which
+           file receives them is immaterial).
+        3. **Warns** if the tracer set is still incomplete.
 
         Parameters
         ----------
-        forcings : forcing object | (object, [fields]) | list of either
+        forcings : forcing object | list of forcing objects
             One or more already-built ``type="bgc"`` forcing objects, modified in
-            place.  Wrap an object as ``(object, ["ALK", "DIC"])`` to make it the
-            preferred source for those fields.
+            place.
         filepath : str | Path | list[str | Path] | None
             If given, each (modified) object is saved.  Pass a single path when
             ``forcings`` is a single object, or a list of paths matching the
-            objects (one per entry, in order).
+            objects (one per object, in order).
 
         Returns
         -------
         forcing object | list of forcing objects
             The processed object(s): the single object when one was passed, or the
-            (unwrapped) list of objects otherwise.
+            list of objects otherwise.
         """
         single = _is_forcing(forcings)
-        entries = [forcings] if single else list(forcings)
-        if not entries:
+        objs = [forcings] if single else list(forcings)
+        if not objs:
             raise ValueError("process_bgc_fields requires at least one forcing object.")
-        objs, claims = _parse_forcing_entries(entries)
-
-        _check_spatial_consistency(objs)
 
         adapters = [_ForcingBGCAdapter(o, self) for o in objs]
 
-        # Resolve cross-file conflicts before union/derivation/write so each
-        # tracer ends up in exactly one object (prefer claims win; else first wins).
-        _resolve_field_conflicts(adapters, claims)
+        # 1. Derive tracers from each object's own key fields (no cross-file priority).
+        for a in adapters:
+            if a.has("Fe") and not a.has("Lig"):
+                a.assign_derived("Lig", "Fe", lambda fe: fe * self._FE_TO_LIG)
+            if a.has("DIC") and not a.has("DIC_ALT_CO2"):
+                a.assign_derived("DIC_ALT_CO2", "DIC", lambda x: x * 1)
+            if a.has("ALK") and not a.has("ALK_ALT_CO2"):
+                a.assign_derived("ALK_ALT_CO2", "ALK", lambda x: x * 1)
+            if a.has("CHL"):
+                for var, factor in self._CHL_FACTORS.items():
+                    if not a.has(var):
+                        a.assign_derived(var, "CHL", lambda x, f=factor: x * f)
+                a.drop("CHL")
 
-        # Union of tracer/input names present across all objects (post-dedupe).
+        # 2. Fill any tracer still missing across the union with its constant default,
+        #    into the first object (spatially-uniform, so the choice of file is arbitrary).
         present: set[str] = set()
         for a in adapters:
             present |= a.present_vars()
+        defaults = get_tracer_defaults()
+        for var in sorted(self.tracer_vars() - present):
+            adapters[0].assign_const(var, float(defaults.get(var, 0.0)))
+            present.add(var)
 
-        # Primary object = the one holding the most key fields.
-        def _key_score(a: "_ForcingBGCAdapter") -> int:
-            return sum(a.has(k) for k in ("CHL", "Fe"))
-
-        primary = max(adapters, key=_key_score)
-
-        missing = set(self.tracer_vars()) - present
-
-        def _first_with(var: str):
-            return next((a for a in adapters if a.has(var)), None)
-
-        # --- Fe → Lig ---
-        if "Lig" in missing:
-            a = _first_with("Fe")
-            if a is not None:
-                a.assign_derived("Lig", "Fe", lambda fe: fe * self._FE_TO_LIG)
-                missing.discard("Lig"); present.add("Lig")
-
-        # --- DIC → DIC_ALT_CO2 ---
-        if "DIC_ALT_CO2" in missing:
-            a = _first_with("DIC")
-            if a is not None:
-                a.assign_derived("DIC_ALT_CO2", "DIC", lambda x: x * 1)
-                missing.discard("DIC_ALT_CO2"); present.add("DIC_ALT_CO2")
-
-        # --- ALK → ALK_ALT_CO2 ---
-        if "ALK_ALT_CO2" in missing:
-            a = _first_with("ALK")
-            if a is not None:
-                a.assign_derived("ALK_ALT_CO2", "ALK", lambda x: x * 1)
-                missing.discard("ALK_ALT_CO2"); present.add("ALK_ALT_CO2")
-
-        # --- CHL → per-PFT tracers (then drop CHL) ---
-        a = _first_with("CHL")
-        if a is not None:
-            for var, factor in self._CHL_FACTORS.items():
-                if var in missing:
-                    a.assign_derived(var, "CHL", lambda x, f=factor: x * f)
-                    missing.discard(var); present.add(var)
-            a.drop("CHL")
-            present.discard("CHL")
-
-        # --- constant defaults into the primary object ---
-        for var in sorted(missing):
-            if var in self._DEFAULTS:
-                primary.assign_const(var, self._DEFAULTS[var])
-                missing.discard(var); present.add(var)
-
+        # 3. Completeness check.
         self.warn_missing(present)
 
         if filepath is not None:
@@ -331,99 +282,9 @@ class BGCMarbl(BGCModel):
         return objs[0] if single else objs
 
 
-# Time-like dimensions are allowed to differ across files; everything else is a
-# spatial/depth dimension that must be consistent (same ROMS grid).
-_TIME_DIMS = frozenset(
-    {"time", "bry_time", "ocean_time", "abs_time", "month", "nv", "ntides"}
-)
-
-
 def _is_forcing(x) -> bool:
     """A forcing object is anything exposing an xarray ``ds`` attribute."""
     return hasattr(x, "ds")
-
-
-def _parse_forcing_entries(entries):
-    """Split entries into parallel ``(objs, claims)`` lists.
-
-    Each entry is either a forcing object or an ``(object, [fields])`` pair.
-    ``claims[i]`` is the set of field names that object ``i`` is the preferred
-    (authoritative) source for.
-    """
-    objs, claims = [], []
-    for e in entries:
-        if _is_forcing(e):
-            objs.append(e)
-            claims.append(set())
-        elif isinstance(e, (tuple, list)) and len(e) == 2 and _is_forcing(e[0]):
-            obj, fields = e
-            objs.append(obj)
-            claims.append(set(fields))
-        else:
-            raise ValueError(
-                "Each forcing entry must be a forcing object or a "
-                "(forcing_object, [field, ...]) pair."
-            )
-    return objs, claims
-
-
-def _resolve_field_conflicts(adapters, claims) -> None:
-    """Drop duplicate tracers so each is written by exactly one object.
-
-    ``claims[i]`` lists fields that object ``i`` is the preferred source for
-    (these win any conflict).  Any other tracer present in more than one object
-    is kept in the first object (lowest index) and dropped from the rest.
-    Mutates the underlying datasets in place.
-    """
-    present = [a.present_vars() for a in adapters]
-
-    # Explicit prefer claims -> owner index (validate uniqueness and presence).
-    claimed_owner: dict[str, int] = {}
-    for idx, fields in enumerate(claims):
-        for f in fields:
-            if f in claimed_owner and claimed_owner[f] != idx:
-                raise ValueError(
-                    f"Field '{f}' is claimed via `prefer` by more than one forcing object."
-                )
-            if f not in present[idx]:
-                raise ValueError(
-                    f"A forcing object is set as the preferred source for '{f}', "
-                    f"but that object does not contain '{f}'."
-                )
-            claimed_owner[f] = idx
-
-    all_fields: set[str] = set().union(*present) if present else set()
-    for f in all_fields:
-        holders = [i for i, pv in enumerate(present) if f in pv]
-        owner = claimed_owner.get(f, holders[0])
-        for i in holders:
-            if i != owner:
-                adapters[i].drop(f)
-
-
-def _check_spatial_consistency(objs) -> None:
-    """Ensure all forcing objects share consistent spatial/depth dimensions.
-
-    Compares the size of every non-time dimension that appears in more than one
-    object's dataset and raises if any disagree.  Time axes are intentionally
-    *not* checked — ROMS interpolates each output file independently, so the
-    files may legitimately carry different time records.
-    """
-    seen: dict[str, tuple[int, int]] = {}  # dim -> (size, first object index)
-    for i, obj in enumerate(objs):
-        for dim, size in obj.ds.sizes.items():
-            if dim in _TIME_DIMS:
-                continue
-            size = int(size)
-            if dim in seen and seen[dim][0] != size:
-                j = seen[dim][1]
-                raise ValueError(
-                    f"Inconsistent spatial dimension '{dim}' across forcing objects: "
-                    f"object {j} has {dim}={seen[dim][0]} but object {i} has {dim}={size}. "
-                    "All BGC forcing objects passed to process_bgc_fields() must describe "
-                    "the same ROMS grid (and vertical levels for initial conditions)."
-                )
-            seen.setdefault(dim, (size, i))
 
 
 class _ForcingBGCAdapter:

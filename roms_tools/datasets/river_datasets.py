@@ -1,19 +1,272 @@
 import logging
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal, Protocol
 
 import numpy as np
 import xarray as xr
 
-from roms_tools.datasets.download import download_river_data
-from roms_tools.datasets.utils import check_dataset, select_relevant_times
-from roms_tools.setup.utils import (
-    assign_dates_to_climatology,
-    gc_dist,
+from roms_tools.datasets.download import (
+    download_river_data,
+    download_river_tracer_defaults,
 )
-from roms_tools.utils import load_data
+from roms_tools.datasets.utils import check_dataset, select_relevant_times
+from roms_tools.setup.utils import MARBL_TRACER_NAMES
+from roms_tools.utils import _get_file_matches, load_data
+
+RiverBGCTemporalInterpolation = Literal["none", "calendar_year"]
+
+RIVR2O_FILL_VALUE = -999.0
+RIVR2O_TRACER_NAMES = ("DIC", "DOC_l", "DOC_sl", "POC", "NO3", "PO4")
+RIVR2O_MIN_YEAR = 1903
+RIVR2O_MAX_YEAR = 2024
+SECONDS_PER_YEAR = 365.25 * 24 * 3600
+
+VALUE_OPTION_DIM = "value_option"
+RECOMMENDED_VALUE_INDEX = 0
+RIVER_TRACER_DEFAULTS_FILENAME = "river_tracer_defaults.nc"
+
+
+class RiverBGCDataset(Protocol):
+    """Protocol for river BGC datasets used by ``RiverForcing``."""
+
+    @property
+    def requires_calendar_discharge_time(self) -> bool:
+        """Whether discharge climatology must be expanded to a calendar axis."""
+        ...
+
+    @property
+    def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        """How interior temporal gaps in dynamic concentrations are filled."""
+        ...
+
+    @property
+    def fill_value(self) -> float | None:
+        """Sentinel marking missing concentrations, or ``None`` if not used.
+
+        ``RiverForcing`` masks this value out of dynamic concentrations before
+        merging in fill defaults, so any dataset that uses a sentinel must
+        surface it here.
+        """
+        ...
+
+    def forcing_concentrations(
+        self,
+        river_volume: xr.DataArray,
+        abs_time: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        *,
+        straddle: bool,
+        river_names: list[str],
+    ) -> dict[str, xr.DataArray]:
+        """Return ROMS tracer concentrations on ``(river_time, nriver)``."""
+        ...
+
+
+def fill_river_bgc_concentrations(
+    dynamic: dict[str, xr.DataArray],
+    fill: dict[str, float],
+    tracer_names: Iterable[str],
+    template: xr.DataArray,
+    *,
+    fill_at_nan: bool = True,
+) -> dict[str, xr.DataArray]:
+    """Merge dynamic river BGC concentrations with fill values.
+
+    For each tracer in ``tracer_names``:
+
+    - If the tracer is absent from ``dynamic``, broadcast the fill scalar to
+      ``template`` shape.
+    - If the tracer is present and ``fill_at_nan`` is True, use dynamic values
+      where finite and fill elsewhere.
+    - If the tracer is present and ``fill_at_nan`` is False, use dynamic values
+      as-is.
+
+    Parameters
+    ----------
+    dynamic
+        Tracer concentrations supplied by a dynamic BGC dataset (may be partial).
+    fill
+        Scalar fill concentrations keyed by tracer name.
+    tracer_names
+        Tracer names to include in the output (typically ``ds.tracer_name``).
+    template
+        Array with shape ``(river_time, nriver)`` used to define output dimensions.
+    fill_at_nan
+        If True, replace non-finite dynamic values with fill scalars.
+
+    Returns
+    -------
+    dict[str, xr.DataArray]
+        Merged concentrations on ``(river_time, nriver)``.
+    """
+    merged: dict[str, xr.DataArray] = {}
+    for tracer_name in tracer_names:
+        if tracer_name not in fill:
+            logging.warning(
+                "Fill source has no value for tracer %s; skipping.", tracer_name
+            )
+            continue
+        fill_arr = xr.full_like(template, fill[tracer_name], dtype=np.float32)
+        if tracer_name in dynamic:
+            dyn = dynamic[tracer_name]
+            if fill_at_nan:
+                merged[tracer_name] = dyn.where(np.isfinite(dyn), fill_arr).astype(
+                    np.float32
+                )
+            else:
+                merged[tracer_name] = dyn.astype(np.float32)
+        else:
+            merged[tracer_name] = fill_arr
+    return merged
+
+
+@dataclass(kw_only=True)
+class RiverTracerDefaultsDataset(RiverBGCDataset):
+    """Default MARBL river tracer concentrations.
+
+    Used as the ``"CONSTANTS"`` ``bgc_source`` and as the default ``fill`` source
+    in ``RiverForcing``. Loads recommended boundary concentrations from
+    ``river_tracer_defaults.nc`` in the roms-tools-data repository. Each tracer
+    variable has dimension ``value_option`` (0 = recommended, 1 = alternate).
+
+    ``forcing_concentrations`` broadcasts scalar defaults to every
+    ``(river_time, nriver)`` point.
+
+    Parameters
+    ----------
+    filename : str or Path, optional
+        Path to the NetCDF file. Defaults to the file from roms-tools-data.
+    value_option_index : int, optional
+        Index along ``value_option`` to read. Defaults to 0 (recommended values).
+
+    Attributes
+    ----------
+    defaults : dict[str, float]
+        Tracer name to concentration for the selected value option.
+    ds : xr.Dataset
+        The loaded NetCDF dataset (in memory).
+    """
+
+    filename: str | Path = field(default_factory=download_river_tracer_defaults)
+    value_option_index: int = RECOMMENDED_VALUE_INDEX
+    defaults: dict[str, float] = field(init=False, repr=False)
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        with xr.open_dataset(self.filename) as ds:
+            self.defaults = self._read_defaults(ds)
+            self.ds = ds.load()
+
+    def _read_defaults(self, ds: xr.Dataset) -> dict[str, float]:
+        """Extract tracer concentrations for the selected value option."""
+        expected_tracers = set(MARBL_TRACER_NAMES)
+
+        if VALUE_OPTION_DIM not in ds.dims:
+            raise ValueError(
+                f"{RIVER_TRACER_DEFAULTS_FILENAME} must contain a "
+                f"'{VALUE_OPTION_DIM}' dimension."
+            )
+
+        defaults: dict[str, float] = {}
+        for tracer_name in ds.data_vars:
+            if tracer_name == VALUE_OPTION_DIM:
+                continue
+
+            da = ds[tracer_name]
+            if VALUE_OPTION_DIM not in da.dims:
+                raise ValueError(
+                    f"Variable '{tracer_name}' must have dimension "
+                    f"'{VALUE_OPTION_DIM}'."
+                )
+
+            value = float(da.isel({VALUE_OPTION_DIM: self.value_option_index}).values)
+            if np.isnan(value):
+                raise ValueError(
+                    f"Value for tracer '{tracer_name}' at "
+                    f"{VALUE_OPTION_DIM}={self.value_option_index} is missing (NaN)."
+                )
+            defaults[tracer_name] = value
+
+        missing = expected_tracers - set(defaults)
+        if missing:
+            raise ValueError(
+                f"{RIVER_TRACER_DEFAULTS_FILENAME} is missing tracers: "
+                f"{sorted(missing)}"
+            )
+
+        extra = set(defaults) - expected_tracers
+        if extra:
+            raise ValueError(
+                f"{RIVER_TRACER_DEFAULTS_FILENAME} contains unknown tracers: "
+                f"{sorted(extra)}"
+            )
+
+        return defaults
+
+    @property
+    def requires_calendar_discharge_time(self) -> bool:
+        return False
+
+    @property
+    def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        return "none"
+
+    @property
+    def fill_value(self) -> float | None:
+        return None
+
+    def forcing_concentrations(
+        self,
+        river_volume: xr.DataArray,
+        abs_time: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        *,
+        straddle: bool,
+        river_names: list[str],
+    ) -> dict[str, xr.DataArray]:
+        """Broadcast constant default concentrations to ``river_volume`` shape."""
+        del abs_time, lons, lats, straddle, river_names
+        return {
+            tracer_name: xr.full_like(river_volume, value, dtype=np.float32)
+            for tracer_name, value in self.defaults.items()
+        }
+
+
+def rivr2o_boundary_time(year: int) -> np.datetime64:
+    """Return the mid-year timestamp used for a RIVR2O annual file."""
+    return np.datetime64(datetime(year, 7, 1), "ns")
+
+
+def clamp_rivr2o_time(time: xr.DataArray) -> xr.DataArray:
+    """Clamp times to the valid RIVR2O product range, holding boundary values.
+
+    Expects absolute datetimes (e.g. ``ds['abs_time']``), not ROMS relative
+    ``river_time`` in days since the model reference date.
+    """
+    return time.clip(
+        min=rivr2o_boundary_time(RIVR2O_MIN_YEAR),
+        max=rivr2o_boundary_time(RIVR2O_MAX_YEAR),
+    )
+
+
+def rivr2o_coerce_time(
+    time: datetime | np.datetime64 | np.integer | int | float | str,
+) -> np.datetime64:
+    """Convert a scalar time to ``datetime64[ns]`` for RIVR2O time indexing.
+
+    Handles ``datetime``, ``numpy.datetime64``, and integer nanosecond stamps
+    (as returned by ``.item()`` on some xarray ``abs_time`` values under Dai
+    climatology).
+    """
+    import pandas as pd
+
+    return np.datetime64(pd.Timestamp(time).to_datetime64())
 
 
 @dataclass(kw_only=True)
@@ -208,6 +461,8 @@ class RiverDataset:
         return ds
 
     def compute_climatology(self):
+        from roms_tools.setup.utils import assign_dates_to_climatology
+
         logging.info("Compute climatology for river forcing.")
 
         time_dim = self.dim_names["time"]
@@ -308,6 +563,8 @@ class RiverDataset:
             river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
         else:
             river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+
+        from roms_tools.setup.utils import gc_dist
 
         # Calculate the distance between the target coordinates and each river mouth
         dist = gc_dist(target_coords["lon"], target_coords["lat"], river_lon, river_lat)
@@ -441,6 +698,617 @@ class DaiRiverDataset(RiverDataset):
         ds[time_dim] = dates
 
         return ds
+
+
+def _parse_rivr2o_year(filename: str | Path) -> int:
+    """Extract the calendar year from a RIVR2O river inputs filename."""
+    stem = Path(filename).stem
+    try:
+        return int(stem.rsplit("_", 1)[-1])
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not parse year from RIVR2O filename '{filename}'. "
+            "Expected pattern 'rivr2o_riverinputs_YYYY.nc'."
+        ) from exc
+
+
+_RIVR2O_MOLAR_MASS_G = {
+    "DIC": 12.011,
+    "DOC_l": 12.011,
+    "DOC_sl": 12.011,
+    "POC": 12.011,
+    "NO3": 14.007,
+    "PO4": 30.974,
+}
+_DON_FROM_DOC_SL = 103 / 2583
+_DON_FROM_POC = 25 / 276
+_DOP_FROM_DOC_SL = 1 / 2583
+_DOP_FROM_POC = 1 / 276
+
+
+@dataclass(kw_only=True)
+class Rivr2oRiverBGCDataset(RiverBGCDataset):
+    """River BGC export data from the RIVR2O river inputs product.
+
+    The product is distributed as one NetCDF file per year. Each file contains
+    global river export fields on a regular lat/lon grid (typically 0.5°). Raw
+    variables are annual mass exports in ``10^6 g element yr-1``.
+
+    On load, raw fields are converted to export variables used for river forcing:
+
+    - ``DIC``, ``DOC_l``, ``DOC_sl``, and ``POC`` are kept as separate carbon exports
+    - ``DIN`` is renamed to ``NO3``
+    - ``DIP`` is renamed to ``PO4``
+
+    The resulting dataset exposes ``DIC``, ``DOC_l``, ``DOC_sl``, ``POC``, ``NO3``,
+    and ``PO4`` on dimensions ``(time, lat, lon)``. Times are assigned from the year
+    in each filename (mid-year, 1 July), because the native ``time`` variable
+    is often unset in the source files.
+
+    The product spans 1903-2024. Requests before 1903 or after 2024 use the boundary
+    years when selecting data and when mapping onto river forcing times.
+
+    Spatial sampling (``sample_at_points``) uses the nearest grid cell with positive
+    ``DIC`` export. DIC has the same spatial coverage each year; that cell is used
+    for all tracers and all years. When several rivers share a cell,
+    ``discharge_partition_weights`` splits export in proportion to discharge so
+    co-located rivers receive similar concentrations. Use ``forcing_concentrations``
+    to convert exports to MARBL river tracer concentrations for ROMS forcing.
+
+    Parameters
+    ----------
+    filename : str, Path, or list[str | Path]
+        Path to one file, a wildcard pattern (e.g.
+        ``"/data/rivr2o_riverinputs_*.nc"``), or a list of file paths.
+    start_time : datetime
+        Start of the time range to retain.
+    end_time : datetime
+        End of the time range to retain.
+    use_dask : bool, optional
+        If True, open files with dask chunking along time. Defaults to False.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        Processed dataset with MARBL tracer variables on the native lat/lon grid.
+    """
+
+    filename: str | Path | list[str | Path]
+    start_time: datetime
+    end_time: datetime
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "latitude": "lat",
+            "longitude": "lon",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "DIC": "DIC",
+            "DIN": "DIN",
+            "DOC_l": "DOC_l",
+            "DOC_sl": "DOC_sl",
+            "POC": "POC",
+            "DIP": "DIP",
+        }
+    )
+    tracer_names: tuple[str, ...] = RIVR2O_TRACER_NAMES
+    fill_value: float = RIVR2O_FILL_VALUE
+    use_dask: bool = False
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.start_time, datetime):
+            raise TypeError(
+                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
+            )
+        if not isinstance(self.end_time, datetime):
+            raise TypeError(
+                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
+            )
+
+        ds = self.load_data()
+        ds = self.clean_up(ds)
+        self.check_dataset(ds)
+        ds = self.select_relevant_times(ds)
+        self.ds = ds
+
+    def load_data(self) -> xr.Dataset:
+        """Load and concatenate yearly RIVR2O files along time.
+
+        Returns
+        -------
+        xr.Dataset
+            Concatenated dataset with one time step per input file.
+        """
+        match_result = _get_file_matches(self.filename)
+        if not match_result.matches:
+            raise FileNotFoundError(f"No RIVR2O files matched: {self.filename}")
+
+        ds_list = []
+        for file in match_result.matches:
+            chunks = {self.dim_names["time"]: 1} if self.use_dask else None
+            ds = xr.open_dataset(file, decode_times=False, chunks=chunks)
+            year = _parse_rivr2o_year(file)
+            ds = ds.assign_coords(
+                {self.dim_names["time"]: [np.datetime64(datetime(year, 7, 1), "ns")]}
+            )
+            ds_list.append(ds)
+
+        return xr.concat(
+            ds_list,
+            dim=self.dim_names["time"],
+            coords="minimal",
+            compat="override",
+            combine_attrs="override",
+        )
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Replace fill values and rename raw RIVR2O variables."""
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+
+        for var_name in self.var_names.values():
+            if var_name in ds:
+                ds[var_name] = ds[var_name].where(ds[var_name] != self.fill_value)
+
+        ds["NO3"] = ds[self.var_names["DIN"]].rename("NO3")
+        ds["NO3"].attrs = ds[self.var_names["DIN"]].attrs
+
+        ds["PO4"] = ds[self.var_names["DIP"]].rename("PO4")
+        ds["PO4"].attrs = ds[self.var_names["DIP"]].attrs
+
+        ds = ds.drop_vars(
+            [self.var_names["DIN"], self.var_names["DIP"]],
+            errors="ignore",
+        )
+
+        ds = ds.drop_vars(
+            [var for var in ds.data_vars if var not in self.tracer_names],
+            errors="ignore",
+        )
+
+        if lat_dim in ds.coords and ds[lat_dim].ndim == 1:
+            ds = ds.sortby(lat_dim)
+        if lon_dim in ds.coords and ds[lon_dim].ndim == 1:
+            ds = ds.sortby(lon_dim)
+
+        return ds
+
+    def check_dataset(self, ds: xr.Dataset) -> None:
+        """Validate dimensions and MARBL tracer variables."""
+        for dim_key in ("latitude", "longitude", "time"):
+            dim_name = self.dim_names[dim_key]
+            if dim_name not in ds.dims:
+                raise ValueError(
+                    f"Dataset is missing required dimension '{dim_name}' ({dim_key})."
+                )
+
+        missing_tracers = [name for name in self.tracer_names if name not in ds]
+        if missing_tracers:
+            raise ValueError(
+                f"Dataset is missing required tracer variables: {missing_tracers}"
+            )
+
+    def select_relevant_times(self, ds: xr.Dataset) -> xr.Dataset:
+        """Select records within the simulation window, clamped to the product range."""
+        time_dim = self.dim_names["time"]
+
+        select_start = self.start_time
+        select_end = self.end_time
+
+        if self.start_time.year < RIVR2O_MIN_YEAR:
+            logging.info(
+                "Simulation start time is before %s; using RIVR2O values from %s.",
+                RIVR2O_MIN_YEAR,
+                RIVR2O_MIN_YEAR,
+            )
+            select_start = datetime(RIVR2O_MIN_YEAR, 1, 1)
+
+        if self.end_time.year > RIVR2O_MAX_YEAR:
+            logging.info(
+                "Simulation end time is after %s; using RIVR2O values from %s.",
+                RIVR2O_MAX_YEAR,
+                RIVR2O_MAX_YEAR,
+            )
+            select_end = datetime(RIVR2O_MAX_YEAR, 12, 31, 23, 59, 59)
+
+        if select_start > select_end:
+            boundary_year = (
+                RIVR2O_MIN_YEAR
+                if self.end_time.year < RIVR2O_MIN_YEAR
+                else RIVR2O_MAX_YEAR
+            )
+            target_time = rivr2o_boundary_time(boundary_year)
+            idx = int(np.abs(ds[time_dim].values - target_time).argmin())
+            return ds.isel({time_dim: [idx]})
+
+        # Annual files use mid-year (1 July) timestamps; match on calendar year.
+        start_year = select_start.year
+        end_year = select_end.year
+        in_range = (ds[time_dim].dt.year >= start_year) & (
+            ds[time_dim].dt.year <= end_year
+        )
+        if not bool(in_range.any()):
+            available = sorted({int(y) for y in ds[time_dim].dt.year.values})
+            raise ValueError(
+                f"No RIVR2O files cover the requested years {start_year}-{end_year}. "
+                f"Loaded files span years {available}. Provide RIVR2O files that "
+                "overlap the simulation window."
+            )
+        return ds.sel({time_dim: ds[time_dim].where(in_range, drop=True)})
+
+    def _adjust_lon_to_grid(self, lon: np.ndarray, *, straddle: bool) -> np.ndarray:
+        """Put query longitudes in the same convention as the RIVR2O lon coordinate."""
+        lon_dim = self.dim_names["longitude"]
+        grid_lon = self.ds[lon_dim]
+        if float(grid_lon.max()) > 180:
+            return np.where(lon < 0, lon + 360, lon)
+        if straddle:
+            return np.where(lon > 180, lon - 360, lon)
+        return lon
+
+    def _nearest_time_index(
+        self, time: datetime | np.datetime64 | np.integer | int | float | str
+    ) -> int:
+        """Index of the RIVR2O annual record closest to ``time``."""
+        time_dim = self.dim_names["time"]
+        target = rivr2o_coerce_time(time)
+        return int(np.argmin(np.abs(self.ds[time_dim].values - target)))
+
+    def _valid_dic_export_cell_indices(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Grid cells with positive DIC export (union over loaded years).
+
+        DIC spatial coverage is the same each year; DIN/DIP masks are not used.
+        """
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+        time_dim = self.dim_names["time"]
+
+        valid = (self.ds["DIC"] > 0).any(dim=time_dim)
+        lat_indices, lon_indices = np.where(valid.values)
+        if lat_indices.size == 0:
+            raise ValueError(
+                "No grid cells with positive RIVR2O DIC export found in the "
+                "loaded dataset."
+            )
+
+        grid_lats = self.ds[lat_dim].values[lat_indices]
+        grid_lons = self.ds[lon_dim].values[lon_indices]
+        return lat_indices, lon_indices, grid_lats, grid_lons
+
+    def sample_at_points(
+        self,
+        lon: xr.DataArray | np.ndarray | float,
+        lat: xr.DataArray | np.ndarray | float,
+        *,
+        straddle: bool = False,
+        method: str = "nearest",
+    ) -> xr.Dataset:
+        """Sample MARBL tracer exports at point locations.
+
+        For each query point, the nearest grid cell with positive ``DIC`` export
+        is used for **all tracers and all years** in the loaded dataset. Cell
+        choice does not depend on simulation year; exports vary in time only
+        along the ``time`` dimension of the returned sample.
+
+        Returns the full cell export at each point. ``forcing_concentrations``
+        applies ``discharge_partition_weights`` so rivers on the same cell share
+        export in proportion to discharge.
+
+        Parameters
+        ----------
+        lon, lat : array-like or scalar
+            Longitude and latitude of sample points in degrees.
+        straddle : bool, optional
+            If True, longitudes greater than 180° are converted to -180-180 before
+            sampling. If False, negative longitudes are converted to 0-360.
+        method : str, optional
+            Accepted for API compatibility; sampling always uses the nearest cell
+            with positive DIC export.
+
+        Returns
+        -------
+        xr.Dataset
+            Tracer variables with dimensions ``(time, points)`` when multiple
+            locations are provided, or ``(time,)`` for a scalar point.
+        """
+        del method  # nearest DIC export cell, not xarray interp at the mouth
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+
+        scalar_point = not np.ndim(lon)
+        query_lon = np.atleast_1d(np.asarray(lon, dtype=float))
+        query_lat = np.atleast_1d(np.asarray(lat, dtype=float))
+        query_lon = self._adjust_lon_to_grid(query_lon, straddle=straddle)
+
+        nearest_lat, nearest_lon = self.nearest_dic_cell_indices_for_points(
+            query_lon, query_lat, straddle=straddle
+        )
+
+        sampled = self.ds.isel(
+            {
+                lat_dim: xr.DataArray(nearest_lat, dims="points"),
+                lon_dim: xr.DataArray(nearest_lon, dims="points"),
+            }
+        )
+
+        if scalar_point:
+            return sampled.squeeze("points", drop=True)
+
+        return sampled
+
+    def nearest_dic_cell_indices_for_points(
+        self,
+        lon: np.ndarray,
+        lat: np.ndarray,
+        *,
+        straddle: bool = False,
+        river_names: list[str] | None = None,
+    ) -> tuple[list[int], list[int]]:
+        """RIVR2O ``(lat, lon)`` indices of the nearest cell with positive DIC export."""
+        from roms_tools.setup.utils import gc_dist
+
+        query_lon = np.atleast_1d(np.asarray(lon, dtype=float))
+        query_lat = np.atleast_1d(np.asarray(lat, dtype=float))
+        query_lon = self._adjust_lon_to_grid(query_lon, straddle=straddle)
+
+        lat_indices, lon_indices, grid_lats, grid_lons = (
+            self._valid_dic_export_cell_indices()
+        )
+
+        if river_names is not None and len(river_names) != len(query_lon):
+            raise ValueError(
+                "river_names must have the same length as lon/lat query points."
+            )
+
+        dist_warn_m = 100_000.0  # 100 km
+        nearest_lat = []
+        nearest_lon = []
+        for i, (q_lon, q_lat) in enumerate(zip(query_lon, query_lat, strict=True)):
+            dist = gc_dist(q_lon, q_lat, grid_lons, grid_lats)
+            nearest = int(np.argmin(dist))
+            min_dist_m = float(dist[nearest])
+            if min_dist_m > dist_warn_m:
+                label = river_names[i] if river_names is not None else f"point {i}"
+                logging.warning(
+                    "RIVR2O DIC export cell for %s is %.1f km from the river "
+                    "mouth (lat=%.4f, lon=%.4f); using grid cell lat_idx=%d, "
+                    "lon_idx=%d.",
+                    label,
+                    min_dist_m / 1000.0,
+                    q_lat,
+                    q_lon,
+                    int(lat_indices[nearest]),
+                    int(lon_indices[nearest]),
+                )
+            nearest_lat.append(int(lat_indices[nearest]))
+            nearest_lon.append(int(lon_indices[nearest]))
+        return nearest_lat, nearest_lon
+
+    def discharge_partition_weights(
+        self,
+        river_volume: xr.DataArray,
+        nearest_lat: list[int],
+        nearest_lon: list[int],
+    ) -> xr.DataArray:
+        """Scale RIVR2O export by discharge for shared cells and through the year.
+
+        For rivers on the same RIVR2O cell at each ``river_time`` step, export is
+        allocated in proportion to ``Q_i / sum(Q_j)``. Weights are then normalized
+        by the mean total discharge of that cell group over ``river_time`` so that
+        ``export * weight / Q_i`` gives the same concentration for co-located rivers
+        at every month, while months with higher discharge receive a larger share of
+        the annual export (more carbon flux when ``Q`` is high).
+        """
+        volume = river_volume
+        if "points" in volume.dims:
+            volume = volume.rename(points="nriver")
+
+        n_points = len(nearest_lat)
+        if volume.sizes["nriver"] != n_points:
+            raise ValueError(
+                f"river_volume nriver size {volume.sizes['nriver']} does not match "
+                f"{n_points} sample points."
+            )
+
+        cell_to_points: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for point_idx, (lat_idx, lon_idx) in enumerate(
+            zip(nearest_lat, nearest_lon, strict=True)
+        ):
+            cell_to_points[(lat_idx, lon_idx)].append(point_idx)
+
+        weights = xr.ones_like(volume, dtype=np.float64)
+        time_dim = "river_time"
+        shared_msgs: list[str] = []
+
+        def _weight_column(values: xr.DataArray, point_idx: int) -> None:
+            weights.values[:, point_idx] = np.asarray(values).reshape(-1)
+
+        for (lat_idx, lon_idx), point_indices in cell_to_points.items():
+            q_cell = volume.isel(nriver=point_indices)
+            if len(point_indices) == 1:
+                point_idx = point_indices[0]
+                q_series = volume.isel(nriver=point_idx, drop=True)
+                q_mean = q_series.mean(dim=time_dim, skipna=True)
+                cell_weight = (q_series / q_mean).where(q_mean > 0, other=1.0)
+                _weight_column(cell_weight, point_idx)
+                continue
+
+            q_sum = q_cell.sum(dim="nriver", min_count=1)
+            q_sum_mean = q_sum.mean(dim=time_dim, skipna=True)
+            n_shared = len(point_indices)
+            for point_idx in point_indices:
+                q_series = volume.isel(nriver=point_idx, drop=True)
+                cell_weight = q_series / q_sum_mean
+                cell_weight = cell_weight.where(q_sum_mean > 0, other=1.0 / n_shared)
+                _weight_column(cell_weight, point_idx)
+            shared_msgs.append(f"({lat_idx},{lon_idx})x{n_shared}")
+
+        if shared_msgs:
+            logging.info(
+                "Partitioning RIVR2O export by discharge among rivers sharing "
+                "grid cell(s): %s.",
+                ", ".join(shared_msgs),
+            )
+
+        return weights
+
+    @property
+    def requires_calendar_discharge_time(self) -> bool:
+        """RIVR2O BGC varies by calendar year and needs a calendar ``river_time`` axis."""
+        return True
+
+    @property
+    def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        return "calendar_year"
+
+    @staticmethod
+    def _align_concentration(
+        values: xr.DataArray, nriver_coord: xr.DataArray
+    ) -> xr.DataArray:
+        """Match sample dimensions to ``river_tracer`` (river_time, nriver)."""
+        if "points" in values.dims:
+            values = values.rename(points="nriver")
+        if "time" in values.dims:
+            values = values.rename(time="river_time")
+        values = values.assign_coords(nriver=nriver_coord)
+        dims = [d for d in ("river_time", "nriver") if d in values.dims]
+        return values.transpose(*dims)
+
+    def _export_to_concentration(
+        self,
+        export: xr.DataArray,
+        molar_mass_g: float,
+        river_volume: xr.DataArray,
+        target_time: xr.DataArray,
+        *,
+        partition_weight: xr.DataArray,
+    ) -> xr.DataArray:
+        """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
+        time_dim = target_time.dims[0]
+        source_time_dim = "time" if "time" in export.dims else export.dims[0]
+        rivr2o_times = xr.DataArray(
+            [
+                rivr2o_boundary_time(int(year))
+                for year in clamp_rivr2o_time(target_time).dt.year.values
+            ],
+            dims=[time_dim],
+            coords={time_dim: target_time.coords[time_dim]},
+        )
+        requested_times = np.unique(rivr2o_times.values)
+        source_times = export[source_time_dim].values
+        missing_times = requested_times[~np.isin(requested_times, source_times)]
+        if missing_times.size:
+            export = export.reindex(
+                {source_time_dim: np.concatenate([source_times, missing_times])},
+                fill_value=np.nan,
+            )
+        export = export.sel({source_time_dim: rivr2o_times})
+        export = self._align_concentration(export, river_volume.coords["nriver"])
+        export = export * partition_weight
+        mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
+        mmol_flux = mass_flux_g_s / molar_mass_g * 1000.0
+        return (mmol_flux / river_volume).astype(np.float32)
+
+    def forcing_concentrations(
+        self,
+        river_volume: xr.DataArray,
+        abs_time: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        *,
+        straddle: bool,
+        river_names: list[str],
+    ) -> dict[str, xr.DataArray]:
+        """Convert RIVR2O exports to MARBL river tracer concentrations (mmol m-3).
+
+        Samples export at each river mouth, applies ``discharge_partition_weights``,
+        converts annual mass export to concentration, and maps to ROMS tracer names:
+
+        - ``DIC`` = file ``DIC`` + ``DOC_l``
+        - ``DOC`` = ``DOC_sl`` + ``POC``
+        - ``DON`` and ``DOP`` from stoichiometric ratios of ``DOC_sl`` and ``POC``
+        - ``ALK`` = file ``DIC``; ``DIC_ALT_CO2`` and ``ALK_ALT_CO2`` mirror ``DIC``
+          and ``ALK``
+        - ``NO3`` and ``PO4`` from renamed file fields
+
+        Returns only the tracers listed above; other ROMS BGC tracers are supplied
+        by the fill source in ``RiverForcing``.
+        """
+        nearest_lat, nearest_lon = self.nearest_dic_cell_indices_for_points(
+            lons,
+            lats,
+            straddle=straddle,
+            river_names=river_names,
+        )
+        partition_weight = self.discharge_partition_weights(
+            river_volume, nearest_lat, nearest_lon
+        )
+        sampled = self.sample_at_points(lon=lons, lat=lats, straddle=straddle)
+        conc_kw = {"partition_weight": partition_weight}
+
+        dic_from_file = self._export_to_concentration(
+            sampled["DIC"],
+            _RIVR2O_MOLAR_MASS_G["DIC"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+        doc_l_conc = self._export_to_concentration(
+            sampled["DOC_l"],
+            _RIVR2O_MOLAR_MASS_G["DOC_l"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+        doc_sl_conc = self._export_to_concentration(
+            sampled["DOC_sl"],
+            _RIVR2O_MOLAR_MASS_G["DOC_sl"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+        poc_conc = self._export_to_concentration(
+            sampled["POC"],
+            _RIVR2O_MOLAR_MASS_G["POC"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+
+        dic_forcing = dic_from_file + doc_l_conc
+        doc_forcing = doc_sl_conc + poc_conc
+        alk_forcing = dic_from_file
+        don_forcing = doc_sl_conc * _DON_FROM_DOC_SL + poc_conc * _DON_FROM_POC
+        dop_forcing = doc_sl_conc * _DOP_FROM_DOC_SL + poc_conc * _DOP_FROM_POC
+
+        return {
+            "DIC": dic_forcing,
+            "DOC": doc_forcing,
+            "DON": don_forcing.astype(np.float32),
+            "DOP": dop_forcing.astype(np.float32),
+            "ALK": alk_forcing,
+            "DIC_ALT_CO2": dic_forcing,
+            "ALK_ALT_CO2": alk_forcing,
+            "NO3": self._export_to_concentration(
+                sampled["NO3"],
+                _RIVR2O_MOLAR_MASS_G["NO3"],
+                river_volume,
+                abs_time,
+                **conc_kw,
+            ),
+            "PO4": self._export_to_concentration(
+                sampled["PO4"],
+                _RIVR2O_MOLAR_MASS_G["PO4"],
+                river_volume,
+                abs_time,
+                **conc_kw,
+            ),
+        }
 
 
 def _decode_string(byte_array):

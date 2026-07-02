@@ -1,18 +1,25 @@
 import logging
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.datasets.river_datasets import (
     DaiRiverDataset,
+    RiverBGCDataset,
+    RiverDataset,
+    RiverTracerDefaultsDataset,
+    Rivr2oRiverBGCDataset,
+    fill_river_bgc_concentrations,
     get_indices_of_nearest_grid_cell_for_rivers,
 )
 from roms_tools.plot import (
@@ -25,11 +32,14 @@ from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
+    expand_monthly_climatology_time_axis,
     from_yaml,
     gc_dist,
     get_target_coords,
     get_tracer_defaults,
     get_variable_metadata,
+    interpolate_dynamic_bgc_by_calendar_year,
+    serialize_paths,
     substitute_nans_by_fillvalue,
     to_dict,
     validate_names,
@@ -39,8 +49,93 @@ from roms_tools.utils import save_datasets
 
 INCLUDE_ALL_RIVER_NAMES = "all"
 MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
+DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
+VALID_CONVERT_TO_CLIMATOLOGY = ("never", "if_any_missing", "always")
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
+
+
+class FillSource(BaseModel):
+    """Secondary BGC source supplying tracers missing from the primary result."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: Literal["CONSTANTS"] = "CONSTANTS"
+
+
+class BgcSourceModel(BaseModel, ABC):
+    """Base for validated BGC source configurations.
+
+    Each subclass is one valid BGC source: it declares its discriminator
+    ``name`` and knows how to build its dataset via ``build_dataset``. Adding a
+    source means adding a subclass and listing it in ``BgcSource`` — no changes
+    to ``RiverForcing`` dispatch logic.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    fill: FillSource = Field(default_factory=FillSource)
+
+    @abstractmethod
+    def build_dataset(
+        self, *, start_time: datetime, end_time: datetime
+    ) -> RiverBGCDataset:
+        """Instantiate the BGC dataset this source describes."""
+        ...
+
+
+class ConstantsBgcSource(BgcSourceModel):
+    """Constant default MARBL river tracer concentrations."""
+
+    name: Literal["CONSTANTS"] = "CONSTANTS"
+
+    def build_dataset(
+        self, *, start_time: datetime, end_time: datetime
+    ) -> RiverBGCDataset:
+        return RiverTracerDefaultsDataset()
+
+
+class Rivr2oBgcSource(BgcSourceModel):
+    """River BGC export from the RIVR2O product (one NetCDF file per year)."""
+
+    name: Literal["RIVR2O"] = "RIVR2O"
+    path: str | Path | list[str | Path]
+
+    def build_dataset(
+        self, *, start_time: datetime, end_time: datetime
+    ) -> RiverBGCDataset:
+        return Rivr2oRiverBGCDataset(
+            filename=self.path, start_time=start_time, end_time=end_time
+        )
+
+
+# Discriminated on ``name``: these variant classes are the registry of valid
+# BGC sources. Users pass a plain dict; the adapter validates and coerces it,
+# rejecting unknown names, missing RIVR2O paths, and unexpected keys.
+BgcSource: TypeAlias = Annotated[
+    ConstantsBgcSource | Rivr2oBgcSource, Field(discriminator="name")
+]
+_BGC_SOURCE_ADAPTER: TypeAdapter[ConstantsBgcSource | Rivr2oBgcSource] = TypeAdapter(
+    BgcSource
+)
+
+_FILL_DATASET_MAP: dict[str, type[RiverTracerDefaultsDataset]] = {
+    "CONSTANTS": RiverTracerDefaultsDataset,
+}
+
+
+def _mask_invalid_dynamic_bgc_concentrations(
+    dynamic: dict[str, xr.DataArray],
+    *,
+    fill_value: float | None = None,
+) -> dict[str, xr.DataArray]:
+    """Replace fill values, negative values, and non-finite values with NaN."""
+    masked: dict[str, xr.DataArray] = {}
+    for tracer_name, values in dynamic.items():
+        valid = np.isfinite(values) & (values >= 0)
+        if fill_value is not None:
+            valid = valid & (values != fill_value)
+        masked[tracer_name] = values.where(valid)
+    return masked
 
 
 @dataclass(kw_only=True)
@@ -77,6 +172,23 @@ class RiverForcing:
 
     include_bgc : bool, optional
         Whether to include BGC tracers. Defaults to `False`.
+    bgc_source : dict, optional
+        Primary river BGC dataset configuration. Only used when
+        ``include_bgc=True``. Keys include:
+
+          - ``name`` (str): Registered dataset identifier.
+          - ``path`` (str, Path, or list): File path(s), when required by the
+            dataset.
+          - ``fill`` (dict, optional): Secondary dataset with the same key
+            structure. Supplies tracers missing from the primary result, or
+            replaces non-finite primary values.
+
+        If omitted when ``include_bgc=True``, only constant default
+        concentrations are used.
+
+        Concentrations come from the primary dataset's
+        ``forcing_concentrations()``, then are merged with fill via
+        ``fill_river_bgc_concentrations``.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
     indices : dict[str, list[tuple[int, int]]], optional
@@ -111,6 +223,12 @@ class RiverForcing:
     """Determines when to compute climatology for river forcing."""
     include_bgc: bool = False
     """Whether to include BGC tracers."""
+    bgc_source: dict | BgcSource | None = None
+    """Primary and fill BGC dataset configuration.
+
+    Accepts a plain dict on input; normalized to a validated ``BgcSource`` model
+    (or ``None`` when ``include_bgc`` is False) during initialization.
+    """
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
@@ -123,8 +241,11 @@ class RiverForcing:
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
-    climatology: xr.Dataset = field(init=False, repr=False)
+    climatology: bool = field(init=False, repr=False)
     """Indicates whether the final river forcing is climatological."""
+    _bgc_dataset: RiverBGCDataset | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self):
         self._input_checks()
@@ -165,95 +286,219 @@ class RiverForcing:
         self.ds = ds
 
     def _input_checks(self):
-        if self.source is None:
-            self.source = {"name": "DAI"}
+        if self.convert_to_climatology not in VALID_CONVERT_TO_CLIMATOLOGY:
+            raise ValueError(
+                f'Invalid convert_to_climatology "{self.convert_to_climatology}". '
+                f"Valid options: {', '.join(VALID_CONVERT_TO_CLIMATOLOGY)}."
+            )
+        self.source = self._normalized_source()
+        self.bgc_source = self._normalized_bgc_source()
+        self._validate_indices()
 
-        if "name" not in self.source:
+    def _normalized_source(self) -> RawDataSource:
+        """Apply defaults to ``source`` and validate its required keys."""
+        source: RawDataSource = (
+            self.source if self.source is not None else {"name": "DAI"}
+        )
+
+        if "name" not in source:
             raise ValueError("`source` must include a 'name'.")
-        if "path" not in self.source:
-            if self.source["name"] != "DAI":
-                raise ValueError("`source` must include a 'path'.")
+        if "path" not in source and source["name"] != "DAI":
+            raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
-        self.source = {
-            **self.source,
-            "climatology": self.source.get("climatology", False),
-        }
+        return {**source, "climatology": source.get("climatology", False)}
 
-        # Check if 'indices' is provided and has the correct format
-        if self.indices is not None:
-            if not isinstance(self.indices, dict):
-                raise ValueError("`indices` must be a dictionary.")
+    def _normalized_bgc_source(self) -> BgcSource | None:
+        """Validate ``bgc_source`` into a typed model when BGC is enabled.
 
-            # Ensure the dictionary contains at least one river
-            if len(self.indices) == 0:
+        Returns ``None`` when BGC is disabled. Otherwise the input dict is
+        validated into the discriminated ``BgcSource`` union, which applies the
+        ``CONSTANTS`` default and rejects unknown names, missing RIVR2O paths,
+        and unexpected keys.
+        """
+        if not self.include_bgc:
+            if self.bgc_source is not None:
+                logging.warning(
+                    "`bgc_source` is ignored because `include_bgc` is False."
+                )
+            return None
+
+        raw: Any = (
+            self.bgc_source if self.bgc_source is not None else {"name": "CONSTANTS"}
+        )
+        if isinstance(raw, dict) and "path" in raw:
+            # Normalize Path -> str so the stored config round-trips through YAML.
+            raw = {**raw, "path": serialize_paths(raw["path"])}
+        return _BGC_SOURCE_ADAPTER.validate_python(raw)
+
+    def _validate_indices(self) -> None:
+        """Validate the format of a provided ``indices`` mapping, if any."""
+        if self.indices is None:
+            return
+        if not isinstance(self.indices, dict):
+            raise ValueError("`indices` must be a dictionary.")
+
+        # Ensure the dictionary contains at least one river
+        if len(self.indices) == 0:
+            raise ValueError(
+                "The provided 'indices' dictionary must contain at least one river."
+            )
+
+        for river_name, river_data in self.indices.items():
+            self._validate_river_index_entry(river_name, river_data)
+
+    def _validate_river_index_entry(self, river_name, river_data) -> None:
+        """Validate one ``indices`` entry: a river name and its list of locations."""
+        if not isinstance(river_name, str):
+            raise ValueError(f"River name `{river_name}` must be a string.")
+
+        if not isinstance(river_data, list):
+            raise ValueError(f"Data for river `{river_name}` must be a list of tuples.")
+
+        seen_tuples = set()
+        # Ensure each element in the list is a tuple of length 2
+        for idx_pair in river_data:
+            if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
                 raise ValueError(
-                    "The provided 'indices' dictionary must contain at least one river."
+                    f"Each item for river `{river_name}` must be a tuple of length 2 representing (eta_rho, xi_rho)."
                 )
 
-            for river_name, river_data in self.indices.items():
-                if not isinstance(river_name, str):
-                    raise ValueError(f"River name `{river_name}` must be a string.")
+            eta_rho, xi_rho = idx_pair
 
-                if not isinstance(river_data, list):
-                    raise ValueError(
-                        f"Data for river `{river_name}` must be a list of tuples."
-                    )
+            # Ensure both eta_rho and xi_rho are integers
+            if not isinstance(eta_rho, int):
+                raise ValueError(
+                    f"First element of tuple for river `{river_name}` must be an integer (eta_rho), but got {type(eta_rho)}."
+                )
+            if not isinstance(xi_rho, int):
+                raise ValueError(
+                    f"Second element of tuple for river `{river_name}` must be an integer (xi_rho), but got {type(xi_rho)}."
+                )
 
-                seen_tuples = set()
-                # Ensure each element in the list is a tuple of length 2
-                for idx_pair in river_data:
-                    if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
-                        raise ValueError(
-                            f"Each item for river `{river_name}` must be a tuple of length 2 representing (eta_rho, xi_rho)."
-                        )
+            # Check that eta_rho and xi_rho are within the valid range
+            if not (0 <= eta_rho < len(self.grid.ds.eta_rho)):
+                raise ValueError(
+                    f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho) - 1}]."
+                )
+            if not (0 <= xi_rho < len(self.grid.ds.xi_rho)):
+                raise ValueError(
+                    f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho) - 1}]."
+                )
 
-                    eta_rho, xi_rho = idx_pair
+            # Check for duplicate tuples for a single river
+            if idx_pair in seen_tuples:
+                raise ValueError(
+                    f"Duplicate location {idx_pair} found for river `{river_name}`."
+                )
+            seen_tuples.add(idx_pair)
 
-                    # Ensure both eta_rho and xi_rho are integers
-                    if not isinstance(eta_rho, int):
-                        raise ValueError(
-                            f"First element of tuple for river `{river_name}` must be an integer (eta_rho), but got {type(eta_rho)}."
-                        )
-                    if not isinstance(xi_rho, int):
-                        raise ValueError(
-                            f"Second element of tuple for river `{river_name}` must be an integer (xi_rho), but got {type(xi_rho)}."
-                        )
-
-                    # Check that eta_rho and xi_rho are within the valid range
-                    if not (0 <= eta_rho < len(self.grid.ds.eta_rho)):
-                        raise ValueError(
-                            f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho) - 1}]."
-                        )
-                    if not (0 <= xi_rho < len(self.grid.ds.xi_rho)):
-                        raise ValueError(
-                            f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho) - 1}]."
-                        )
-
-                    # Check for duplicate tuples for a single river
-                    if idx_pair in seen_tuples:
-                        raise ValueError(
-                            f"Duplicate location {idx_pair} found for river `{river_name}`."
-                        )
-                    seen_tuples.add(idx_pair)
-
-    def _get_data(self):
-        data_dict = {
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-        }
-
-        if self.source["name"] == "DAI":
-            if "path" in self.source.keys():
-                data_dict["filename"] = self.source["path"]
-            data = DaiRiverDataset(**data_dict)
-        else:
+    def _get_data(self) -> RiverDataset:
+        source = self.source
+        if source is None:
+            raise RuntimeError("source must be set.")
+        if source["name"] != "DAI":
             raise ValueError('Only "DAI" is a valid option for source["name"].')
 
-        return data
+        data_dict: dict[str, Any] = {
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "climatology": source["climatology"],
+        }
+        if "path" in source:
+            data_dict["filename"] = source["path"]
 
-    def _move_rivers_to_closest_coast(self, target_coords, data):
+        return DaiRiverDataset(**data_dict)
+
+    def _get_bgc_dataset(self) -> RiverBGCDataset:
+        """Instantiate the BGC dataset for the configured ``bgc_source``.
+
+        ``bgc_source`` is a validated ``BgcSourceModel`` (see ``_input_checks``),
+        which knows how to build its own dataset.
+        """
+        if self._bgc_dataset is not None:
+            return self._bgc_dataset
+
+        bgc_source = self.bgc_source
+        if not isinstance(bgc_source, BgcSourceModel):
+            raise RuntimeError("bgc_source must be a validated BgcSource model.")
+        self._bgc_dataset = bgc_source.build_dataset(
+            start_time=self.start_time, end_time=self.end_time
+        )
+        return self._bgc_dataset
+
+    def _get_fill_defaults(self) -> dict[str, float]:
+        """Load scalar fill concentrations for missing or non-finite BGC tracers."""
+        bgc_source = self.bgc_source
+        if not isinstance(bgc_source, BgcSourceModel):
+            raise RuntimeError("bgc_source must be a validated BgcSource model.")
+        return _FILL_DATASET_MAP[bgc_source.fill.name]().defaults
+
+    def _get_river_sample_coords(
+        self, river_names: list[str]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return mean lat/lon at each river's coastal injection point(s)."""
+        if self.indices is None:
+            raise RuntimeError("River indices are not set.")
+        indices = self.indices
+        lons = []
+        lats = []
+        for river_name in river_names:
+            cell_lons = []
+            cell_lats = []
+            for eta_rho, xi_rho in indices[river_name]:
+                cell_lons.append(float(self.grid.ds.lon_rho[eta_rho, xi_rho]))
+                cell_lats.append(float(self.grid.ds.lat_rho[eta_rho, xi_rho]))
+            lons.append(np.mean(cell_lons))
+            lats.append(np.mean(cell_lats))
+        return np.asarray(lons), np.asarray(lats)
+
+    def _set_river_tracer_values(
+        self, ds: xr.Dataset, tracer_name: str, values: xr.DataArray
+    ) -> None:
+        ntracer = int(np.where(ds.tracer_name.values == tracer_name)[0][0])
+        ds["river_tracer"].loc[{"ntracers": ntracer}] = values
+
+    def _apply_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
+        """Apply BGC tracer concentrations from the primary source, with fill."""
+        bgc_source = self.bgc_source
+        if not isinstance(bgc_source, BgcSourceModel):
+            raise RuntimeError("bgc_source must be a validated BgcSource model.")
+        bgc_data = self._get_bgc_dataset()
+        if isinstance(bgc_data, RiverTracerDefaultsDataset) and (
+            bgc_source.fill.name == "CONSTANTS"
+        ):
+            fill_defaults = bgc_data.defaults
+        else:
+            fill_defaults = self._get_fill_defaults()
+
+        river_names = [str(name) for name in ds.river_name.values]
+        lons, lats = self._get_river_sample_coords(river_names)
+        dynamic = bgc_data.forcing_concentrations(
+            ds["river_volume"],
+            ds["abs_time"],
+            lons,
+            lats,
+            straddle=self.grid.straddle,
+            river_names=river_names,
+        )
+        dynamic = _mask_invalid_dynamic_bgc_concentrations(
+            dynamic,
+            fill_value=bgc_data.fill_value,
+        )
+        if bgc_data.temporal_interpolation == "calendar_year":
+            dynamic = interpolate_dynamic_bgc_by_calendar_year(dynamic, ds["abs_time"])
+        merged = fill_river_bgc_concentrations(
+            dynamic,
+            fill_defaults,
+            ds.tracer_name.values,
+            ds["river_volume"],
+        )
+        for tracer_name, values in merged.items():
+            self._set_river_tracer_values(ds, tracer_name, values)
+        return ds
+
+    def _move_rivers_to_closest_coast(self, target_coords, data: RiverDataset):
         """Move river mouths to the closest coastal grid cell.
 
         This method computes the closest coastal grid point to each river mouth
@@ -267,8 +512,8 @@ class RiverForcing:
             - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
             - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
 
-        data : object
-            An object that contains the dataset and related variables. It must have the following attributes:
+        data : RiverDataset
+            A river dataset providing the following attributes:
             - `ds`: The dataset containing river information.
             - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
             - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
@@ -311,7 +556,7 @@ class RiverForcing:
 
         return river_indices
 
-    def _create_river_forcing(self, data):
+    def _create_river_forcing(self, data: RiverDataset):
         """Create river forcing data for volume flux and tracers (temperature, salinity,
         BGC tracers).
 
@@ -324,8 +569,8 @@ class RiverForcing:
 
         Parameters
         ----------
-        data : object
-            An object containing the necessary dataset and variables for river forcing creation. The object must have the following attributes:
+        data : RiverDataset
+            A river dataset providing the necessary data and variables for river forcing creation, with the following attributes:
             - `ds`: The dataset containing the river flux, ratio, and other related variables.
             - `var_names`: A dictionary mapping variable names (e.g., `"flux"`, `"ratio"`, `"name"`) to the corresponding variable names in the dataset.
             - `dim_names`: A dictionary mapping dimension names (e.g., `"time"`, `"station"`) to the corresponding dimension names in the dataset.
@@ -337,7 +582,10 @@ class RiverForcing:
             - `river_volume`: A `DataArray` representing the river volume flux (m³/s).
             - `river_tracer`: A `DataArray` representing tracer data for temperature, salinity and BGC tracers (if specified) for each river over time.
         """
-        if self.source["climatology"]:
+        source = self.source
+        if source is None:
+            raise RuntimeError("source must be set.")
+        if source["climatology"]:
             self.climatology = True
         else:
             if self.convert_to_climatology in ["never", "if_any_missing"]:
@@ -372,16 +620,25 @@ class RiverForcing:
         ds["river_volume"].attrs["long_name"] = "River volume flux"
         ds["river_volume"].attrs["units"] = "m^3/s"
 
-        # River tracers
-        ds["river_tracer"] = xr.zeros_like(
-            ds.river_time.astype(np.float32) * ds.ntracers * ds.nriver, dtype=np.float32
+        # River tracers (per-tracer units live on tracer_unit, not on this array)
+        target_shape = (
+            ds.sizes["river_time"],
+            ds.sizes["ntracers"],
+            ds.sizes["nriver"],
         )
-        ds["river_tracer"].attrs["long_name"] = "River tracer data"
+        ds["river_tracer"] = xr.DataArray(
+            np.zeros(target_shape, dtype=np.float32),
+            dims=("river_time", "ntracers", "nriver"),
+        )
+        ds["river_tracer"].attrs = {"long_name": "River tracer data"}
 
-        defaults = get_tracer_defaults()
-        for ntracer in range(ds.ntracers.size):
-            tracer_name = ds.tracer_name[ntracer].item()
-            ds["river_tracer"].loc[{"ntracers": ntracer}] = defaults[tracer_name]
+        if self.include_bgc:
+            ds["river_tracer"] = ds["river_tracer"] * np.nan
+        else:
+            defaults = get_tracer_defaults()
+            for ntracer in range(ds.ntracers.size):
+                tracer_name = ds.tracer_name[ntracer].item()
+                ds["river_tracer"].loc[{"ntracers": ntracer}] = defaults[tracer_name]
 
         # River names
         river_names = data.ds[data.var_names["name"]].rename(
@@ -403,6 +660,20 @@ class RiverForcing:
             ds, self.model_reference_date, self.climatology, time_name="river_time"
         )
         ds = ds.assign_coords({"river_time": time})
+
+        if self.climatology and self.bgc_source is not None:
+            bgc = self._get_bgc_dataset()
+            if bgc.requires_calendar_discharge_time:
+                ds = expand_monthly_climatology_time_axis(
+                    ds,
+                    self.start_time,
+                    self.end_time,
+                    self.model_reference_date,
+                    discharge_climatology_attr=DISCHARGE_CLIMATOLOGY_ATTR,
+                )
+
+        if self.include_bgc and self.bgc_source is not None:
+            ds = self._apply_bgc_tracers(ds)
 
         return ds
 
@@ -833,7 +1104,10 @@ class RiverForcing:
         else:
             colors = assign_category_colors(valid_river_names)
 
-        if self.climatology:
+        discharge_climatology = (
+            str(self.ds.attrs.get(DISCHARGE_CLIMATOLOGY_ATTR, "")).lower() == "true"
+        )
+        if self.climatology and not discharge_climatology:
             xticks = self.ds.month.values
             xlabel = "month"
         else:
@@ -870,7 +1144,7 @@ class RiverForcing:
 
         ax.set_xticks(xticks)
         ax.set_xlabel(xlabel)
-        if not self.climatology:
+        if discharge_climatology or not self.climatology:
             n = len(self.ds.river_time)
             ticks = self.ds.abs_time.values[:: n // 6 + 1]
             ax.set_xticks(ticks)

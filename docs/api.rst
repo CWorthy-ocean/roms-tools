@@ -49,6 +49,8 @@ River Forcing
    :toctree: generated/
 
    roms_tools.RiverForcing
+   roms_tools.datasets.river_datasets.DaiRiverDataset
+   roms_tools.datasets.river_datasets.GloFASRiverDataset
 
 CDR Forcing
 --------------------

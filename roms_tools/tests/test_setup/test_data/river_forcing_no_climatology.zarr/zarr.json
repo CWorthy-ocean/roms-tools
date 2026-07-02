@@ -118,7 +118,7 @@
             "separator": "/"
           }
         },
-        "fill_value": "NaN",
+        "fill_value": 0.0,
         "codecs": [
           {
             "name": "bytes",
@@ -168,7 +168,7 @@
             "separator": "/"
           }
         },
-        "fill_value": "NaN",
+        "fill_value": 0.0,
         "codecs": [
           {
             "name": "bytes",
@@ -201,7 +201,12 @@
         "shape": [
           7
         ],
-        "data_type": "string",
+        "data_type": {
+          "name": "fixed_length_utf32",
+          "configuration": {
+            "length_bytes": 60
+          }
+        },
         "chunk_grid": {
           "name": "regular",
           "configuration": {
@@ -219,8 +224,10 @@
         "fill_value": "",
         "codecs": [
           {
-            "name": "vlen-utf8",
-            "configuration": {}
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
           },
           {
             "name": "zstd",
@@ -259,7 +266,7 @@
             "separator": "/"
           }
         },
-        "fill_value": "NaN",
+        "fill_value": 0.0,
         "codecs": [
           {
             "name": "bytes",
@@ -289,8 +296,8 @@
       },
       "river_tracer": {
         "shape": [
-          4,
           2,
+          4,
           7
         ],
         "data_type": "float64",
@@ -298,8 +305,8 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              4,
               2,
+              4,
               7
             ]
           }
@@ -310,7 +317,7 @@
             "separator": "/"
           }
         },
-        "fill_value": "NaN",
+        "fill_value": 0.0,
         "codecs": [
           {
             "name": "bytes",
@@ -332,8 +339,8 @@
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "river_time",
           "ntracers",
+          "river_time",
           "nriver"
         ],
         "zarr_format": 3,
@@ -361,7 +368,7 @@
             "separator": "/"
           }
         },
-        "fill_value": "NaN",
+        "fill_value": 0.0,
         "codecs": [
           {
             "name": "bytes",
@@ -378,8 +385,8 @@
           }
         ],
         "attributes": {
-          "units": "m^3/s",
           "long_name": "River volume flux",
+          "units": "m^3/s",
           "coordinates": "abs_time river_name",
           "_FillValue": "AAAAAAAA+H8="
         },

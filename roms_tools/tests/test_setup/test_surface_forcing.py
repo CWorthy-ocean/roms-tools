@@ -291,9 +291,11 @@ def test_successful_initialization_with_global_data(
 def test_nan_detection_initialization_with_regional_data(
     grid_fixture, request, use_dask
 ):
-    """Test handling of NaN values during initialization with regional data.
+    """Test handling of a grid that extends beyond the source data coverage.
 
-    Ensures ValueError is raised if NaN values are detected in the dataset.
+    On the default (no-prefill xESMF) path, destination extrapolation would
+    otherwise silently fill out-of-coverage points, so SurfaceForcing raises a
+    coverage error for a grid that outruns the regional ERA5 data.
     """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
@@ -303,7 +305,7 @@ def test_nan_detection_initialization_with_regional_data(
     grid = request.getfixturevalue(grid_fixture)
 
     for coarse_grid_mode in ["always", "never"]:
-        with pytest.raises(ValueError, match="NaN values found"):
+        with pytest.raises(ValueError, match="extends beyond"):
             SurfaceForcing(
                 grid=grid,
                 coarse_grid_mode=coarse_grid_mode,
@@ -312,6 +314,105 @@ def test_nan_detection_initialization_with_regional_data(
                 source={"name": "ERA5", "path": fname},
                 use_dask=use_dask,
             )
+
+
+def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_dask):
+    """Physics default is no-prefill masked xESMF (scipy fallback); the legacy
+    scipy + 2d_lateral_fill path still works and produces different output.
+    """
+    from roms_tools.processing_methods import _xesmf_available
+
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+    common = dict(
+        grid=grid_that_straddles_dateline,
+        start_time=datetime(2020, 1, 31),
+        end_time=datetime(2020, 2, 2),
+        source={"name": "ERA5", "path": fname},
+        use_dask=use_dask,
+    )
+    fields = ["uwnd", "swrad", "Tair", "qair", "rain"]
+
+    # Default: no prefill; engine resolves to xESMF iff available.
+    default = SurfaceForcing(**common)
+    assert default.prefill is None
+    assert default._regrid.use_xesmf == _xesmf_available()
+    for var in fields:
+        assert not bool(default.ds[var].isnull().any())
+
+    # Legacy path (pre-change behavior) still works.
+    legacy = SurfaceForcing(**common, prefill="2d_lateral_fill", regrid_method="scipy")
+    assert legacy.prefill == "2d_lateral_fill"
+    assert not legacy._regrid.use_xesmf
+    for var in fields:
+        assert not bool(legacy.ds[var].isnull().any())
+
+    # The regrid/prefill choice actually changes the output (the "test that would
+    # have changed" for the new default).
+    if _xesmf_available():
+        assert not np.allclose(
+            default.ds["uwnd"].values, legacy.ds["uwnd"].values, equal_nan=True
+        )
+
+
+@pytest.mark.parametrize(
+    "source, sf_type, restoring_forces",
+    [
+        (
+            {"name": "UNIFIED", "path": "coarsened_UNIFIED_bgc_dataset.nc", "climatology": True},
+            "bgc",
+            None,
+        ),
+        (
+            {"name": "CESM_REGRIDDED", "path": "CESM_surface_global_test_data.nc"},
+            "bgc",
+            None,
+        ),
+        (
+            {"name": "UNIFIED", "path": "coarsened_UNIFIED_bgc_dataset.nc", "climatology": True},
+            "restoring",
+            ["sss"],
+        ),
+        (
+            {"name": "SODA", "path": "coarsened_OceanSODA_dataset.nc"},
+            "restoring",
+            ["sDIC", "sALK"],
+        ),
+    ],
+)
+def test_bgc_restoring_default_regrid_path(source, sf_type, restoring_forces, use_dask):
+    """bgc/restoring build NaN-free under the *default* masked-xESMF regrid.
+
+    The regression fixtures pin these to scipy + 2d_lateral_fill for byte-
+    reproducibility, so this guards the actual default path (which users get) --
+    in particular that each source's dim ordering / mask flows through xESMF
+    without error.
+    """
+    from roms_tools.processing_methods import _xesmf_available
+
+    grid = Grid(
+        nx=5, ny=5, size_x=1800, size_y=2400, center_lon=180, center_lat=61, rot=20
+    )
+    src = {**source, "path": Path(download_test_data(source["path"]))}
+    kwargs = dict(
+        grid=grid,
+        start_time=datetime(2020, 2, 1),
+        end_time=datetime(2020, 2, 1),
+        source=src,
+        type=sf_type,
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+    if restoring_forces is not None:
+        kwargs["restoring_forces"] = restoring_forces
+
+    # No regrid_method/prefill args -> the default (masked xESMF + extrapolation,
+    # scipy + nearest-neighbor fallback without xESMF).
+    sf = SurfaceForcing(**kwargs)
+    assert sf.prefill is None
+    assert sf._regrid.use_xesmf == _xesmf_available()
+    assert len(sf.ds.data_vars) > 0
+    for var in sf.ds.data_vars:
+        assert not bool(sf.ds[var].isnull().any()), f"{var} has NaNs"
 
 
 def test_no_longitude_intersection_initialization_with_regional_data(

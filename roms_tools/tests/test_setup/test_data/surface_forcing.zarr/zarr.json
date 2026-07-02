@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS surface forcing file created by ROMS-Tools",
-    "roms_tools_version": "3.6.1.dev26+g58d7c491b",
+    "roms_tools_version": "4.0.0a3.dev6+g18150aeee.d20260702",
     "start_time": "2020-02-01 00:00:00",
     "end_time": "2020-02-02 00:00:00",
     "source": "ERA5",
@@ -9,6 +9,9 @@
     "wind_dropoff": "False",
     "use_coarse_grid": "False",
     "model_reference_date": "2000-01-01 00:00:00",
+    "prefill": "None",
+    "regrid_method": "xesmf",
+    "extrap_method": "inverse_dist",
     "type": "physics"
   },
   "zarr_format": 3,
@@ -103,8 +106,9 @@
           }
         ],
         "attributes": {
-          "long_name": "downward long-wave (thermal) radiation",
           "units": "W/m^2",
+          "regrid_method": "bilinear",
+          "long_name": "downward long-wave (thermal) radiation",
           "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -159,6 +163,7 @@
         "attributes": {
           "long_name": "absolute humidity at 2m",
           "units": "kg/kg",
+          "regrid_method": "bilinear",
           "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -258,6 +263,7 @@
           }
         ],
         "attributes": {
+          "regrid_method": "bilinear",
           "long_name": "total precipitation",
           "units": "cm/day",
           "coordinates": "abs_time rad_time",
@@ -312,8 +318,9 @@
           }
         ],
         "attributes": {
-          "long_name": "downward short-wave (solar) radiation",
           "units": "W/m^2",
+          "regrid_method": "bilinear",
+          "long_name": "downward short-wave (solar) radiation",
           "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -366,8 +373,9 @@
           }
         ],
         "attributes": {
-          "long_name": "air temperature at 2m",
           "units": "degrees Celsius",
+          "regrid_method": "bilinear",
+          "long_name": "air temperature at 2m",
           "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },

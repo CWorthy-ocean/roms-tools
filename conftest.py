@@ -892,6 +892,9 @@ def bgc_surface_forcing(use_dask: bool) -> SurfaceForcing:
         source={"name": "CESM_REGRIDDED", "path": fname_bgc},
         type="bgc",
         coarse_grid_mode="never",
+        # scipy + 2d_lateral_fill reproduce the legacy AMG+scipy output byte-for-byte
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -921,6 +924,9 @@ def bgc_surface_forcing_from_climatology(use_dask: bool) -> SurfaceForcing:
         source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
+        # scipy + 2d_lateral_fill reproduce the legacy AMG+scipy output byte-for-byte
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -950,6 +956,9 @@ def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForci
         source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
+        # scipy + 2d_lateral_fill reproduce the legacy AMG+scipy output byte-for-byte
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 

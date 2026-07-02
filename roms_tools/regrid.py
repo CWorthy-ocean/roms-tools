@@ -1,14 +1,84 @@
 import warnings
 
+import numpy as np
 import xarray as xr
 import xgcm
 
 
-class LateralRegridToROMS:
-    """Handles lateral regridding of data onto a new spatial grid."""
+def _xesmf_extrap_kwargs(method: str | None, kwargs: dict | None) -> dict:
+    """Map friendly extrapolation kwargs to ``xe.Regridder`` ``extrap_*`` kwargs.
 
-    def __init__(self, target_coords, source_dim_names):
-        """Initialize target grid coordinates and names for grid dimensions.
+    Both the destination-side extrapolation in :class:`LateralRegridToROMS` and
+    the source-on-source fill in ``LatLonDataset.apply_xesmf_source_fill`` accept the
+    same user-facing keys; this centralizes the translation to xESMF's
+    ``extrap_num_levels`` / ``extrap_num_src_pnts`` / ``extrap_dist_exponent``.
+
+    The set of keys each method accepts comes from the single-source-of-truth
+    registry (``METHOD_META``); each user-facing key ``k`` maps to ``extrap_<k>``.
+
+    Parameters
+    ----------
+    method : str or None
+        The xESMF extrapolation method (``"inverse_dist"``, ``"nearest_s2d"``,
+        ``"creep_fill"``). ``None`` (or any method with no tunable kwargs) returns
+        an empty mapping.
+    kwargs : dict or None
+        User-facing kwargs: ``num_levels`` (creep_fill), ``num_src_pnts`` /
+        ``dist_exponent`` (inverse_dist). ``None``/missing values are skipped so
+        xESMF defaults apply.
+
+    Returns
+    -------
+    dict
+        Keyword arguments to splat into ``xe.Regridder(...)``.
+    """
+    from roms_tools.processing_methods import METHOD_META
+
+    if not method:
+        return {}
+    kwargs = kwargs or {}
+    spec = METHOD_META.get(method)
+    allowed_keys = spec.allowed_kwargs if spec is not None else frozenset()
+    out: dict = {}
+    for key in allowed_keys:
+        value = kwargs.get(key)
+        if value is not None:
+            out[f"extrap_{key}"] = value
+    return out
+
+
+class LateralRegridToROMS:
+    """Handles lateral regridding of data onto a ROMS grid.
+
+    Two modes are supported:
+
+    * **scipy interpolation (default, ``use_xesmf=False``):** uses
+      :meth:`xarray.DataArray.interp` with the requested ``method``. This is the
+      historical behavior and requires no optional dependencies. The caller is
+      responsible for filling NaNs in the source beforehand (otherwise NaNs
+      propagate into the regridded field).
+    * **xESMF bilinear (``use_xesmf=True``):** uses ``xesmf`` bilinear
+      interpolation with an ``extrap_method`` (default ``"inverse_dist"``) to
+      fill targets whose source neighbors are all masked/out of range, producing
+      NaN-free output without any separate fill step. When a ``source_mask`` is
+      supplied (for
+      sources that still contain land NaNs, e.g. GLORYS), it is applied as
+      ``mask_in`` so the bilinear weights are renormalized over only the valid
+      ocean cells; when omitted (for already NaN-free sources), plain bilinear
+      is used. Requires ``xesmf`` (install ``roms-tools`` via conda).
+    """
+
+    def __init__(
+        self,
+        target_coords,
+        source_dim_names,
+        source_ds=None,
+        use_xesmf=False,
+        source_mask=None,
+        extrap_method="inverse_dist",
+        extrap_kwargs=None,
+    ):
+        """Initialize the regridder.
 
         Parameters
         ----------
@@ -17,38 +87,154 @@ class LateralRegridToROMS:
             the longitude and latitude values of the target grid.
         source_dim_names : dict
             Dictionary specifying names for the latitude and longitude dimensions,
-            typically using keys like "latitude" and "longitude" to align with the dataset conventions.
+            typically using keys "latitude" and "longitude".
+        source_ds : xarray.Dataset, optional
+            The source dataset. Required when ``use_xesmf=True`` (used for the
+            source latitude/longitude coordinates).
+        use_xesmf : bool, optional
+            If True, use xESMF masked bilinear regridding with nearest-neighbor
+            extrapolation. If False (default), use scipy interpolation via
+            :meth:`xarray.DataArray.interp`.
+        source_mask : xarray.DataArray, optional
+            A 2D source ocean mask (1 = valid/ocean, 0 = masked/land) with the
+            source latitude/longitude dimensions, used as ``mask_in`` in the
+            xESMF path so bilinear weights are renormalized over valid ocean
+            cells. Pass the field-appropriate mask (e.g. ``ds["mask"]`` for
+            tracers, ``ds["mask_vel"]`` for velocities) for sources that still
+            contain land NaNs. When omitted, plain (unmasked) bilinear is used —
+            appropriate for sources that are already NaN-free (e.g. a source
+            laterally filled during preprocessing).
+        extrap_method : str, optional
+            xESMF extrapolation method used to fill target points whose source
+            neighbors are all masked/out of range, guaranteeing NaN-free output.
+            Options are ``"inverse_dist"`` (default; inverse-distance-weighted
+            average of the nearest source points, giving smoothly varying values)
+            and ``"nearest_s2d"`` (single nearest source point). Only used in the
+            xESMF path. Pass ``None`` to disable extrapolation (plain bilinear),
+            e.g. when the source has already been pre-filled and is NaN-free.
+        extrap_kwargs : dict, optional
+            Method-specific tuning for ``extrap_method``: ``num_src_pnts`` /
+            ``dist_exponent`` for ``"inverse_dist"``, ``num_levels`` for
+            ``"creep_fill"``. Translated to xESMF's ``extrap_*`` kwargs via
+            :func:`_xesmf_extrap_kwargs`. Only used in the xESMF path.
 
-        Attributes
-        ----------
-        coords : dict
-            Maps the dimension names to the corresponding latitude and longitude
-            DataArrays, providing easy access to target grid coordinates.
+        Raises
+        ------
+        ImportError
+            If ``use_xesmf=True`` but xESMF is not installed.
+        ValueError
+            If ``use_xesmf=True`` but ``source_ds`` is not provided.
         """
-        self.coords = {
-            source_dim_names["latitude"]: target_coords["lat"],
-            source_dim_names["longitude"]: target_coords["lon"],
-        }
+        self.use_xesmf = use_xesmf
+
+        if not use_xesmf:
+            # Backward-compatible scipy interpolation path.
+            self.coords = {
+                source_dim_names["latitude"]: target_coords["lat"],
+                source_dim_names["longitude"]: target_coords["lon"],
+            }
+            return
+
+        if source_ds is None:
+            raise ValueError(
+                "source_ds must be provided when use_xesmf=True (needed for the "
+                "source latitude/longitude coordinates)."
+            )
+        try:
+            import xesmf as xe
+        except ImportError:
+            raise ImportError(
+                "xesmf is required for masked regridding. Please install `roms-tools` via conda, which includes xesmf."
+            )
+
+        lat_name = source_dim_names["latitude"]
+        lon_name = source_dim_names["longitude"]
+        source_lat = np.asarray(source_ds[lat_name].values)
+        source_lon = np.asarray(source_ds[lon_name].values)
+
+        ds_in = xr.Dataset(
+            {
+                "lat": xr.DataArray(source_lat, dims="lat"),
+                "lon": xr.DataArray(source_lon, dims="lon"),
+            }
+        )
+
+        # xESMF reads masking from a variable named "mask" in the input dataset
+        # (1 = valid, 0 = masked); masked cells are excluded and the bilinear
+        # weights are renormalized over the remaining valid cells. We add it only
+        # when the caller supplies a ``source_mask`` (sources that still contain
+        # land NaNs, e.g. GLORYS/CESM). Sources that are already NaN-free (e.g.
+        # the pre-filled UNIFIED BGC dataset) pass ``source_mask=None`` and use
+        # plain bilinear, which is equivalent to an all-ocean mask.
+        if source_mask is not None:
+            # Rebuild as a bare (lat, lon) DataArray so its coordinates can't
+            # conflict with the explicit lat/lon axes assigned to ``ds_in``.
+            ds_in["mask"] = xr.DataArray(
+                source_mask.transpose(lat_name, lon_name).values.astype(np.int32),
+                dims=("lat", "lon"),
+            )
+
+        # A 1D target (e.g. a ROMS boundary line where lat and lon share a single
+        # dimension) is a line of points. We do NOT use ``locstream_out=True``
+        # here: xESMF silently ignores ``extrap_method`` for locstream output, so
+        # boundary points whose source neighbors are all masked would be left as
+        # NaN. Instead we promote the line to a (1, N) structured grid (adding a
+        # singleton ``_dummy_y`` dimension), which keeps nearest-neighbor
+        # extrapolation working, and squeeze that dimension back out in ``apply``.
+        # A 2D (curvilinear) target is already a structured grid.
+        self._dummy_dim = None
+        ds_out = xr.Dataset()
+        if target_coords["lat"].ndim == 1:
+            self._dummy_dim = "_dummy_y"
+            line_dim = target_coords["lat"].dims[0]
+            ds_out["lat"] = xr.DataArray(
+                target_coords["lat"].values[None, :], dims=(self._dummy_dim, line_dim)
+            )
+            ds_out["lon"] = xr.DataArray(
+                target_coords["lon"].values[None, :], dims=(self._dummy_dim, line_dim)
+            )
+        else:
+            ds_out["lat"] = target_coords["lat"]
+            ds_out["lon"] = target_coords["lon"]
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+            self.regridder = xe.Regridder(
+                ds_in,
+                ds_out,
+                method="bilinear",
+                unmapped_to_nan=True,
+                extrap_method=extrap_method,
+                **_xesmf_extrap_kwargs(extrap_method, extrap_kwargs),
+            )
 
     def apply(self, da, method="linear"):
-        """Fills missing values and regrids the variable.
+        """Regrid the provided data array.
 
         Parameters
         ----------
         da : xarray.DataArray
-            Input data to fill and regrid.
-        method : str
-            Interpolation method to use.
+            The data array to regrid.
+        method : str, optional
+            Interpolation method for the scipy path. Ignored when
+            ``use_xesmf=True``. Default is "linear".
 
         Returns
         -------
         xarray.DataArray
-            Regridded data with filled values.
+            The regridded data array.
         """
-        regridded = da.interp(self.coords, method=method).drop_vars(
-            list(self.coords.keys())
-        )
-        return regridded
+        if self.use_xesmf:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+                regridded = self.regridder(da, keep_attrs=True)
+            if self._dummy_dim is not None:
+                # Remove the singleton dimension added to promote a 1D boundary
+                # line to a (1, N) structured target grid.
+                regridded = regridded.isel({self._dummy_dim: 0})
+            return regridded
+
+        return da.interp(self.coords, method=method).drop_vars(list(self.coords.keys()))
 
 
 class LateralRegridFromROMS:

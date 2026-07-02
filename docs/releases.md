@@ -42,6 +42,7 @@
 * `SurfaceForcing` gains the same regrid/prefill controls as `BoundaryForcing` (all types): `regrid_method` (`"auto"` (default; xESMF if installed else scipy), `"xesmf"`, `"scipy"`), `prefill` (with `prefill_kwargs`; `None` default = no source fill, or `"2d_lateral_fill"`/`"nearest_neighbor"`/`"inverse_dist"`/`"nearest_s2d"`/`"creep_fill"`), and `extrap_method` (with `extrap_kwargs`) for the default no-prefill path. These are recorded in the saved dataset metadata and round-trip through `to_yaml`/`from_yaml`. ([#XXX](https://github.com/CWorthy-ocean/roms-tools/pull/XXX))
 * `SurfaceForcing` with `correct_radiation=True` now scales to long (multi-year) records: the ERA5 radiation-correction climatology is interpolated onto the forcing time axis in chunks, so the correction no longer materializes the full `(time, y, x)` field at once. This also keeps per-timestep access (e.g. validation) cheap. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
 * New "Downloading ERA5 data" section in the datasets documentation shows how to pre-save ERA5 surface forcing (one file per day, NetCDF or Zarr) from the analysis-ready ARCO cloud store for offline/local use. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
+* Added support for the GloFAS v4.0 global river discharge dataset as an alternative to Dai & Trenberth, along with performance improvements and bug fixes to the river forcing pipeline. ([#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
 
 
 ### Internal Changes
@@ -84,6 +85,7 @@
 * Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region. ([#577](https://github.com/CWorthy-ocean/roms-tools/pull/577))
 * Fix timer logging messages during mask generation so durations render correctly when closing narrow channels and filling enclosed basins
 * Fix for hanging when using the default of streaming from Copernicus for GLORYS output. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
+* Fix for river forcing indexing, sorting and plotting so that river_forcing.plot() and river_forcing.plot_locations() correctly shows top 20 largest rivers when plotting.
 
 ## v3.5.0
 

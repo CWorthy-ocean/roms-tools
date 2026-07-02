@@ -38,9 +38,8 @@
     }
   ],
   "attributes": {
-    "units": "W/m^2",
-    "regrid_method": "bilinear",
     "long_name": "downward long-wave (thermal) radiation",
+    "units": "W/m^2",
     "coordinates": "abs_time rad_time",
     "_FillValue": "AAAAAAAA+H8="
   },

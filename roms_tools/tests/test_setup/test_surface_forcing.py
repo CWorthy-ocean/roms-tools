@@ -293,9 +293,10 @@ def test_nan_detection_initialization_with_regional_data(
 ):
     """Test handling of a grid that extends beyond the source data coverage.
 
-    On the default (no-prefill xESMF) path, destination extrapolation would
-    otherwise silently fill out-of-coverage points, so SurfaceForcing raises a
-    coverage error for a grid that outruns the regional ERA5 data.
+    Both regrid paths reject a grid that outruns the regional ERA5 data, with
+    different messages: the default (no-prefill xESMF) path raises an explicit
+    coverage error ("extends beyond ...") before extrapolating, while the scipy
+    fallback (no xESMF) propagates NaNs and is caught by the NaN check.
     """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
@@ -305,7 +306,7 @@ def test_nan_detection_initialization_with_regional_data(
     grid = request.getfixturevalue(grid_fixture)
 
     for coarse_grid_mode in ["always", "never"]:
-        with pytest.raises(ValueError, match="extends beyond"):
+        with pytest.raises(ValueError, match="extends beyond|NaN values found"):
             SurfaceForcing(
                 grid=grid,
                 coarse_grid_mode=coarse_grid_mode,

@@ -38,7 +38,6 @@
     }
   ],
   "attributes": {
-    "regrid_method": "bilinear",
     "long_name": "total precipitation",
     "units": "cm/day",
     "coordinates": "abs_time rad_time",

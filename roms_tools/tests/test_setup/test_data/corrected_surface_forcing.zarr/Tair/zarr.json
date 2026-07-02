@@ -38,9 +38,8 @@
     }
   ],
   "attributes": {
-    "units": "degrees Celsius",
-    "regrid_method": "bilinear",
     "long_name": "air temperature at 2m",
+    "units": "degrees Celsius",
     "coordinates": "abs_time rad_time",
     "_FillValue": "AAAAAAAA+H8="
   },

@@ -745,6 +745,11 @@ def surface_forcing(use_dask: bool) -> SurfaceForcing:
         source={"name": "ERA5", "path": fname},
         correct_radiation=False,
         coarse_grid_mode="never",
+        # Pin to scipy + 2d_lateral_fill so this regression fixture is deterministic
+        # across platforms (the xESMF default varies by version, and CI runs a
+        # no-xESMF leg); the default path is covered by structural tests.
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -804,6 +809,9 @@ def coarse_surface_forcing(use_dask: bool) -> SurfaceForcing:
         coarse_grid_mode="always",
         source={"name": "ERA5", "path": fname},
         correct_radiation=False,
+        # Pin to scipy + 2d_lateral_fill for deterministic cross-platform regression.
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -835,6 +843,9 @@ def corrected_surface_forcing(use_dask: bool) -> SurfaceForcing:
         source={"name": "ERA5", "path": fname},
         correct_radiation=True,
         coarse_grid_mode="never",
+        # Pin to scipy + 2d_lateral_fill for deterministic cross-platform regression.
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 

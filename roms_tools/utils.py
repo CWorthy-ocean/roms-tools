@@ -1453,9 +1453,7 @@ def _interpolate_in_time_blocks(
         n = targets.shape[0]
         blocks = (targets[i : i + block_size] for i in range(0, n, block_size))
 
-    pieces = [
-        source.interp(**{time_dim: block}, method="linear") for block in blocks
-    ]
+    pieces = [source.interp(**{time_dim: block}, method="linear") for block in blocks]
     return xr.concat(pieces, dim=concat_dim)
 
 

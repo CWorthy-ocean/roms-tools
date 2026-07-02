@@ -358,7 +358,11 @@ def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_da
     "source, sf_type, restoring_forces",
     [
         (
-            {"name": "UNIFIED", "path": "coarsened_UNIFIED_bgc_dataset.nc", "climatology": True},
+            {
+                "name": "UNIFIED",
+                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "climatology": True,
+            },
             "bgc",
             None,
         ),
@@ -368,7 +372,11 @@ def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_da
             None,
         ),
         (
-            {"name": "UNIFIED", "path": "coarsened_UNIFIED_bgc_dataset.nc", "climatology": True},
+            {
+                "name": "UNIFIED",
+                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "climatology": True,
+            },
             "restoring",
             ["sss"],
         ),

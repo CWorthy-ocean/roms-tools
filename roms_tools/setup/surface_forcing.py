@@ -803,9 +803,7 @@ class SurfaceForcing:
         # result stays chunked along time: this bounds peak memory for long forcing
         # records and makes slicing a few time steps (e.g. validation) cheap, instead
         # of producing a single (N, ny, nx) chunk.
-        interp_chunk_size = (
-            _DEFAULT_CLIMATOLOGY_TIME_CHUNK if self.use_dask else None
-        )
+        interp_chunk_size = _DEFAULT_CLIMATOLOGY_TIME_CHUNK if self.use_dask else None
         swr_corr_factor = interpolate_from_climatology(
             field=swr_12,
             time_dim=time_dim,

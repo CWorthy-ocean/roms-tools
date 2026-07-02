@@ -19,7 +19,7 @@
       "separator": "/"
     }
   },
-  "fill_value": "NaN",
+  "fill_value": 0.0,
   "codecs": [
     {
       "name": "bytes",
@@ -36,8 +36,8 @@
     }
   ],
   "attributes": {
-    "units": "m^3/s",
     "long_name": "River volume flux",
+    "units": "m^3/s",
     "coordinates": "abs_time month river_name",
     "_FillValue": "AAAAAAAA+H8="
   },

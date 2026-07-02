@@ -9,6 +9,8 @@ import xarray as xr
 from roms_tools.datasets.river_datasets import (
     RIVR2O_FILL_VALUE,
     SECONDS_PER_YEAR,
+    DaiRiverDataset,
+    GloFASRiverDataset,
     RiverDataset,
     Rivr2oRiverBGCDataset,
     fill_river_bgc_concentrations,
@@ -16,6 +18,7 @@ from roms_tools.datasets.river_datasets import (
 )
 from roms_tools.setup.river_forcing import _mask_invalid_dynamic_bgc_concentrations
 from roms_tools.setup.utils import interpolate_dynamic_bgc_by_calendar_year
+from roms_tools.tests.river_test_utils import write_dai_file, write_glofas_file
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 
@@ -39,7 +42,10 @@ class TestRiverDataset:
             "ratio": (["time", "station"], np.random.rand(1, 3)),
             "name": (["station"], ["Amazon", "Nile", "Amazon"]),  # duplicate
         }
-        coords = {"station": [0, 1, 2], "time": [0]}
+        coords = {
+            "station": [0, 1, 2],
+            "time": np.array(["2000-01-01"], dtype="datetime64[ns]"),
+        }
         ds = xr.Dataset(data, coords=coords)
 
         # Write to temporary NetCDF file
@@ -320,8 +326,8 @@ class TestRivr2oRiverBGCDataset:
                 lat=[-50.0],
                 river_names=["FarRiver"],
             )
-        assert "RIVR2O DIC export cell for FarRiver" in caplog.text
-        assert "km from the river mouth" in caplog.text
+        assert "FarRiver" in caplog.text
+        assert "km from nearest coastal cell" in caplog.text
 
         near_path = tmp_path / "rivr2o_riverinputs_2001.nc"
         near_tracer_values = {
@@ -846,3 +852,276 @@ class TestRivr2oRiverBGCDatasetFromTestData:
         )
         assert np.isfinite(concentrations["DIC"].values).all()
         assert (concentrations["DIC"].values > 0).any()
+
+
+class TestSortByRiverVolume:
+    @pytest.fixture
+    def river_dataset_with_vol(self):
+        ds_obj = RiverDataset.__new__(RiverDataset)
+        ds_obj.opt_var_names = {"vol": "vol_stn"}
+        ds_obj.dim_names = {"station": "station", "time": "time"}
+        return ds_obj
+
+    def _make_ds(self, vol_values):
+        n = len(vol_values)
+        return xr.Dataset(
+            {
+                "flux": (["time", "station"], np.ones((1, n))),
+                "vol_stn": (["station"], np.array(vol_values, dtype=np.float32)),
+            },
+            coords={"station": np.arange(n), "time": [0]},
+        )
+
+    def test_sort_descending(self, river_dataset_with_vol):
+        ds = self._make_ds([10.0, 1.0, 5.0])
+        ds_out = river_dataset_with_vol.sort_by_river_volume(ds)
+        np.testing.assert_array_equal(ds_out.station.values, [0, 2, 1])
+
+    def test_sort_equal_volumes(self, river_dataset_with_vol):
+        ds = self._make_ds([5.0, 5.0, 5.0])
+        ds_out = river_dataset_with_vol.sort_by_river_volume(ds)
+        np.testing.assert_array_equal(ds_out.station.values, [0, 1, 2])
+
+    def test_sort_missing_vol_var(self, caplog):
+        # When opt_var_names has no "vol" key, a warning is logged and the
+        # dataset is returned unchanged.
+        ds_obj = RiverDataset.__new__(RiverDataset)
+        ds_obj.opt_var_names = {}
+        ds_obj.dim_names = {"station": "station", "time": "time"}
+        ds = xr.Dataset(
+            {"flux": (["time", "station"], np.ones((1, 3)))},
+            coords={"station": [0, 1, 2], "time": [0]},
+        )
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            ds_out = ds_obj.sort_by_river_volume(ds)
+        assert "vol" in caplog.text.lower()
+        assert ds_out.identical(ds)
+
+    def test_sort_empty_dataset(self, river_dataset_with_vol):
+        ds = xr.Dataset(
+            {
+                "flux": (["time", "station"], np.ones((1, 0))),
+                "vol_stn": (["station"], np.array([], dtype=np.float32)),
+            },
+            coords={"station": np.array([], dtype=int), "time": [0]},
+        )
+        ds_out = river_dataset_with_vol.sort_by_river_volume(ds)
+        assert ds_out.sizes["station"] == 0
+
+
+class TestGloFASRiverDataset:
+    def test_default_var_names(self):
+        # Access dataclass field defaults via the class itself
+        var_names = GloFASRiverDataset.__dataclass_fields__[
+            "var_names"
+        ].default_factory()
+        assert var_names["flux"] == "FLOW"
+        assert var_names["name"] == "riv_name"
+        assert var_names["latitude"] == "lat_mou"
+        assert var_names["longitude"] == "lon_mou"
+        assert var_names["ratio"] == "ratio_m2s"
+
+    def test_default_opt_var_names(self):
+        opt = GloFASRiverDataset.__dataclass_fields__["opt_var_names"].default_factory()
+        assert opt == {"vol": "vol_stn"}
+
+    def test_snap_buffer_default(self):
+        assert GloFASRiverDataset.COAST_SNAP_BUFFER_KM == 50.0
+
+    def test_cf_datetime_decoding(self):
+        ds_obj = GloFASRiverDataset.__new__(GloFASRiverDataset)
+        ds_obj.dim_names = {"time": "time", "station": "station"}
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        ds = xr.Dataset({"time": ("time", times)})
+        result = ds_obj.add_time_info(ds)
+        assert result["time"].values[0] == np.datetime64("1998-01-15", "ns")
+        assert result["time"].values[1] == np.datetime64("1998-02-15", "ns")
+
+    def test_post_init_loads_glofas_format(self, tmp_path):
+        path = tmp_path / "glofas.nc"
+        write_glofas_file(
+            path,
+            lats=np.array([65.0, 65.0, 64.0], dtype=np.float32),
+            lons=np.array([-20.0, -20.0, -21.0], dtype=np.float32),
+            flow=np.tile(np.array([100.0, 200.0, 300.0], dtype=np.float32), (4, 1)),
+            river_names=["RiverA", "RiverA", "RiverB"],
+            times=np.array(
+                ["1997-11-15", "1998-01-15", "1998-02-15", "1998-06-15"],
+                dtype="datetime64[ns]",
+            ),
+            vol=np.array([100.0, 200.0, 300.0], dtype=np.float32),
+        )
+        data = GloFASRiverDataset(
+            filename=path,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+
+        # Variable mapping: FLOW/riv_name/vol_stn loaded under var_names/opt_var_names.
+        assert data.var_names["flux"] in data.ds
+        assert data.var_names["name"] in data.ds
+        assert data.opt_var_names["vol"] in data.ds
+
+        # Dedup: "RiverA" appears twice in the source -> "RiverA_1"/"RiverA_2".
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert names.count("RiverA_1") == 1
+        assert names.count("RiverA_2") == 1
+        assert names.count("RiverB") == 1
+
+        # Time subsetting: 1997-11-15 and 1998-06-15 are well outside the
+        # [start_time - 1 day, end_time + 1 day] window applied in load_data.
+        time_dim = data.dim_names["time"]
+        assert len(data.ds[time_dim]) == 2
+        retained = data.ds[time_dim].values
+        assert np.datetime64("1997-11-15") not in retained
+        assert np.datetime64("1998-06-15") not in retained
+
+        # CF time decoded straight to datetime64, no manual YYYYMM parsing.
+        assert np.issubdtype(data.ds[time_dim].dtype, np.datetime64)
+
+
+class TestDaiRiverDataset:
+    def test_snap_buffer_default(self):
+        assert DaiRiverDataset.COAST_SNAP_BUFFER_KM == 200.0
+
+    def test_default_var_names(self):
+        var_names = DaiRiverDataset.__dataclass_fields__["var_names"].default_factory()
+        assert var_names["flux"] == "FLOW"
+        assert var_names["name"] == "riv_name"
+        assert var_names["latitude"] == "lat_mou"
+        assert var_names["longitude"] == "lon_mou"
+        assert var_names["ratio"] == "ratio_m2s"
+
+
+class TestExtractRelevantRivers:
+    """RiverDataset.extract_relevant_rivers / GloFASRiverDataset.extract_relevant_rivers."""
+
+    @staticmethod
+    def _target_coords(lon2d, lat2d, mask2d=None, straddle=False):
+        return {
+            "lon": xr.DataArray(
+                np.asarray(lon2d, dtype=float), dims=("eta_rho", "xi_rho")
+            ),
+            "lat": xr.DataArray(
+                np.asarray(lat2d, dtype=float), dims=("eta_rho", "xi_rho")
+            ),
+            "straddle": straddle,
+            "mask": (
+                xr.DataArray(np.asarray(mask2d), dims=("eta_rho", "xi_rho"))
+                if mask2d is not None
+                else None
+            ),
+        }
+
+    @staticmethod
+    def _glofas_dataset(tmp_path, lats, lons, names, n_times=2):
+        path = tmp_path / "glofas.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")[:n_times]
+        flow = np.tile(np.full(len(lats), 100.0, dtype=np.float32), (n_times, 1))
+        vol = np.full(len(lats), 100.0, dtype=np.float32)
+        write_glofas_file(
+            path, np.asarray(lats), np.asarray(lons), flow, names, times, vol=vol
+        )
+        return GloFASRiverDataset(
+            filename=path,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+
+    def test_bounding_box_filters_stations(self, tmp_path):
+        # 3x3 grid spanning roughly [-1, 1] degrees in lat/lon (~222 km box).
+        lon2d = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]
+        lat2d = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]]
+        target_coords = self._target_coords(lon2d, lat2d)
+
+        data = self._glofas_dataset(
+            tmp_path,
+            lats=[0.0, 10.0],
+            lons=[0.0, 10.0],
+            names=["Inside", "Outside"],
+        )
+        # coast_snap_buffer_km=None isolates the bounding-box pre-filter (step 1).
+        data.extract_relevant_rivers(
+            target_coords, dx=10_000.0, coast_snap_buffer_km=None, domain_edge_buffer=0
+        )
+
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert names == ["Inside"]
+
+    def test_glofas_default_snap_buffer_50km(self, tmp_path):
+        # Land row (eta=1) borders an ocean row (eta=2) -> coastal cells are
+        # (1, 0), (1, 1), (1, 2), all at lat=1.
+        mask2d = [[0, 0, 0], [0, 0, 0], [1, 1, 1]]
+        lon2d = [[0, 1, 2], [0, 1, 2], [0, 1, 2]]
+        lat2d = [[0, 0, 0], [1, 1, 1], [2, 2, 2]]
+        target_coords = self._target_coords(lon2d, lat2d, mask2d=mask2d)
+
+        # ~30 km from the coast (within the 50 km GloFAS default) and ~80 km
+        # away (outside it); 1 degree of latitude is ~111 km.
+        near_lat = 1.0 + 30.0 / 111.0
+        far_lat = 1.0 + 80.0 / 111.0
+
+        data = self._glofas_dataset(
+            tmp_path,
+            lats=[near_lat, far_lat],
+            lons=[0.0, 0.0],
+            names=["NearRiver", "FarRiver"],
+        )
+        # coast_snap_buffer_km omitted -> GloFASRiverDataset's 50 km default.
+        data.extract_relevant_rivers(target_coords, dx=1_000.0)
+
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert names == ["NearRiver"]
+
+    def test_dai_default_snap_buffer_200km(self, tmp_path):
+        # Ocean row at lat=5 (eta=5), coastal cells at lat=4 (eta=4). Rivers placed inside the grid south of the coast.
+        lon2d = [[0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2]]
+        lat2d = [[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4], [5, 5, 5]]
+        mask2d = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [1, 1, 1]]
+        target_coords = self._target_coords(lon2d, lat2d, mask2d=mask2d)
+
+        # ~150 km from coast (within Dai's 200 km default) and ~250 km away (outside it).
+        near_lat = 4.0 - 150.0 / 111.0  # ~2.65, inside grid, 150 km from coast at lat=4
+        far_lat = 4.0 - 250.0 / 111.0  # ~1.75, inside grid, 250 km from coast at lat=4
+
+        path = tmp_path / "dai.nc"
+        # Build a minimal Dai-format dataset directly
+        path = tmp_path / "dai.nc"
+        write_dai_file(
+            path,
+            lats=np.array([near_lat, far_lat], dtype=np.float32),
+            lons=np.array([0.0, 0.0], dtype=np.float32),
+            flow=np.array([[100.0, 100.0]], dtype=np.float32),
+            river_names=["NearRiver", "FarRiver"],
+            times=np.array([199801]),
+            vol=np.array([100.0, 100.0], dtype=np.float32),
+        )
+
+        data = DaiRiverDataset(
+            filename=path,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+        # coast_snap_buffer_km omitted -> DaiRiverDataset's 200 km default.
+        data.extract_relevant_rivers(target_coords, dx=1000.0, domain_edge_buffer=0)
+
+        names = [str(n) for n in data.ds[data.var_names["name"]].values]
+        assert "NearRiver" in names
+        assert "FarRiver" not in names
+
+    def test_no_rivers_in_domain_raises(self, tmp_path):
+        lon2d = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]
+        lat2d = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]]
+        target_coords = self._target_coords(lon2d, lat2d)
+
+        data = self._glofas_dataset(
+            tmp_path, lats=[50.0], lons=[50.0], names=["FarAway"]
+        )
+        with pytest.raises(ValueError, match="No relevant rivers found"):
+            data.extract_relevant_rivers(
+                target_coords,
+                dx=10_000.0,
+                coast_snap_buffer_km=None,
+                domain_edge_buffer=0,
+            )

@@ -21,6 +21,7 @@ import xarray as xr
 import xgcm
 import yaml
 from pydantic import BaseModel
+from scipy.spatial import cKDTree
 
 from roms_tools.constants import R_EARTH
 
@@ -313,7 +314,9 @@ def interpolate_dynamic_bgc_by_calendar_year(
     ``river_time`` steps in that year), missing years are inserted, interior NaN
     years are linearly interpolated along the year axis, and the result is
     broadcast back to every ``river_time`` step. Leading and trailing NaN years
-    are left unchanged.
+    are filled by backward- and forward-fill respectively so partial boundary years
+    use the nearest full year's concentration. This prevents unrealistic concentrations
+    being generated from highly seasonal discharge data.
     """
     calendar_years = abs_time.dt.year
     if time_dim not in calendar_years.dims:
@@ -334,9 +337,19 @@ def interpolate_dynamic_bgc_by_calendar_year(
             )
 
         tagged = values.assign_coords(calendar_year=calendar_years)
-        annual = tagged.groupby("calendar_year").mean(dim=time_dim, skipna=True)
-        annual = annual.reindex(calendar_year=full_years)
-        annual = annual.interpolate_na(dim="calendar_year", method="linear")
+        # Treat years with less than a quarter of the year as missing and interpolate.
+        min_fraction: float = 0.25
+        step_counts = tagged.groupby("calendar_year").count(dim=time_dim)
+        annual = (
+            tagged.groupby("calendar_year")
+            .mean(dim=time_dim, skipna=True)
+            .where(step_counts >= min_fraction * step_counts.median())
+            .reindex(calendar_year=full_years)
+            .chunk({"calendar_year": -1})
+            .interpolate_na(dim="calendar_year", method="linear")
+            .ffill(dim="calendar_year")
+            .bfill(dim="calendar_year")
+        )
 
         year_indexer = xr.DataArray(
             year_at_steps,
@@ -1635,6 +1648,133 @@ def _gc_dist_radians(lon1, lat1, lon2, lat2):
     dis = R_EARTH * dang
 
     return dis
+
+
+# --- cKDTree-based spatial lookup helpers ---
+def latlon_to_xyz(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Convert lat/lon coordinates (degrees) to unit-sphere XYZ vectors.
+
+    Used to prepare query and candidate points for cKDTree distance queries,
+    where chord distance on the unit sphere approximates great-circle distance.
+
+    Parameters
+    ----------
+    lat : np.ndarray
+        Latitudes in degrees.
+    lon : np.ndarray
+        Longitudes in degrees.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(N, 3)`` with unit-sphere XYZ coordinates, one row
+        per input point.
+    """
+    lat_r = np.deg2rad(lat)
+    lon_r = np.deg2rad(lon)
+    return np.column_stack(
+        [np.cos(lat_r) * np.cos(lon_r), np.cos(lat_r) * np.sin(lon_r), np.sin(lat_r)]
+    )
+
+
+def find_coastal_cells(mask: np.ndarray) -> np.ndarray:
+    """Identify coastal grid cells using a 4-neighbor convolution.
+
+    A coastal cell is defined as a land cell (mask=0) that is adjacent to
+    at least one ocean cell (mask=1) in the N/S/E/W directions.
+
+    The 4-neighbor kernel counts how many of the cardinal neighbors are ocean.
+    Convolving with this kernel over the mask gives, for each cell, the number
+    of ocean neighbors. Land cells with at least one ocean neighbor are coastal.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2D array of shape (eta_rho, xi_rho) where 1=ocean and 0=land.
+
+    Returns
+    -------
+    np.ndarray
+        2D boolean array of the same shape, True where cells are coastal.
+    """
+    from scipy.ndimage import convolve
+
+    kernel = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
+    faces = convolve(mask, kernel, mode="constant", cval=0.0)
+    return (1 - mask) * (faces > 0)
+
+
+def build_kdtree_from_latlon(lat, lon):
+    """Build a cKDTree on the unit sphere from lat/lon arrays."""
+    return cKDTree(latlon_to_xyz(lat, lon))
+
+
+def query_kdtree_nearest(
+    tree,
+    query_lat,
+    query_lon,
+    cand_eta,
+    cand_xi,
+    *,
+    warn_dist_km=100.0,
+    labels=None,
+    workers=-1,
+):
+    """Query a cKDTree for the nearest candidate grid cell to each query point.
+
+    For each query point (river mouth), finds the nearest candidate grid cell
+    (e.g. coastal cell) using Euclidean distance on the unit sphere, which
+    approximates great-circle distance. Emits a warning if the nearest cell
+    is farther than ``warn_dist_km``.
+
+    Parameters
+    ----------
+    tree : cKDTree
+        Tree built from candidate grid cell XYZ coordinates, e.g. via
+        ``build_kdtree_from_latlon``.
+    query_lat : array-like
+        Latitudes of query points (river mouths) in degrees.
+    query_lon : array-like
+        Longitudes of query points (river mouths) in degrees.
+    cand_eta : np.ndarray
+        Eta (row) indices of the candidate grid cells.
+    cand_xi : np.ndarray
+        Xi (column) indices of the candidate grid cells.
+    warn_dist_km : float, optional
+        Distance threshold in km beyond which a warning is logged. Default 100 km.
+    labels : list[str], optional
+        River names for use in warning messages. If None, points are labelled
+        by index.
+    workers : int, optional
+        Number of parallel workers for the tree query. Default -1 (all CPUs).
+
+    Returns
+    -------
+    eta_out : np.ndarray
+        Eta indices of the nearest candidate cell for each query point.
+    xi_out : np.ndarray
+        Xi indices of the nearest candidate cell for each query point.
+    distances_km : np.ndarray
+        Great-circle distances in km from each query point to its nearest cell.
+    """
+    distances, nearest_idx = tree.query(
+        latlon_to_xyz(query_lat, query_lon), workers=workers
+    )
+    distances_km = 2 * 6371.0 * np.arcsin(np.clip(distances / 2, 0, 1))
+    eta_out = cand_eta[nearest_idx]
+    xi_out = cand_xi[nearest_idx]
+    for i in range(len(distances_km)):
+        if distances_km[i] > warn_dist_km:
+            label = labels[i] if labels is not None else f"point {i}"
+            logging.warning(
+                "River '%s' is %.1f km from nearest coastal cell (%d, %d). "
+                "Check river mouth location.",
+                label,
+                distances_km[i],
+                int(eta_out[i]),
+                int(xi_out[i]),
+            )
+    return eta_out, xi_out, distances_km
 
 
 @nb.njit(

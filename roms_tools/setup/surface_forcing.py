@@ -289,6 +289,12 @@ class SurfaceForcing:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
 
+        # On the no-prefill xESMF path, destination extrapolation would silently fill
+        # points outside the source coverage. Guard against a grid that outruns the
+        # data (coastal gaps *within* coverage are still filled by the masked regrid).
+        if self._regrid.extrap_is_active:
+            self._check_source_coverage(data, target_coords)
+
         regrid = self._regrid
         use_xesmf = regrid.use_xesmf
         if regrid.prefill is not None:
@@ -384,6 +390,47 @@ class SurfaceForcing:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
+
+    def _check_source_coverage(self, data, target_coords) -> None:
+        """Raise if the ROMS grid extends beyond the source data's coverage.
+
+        Used only on the default no-prefill xESMF path, where destination
+        extrapolation would otherwise silently fill points that lie outside the
+        source coverage. (On the scipy / prefill path such points become NaN and are
+        caught by the standard NaN validation instead.) Coastal gaps *within* the
+        source coverage are still filled by the masked regrid + extrapolation; this
+        only guards against a grid that outruns the source data.
+        """
+        lat = data.ds[data.dim_names["latitude"]]
+        lon = data.ds[data.dim_names["longitude"]]
+        extents = {
+            "latitude": (
+                float(target_coords["lat"].min()),
+                float(target_coords["lat"].max()),
+                float(lat.min()),
+                float(lat.max()),
+            ),
+            "longitude": (
+                float(target_coords["lon"].min()),
+                float(target_coords["lon"].max()),
+                float(lon.min()),
+                float(lon.max()),
+            ),
+        }
+        tol = 1e-6
+        outside = [
+            name
+            for name, (tmin, tmax, smin, smax) in extents.items()
+            if tmin < smin - tol or tmax > smax + tol
+        ]
+        if outside:
+            raise ValueError(
+                f"The ROMS grid (including the interpolation margin) extends beyond "
+                f"the {self.source['name']} source data coverage in "
+                f"{', '.join(outside)}. The default masked-bilinear regrid would "
+                f"extrapolate these points. Provide source data that covers the full "
+                f"domain plus a margin."
+            )
 
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is
@@ -950,6 +997,9 @@ class SurfaceForcing:
         ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["prefill"] = str(self.prefill)
+        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         ds.attrs["type"] = self.type
         ds.attrs["source"] = self.source["name"]

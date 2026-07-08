@@ -124,7 +124,7 @@ Additional evidence of community uptake comes from public usage metrics. At the 
 
 # AI Usage Disclosure
 
-Generative AI tools were used to help write docstrings, develop tests, and improve the clarity and readability of both the `ROMS-Tools` documentation and manuscript text. All AI-assisted content was reviewed and verified by the authors for technical accuracy and correctness.
+Generative AI tools were used to help write docstrings, develop tests, and improve the clarity and readability of both the `ROMS-Tools` documentation and manuscript text. Some recent development has used AI for minor refactoring and small feature additions. All AI-assisted content was reviewed and verified by the authors for technical accuracy and correctness.
 
 # Acknowledgements
 

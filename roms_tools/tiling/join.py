@@ -4,7 +4,12 @@ from typing import Literal, cast
 
 import xarray as xr
 
-from roms_tools.utils import FilePaths, _path_list_from_input
+from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    FilePaths,
+    NetCDFFormat,
+    _path_list_from_input,
+)
 
 
 def open_partitions(files: FilePaths) -> xr.Dataset:
@@ -28,7 +33,11 @@ def open_partitions(files: FilePaths) -> xr.Dataset:
     return joined
 
 
-def join_netcdf(files: FilePaths, output_path: Path | None = None) -> Path:
+def join_netcdf(
+    files: FilePaths,
+    output_path: Path | None = None,
+    format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+) -> Path:
     """
     Join partitioned NetCDFs into a single dataset.
 
@@ -42,6 +51,8 @@ def join_netcdf(files: FilePaths, output_path: Path | None = None) -> Path:
         If provided, the joined dataset will be saved to this path.
         Otherwise, the common base of pattern (e.g. roms_rst.20121209133435.nc)
         will be used.
+    format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+        NetCDF file format. Defaults to ``"NETCDF4"``.
 
     Returns
     -------
@@ -55,7 +66,7 @@ def join_netcdf(files: FilePaths, output_path: Path | None = None) -> Path:
         output_path = filepaths[0].with_suffix("").with_suffix(".nc")
 
     joined = open_partitions(cast(FilePaths, filepaths))
-    joined.to_netcdf(output_path)
+    joined.to_netcdf(output_path, format=format)
     print(f"Saved joined dataset to: {output_path}")
 
     return output_path

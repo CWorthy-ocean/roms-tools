@@ -14,6 +14,8 @@ from roms_tools.setup.utils import (
     get_boundary_coords,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     save_datasets,
@@ -108,9 +110,10 @@ def make_nesting_info(
     include_pressure_fluxes: bool = False,
     boundaries: dict | None = None,
     verbose: bool = False,
+    format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
 ) -> xr.Dataset:
     """Maps child grid boundary points onto absolute indices of the parent grid, and saves
-    the nesting information to netCDF4 files.
+    the nesting information to NetCDF files.
 
     This function updates the mapping of child boundaries to parent-grid indices. This
     mapping depends on the updated mask from ``align_grid``, since masked (land) points may
@@ -145,6 +148,8 @@ def make_nesting_info(
         indicating whether to process each boundary. Defaults to mapping all boundaries.
     verbose: bool, optional
         Indicates whether to print grid generation steps with timing. Defaults to False.
+    format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+        NetCDF file format when ``filepath`` is provided. Defaults to ``"NETCDF4"``.
 
 
     Returns
@@ -177,7 +182,7 @@ def make_nesting_info(
 
     # Save the nesting file and return nesting dataset
     if filepath is not None:
-        _save_nesting_info(ds_nesting, filepath)
+        _save_nesting_info(ds_nesting, filepath, format=format)
 
     return ds_nesting
 
@@ -370,13 +375,16 @@ def _apply_child_modification(
 def _save_nesting_info(
     ds_nesting: xr.Dataset,
     filepath: str | Path,
+    format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
 ) -> None:
-    """Save the nesting information to netCDF4 files.
+    """Save the nesting information to NetCDF files.
 
     Parameters
     ----------
     filepath : Union[str, Path]
         The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
+    format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+        NetCDF file format. Defaults to ``"NETCDF4"``.
 
     Returns
     -------
@@ -393,7 +401,7 @@ def _save_nesting_info(
     dataset_list = [ds_nesting]
     output_filenames = [str(filepath)]
 
-    save_datasets(dataset_list, output_filenames)
+    save_datasets(dataset_list, output_filenames, format=format)
 
 
 def compute_boundary_distance(

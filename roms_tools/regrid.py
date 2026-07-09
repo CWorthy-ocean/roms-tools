@@ -242,6 +242,77 @@ class LateralRegridToROMS:
         return da.interp(self.coords, method=method).drop_vars(list(self.coords.keys()))
 
 
+def select_source_mask(ds, *, is_vector, use_xesmf, prefill):
+    """Pick the source mask for the xESMF masked-bilinear path, or ``None``.
+
+    Reproduces the per-field mask selection used across the setup classes (e.g.
+    ``boundary_forcing.py``): a mask is only meaningful on the xESMF path with no
+    source prefill (a prefilled source is already NaN-free, so plain bilinear is
+    used). Velocity fields use ``"mask_vel"`` when the source provides it, falling
+    back to the tracer ``"mask"``.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The source dataset.
+    is_vector : bool
+        Whether the field being regridded is a velocity component.
+    use_xesmf : bool
+        Whether the xESMF engine is in use (``RegridConfig.use_xesmf``).
+    prefill : str or None
+        The resolved source prefill (``RegridConfig.prefill``); ``None`` means no
+        whole-domain source fill was applied.
+
+    Returns
+    -------
+    xarray.DataArray or None
+        The source mask, or ``None`` when masking does not apply.
+    """
+    if not (use_xesmf and prefill is None):
+        return None
+    tracer = ds["mask"] if "mask" in ds.data_vars else None
+    if is_vector:
+        return ds["mask_vel"] if "mask_vel" in ds.data_vars else tracer
+    return tracer
+
+
+def build_lateral_regridder(target_coords, data, regrid_config, source_mask):
+    """Construct a :class:`LateralRegridToROMS` from a resolved ``RegridConfig``.
+
+    Centralizes the extrapolation contract in one place: the regridder is passed
+    ``regrid_config.regrid_extrap_method`` (which the config returns as ``None``
+    when a prefill is set), rather than relying on the ``"inverse_dist"`` default
+    of :class:`LateralRegridToROMS`. This guarantees that a NaN-free prefilled
+    source is regridded with plain bilinear (no destination extrapolation).
+
+    Parameters
+    ----------
+    target_coords : dict
+        Target-grid ``{"lat": ..., "lon": ...}`` DataArrays (extra keys ignored).
+    data : LatLonDataset
+        The (already subset/prefilled) source dataset object; ``data.ds`` and
+        ``data.dim_names`` are used.
+    regrid_config : RegridConfig
+        The resolved regrid configuration.
+    source_mask : xarray.DataArray or None
+        The source mask, typically from :func:`select_source_mask`.
+
+    Returns
+    -------
+    LateralRegridToROMS
+        A regridder wired to the config's engine and extrapolation settings.
+    """
+    return LateralRegridToROMS(
+        target_coords,
+        data.dim_names,
+        source_ds=data.ds,
+        use_xesmf=regrid_config.use_xesmf,
+        source_mask=source_mask,
+        extrap_method=regrid_config.regrid_extrap_method,
+        extrap_kwargs=regrid_config.regrid_extrap_kwargs,
+    )
+
+
 class LateralRegridFromROMS:
     """Regrids data from a curvilinear ROMS grid onto latitude-longitude coordinates
     using xESMF.

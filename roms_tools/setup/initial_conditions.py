@@ -20,15 +20,20 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
 from roms_tools.plot import plot
+from roms_tools.processing_methods import RegridConfig, _xesmf_available
 from roms_tools.regrid import (
     LateralRegridFromROMS,
-    LateralRegridToROMS,
     VerticalRegrid,
+    build_lateral_regridder,
+    select_source_mask,
 )
 from roms_tools.setup.utils import (
     BGC_INTERPOLATION_METHODS,
     RawDataSource,
+    apply_scipy_fallback_fill,
+    apply_source_prefill,
     build_bgc_vertical_coords,
+    check_source_coverage,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     from_yaml,
@@ -186,6 +191,29 @@ class InitialConditions:
     bgc_interpolation_method: str = "depth"
     """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
     ``"density_mld"``."""
+    prefill: str | None = None
+    """Source-side fill applied before lateral regridding. ``None`` (default) applies
+    **no** whole-domain source fill: with xESMF the masked-bilinear regrid plus
+    destination extrapolation (``extrap_method``) produces NaN-free output directly;
+    without xESMF a nearest-neighbor pre-fill is applied automatically before scipy
+    interpolation. Set to ``"2d_lateral_fill"`` (legacy AMG Poisson fill),
+    ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``, or ``"creep_fill"``
+    to fill the whole-domain source first (the last three require xESMF).
+    Applies only to lat/lon sources; ignored for a ROMS restart source."""
+    prefill_kwargs: dict | None = None
+    """Method-specific options for ``prefill`` (e.g. ``num_src_pnts`` /
+    ``dist_exponent``). Applies only to lat/lon sources."""
+    regrid_method: str | None = None
+    """Horizontal regrid engine, chosen independently of ``prefill``: ``None``/``"auto"``
+    uses xESMF when installed (else scipy), ``"xesmf"`` forces xESMF, ``"scipy"`` forces
+    scipy. Applies only to lat/lon sources; ignored for a ROMS restart source."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation used on the default no-prefill path (``None`` is
+    treated as ``"inverse_dist"``) to fill target points whose source neighbors are all
+    masked. Ignored when ``prefill`` is set, on the scipy path, or for a ROMS restart
+    source."""
+    extrap_kwargs: dict | None = None
+    """Method-specific options for ``extrap_method``. Applies only to lat/lon sources."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -198,6 +226,7 @@ class InitialConditions:
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
 
+        self._resolve_prefill_options()
         self._input_checks()
 
         processed_fields = {}
@@ -226,6 +255,52 @@ class InitialConditions:
 
         self.ds = ds
 
+    def _resolve_prefill_options(self) -> None:
+        """Build the validated :class:`RegridConfig` from the public options.
+
+        Delegates all prefill/extrap/regrid validation to
+        :meth:`RegridConfig.from_options`, then writes the resolved ``prefill`` back
+        to the public field (as a plain string or ``None``) so the YAML round-trip
+        emits a clean ``prefill``. Derived state (``use_xesmf``, ``effective_extrap``,
+        ...) is read off ``self._regrid``. These options apply to lat/lon sources
+        only; the ROMS-restart path (see :meth:`_process_data`) ignores them.
+        """
+        self._regrid = RegridConfig.from_options(
+            prefill=self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            regrid_method=self.regrid_method,
+            extrap_method=self.extrap_method,
+            extrap_kwargs=self.extrap_kwargs,
+            xesmf_available=_xesmf_available(),
+        )
+        self.prefill = (
+            None if self._regrid.prefill is None else str(self._regrid.prefill)
+        )
+
+    def _warn_if_regrid_options_set_for_roms(self) -> None:
+        """Log a note when prefill/regrid options are set but the source is ROMS.
+
+        Mirrors the ``bgc_interpolation_method`` house style: the options are
+        accepted but have no effect on a ROMS restart source (which uses the
+        legacy lateral fill + ``LateralRegridFromROMS``), so we note the fallback
+        in the log rather than raising.
+        """
+        if any(
+            opt is not None
+            for opt in (
+                self.prefill,
+                self.prefill_kwargs,
+                self.regrid_method,
+                self.extrap_method,
+                self.extrap_kwargs,
+            )
+        ):
+            logging.info(
+                "prefill/regrid_method/extrap_method apply to lat/lon sources only; "
+                "ignoring them for the ROMS restart source and using the legacy "
+                "lateral fill."
+            )
+
     def _process_data(self, processed_fields, type="physics"):
         target_coords = get_target_coords(self.grid)
 
@@ -237,7 +312,20 @@ class InitialConditions:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
-        data.apply_lateral_fill()
+        if isinstance(data, ROMSDataset):
+            # ROMS restart source: the bespoke ROMS-grid fill feeds only
+            # ``LateralRegridFromROMS`` (unchanged). The prefill/regrid/extrap options
+            # do not apply here; warn if the user explicitly set any of them.
+            self._warn_if_regrid_options_set_for_roms()
+            data.apply_lateral_fill()
+        else:
+            source_name = (
+                self.source["name"] if type == "physics" else self.bgc_source["name"]
+            )
+            if self._regrid.extrap_is_active:
+                check_source_coverage(data, target_coords, source_name)
+            apply_source_prefill(data, self._regrid, self.prefill_kwargs)
+            apply_scipy_fallback_fill(data, self._regrid)
         data.rotate_velocities_to_east_and_north()
 
         self._set_variable_info(data, type=type)
@@ -367,9 +455,35 @@ class InitialConditions:
             )
 
         else:
-            lateral_regrid_to_roms = LateralRegridToROMS(target_coords, data.dim_names)
+            # Velocity fields (location "u"/"v") use the velocity mask; build a
+            # separate vector regridder only when a velocity var is present so
+            # mask_vel-less sources (e.g. BGC) don't pay for unused xESMF weights.
+            def _mask(is_vector):
+                return select_source_mask(
+                    data.ds,
+                    is_vector=is_vector,
+                    use_xesmf=self._regrid.use_xesmf,
+                    prefill=self._regrid.prefill,
+                )
+
+            tracer_rg = build_lateral_regridder(
+                target_coords, data, self._regrid, _mask(False)
+            )
+            has_vel = any(
+                var_names[v]["location"] in ("u", "v") for v in var_names
+            )
+            vector_rg = (
+                build_lateral_regridder(target_coords, data, self._regrid, _mask(True))
+                if has_vel
+                else tracer_rg
+            )
             for var_name in var_names:
-                processed_fields[var_name] = lateral_regrid_to_roms.apply(
+                rg = (
+                    vector_rg
+                    if var_names[var_name]["location"] in ("u", "v")
+                    else tracer_rg
+                )
+                processed_fields[var_name] = rg.apply(
                     data.ds[var_names[var_name]["name"]]
                 )
 
@@ -921,6 +1035,10 @@ class InitialConditions:
         ds.attrs["source"] = self.source["name"]
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
+
+        ds.attrs["prefill"] = str(self.prefill)
+        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]

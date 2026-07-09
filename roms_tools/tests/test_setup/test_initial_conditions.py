@@ -828,3 +828,146 @@ def test_ic_invalid_interpolation_method_raises(use_dask):
             bgc_interpolation_method="bogus",
             use_dask=use_dask,
         )
+
+
+def test_ic_default_regrid_path(use_dask):
+    """The default horizontal regrid path applies no source prefill, selects the engine
+    by xESMF availability, produces NaN-free output, and records the resolved settings
+    in the dataset metadata.
+    """
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+    assert ic.prefill is None
+    assert ic._regrid.use_xesmf == (xesmf is not None)
+    for var in ["temp", "salt", "u", "v", "zeta"]:
+        assert not np.isnan(ic.ds[var].values).any()
+    assert ic.ds.attrs["prefill"] == "None"
+    assert ic.ds.attrs["regrid_method"] == ("xesmf" if xesmf is not None else "scipy")
+    assert ic.ds.attrs["extrap_method"] == "inverse_dist"
+
+
+def test_ic_legacy_path(use_dask):
+    """The legacy AMG-fill + scipy regrid path remains available via explicit options."""
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    assert ic.prefill == "2d_lateral_fill"
+    assert ic._regrid.use_xesmf is False
+    for var in ["temp", "salt", "u", "v", "zeta"]:
+        assert not np.isnan(ic.ds[var].values).any()
+
+
+@skip_xesmf
+def test_ic_default_differs_from_legacy(use_dask):
+    """With xESMF available, the default masked-bilinear path differs numerically from
+    the legacy AMG-fill + scipy path.
+    """
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    common = dict(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+    ic_default = InitialConditions(**common)
+    ic_legacy = InitialConditions(
+        **common, prefill="2d_lateral_fill", regrid_method="scipy"
+    )
+    assert not np.allclose(
+        ic_default.ds["temp"].values, ic_legacy.ds["temp"].values, equal_nan=True
+    )
+
+
+@pytest.mark.parametrize(
+    "prefill",
+    [
+        "2d_lateral_fill",
+        pytest.param("inverse_dist", marks=skip_xesmf),
+        pytest.param("nearest_s2d", marks=skip_xesmf),
+        "nearest_neighbor",
+        # "creep_fill" is a valid prefill but is not in released xESMF, so it
+        # cannot be exercised end-to-end here; see test_prefill.py for its
+        # config-level coverage.
+    ],
+)
+def test_ic_prefill_methods_produce_nan_free_output(use_dask, prefill):
+    """Every prefill method runnable with released xESMF yields NaN-free IC fields."""
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        prefill=prefill,
+        use_dask=use_dask,
+    )
+    assert ic.prefill == prefill
+    for var in ["temp", "salt", "u", "v", "zeta"]:
+        assert not np.isnan(ic.ds[var].values).any()
+
+
+@skip_xesmf
+def test_ic_source_coverage_error(use_dask):
+    """On the default extrapolating path, a grid that outruns the source coverage raises
+    a clear coverage error rather than silently extrapolating.
+    """
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    # The coarse GLORYS test data covers lat ~46-70; this grid extends well below it.
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=3000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    with pytest.raises(ValueError, match="extends beyond"):
+        InitialConditions(
+            grid=grid,
+            ini_time=datetime(2021, 6, 29),
+            source={"path": fname, "name": "GLORYS"},
+            use_dask=use_dask,
+        )
+
+
+def test_ic_roms_source_ignores_regrid_options(use_dask, caplog):
+    """A ROMS restart source keeps its legacy lateral-fill path; explicitly setting
+    prefill/regrid options is a logged no-op (never an AttributeError).
+    """
+    import logging
+
+    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    fname_restart = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    with caplog.at_level(logging.INFO):
+        ic = InitialConditions(
+            grid=grid,
+            ini_time=datetime(1998, 1, 6),
+            source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},
+            prefill="2d_lateral_fill",
+            regrid_method="scipy",
+            use_dask=use_dask,
+        )
+    assert "lat/lon sources only" in caplog.text
+    assert "temp" in ic.ds

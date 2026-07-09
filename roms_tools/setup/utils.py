@@ -56,6 +56,92 @@ HEADER_CHAR = "="
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
 
+def apply_source_prefill(data, regrid_config, prefill_kwargs) -> None:
+    """Apply a whole-domain source prefill when the config requests one.
+
+    No-op when ``regrid_config.prefill is None`` (the default NaN-aware path).
+    Only valid for lat/lon source datasets, which implement ``apply_prefill``.
+
+    Parameters
+    ----------
+    data : LatLonDataset
+        The source dataset object (must implement ``apply_prefill``).
+    regrid_config : RegridConfig
+        The resolved regrid configuration.
+    prefill_kwargs : dict or None
+        Method-specific options forwarded to ``apply_prefill``.
+    """
+    if regrid_config.prefill is not None:
+        data.apply_prefill(
+            str(regrid_config.prefill),
+            prefill_kwargs=prefill_kwargs,
+            prefill_was_user_set=True,
+        )
+
+
+def apply_scipy_fallback_fill(data, regrid_config) -> None:
+    """Nearest-neighbor pre-fill the source on the scipy, no-prefill path.
+
+    When xESMF is unavailable and no explicit prefill was requested, the source
+    is nearest-neighbor filled so the subsequent scipy interpolation cannot
+    propagate NaNs. No-op on the xESMF path or when a prefill is set. Only valid
+    for lat/lon source datasets, which implement ``apply_nearest_neighbor_fill``.
+    """
+    if regrid_config.prefill is None and not regrid_config.use_xesmf:
+        data.apply_nearest_neighbor_fill()
+
+
+def check_source_coverage(data, target_coords, source_name) -> None:
+    """Raise if the ROMS grid extends beyond the source data's coverage.
+
+    Used only on the default no-prefill xESMF path, where destination
+    extrapolation would otherwise silently fill points that lie outside the
+    source coverage. (On the scipy / prefill path such points become NaN and are
+    caught by the standard NaN validation instead.) Coastal gaps *within* the
+    source coverage are still filled by the masked regrid + extrapolation; this
+    only guards against a grid that outruns the source data.
+
+    Parameters
+    ----------
+    data : LatLonDataset
+        The source dataset object; ``data.ds`` and ``data.dim_names`` are used.
+    target_coords : dict
+        Target-grid ``{"lat": ..., "lon": ...}`` DataArrays.
+    source_name : str
+        Name of the source (for the error message), e.g. ``"GLORYS"``.
+    """
+    lat = data.ds[data.dim_names["latitude"]]
+    lon = data.ds[data.dim_names["longitude"]]
+    extents = {
+        "latitude": (
+            float(target_coords["lat"].min()),
+            float(target_coords["lat"].max()),
+            float(lat.min()),
+            float(lat.max()),
+        ),
+        "longitude": (
+            float(target_coords["lon"].min()),
+            float(target_coords["lon"].max()),
+            float(lon.min()),
+            float(lon.max()),
+        ),
+    }
+    tol = 1e-6
+    outside = [
+        name
+        for name, (tmin, tmax, smin, smax) in extents.items()
+        if tmin < smin - tol or tmax > smax + tol
+    ]
+    if outside:
+        raise ValueError(
+            f"The ROMS grid (including the interpolation margin) extends beyond "
+            f"the {source_name} source data coverage in "
+            f"{', '.join(outside)}. The default masked-bilinear regrid would "
+            f"extrapolate these points. Provide source data that covers the full "
+            f"domain plus a margin."
+        )
+
+
 def log_the_separator() -> None:
     """Log a separator line using HEADER_CHAR repeated HEADER_SZ times."""
     logging.info(HEADER_CHAR * HEADER_SZ)

@@ -25,8 +25,9 @@ from roms_tools.processing_methods import (
     resolve_bgc_interp_method,
 )
 from roms_tools.regrid import (
-    LateralRegridToROMS,
     VerticalRegrid,
+    build_lateral_regridder,
+    select_source_mask,
 )
 from roms_tools.setup.utils import (
     RawDataSource,
@@ -422,23 +423,12 @@ class BoundaryForcing:
             # NaN-free (e.g. the pre-filled UNIFIED BGC dataset, which carries
             # no mask, or a whole-domain prefill above) so the regridder uses
             # plain bilinear; irrelevant on the scipy path.
-            if use_xesmf and prefill is None:
-                tracer_mask = (
-                    bdry_data.ds["mask"] if "mask" in bdry_data.ds.data_vars else None
-                )
-                vector_mask = (
-                    bdry_data.ds["mask_vel"]
-                    if "mask_vel" in bdry_data.ds.data_vars
-                    else tracer_mask
-                )
-            else:
-                tracer_mask = None
-                vector_mask = None
-
-            # With a prefilled (NaN-free) source, no regrid-time extrapolation
-            # is needed; use plain bilinear (the config returns ``None`` then).
-            regrid_extrap_method = regrid.regrid_extrap_method
-            regrid_extrap_kwargs = regrid.regrid_extrap_kwargs
+            tracer_mask = select_source_mask(
+                bdry_data.ds, is_vector=False, use_xesmf=use_xesmf, prefill=prefill
+            )
+            vector_mask = select_source_mask(
+                bdry_data.ds, is_vector=True, use_xesmf=use_xesmf, prefill=prefill
+            )
 
             processed_fields = {}
 
@@ -454,14 +444,8 @@ class BoundaryForcing:
             if filtered_vars:
                 lon = target_coords["lon"].isel(**self.bdry_coords["vector"][direction])
                 lat = target_coords["lat"].isel(**self.bdry_coords["vector"][direction])
-                lateral_regrid_vector = LateralRegridToROMS(
-                    {"lat": lat, "lon": lon},
-                    bdry_data.dim_names,
-                    source_ds=bdry_data.ds,
-                    use_xesmf=use_xesmf,
-                    source_mask=vector_mask,
-                    extrap_method=regrid_extrap_method,
-                    extrap_kwargs=regrid_extrap_kwargs,
+                lateral_regrid_vector = build_lateral_regridder(
+                    {"lat": lat, "lon": lon}, bdry_data, regrid, vector_mask
                 )
                 for var_name in filtered_vars:
                     processed_fields[var_name] = lateral_regrid_vector.apply(
@@ -474,14 +458,8 @@ class BoundaryForcing:
                     # 'zeta' is a scalar, so it uses the tracer mask (not the
                     # velocity mask of the vector regridder); build a dedicated
                     # regridder on the same vector-margin target.
-                    zeta_vector_regrid = LateralRegridToROMS(
-                        {"lat": lat, "lon": lon},
-                        bdry_data.dim_names,
-                        source_ds=bdry_data.ds,
-                        use_xesmf=use_xesmf,
-                        source_mask=tracer_mask,
-                        extrap_method=regrid_extrap_method,
-                        extrap_kwargs=regrid_extrap_kwargs,
+                    zeta_vector_regrid = build_lateral_regridder(
+                        {"lat": lat, "lon": lon}, bdry_data, regrid, tracer_mask
                     )
                     zeta_vector = zeta_vector_regrid.apply(
                         bdry_data.ds[var_names["zeta"]["name"]]
@@ -498,14 +476,8 @@ class BoundaryForcing:
             if filtered_vars:
                 lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
                 lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
-                lateral_regrid = LateralRegridToROMS(
-                    {"lat": lat, "lon": lon},
-                    bdry_data.dim_names,
-                    source_ds=bdry_data.ds,
-                    use_xesmf=use_xesmf,
-                    source_mask=tracer_mask,
-                    extrap_method=regrid_extrap_method,
-                    extrap_kwargs=regrid_extrap_kwargs,
+                lateral_regrid = build_lateral_regridder(
+                    {"lat": lat, "lon": lon}, bdry_data, regrid, tracer_mask
                 )
                 for var_name in filtered_vars:
                     processed_fields[var_name] = lateral_regrid.apply(

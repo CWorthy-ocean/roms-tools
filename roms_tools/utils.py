@@ -916,7 +916,7 @@ def save_datasets(
                     else:
                         da.encoding["dtype"] = "float64"
 
-    saved_filenames = []
+    saved_filenames: list[Path] = []
     _patch_1d_encodings(dataset_list)
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]

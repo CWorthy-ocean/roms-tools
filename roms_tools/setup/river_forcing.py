@@ -1363,9 +1363,7 @@ class RiverForcing:
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(
-            dataset_list, output_filenames, format=format
-        )
+        saved_filenames = save_datasets(dataset_list, output_filenames, format=format)
 
         return saved_filenames
 

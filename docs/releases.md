@@ -39,6 +39,7 @@
 * The CDR metrics figure from `ROMSOutput.cdr_metrics()` uses twin y-axes: CDR efficiency (dimensionless) and CO2 uptake (tonnes CO2), with title "CO2 uptake and CDR efficiency". ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * `SurfaceForcing` with `type='restoring'` now allows for making DIC and ALK restoring forces files ([#619](https://github.com/CWorthy-ocean/roms-tools/pull/619))
 * Added support for the GloFAS v4.0 global river discharge dataset as an alternative to Dai & Trenberth, along with performance improvements and bug fixes to the river forcing pipeline. ([#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
+* The end-to-end example notebook can now be downloaded as a plain Python script from the docs ([#630](https://github.com/CWorthy-ocean/roms-tools/pull/630))
 
 
 ### Internal Changes

@@ -21,6 +21,10 @@ from roms_tools.datasets.lat_lon_datasets import (
     WOARestoringSurfaceDataset,
 )
 from roms_tools.plot import plot
+from roms_tools.processing_methods import (
+    RegridConfig,
+    _xesmf_available,
+)
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import (
     RawDataSource,
@@ -46,6 +50,12 @@ from roms_tools.utils import (
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
+
+# Number of forcing time steps per block when interpolating the radiation-correction
+# climatology onto the forcing time axis. Keeps the interpolated time axis chunked so
+# long records don't build one giant task and slicing a few steps stays cheap. Larger
+# values mean fewer, bigger dask tasks; smaller values mean cheaper per-slice reads.
+_DEFAULT_CLIMATOLOGY_TIME_CHUNK = 100
 
 DEFAULT_MBL_co2_PATH = (
     "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
@@ -167,6 +177,24 @@ class SurfaceForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    regrid_method: str = "auto"
+    """Horizontal regrid engine: ``"auto"`` (xESMF if installed, else scipy),
+    ``"xesmf"``, or ``"scipy"``."""
+    prefill: str | None = None
+    """Source-side fill applied before regridding. ``None`` (default) applies no
+    whole-domain fill: with xESMF the regrid is masked bilinear with inverse-distance
+    destination extrapolation; without xESMF the source is nearest-neighbor pre-filled
+    before scipy interpolation. Set to ``"2d_lateral_fill"`` (legacy AMG Poisson),
+    ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``, or ``"creep_fill"``
+    to fill the whole-domain source first (the last three require xESMF)."""
+    prefill_kwargs: dict | None = None
+    """Method-specific keyword arguments for ``prefill`` (e.g. ``num_src_pnts`` /
+    ``dist_exponent`` for ``"inverse_dist"``)."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation on the default no-prefill path; defaults to
+    ``"inverse_dist"``. Ignored when a ``prefill`` is set or on the scipy path."""
+    extrap_kwargs: dict | None = None
+    """Method-specific keyword arguments for ``extrap_method``."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -176,6 +204,20 @@ class SurfaceForcing:
 
     def __post_init__(self):
         self._input_checks()
+        # Resolve/validate the regrid engine + source-prefill + extrapolation options
+        # once (mirrors BoundaryForcing); derived decisions are read off self._regrid.
+        self._regrid = RegridConfig.from_options(
+            prefill=self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            regrid_method=self.regrid_method,
+            extrap_method=self.extrap_method,
+            extrap_kwargs=self.extrap_kwargs,
+            xesmf_available=_xesmf_available(),
+        )
+        # Persist the resolved prefill as a plain string (or None) for the YAML round-trip.
+        self.prefill = (
+            None if self._regrid.prefill is None else str(self._regrid.prefill)
+        )
 
         data = self._get_data()
 
@@ -247,7 +289,25 @@ class SurfaceForcing:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
 
-        data.apply_lateral_fill()
+        # On the no-prefill xESMF path, destination extrapolation would silently fill
+        # points outside the source coverage. Guard against a grid that outruns the
+        # data (coastal gaps *within* coverage are still filled by the masked regrid).
+        if self._regrid.extrap_is_active:
+            self._check_source_coverage(data, target_coords)
+
+        regrid = self._regrid
+        use_xesmf = regrid.use_xesmf
+        if regrid.prefill is not None:
+            # Whole-domain source fill; the subsequent regrid is plain bilinear.
+            data.apply_prefill(
+                str(regrid.prefill),
+                prefill_kwargs=self.prefill_kwargs,
+                prefill_was_user_set=True,
+            )
+        elif not use_xesmf:
+            # xESMF unavailable + no prefill: nearest-neighbor pre-fill the source so
+            # the subsequent scipy interpolation cannot propagate NaNs.
+            data.apply_nearest_neighbor_fill()
 
         self._set_variable_info(data)
         var_names = {
@@ -257,9 +317,25 @@ class SurfaceForcing:
             if name in data.ds.data_vars
         }
 
+        # On the default (no-prefill) xESMF path, use the source "mask" for masked
+        # bilinear regridding; a set prefill / the scipy path leaves the source
+        # already NaN-free, so no mask is needed (plain bilinear / scipy interp).
+        source_mask = (
+            data.ds["mask"]
+            if use_xesmf and regrid.prefill is None and "mask" in data.ds.data_vars
+            else None
+        )
         processed_fields = {}
         # lateral regridding
-        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
+        lateral_regrid = LateralRegridToROMS(
+            target_coords,
+            data.dim_names,
+            source_ds=data.ds,
+            use_xesmf=use_xesmf,
+            source_mask=source_mask,
+            extrap_method=regrid.regrid_extrap_method,
+            extrap_kwargs=regrid.regrid_extrap_kwargs,
+        )
         for var_name in var_names:
             processed_fields[var_name] = lateral_regrid.apply(
                 data.ds[var_names[var_name]["name"]]
@@ -314,6 +390,47 @@ class SurfaceForcing:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
+
+    def _check_source_coverage(self, data, target_coords) -> None:
+        """Raise if the ROMS grid extends beyond the source data's coverage.
+
+        Used only on the default no-prefill xESMF path, where destination
+        extrapolation would otherwise silently fill points that lie outside the
+        source coverage. (On the scipy / prefill path such points become NaN and are
+        caught by the standard NaN validation instead.) Coastal gaps *within* the
+        source coverage are still filled by the masked regrid + extrapolation; this
+        only guards against a grid that outruns the source data.
+        """
+        lat = data.ds[data.dim_names["latitude"]]
+        lon = data.ds[data.dim_names["longitude"]]
+        extents = {
+            "latitude": (
+                float(target_coords["lat"].min()),
+                float(target_coords["lat"].max()),
+                float(lat.min()),
+                float(lat.max()),
+            ),
+            "longitude": (
+                float(target_coords["lon"].min()),
+                float(target_coords["lon"].max()),
+                float(lon.min()),
+                float(lon.max()),
+            ),
+        }
+        tol = 1e-6
+        outside = [
+            name
+            for name, (tmin, tmax, smin, smax) in extents.items()
+            if tmin < smin - tol or tmax > smax + tol
+        ]
+        if outside:
+            raise ValueError(
+                f"The ROMS grid (including the interpolation margin) extends beyond "
+                f"the {self.source['name']} source data coverage in "
+                f"{', '.join(outside)}. The default masked-bilinear regrid would "
+                f"extrapolate these points. Provide source data that covers the full "
+                f"domain plus a margin."
+            )
 
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is
@@ -633,13 +750,39 @@ class SurfaceForcing:
         correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
         correction_data.ds["mask"] = data.ds["mask"]
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
-        correction_data.apply_lateral_fill()
+
+        # Use the same regrid engine / source-fill choice as the main data so the
+        # correction climatology is treated consistently.
+        regrid = self._regrid
+        use_xesmf = regrid.use_xesmf
+        if regrid.prefill is not None:
+            correction_data.apply_prefill(
+                str(regrid.prefill),
+                prefill_kwargs=self.prefill_kwargs,
+                prefill_was_user_set=True,
+            )
+        elif not use_xesmf:
+            correction_data.apply_nearest_neighbor_fill()
+
+        source_mask = (
+            correction_data.ds["mask"]
+            if use_xesmf
+            and regrid.prefill is None
+            and "mask" in correction_data.ds.data_vars
+            else None
+        )
 
         # Spatial regrid first: only 12 interpolations per variable regardless of
         # the length of the forcing time series. lateral_regrid.apply() forces eager
         # compute on the 12-step climatology, which is acceptable (~MB of data).
         lateral_regrid = LateralRegridToROMS(
-            self.target_coords, correction_data.dim_names
+            self.target_coords,
+            correction_data.dim_names,
+            source_ds=correction_data.ds,
+            use_xesmf=use_xesmf,
+            source_mask=source_mask,
+            extrap_method=regrid.regrid_extrap_method,
+            extrap_kwargs=regrid.regrid_extrap_kwargs,
         )
         time_dim = correction_data.dim_names["time"]
 
@@ -656,19 +799,24 @@ class SurfaceForcing:
             swr_12 = swr_12.chunk({time_dim: len(swr_12[time_dim])})
             lwr_12 = lwr_12.chunk({time_dim: len(lwr_12[time_dim])})
 
-        # Single interpolate call per variable — lazy when input is dask-backed.
-        # Produces (N, ny_roms, nx_roms) with one large time chunk.
+        # Interpolate onto the forcing time axis in blocks (when using dask) so the
+        # result stays chunked along time: this bounds peak memory for long forcing
+        # records and makes slicing a few time steps (e.g. validation) cheap, instead
+        # of producing a single (N, ny, nx) chunk.
+        interp_chunk_size = _DEFAULT_CLIMATOLOGY_TIME_CHUNK if self.use_dask else None
         swr_corr_factor = interpolate_from_climatology(
             field=swr_12,
             time_dim=time_dim,
             time_coord=time_dim,
             time=swrad.time,
+            interp_chunk_size=interp_chunk_size,
         )
         lwr_corr_factor = interpolate_from_climatology(
             field=lwr_12,
             time_dim=time_dim,
             time_coord=time_dim,
             time=lwrad.time,
+            interp_chunk_size=interp_chunk_size,
         )
 
         # Rechunk time to match the radiation fields so that the element-wise
@@ -847,6 +995,9 @@ class SurfaceForcing:
         ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["prefill"] = str(self.prefill)
+        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         ds.attrs["type"] = self.type
         ds.attrs["source"] = self.source["name"]

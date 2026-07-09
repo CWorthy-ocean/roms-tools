@@ -152,10 +152,15 @@ class LateralRegridToROMS:
         source_lat = np.asarray(source_ds[lat_name].values)
         source_lon = np.asarray(source_ds[lon_name].values)
 
+        # Build the source grid on the source's own horizontal dim names (rather than
+        # generic "lat"/"lon") so xESMF records them as ``in_horiz_dims`` and matches
+        # input DataArrays by name instead of by position. This lets fields whose
+        # horizontal dims are not last (e.g. climatology sources ordered
+        # ``(lat, lon, time)``) regrid correctly without a manual transpose.
         ds_in = xr.Dataset(
             {
-                "lat": xr.DataArray(source_lat, dims="lat"),
-                "lon": xr.DataArray(source_lon, dims="lon"),
+                "lat": xr.DataArray(source_lat, dims=lat_name),
+                "lon": xr.DataArray(source_lon, dims=lon_name),
             }
         )
 
@@ -171,7 +176,7 @@ class LateralRegridToROMS:
             # conflict with the explicit lat/lon axes assigned to ``ds_in``.
             ds_in["mask"] = xr.DataArray(
                 source_mask.transpose(lat_name, lon_name).values.astype(np.int32),
-                dims=("lat", "lon"),
+                dims=(lat_name, lon_name),
             )
 
         # A 1D target (e.g. a ROMS boundary line where lat and lon share a single

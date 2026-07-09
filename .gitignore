@@ -71,6 +71,7 @@ instance/
 # Sphinx documentation
 docs/_build/
 /docs/generated/
+/docs/_static/end_to_end.py
 
 # PyBuilder
 target/
@@ -137,3 +138,16 @@ dask-worker-space/
 
 # Vscode
 .vscode/
+
+# Local scratch notebooks — kept on disk, never committed
+docs/local_notebooks/
+
+# Local outputs
+docs/ROMS_TOOLS_INPUT_DATA
+ROMS_TOOLS_INPUT_DATA
+docs/source-data
+source-data
+docs/OUTPUT/
+docs/gml.noaa.gov/
+
+.claude

@@ -1318,6 +1318,7 @@ def interpolate_from_climatology(
     time_dim: str,
     time_coord: str,
     time: xr.DataArray | pd.DatetimeIndex,
+    interp_chunk_size: int | None = None,
 ) -> xr.DataArray | xr.Dataset:
     """Interpolates a climatological field to specified time points.
 
@@ -1339,6 +1340,11 @@ def interpolate_from_climatology(
     time : xarray.DataArray or pandas.DatetimeIndex
         The target time points for interpolation. These are internally converted to `day_of_year`
         before performing interpolation.
+    interp_chunk_size : int, optional
+        If given, the temporal interpolation is performed in blocks of this many
+        target time steps and concatenated, so the interpolated time axis stays
+        chunked (bounded memory, cheap time-slicing) instead of being produced as a
+        single large chunk. Defaults to None (a single interpolation call).
 
     Returns
     -------
@@ -1378,7 +1384,11 @@ def interpolate_from_climatology(
             day_of_year = np_times_to_fractional_days(time)
 
         data_array_interpolated = interpolate_cyclic_time(
-            data_array, time_dim, time_coord, day_of_year
+            data_array,
+            time_dim,
+            time_coord,
+            day_of_year,
+            interp_chunk_size=interp_chunk_size,
         )
 
         # expand dims if single element
@@ -1399,11 +1409,60 @@ def interpolate_from_climatology(
         raise TypeError("Input 'field' must be an xarray.DataArray or xarray.Dataset.")
 
 
+def _interpolate_in_time_blocks(
+    source: xr.DataArray,
+    time_dim: str,
+    targets: np.ndarray | xr.DataArray,
+    block_size: int,
+) -> xr.DataArray:
+    """Interpolate ``source`` onto ``targets`` along ``time_dim`` in blocks.
+
+    Interpolating the target axis block-by-block (rather than in a single
+    ``.interp`` call) keeps each block a separate dask task, so the interpolated
+    time axis stays chunked. This bounds peak memory for long target axes and makes
+    slicing a few time steps cheap, at the cost of a larger task graph. The result is
+    identical to a single ``.interp`` call; only the chunking differs.
+
+    Parameters
+    ----------
+    source : xarray.DataArray
+        The field to interpolate; its ``time_dim`` must be a single chunk.
+    time_dim : str
+        Name of the dimension in ``source`` being interpolated.
+    targets : numpy.ndarray or xarray.DataArray
+        The 1-D target coordinate values to interpolate onto.
+    block_size : int
+        Number of target steps per block.
+
+    Returns
+    -------
+    xarray.DataArray
+        ``source`` interpolated onto ``targets``, chunked along the target axis.
+    """
+    if isinstance(targets, xr.DataArray):
+        concat_dim = targets.dims[0]
+        n = targets.sizes[concat_dim]
+        blocks = (
+            targets.isel({concat_dim: slice(i, i + block_size)})
+            for i in range(0, n, block_size)
+        )
+    else:
+        # An ndarray target keeps the source dimension name on the output.
+        concat_dim = time_dim
+        targets = np.atleast_1d(np.asarray(targets))
+        n = targets.shape[0]
+        blocks = (targets[i : i + block_size] for i in range(0, n, block_size))
+
+    pieces = [source.interp(**{time_dim: block}, method="linear") for block in blocks]
+    return xr.concat(pieces, dim=concat_dim)
+
+
 def interpolate_cyclic_time(
     data_array: xr.DataArray,
     time_dim: str,
     time_coord: str,
     day_of_year: int | float | np.ndarray | xr.DataArray | Sequence[int | float],
+    interp_chunk_size: int | None = None,
 ) -> xr.DataArray:
     """Interpolates a DataArray cyclically across the start and end of the year.
 
@@ -1457,9 +1516,15 @@ def interpolate_cyclic_time(
     )
     data_array_concat[time_dim] = time_concat
 
-    # Interpolate to specified times
-    data_array_interpolated = data_array_concat.interp(
-        **{time_dim: day_of_year}, method="linear"
-    )
+    # A single interpolation call emits the interpolated axis as one dask chunk, which
+    # for a long target axis materialises one large (N, ...) block. When a chunk size
+    # is given and the target is longer than one block, interpolate the target in
+    # blocks instead so the axis stays chunked. Short/scalar targets fall through to a
+    # single call, which is behaviour-identical and avoids edge cases.
+    n_targets = getattr(day_of_year, "size", None) or np.size(day_of_year)
+    if interp_chunk_size is not None and n_targets > interp_chunk_size:
+        return _interpolate_in_time_blocks(
+            data_array_concat, time_dim, day_of_year, interp_chunk_size
+        )
 
-    return data_array_interpolated
+    return data_array_concat.interp(**{time_dim: day_of_year}, method="linear")

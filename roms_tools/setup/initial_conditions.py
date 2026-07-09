@@ -140,6 +140,61 @@ class InitialConditions:
         the log. Interpolation uses ``xgcm.Grid.transform`` with the linear method
         inside the source range and edge-value extrapolation outside
         (``mask_edges=False``).
+    prefill : str or None, optional
+        How to fill NaN (land/void) cells in the *source* before regridding. The
+        default (``None``) applies **no** source prefill: with xESMF installed,
+        masked bilinear interpolation plus destination extrapolation
+        (``extrap_method``) produces NaN-free initial-condition fields directly;
+        without xESMF, the source is automatically pre-filled with a cheap
+        nearest-neighbor fill before scipy interpolation. Set ``prefill`` to fill
+        the whole-domain source first (the regrid is then plain bilinear and
+        ``extrap_method`` is ignored). Options:
+
+          - ``"2d_lateral_fill"`` -- legacy AMG Poisson fill (smoothest, slow;
+            no xESMF required). This reproduces the pre-v4 fill behavior.
+          - ``"inverse_dist"`` -- xESMF inverse-distance-weighted source fill
+            (tunable via ``prefill_kwargs``; requires xESMF).
+          - ``"nearest_s2d"`` -- xESMF nearest-source fill (requires xESMF).
+          - ``"nearest_neighbor"`` -- cheap distance-transform fill (no xESMF;
+            also the automatic fallback when xESMF is unavailable). Use for
+            cross-platform reproducibility or when xESMF is unavailable and the
+            AMG fill is too slow; not recommended when xESMF is available.
+          - ``"creep_fill"`` -- xESMF truncated Laplace-style diffusion source
+            fill (tunable via ``prefill_kwargs``; requires xESMF). **Not available
+            in current released xESMF** -- requires a newer/unreleased xESMF +
+            ESMF; provided for use once a supporting xESMF is installed.
+
+        Applies only to lat/lon physics/BGC sources; for a ROMS restart source it
+        is ignored (the legacy fill path is used) and a note is logged. Defaults to
+        ``None``.
+    prefill_kwargs : dict, optional
+        Method-specific options for ``prefill``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``; ``num_levels`` for
+        ``"creep_fill"``. Ignored by the other methods. Defaults to ``None``.
+    regrid_method : str or None, optional
+        Horizontal regrid engine, chosen independently of ``prefill``:
+
+          - ``None`` / ``"auto"`` (default) -- use xESMF if it is installed
+            (lazy, weight-reused, faster on large grids), otherwise scipy.
+          - ``"xesmf"`` -- force the xESMF regridder (raises if xESMF is absent).
+          - ``"scipy"`` -- force scipy ``interp``. Byte-reproducible with pre-v4
+            outputs; when ``prefill`` is ``None`` a nearest-neighbor source
+            pre-fill is applied automatically so scipy cannot propagate NaNs.
+
+        Note that ``inverse_dist`` / ``nearest_s2d`` *prefills* still require xESMF
+        for the fill step regardless of ``regrid_method``. Applies only to lat/lon
+        sources (ignored for a ROMS restart source). Defaults to ``None``.
+    extrap_method : str or None, optional
+        xESMF *destination* extrapolation used on the default path
+        (``prefill is None``) to fill target points whose source neighbors are
+        all land/out of range, guaranteeing NaN-free output. ``"inverse_dist"``
+        (the effective default) gives an inverse-distance-weighted average of the
+        nearest source points (smoothly varying); ``"nearest_s2d"`` uses the
+        single nearest source point. Ignored when ``prefill`` is set. Defaults to
+        ``None`` (treated as ``"inverse_dist"``).
+    extrap_kwargs : dict, optional
+        Method-specific options for ``extrap_method``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
 
     Examples
     --------

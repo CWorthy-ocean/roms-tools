@@ -600,6 +600,37 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
         filepath.unlink()
 
 
+def test_ic_prefill_options_roundtrip_yaml(tmp_path, use_dask):
+    """The prefill/regrid/extrap options survive a to_yaml -> from_yaml round-trip
+    and are recorded in the saved-dataset metadata (releases.md claims this).
+    """
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        extrap_method="nearest_s2d",
+        use_dask=use_dask,
+    )
+
+    filepath = tmp_path / "ic_prefill.yaml"
+    ic.to_yaml(filepath)
+    ic_from_file = InitialConditions.from_yaml(filepath, use_dask=use_dask)
+
+    assert ic_from_file.prefill == ic.prefill == "2d_lateral_fill"
+    assert ic_from_file.regrid_method == ic.regrid_method == "scipy"
+    assert ic_from_file.extrap_method == ic.extrap_method == "nearest_s2d"
+    assert ic_from_file.prefill_kwargs == ic.prefill_kwargs
+    assert ic_from_file.extrap_kwargs == ic.extrap_kwargs
+
+    # Resolved values are also recorded in the saved-dataset metadata.
+    assert ic.ds.attrs["prefill"] == "2d_lateral_fill"
+    assert ic.ds.attrs["regrid_method"] == "scipy"
+
+
 @pytest.mark.parametrize(
     "initial_conditions_fixture",
     [

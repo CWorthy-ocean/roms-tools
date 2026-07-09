@@ -524,9 +524,7 @@ class InitialConditions:
             tracer_rg = build_lateral_regridder(
                 target_coords, data, self._regrid, _mask(False)
             )
-            has_vel = any(
-                var_names[v]["location"] in ("u", "v") for v in var_names
-            )
+            has_vel = any(var_names[v]["location"] in ("u", "v") for v in var_names)
             vector_rg = (
                 build_lateral_regridder(target_coords, data, self._regrid, _mask(True))
                 if has_vel

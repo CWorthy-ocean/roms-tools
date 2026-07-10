@@ -980,9 +980,13 @@ def test_ic_source_coverage_error(use_dask):
         )
 
 
+@skip_xesmf
 def test_ic_roms_source_ignores_regrid_options(use_dask, caplog):
     """A ROMS restart source keeps its legacy lateral-fill path; explicitly setting
     prefill/regrid options is a logged no-op (never an AttributeError).
+
+    Marked ``skip_xesmf`` because the ROMS-restart lateral regrid uses
+    ``LateralRegridFromROMS`` (xESMF), which has no scipy fallback.
     """
     import logging
 

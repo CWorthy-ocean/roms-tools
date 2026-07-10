@@ -41,6 +41,8 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     interpolate_from_climatology,
     rotate_velocities,
     save_datasets,
@@ -1084,10 +1086,11 @@ class SurfaceForcing:
         self,
         filepath: str | Path,
         group: bool = True,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
     ) -> None:
-        """Save the surface forcing fields to one or more netCDF4 files.
+        """Save the surface forcing fields to one or more NetCDF files.
 
-        This method saves the dataset to disk as either a single netCDF4 file or multiple files, depending on the `group` parameter.
+        This method saves the dataset to disk as either a single NetCDF file or multiple files, depending on the `group` parameter.
         If `group` is `True`, the dataset is divided into subsets (e.g., monthly or yearly) based on the temporal frequency
         of the data, and each subset is saved to a separate file.
 
@@ -1098,6 +1101,8 @@ class SurfaceForcing:
             time-based information (e.g., year or month) to distinguish the subsets.
         group : bool, optional
             Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `True`.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -1118,7 +1123,10 @@ class SurfaceForcing:
             output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            format=format,
         )
 
         return saved_filenames

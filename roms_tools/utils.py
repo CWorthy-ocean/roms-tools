@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import partial
 from importlib.util import find_spec
 from pathlib import Path
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,14 @@ import xarray as xr
 from roms_tools.constants import R_EARTH
 
 FilePaths: TypeAlias = str | Path | list[Path | str]
+
+NetCDFFormat = Literal[
+    "NETCDF4",
+    "NETCDF3_CLASSIC",
+    "NETCDF3_64BIT_OFFSET",
+    "NETCDF3_64BIT_DATA",
+]
+DEFAULT_NETCDF_FORMAT: NetCDFFormat = "NETCDF4"
 
 
 def _path_list_from_input(files: FilePaths) -> list[Path]:
@@ -844,8 +852,14 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
-def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
-    """Save the list of datasets to netCDF4 files.
+def save_datasets(
+    dataset_list,
+    output_filenames,
+    use_dask=False,
+    verbose=True,
+    format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+):
+    """Save the list of datasets to NetCDF files.
 
     Parameters
     ----------
@@ -858,6 +872,8 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     verbose : bool, optional
         Whether to log information about the files being written. If True, logs the output filenames.
         Defaults to True.
+    format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+        NetCDF file format passed to ``xarray.save_mfdataset``. Defaults to ``"NETCDF4"``.
 
     Returns
     -------
@@ -900,7 +916,7 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
                     else:
                         da.encoding["dtype"] = "float64"
 
-    saved_filenames = []
+    saved_filenames: list[Path] = []
     _patch_1d_encodings(dataset_list)
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
@@ -913,9 +929,9 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
         from dask.diagnostics import ProgressBar
 
         with ProgressBar():
-            xr.save_mfdataset(dataset_list, output_filenames)
+            xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
-        xr.save_mfdataset(dataset_list, output_filenames)
+        xr.save_mfdataset(dataset_list, output_filenames, format=format)
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

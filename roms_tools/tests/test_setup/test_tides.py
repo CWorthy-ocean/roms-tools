@@ -1,12 +1,35 @@
 import textwrap
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
 from roms_tools import Grid, TidalForcing
 from roms_tools.datasets.download import download_test_data
+
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
+
+skip_xesmf = pytest.mark.skipif(
+    xesmf is None, reason="xesmf required for ROMS regridding"
+)
+
+
+def _regional_tpxo10v2_files():
+    fname_grid = Path(download_test_data("regional_grid_tpxo10v2.nc"))
+    fname_h = Path(download_test_data("regional_h_tpxo10v2.nc"))
+    fname_u = Path(download_test_data("regional_u_tpxo10v2.nc"))
+    return {"grid": fname_grid, "h": fname_h, "u": fname_u}
+
+
+def _tides_grid():
+    return Grid(
+        nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
+    )
 
 
 @pytest.fixture(scope="session")
@@ -165,16 +188,19 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
 def test_unsuccessful_initialization_with_regional_data_due_to_nans(
     grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask
 ):
-    fname_grid = Path(download_test_data("regional_grid_tpxo10v2.nc"))
-    fname_h = Path(download_test_data("regional_h_tpxo10v2.nc"))
-    fname_u = Path(download_test_data("regional_u_tpxo10v2.nc"))
-    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u}
+    fname_dict = _regional_tpxo10v2_files()
 
+    # Pinned to the legacy (prefill + scipy) path: there, out-of-coverage points
+    # become NaN and are caught by the standard NaN validation. On the default
+    # extrapolating path the coverage check fires first instead (see
+    # test_tides_source_coverage_error).
     with pytest.raises(ValueError, match="NaN values found"):
         TidalForcing(
             grid=grid_that_is_out_of_bounds_of_regional_tpxo_data,
             source={"name": "TPXO", "path": fname_dict},
             ntides=10,
+            prefill="2d_lateral_fill",
+            regrid_method="scipy",
             use_dask=use_dask,
         )
 
@@ -334,3 +360,133 @@ def test_from_yaml_missing_tidal_forcing(tmp_path, use_dask):
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
+
+
+def test_tides_default_regrid_path(use_dask):
+    """The default horizontal regrid path applies no source prefill, selects the engine
+    by xESMF availability, produces NaN-free output, and records the resolved settings
+    in the dataset metadata.
+    """
+    tidal_forcing = TidalForcing(
+        grid=_tides_grid(),
+        source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+        ntides=1,
+        use_dask=use_dask,
+    )
+    assert tidal_forcing.prefill is None
+    assert tidal_forcing._regrid.use_xesmf == (xesmf is not None)
+    for var in ["ssh_Re", "ssh_Im", "pot_Re", "pot_Im", "u_Re", "u_Im", "v_Re", "v_Im"]:
+        assert not np.isnan(tidal_forcing.ds[var].values).any()
+    assert tidal_forcing.ds.attrs["prefill"] == "None"
+    assert tidal_forcing.ds.attrs["regrid_method"] == (
+        "xesmf" if xesmf is not None else "scipy"
+    )
+    assert tidal_forcing.ds.attrs["extrap_method"] == "inverse_dist"
+
+
+def test_tides_legacy_path(use_dask):
+    """The legacy AMG-fill + scipy regrid path remains available via explicit options."""
+    tidal_forcing = TidalForcing(
+        grid=_tides_grid(),
+        source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+        ntides=1,
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    assert tidal_forcing.prefill == "2d_lateral_fill"
+    assert tidal_forcing._regrid.use_xesmf is False
+    for var in ["ssh_Re", "ssh_Im", "pot_Re", "pot_Im", "u_Re", "u_Im", "v_Re", "v_Im"]:
+        assert not np.isnan(tidal_forcing.ds[var].values).any()
+    assert tidal_forcing.ds.attrs["prefill"] == "2d_lateral_fill"
+    assert tidal_forcing.ds.attrs["regrid_method"] == "scipy"
+
+
+@skip_xesmf
+def test_tides_default_differs_from_legacy(use_dask):
+    """With xESMF available, the default masked-bilinear path differs numerically from
+    the legacy AMG-fill + scipy path.
+    """
+    common = dict(
+        source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+        ntides=1,
+        use_dask=use_dask,
+    )
+    tides_default = TidalForcing(grid=_tides_grid(), **common)
+    tides_legacy = TidalForcing(
+        grid=_tides_grid(), prefill="2d_lateral_fill", regrid_method="scipy", **common
+    )
+    assert not np.allclose(
+        tides_default.ds["ssh_Re"].values,
+        tides_legacy.ds["ssh_Re"].values,
+        equal_nan=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "prefill",
+    [
+        "2d_lateral_fill",
+        pytest.param("inverse_dist", marks=skip_xesmf),
+        pytest.param("nearest_s2d", marks=skip_xesmf),
+        "nearest_neighbor",
+        # "creep_fill" is a valid prefill but is not in released xESMF, so it
+        # cannot be exercised end-to-end here; see test_prefill.py for its
+        # config-level coverage.
+    ],
+)
+def test_tides_prefill_methods_produce_nan_free_output(use_dask, prefill):
+    """Every prefill method runnable with released xESMF yields NaN-free tidal
+    fields.
+    """
+    tidal_forcing = TidalForcing(
+        grid=_tides_grid(),
+        source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+        ntides=1,
+        prefill=prefill,
+        use_dask=use_dask,
+    )
+    assert tidal_forcing.prefill == prefill
+    for var in ["ssh_Re", "ssh_Im", "pot_Re", "pot_Im", "u_Re", "u_Im", "v_Re", "v_Im"]:
+        assert not np.isnan(tidal_forcing.ds[var].values).any()
+
+
+@skip_xesmf
+def test_tides_source_coverage_error(
+    grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask
+):
+    """On the default extrapolating path, a grid that outruns the source coverage raises
+    a clear coverage error rather than silently extrapolating.
+    """
+    with pytest.raises(ValueError, match="extends beyond"):
+        TidalForcing(
+            grid=grid_that_is_out_of_bounds_of_regional_tpxo_data,
+            source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+            ntides=1,
+            use_dask=use_dask,
+        )
+
+
+def test_tides_regrid_options_roundtrip_yaml(tmp_path, use_dask):
+    """The prefill/regrid options survive the to_yaml/from_yaml round-trip."""
+    tidal_forcing = TidalForcing(
+        grid=_tides_grid(),
+        source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+        ntides=1,
+        prefill="nearest_neighbor",
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+
+    yaml_filepath = tmp_path / "test_yaml.yaml"
+    tidal_forcing.to_yaml(yaml_filepath)
+    tidal_forcing_from_file = TidalForcing.from_yaml(yaml_filepath, use_dask=use_dask)
+
+    assert tidal_forcing_from_file.prefill == "nearest_neighbor"
+    assert tidal_forcing_from_file.regrid_method == "scipy"
+    assert tidal_forcing_from_file.prefill_kwargs == tidal_forcing.prefill_kwargs
+    assert tidal_forcing_from_file.extrap_method == tidal_forcing.extrap_method
+    assert tidal_forcing_from_file.extrap_kwargs == tidal_forcing.extrap_kwargs
+    assert tidal_forcing == tidal_forcing_from_file
+
+    yaml_filepath.unlink()

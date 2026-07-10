@@ -352,6 +352,8 @@ def tidal_forcing(use_dask: bool) -> TidalForcing:
         grid=grid,
         source={"name": "TPXO", "path": fname_dict},  # type: ignore[dict-item]
         ntides=1,
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 

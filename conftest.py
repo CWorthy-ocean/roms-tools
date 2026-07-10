@@ -147,7 +147,16 @@ def use_dask(request, configure_dask_threads) -> bool:
 
 @pytest.fixture(scope="session")
 def grid() -> Grid:
-    grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
+    grid = Grid(
+        regrid_method="scipy",
+        nx=1,
+        ny=1,
+        size_x=100,
+        size_y=100,
+        center_lon=-20,
+        center_lat=0,
+        rot=0,
+    )
 
     return grid
 
@@ -155,6 +164,7 @@ def grid() -> Grid:
 @pytest.fixture(scope="session")
 def large_grid():
     grid = Grid(
+        regrid_method="scipy",
         nx=24,
         ny=48,
         size_x=500,
@@ -173,7 +183,14 @@ def large_grid():
 @pytest.fixture(scope="session")
 def grid_that_straddles_dateline() -> Grid:
     grid = Grid(
-        nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20
+        regrid_method="scipy",
+        nx=1,
+        ny=1,
+        size_x=1000,
+        size_y=1000,
+        center_lon=0.5,
+        center_lat=0,
+        rot=20,
     )
 
     return grid
@@ -182,6 +199,7 @@ def grid_that_straddles_dateline() -> Grid:
 @pytest.fixture(scope="session")
 def tiny_grid_that_straddles_dateline() -> Grid:
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=10,
@@ -202,6 +220,7 @@ def grid_that_straddles_180_degree_meridian() -> Grid:
     longitude grid.
     """
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -217,6 +236,7 @@ def grid_that_straddles_180_degree_meridian() -> Grid:
 @pytest.fixture(scope="session")
 def tiny_grid_that_straddles_180_degree_meridian() -> Grid:
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=10,
@@ -233,6 +253,7 @@ def tiny_grid_that_straddles_180_degree_meridian() -> Grid:
 def small_grid() -> Grid:
     """Create a grid that covers a small surface area."""
     return Grid(
+        regrid_method="scipy",
         nx=3,
         ny=3,
         size_x=400,
@@ -251,6 +272,7 @@ def small_grid() -> Grid:
 def tiny_grid() -> Grid:
     """Create a grid that covers a small surface area."""
     return Grid(
+        regrid_method="scipy",
         nx=3,
         ny=3,
         size_x=10,
@@ -269,6 +291,7 @@ def tiny_grid() -> Grid:
 def tiny_rotated_grid() -> Grid:
     """Create a grid that covers a small surface area."""
     return Grid(
+        regrid_method="scipy",
         nx=3,
         ny=3,
         size_x=10,
@@ -286,6 +309,7 @@ def tiny_rotated_grid() -> Grid:
 @pytest.fixture(scope="session")
 def grid_with_closed_channels() -> Grid:
     return Grid(
+        regrid_method="scipy",
         nx=3,
         ny=3,
         size_x=10,
@@ -301,13 +325,21 @@ def grid_with_closed_channels() -> Grid:
 @pytest.fixture(scope="session")
 def big_grid() -> Grid:
     return Grid(
-        nx=5, ny=7, center_lon=-23, center_lat=61, rot=20, size_x=1800, size_y=2400
+        regrid_method="scipy",
+        nx=5,
+        ny=7,
+        center_lon=-23,
+        center_lat=61,
+        rot=20,
+        size_x=1800,
+        size_y=2400,
     )
 
 
 @pytest.fixture(scope="session")
 def child_grid_with_bgc(big_grid):
     child_grid = Grid(
+        regrid_method="scipy",
         nx=10,
         ny=10,
         center_lon=-23,
@@ -324,6 +356,7 @@ def child_grid_with_bgc(big_grid):
 @pytest.fixture(scope="session")
 def child_grid_with_pflx(big_grid):
     child_grid = Grid(
+        regrid_method="scipy",
         nx=10,
         ny=10,
         center_lon=-23,
@@ -341,7 +374,14 @@ def child_grid_with_pflx(big_grid):
 @pytest.fixture(scope="session")
 def tidal_forcing(use_dask: bool) -> TidalForcing:
     grid = Grid(
-        nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
+        regrid_method="scipy",
+        nx=3,
+        ny=3,
+        size_x=1500,
+        size_y=1500,
+        center_lon=235,
+        center_lat=25,
+        rot=-20,
     )
     fname_grid = Path(download_test_data("regional_grid_tpxo10v2.nc"))
     fname_h = Path(download_test_data("regional_h_tpxo10v2.nc"))
@@ -360,6 +400,7 @@ def tidal_forcing(use_dask: bool) -> TidalForcing:
 def initial_conditions(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
+        regrid_method="scipy",
         nx=2,
         ny=2,
         size_x=500,
@@ -404,6 +445,7 @@ def initial_conditions_on_large_grid(large_grid, use_dask):
 def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
+        regrid_method="scipy",
         nx=2,
         ny=2,
         size_x=500,
@@ -435,6 +477,7 @@ def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
 def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
+        regrid_method="scipy",
         nx=2,
         ny=2,
         size_x=500,
@@ -471,6 +514,7 @@ def initial_conditions_with_unified_bgc_from_climatology(
     use_dask: bool,
 ) -> InitialConditions:
     grid = Grid(
+        regrid_method="scipy",
         nx=2,
         ny=2,
         size_x=500,
@@ -509,6 +553,7 @@ def initial_conditions_with_unified_bgc_density(
     density surfaces (target T/S come from the physics in the same object).
     """
     grid = Grid(
+        regrid_method="scipy",
         nx=2,
         ny=2,
         size_x=500,
@@ -541,10 +586,26 @@ def initial_conditions_with_unified_bgc_density(
 def initial_conditions_from_roms(
     use_dask: bool,
 ) -> InitialConditions:
-    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+    grid = Grid(
+        regrid_method="scipy",
+        nx=5,
+        ny=5,
+        center_lon=-120,
+        center_lat=34,
+        size_x=100,
+        size_y=100,
+        N=3,
+    )
 
     parent_grid = Grid(
-        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+        regrid_method="scipy",
+        center_lon=-120,
+        center_lat=30,
+        nx=8,
+        ny=13,
+        size_x=3000,
+        size_y=4000,
+        rot=32,
     )
     fname_restart = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
 
@@ -561,10 +622,26 @@ def initial_conditions_from_roms(
 def initial_conditions_from_roms_without_bgc(
     use_dask: bool,
 ) -> InitialConditions:
-    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+    grid = Grid(
+        regrid_method="scipy",
+        nx=5,
+        ny=5,
+        center_lon=-120,
+        center_lat=34,
+        size_x=100,
+        size_y=100,
+        N=3,
+    )
 
     parent_grid = Grid(
-        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+        regrid_method="scipy",
+        center_lon=-120,
+        center_lat=30,
+        nx=8,
+        ny=13,
+        size_x=3000,
+        size_y=4000,
+        rot=32,
     )
     fname_restart = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
 
@@ -615,6 +692,7 @@ def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid) -> BoundaryF
 def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
     grid = Grid(
+        regrid_method="scipy",
         nx=2,
         ny=2,
         size_x=500,
@@ -650,6 +728,7 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
 def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
     grid = Grid(
+        regrid_method="scipy",
         nx=2,
         ny=2,
         size_x=500,
@@ -689,6 +768,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
     Uses the North Atlantic GLORYS physics so the target T/S overlap the domain.
     """
     grid = Grid(
+        regrid_method="scipy",
         nx=3,
         ny=3,
         size_x=400,
@@ -736,6 +816,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
 def surface_forcing(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -773,6 +854,7 @@ def surface_forcing_arco(use_dask: bool) -> SurfaceForcing:
         pytest.skip("surface_forcing_arco requires use_dask=True")
 
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=5,
@@ -800,6 +882,7 @@ def surface_forcing_arco(use_dask: bool) -> SurfaceForcing:
 def coarse_surface_forcing(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -834,6 +917,7 @@ def corrected_surface_forcing(use_dask: bool) -> SurfaceForcing:
     correction.
     """
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -866,6 +950,7 @@ def corrected_surface_forcing(use_dask: bool) -> SurfaceForcing:
 def surface_forcing_with_wind_dropoff(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with wind dropoff correction."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -895,6 +980,7 @@ def surface_forcing_with_wind_dropoff(use_dask: bool) -> SurfaceForcing:
 def bgc_surface_forcing(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with BGC."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -927,6 +1013,7 @@ def bgc_surface_forcing(use_dask: bool) -> SurfaceForcing:
 def bgc_surface_forcing_from_climatology(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with BGC from climatology."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -959,6 +1046,7 @@ def bgc_surface_forcing_from_climatology(use_dask: bool) -> SurfaceForcing:
 def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with BGC from climatology."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -991,6 +1079,7 @@ def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForci
 def bgc_surface_forcing_from_mbl_co2(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with co2 from NOAA's MBL."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -1022,6 +1111,7 @@ def restoring_surface_forcing_from_unified_climatology(
 ) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with salinity restoring forces from unified climatology."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -1054,6 +1144,7 @@ def restoring_surface_forcing_from_woa_climatology(
 ) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with salinity restoring forces from WOA climatology."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -1086,6 +1177,7 @@ def restoring_surface_forcing_from_soda(
 ) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with DIC/ALK restoring forces from OceanSODA."""
     grid = Grid(
+        regrid_method="scipy",
         nx=5,
         ny=5,
         size_x=1800,
@@ -1116,7 +1208,15 @@ def restoring_surface_forcing_from_soda(
 def river_forcing() -> RiverForcing:
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
     grid = Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+        regrid_method="scipy",
+        nx=18,
+        ny=18,
+        size_x=800,
+        size_y=800,
+        center_lon=-18,
+        center_lat=65,
+        rot=20,
+        N=3,
     )
 
     start_time = datetime(1998, 1, 1)
@@ -1133,7 +1233,15 @@ def river_forcing() -> RiverForcing:
 def river_forcing_no_climatology() -> RiverForcing:
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
     grid = Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+        regrid_method="scipy",
+        nx=18,
+        ny=18,
+        size_x=800,
+        size_y=800,
+        center_lon=-18,
+        center_lat=65,
+        rot=20,
+        N=3,
     )
 
     start_time = datetime(1998, 1, 1)
@@ -1151,7 +1259,15 @@ def river_forcing_no_climatology() -> RiverForcing:
 def river_forcing_with_bgc() -> RiverForcing:
     """Fixture for creating a RiverForcing object with BGC tracers."""
     grid = Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+        regrid_method="scipy",
+        nx=18,
+        ny=18,
+        size_x=800,
+        size_y=800,
+        center_lon=-18,
+        center_lat=65,
+        rot=20,
+        N=3,
     )
 
     start_time = datetime(1998, 1, 1)
@@ -1199,7 +1315,15 @@ def glofas_test_file(tmp_path_factory):
 def river_forcing_with_glofas(glofas_test_file) -> RiverForcing:
     """RiverForcing using a synthetic GloFAS-format discharge file."""
     grid = Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+        regrid_method="scipy",
+        nx=18,
+        ny=18,
+        size_x=800,
+        size_y=800,
+        center_lon=-18,
+        center_lat=65,
+        rot=20,
+        N=3,
     )
     return RiverForcing(
         grid=grid,
@@ -1213,7 +1337,15 @@ def river_forcing_with_glofas(glofas_test_file) -> RiverForcing:
 def river_forcing_with_rivr2o_bgc(rivr2o_test_data_paths: list[str]) -> RiverForcing:
     """RiverForcing with Dai discharge and RIVR2O BGC from the test-data repository."""
     grid = Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+        regrid_method="scipy",
+        nx=18,
+        ny=18,
+        size_x=800,
+        size_y=800,
+        center_lon=-18,
+        center_lat=65,
+        rot=20,
+        N=3,
     )
 
     return RiverForcing(

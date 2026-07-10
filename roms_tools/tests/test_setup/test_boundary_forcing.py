@@ -562,7 +562,9 @@ def test_old_yaml_with_apply_2d_horizontal_fill_still_loads(use_dask, tmp_path):
         stripped = ln.strip()
         if stripped.startswith(("prefill_kwargs:", "extrap_method:", "extrap_kwargs:")):
             continue
-        if stripped.startswith("prefill:"):
+        if stripped == "prefill: 2d_lateral_fill":
+            # only the BoundaryForcing line; the embedded Grid section also
+            # carries a (null) prefill key that must stay untouched
             indent = ln[: len(ln) - len(ln.lstrip())]
             new_lines.append(f"{indent}apply_2d_horizontal_fill: true")
         else:

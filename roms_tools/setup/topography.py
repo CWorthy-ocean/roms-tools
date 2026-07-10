@@ -12,8 +12,14 @@ from roms_tools.datasets.lat_lon_datasets import (
     ETOPO5Dataset,
     SRTM15Dataset,
 )
-from roms_tools.regrid import LateralRegridToROMS
-from roms_tools.setup.utils import handle_boundaries
+from roms_tools.processing_methods import RegridConfig, _xesmf_available
+from roms_tools.regrid import build_lateral_regridder, select_source_mask
+from roms_tools.setup.utils import (
+    apply_scipy_fallback_fill,
+    apply_source_prefill,
+    check_source_coverage,
+    handle_boundaries,
+)
 
 
 def add_topography(
@@ -23,6 +29,8 @@ def add_topography(
     hmin,
     smooth_factor=5.0,
     rmax=0.2,
+    regrid_config=None,
+    prefill_kwargs=None,
     verbose=False,
 ) -> xr.Dataset:
     """Adds topography to the dataset based on the provided topography source.
@@ -48,6 +56,16 @@ def add_topography(
         The maximum allowable steepness ratio for the topography smoothing.
         This parameter controls the local smoothing of the topography. Smaller values result in
         smoother topography, while larger values preserve more detail. The default is 0.2.
+    regrid_config : RegridConfig, optional
+        Resolved lateral-regrid configuration (engine, prefill, extrapolation).
+        The default (``None``) resolves the standard defaults: xESMF masked
+        bilinear regridding with destination extrapolation when xESMF is
+        installed, otherwise scipy interpolation with a nearest-neighbor
+        source pre-fill.
+    prefill_kwargs : dict, optional
+        Method-specific options forwarded to the source prefill (e.g.
+        ``num_src_pnts`` / ``dist_exponent``). Ignored when
+        ``regrid_config.prefill`` is ``None``.
     verbose: bool, optional
         Indicates whether to print topography generation steps with timing. Defaults to False.
 
@@ -56,6 +74,16 @@ def add_topography(
     xr.Dataset
         Updated dataset with added topography and metadata.
     """
+    if regrid_config is None:
+        regrid_config = RegridConfig.from_options(
+            prefill=None,
+            prefill_kwargs=None,
+            regrid_method=None,
+            extrap_method=None,
+            extrap_kwargs=None,
+            xesmf_available=_xesmf_available(),
+        )
+
     if verbose:
         start_time = time.time()
     data = _get_topography_data(topography_source)
@@ -65,7 +93,14 @@ def add_topography(
         )
 
     # interpolate topography onto desired grid
-    hraw = _make_raw_topography(data, target_coords, verbose=verbose)
+    hraw = _make_raw_topography(
+        data,
+        target_coords,
+        regrid_config,
+        prefill_kwargs=prefill_kwargs,
+        source_name=topography_source["name"],
+        verbose=verbose,
+    )
     nan_check(hraw)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
@@ -131,7 +166,12 @@ def _get_topography_data(source):
 
 
 def _make_raw_topography(
-    data, target_coords, method="linear", verbose=False
+    data,
+    target_coords,
+    regrid_config,
+    prefill_kwargs=None,
+    source_name=None,
+    verbose=False,
 ) -> xr.DataArray:
     """Regrid topography data to match target coordinates.
 
@@ -141,8 +181,12 @@ def _make_raw_topography(
         The dataset object containing the topography data.
     target_coords : object
         The target coordinates to which the data will be regridded.
-    method : str, optional
-        The regridding method to use, by default "linear".
+    regrid_config : RegridConfig
+        Resolved lateral-regrid configuration (engine, prefill, extrapolation).
+    prefill_kwargs : dict, optional
+        Method-specific options forwarded to the source prefill.
+    source_name : str, optional
+        Name of the topography source, used in error messages.
     verbose : bool, optional
         If True, logs the time taken for regridding, by default False.
 
@@ -156,16 +200,33 @@ def _make_raw_topography(
     )
     # Enforce double precision to ensure reproducibility
     data.convert_to_float64()
-    data.apply_lateral_fill()
+
+    if regrid_config.extrap_is_active:
+        check_source_coverage(data, target_coords, source_name)
+    apply_source_prefill(data, regrid_config, prefill_kwargs)
+    apply_scipy_fallback_fill(data, regrid_config)
 
     if verbose:
         start_time = time.time()
-    lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
-    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]], method=method)
+    source_mask = select_source_mask(
+        data.ds,
+        is_vector=False,
+        use_xesmf=regrid_config.use_xesmf,
+        prefill=regrid_config.prefill,
+    )
+    lateral_regrid = build_lateral_regridder(
+        target_coords, data, regrid_config, source_mask
+    )
+    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
     if verbose:
         logging.info(
             f"Regridding the topography: {time.time() - start_time:.3f} seconds"
         )
+
+    # Drop the destination lat/lon coordinates the xESMF regridder attaches;
+    # topography is written straight into the grid dataset, which must not
+    # gain extra coordinate variables.
+    hraw = hraw.drop_vars(["lat", "lon"], errors="ignore")
 
     # flip sign so that bathmetry is positive
     hraw = -hraw

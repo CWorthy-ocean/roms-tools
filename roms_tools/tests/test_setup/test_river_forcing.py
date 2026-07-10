@@ -52,8 +52,18 @@ ROUNDTRIP_FIXTURES = [
 
 @pytest.fixture
 def iceland_test_grid():
+    # regrid_method is pinned so this grid stays identical to the one inside
+    # the conftest `river_forcing` fixture (test_reproducibility compares them)
     return Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+        regrid_method="scipy",
+        nx=18,
+        ny=18,
+        size_x=800,
+        size_y=800,
+        center_lon=-18,
+        center_lat=65,
+        rot=20,
+        N=3,
     )
 
 

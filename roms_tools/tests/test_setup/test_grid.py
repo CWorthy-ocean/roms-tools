@@ -794,6 +794,163 @@ def test_update_topography_raises_if_grid_loaded_from_file_has_no_source_info():
         grid.update_topography(topography_source={"name": "ETOPO5"})
 
 
+# Topography regridding options
+
+requires_xesmf = pytest.mark.skipif(
+    xesmf is None, reason="requires the optional xESMF dependency"
+)
+
+small_grid_kwargs = {
+    "nx": 5,
+    "ny": 5,
+    "size_x": 400,
+    "size_y": 400,
+    "center_lon": -8,
+    "center_lat": 58,
+    "rot": 0,
+    "N": 3,
+}
+
+
+@requires_xesmf
+def test_topography_default_engine_is_xesmf():
+    grid = Grid(**small_grid_kwargs)
+
+    assert grid.ds.attrs["topography_regrid_engine_used"] == "xesmf"
+    # raw user options are only persisted when set
+    for attr in (
+        "topography_prefill",
+        "topography_regrid_method",
+        "topography_extrap_method",
+    ):
+        assert attr not in grid.ds.attrs
+    assert grid.ds.h.notnull().all()
+    # the xESMF regridder must not leak its destination coordinates
+    assert "lat" not in grid.ds.coords and "lat" not in grid.ds.data_vars
+    assert "lon" not in grid.ds.coords and "lon" not in grid.ds.data_vars
+
+
+@requires_xesmf
+def test_topography_regrid_engines_agree():
+    grid_xesmf = Grid(**small_grid_kwargs, regrid_method="xesmf")
+    grid_scipy = Grid(**small_grid_kwargs, regrid_method="scipy")
+
+    assert grid_xesmf.ds.attrs["topography_regrid_engine_used"] == "xesmf"
+    assert grid_scipy.ds.attrs["topography_regrid_engine_used"] == "scipy"
+
+    for grid in (grid_xesmf, grid_scipy):
+        assert grid.ds.h.notnull().all()
+        assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+    # bilinear (xESMF) and linear (scipy) interpolation of the same smooth
+    # source agree closely after smoothing but are distinct algorithms
+    npt.assert_allclose(grid_xesmf.ds.h, grid_scipy.ds.h, rtol=1e-3)
+
+
+def test_topography_scipy_fallback_when_xesmf_missing(monkeypatch):
+    monkeypatch.setattr("roms_tools.setup.grid._xesmf_available", lambda: False)
+
+    grid = Grid(**small_grid_kwargs)
+
+    assert grid.ds.attrs["topography_regrid_engine_used"] == "scipy"
+    assert grid.ds.h.notnull().all()
+    assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+
+@requires_xesmf
+def test_topography_emod_prefill_options():
+    emod_kwargs = {
+        "nx": 2,
+        "ny": 2,
+        "size_x": 32,
+        "size_y": 19.2,
+        "center_lon": -21.68,
+        "center_lat": 64.325,
+        "rot": 0,
+        "N": 3,
+        "topography_source": {
+            "name": "EMOD",
+            "path": download_test_data("EMODnet_C2_coarse100.nc"),
+        },
+    }
+
+    # default: masked bilinear + destination extrapolation
+    grid_default = Grid(**emod_kwargs)
+    # legacy: whole-domain Poisson fill + scipy interpolation
+    grid_legacy = Grid(**emod_kwargs, prefill="2d_lateral_fill", regrid_method="scipy")
+
+    assert grid_default.prefill is None
+    assert grid_legacy.prefill == "2d_lateral_fill"
+
+    for grid in (grid_default, grid_legacy):
+        assert grid.ds.h.notnull().all()
+        assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+    # the two fill strategies agree within a loose tolerance
+    npt.assert_allclose(grid_default.ds.h, grid_legacy.ds.h, rtol=0.15)
+
+
+def test_topography_regrid_options_roundtrip(tmp_path):
+    grid = Grid(**small_grid_kwargs, regrid_method="scipy", prefill="2d_lateral_fill")
+    filepath = tmp_path / "grid.nc"
+    grid.save(filepath)
+
+    grid_from_file = Grid(filename=filepath)
+
+    assert grid_from_file.regrid_method == "scipy"
+    assert grid_from_file.prefill == "2d_lateral_fill"
+
+    grid.filename = grid_from_file.filename
+    assert grid == grid_from_file
+
+    # a grid built with the defaults must reload with the defaults
+    grid_default = Grid(**small_grid_kwargs)
+    filepath_default = tmp_path / "grid_default.nc"
+    grid_default.save(filepath_default)
+
+    saved = xr.open_dataset(filepath_default)
+    for attr in (
+        "topography_prefill",
+        "topography_regrid_method",
+        "topography_extrap_method",
+    ):
+        assert attr not in saved.attrs
+
+    grid_default_from_file = Grid(filename=filepath_default)
+    assert grid_default_from_file.regrid_method is None
+    assert grid_default_from_file.prefill is None
+    assert grid_default_from_file.extrap_method is None
+
+
+def test_update_topography_regrid_options():
+    grid = Grid(**small_grid_kwargs, regrid_method="scipy")
+    h_scipy = grid.ds.h.copy(deep=True)
+
+    grid.update_topography(regrid_method="scipy")
+    xr.testing.assert_identical(grid.ds.h, h_scipy)
+
+
+def test_update_topography_regrid_options_on_grid_from_file(tmp_path):
+    grid = Grid(**small_grid_kwargs)
+    filepath = tmp_path / "grid.nc"
+    grid.save(filepath)
+
+    grid_from_file = Grid(filename=filepath)
+    # must not raise even though __post_init__ was bypassed on the file path
+    grid_from_file.update_topography(regrid_method="scipy")
+
+    assert grid_from_file.regrid_method == "scipy"
+    assert grid_from_file.ds.attrs["topography_regrid_engine_used"] == "scipy"
+
+
+def test_topography_invalid_regrid_options_raise():
+    with pytest.raises(ValueError, match="regrid_method"):
+        Grid(**small_grid_kwargs, regrid_method="cubic")
+
+    with pytest.raises(ValueError, match="prefill"):
+        Grid(**small_grid_kwargs, prefill="bogus")
+
+
 # Mask tests
 
 

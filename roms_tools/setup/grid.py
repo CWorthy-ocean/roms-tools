@@ -14,6 +14,7 @@ from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import plot
+from roms_tools.processing_methods import RegridConfig, _xesmf_available
 from roms_tools.setup.mask import add_mask, add_velocity_masks
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
@@ -76,6 +77,59 @@ class Grid:
         The default is False.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
+    prefill : str or None, optional
+        How to fill NaN (land/void) cells in the *source* topography before
+        regridding. Applies to the topography regridding step only (the mask and
+        coordinates involve no regridding), and only matters for sources with
+        missing values (e.g. ``"EMOD"``); ``"ETOPO5"`` and ``"SRTM15"`` are
+        NaN-free, so every prefill is a no-op for them. The default (``None``)
+        applies **no** source prefill: with xESMF installed, masked bilinear
+        interpolation plus destination extrapolation (``extrap_method``)
+        produces NaN-free topography directly; without xESMF, the source is
+        automatically pre-filled with a cheap nearest-neighbor fill before
+        scipy interpolation. Set ``prefill`` to fill the whole-domain source
+        first (the regrid is then plain bilinear and ``extrap_method`` is
+        ignored). Options:
+
+          - ``"2d_lateral_fill"`` -- legacy AMG Poisson fill (smoothest, slow;
+            no xESMF required). This reproduces the pre-v4 fill behavior.
+          - ``"inverse_dist"`` -- xESMF inverse-distance-weighted source fill
+            (tunable via ``prefill_kwargs``; requires xESMF).
+          - ``"nearest_s2d"`` -- xESMF nearest-source fill (requires xESMF).
+          - ``"nearest_neighbor"`` -- cheap distance-transform fill (no xESMF;
+            also the automatic fallback when xESMF is unavailable).
+          - ``"creep_fill"`` -- xESMF truncated Laplace-style diffusion source
+            fill (tunable via ``prefill_kwargs``; requires a newer/unreleased
+            xESMF + ESMF).
+
+        Defaults to ``None``.
+    prefill_kwargs : dict, optional
+        Method-specific options for ``prefill``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``; ``num_levels`` for
+        ``"creep_fill"``. Ignored by the other methods. Defaults to ``None``.
+    regrid_method : str or None, optional
+        Horizontal regrid engine for the topography, chosen independently of
+        ``prefill``:
+
+          - ``None`` / ``"auto"`` (default) -- use xESMF if it is installed
+            (lazy, weight-reused, faster on large grids), otherwise scipy.
+          - ``"xesmf"`` -- force the xESMF regridder (raises if xESMF is absent).
+          - ``"scipy"`` -- force scipy ``interp``. Byte-reproducible with pre-v4
+            topography; when ``prefill`` is ``None`` a nearest-neighbor source
+            pre-fill is applied automatically so scipy cannot propagate NaNs.
+
+        Defaults to ``None``.
+    extrap_method : str or None, optional
+        xESMF *destination* extrapolation used on the default path
+        (``prefill is None``) to fill target points whose source neighbors are
+        all masked/out of range, guaranteeing NaN-free topography.
+        ``"inverse_dist"`` (the effective default) gives an
+        inverse-distance-weighted average of the nearest source points;
+        ``"nearest_s2d"`` uses the single nearest source point. Ignored when
+        ``prefill`` is set. Defaults to ``None`` (treated as ``"inverse_dist"``).
+    extrap_kwargs : dict, optional
+        Method-specific options for ``extrap_method``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
     N : int, optional
         The number of vertical levels. The default is 100.
     theta_s : float, optional
@@ -125,6 +179,30 @@ class Grid:
     Default is False."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
+    prefill: str | None = None
+    """Source-side fill applied before the topography is laterally regridded.
+    ``None`` (default) applies **no** whole-domain source fill: with xESMF the
+    masked-bilinear regrid plus destination extrapolation (``extrap_method``)
+    produces NaN-free topography directly; without xESMF a nearest-neighbor
+    pre-fill is applied automatically before scipy interpolation. Set to
+    ``"2d_lateral_fill"`` (legacy AMG Poisson fill), ``"nearest_neighbor"``,
+    ``"inverse_dist"``, ``"nearest_s2d"``, or ``"creep_fill"`` to fill the
+    whole-domain source first (the last three require xESMF). Only matters for
+    topography sources with missing values (e.g. ``"EMOD"``)."""
+    prefill_kwargs: dict | None = None
+    """Method-specific options for ``prefill`` (e.g. ``num_src_pnts`` /
+    ``dist_exponent``)."""
+    regrid_method: str | None = None
+    """Horizontal regrid engine for the topography, chosen independently of
+    ``prefill``: ``None``/``"auto"`` uses xESMF when installed (else scipy),
+    ``"xesmf"`` forces xESMF, ``"scipy"`` forces scipy."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation used on the default no-prefill path
+    (``None`` is treated as ``"inverse_dist"``) to fill target points whose
+    source neighbors are all masked. Ignored when ``prefill`` is set or on the
+    scipy path."""
+    extrap_kwargs: dict | None = None
+    """Method-specific options for ``extrap_method``."""
     verbose: bool = False
     """Whether to print grid generation steps with timing."""
     filename: str | Path | None = None
@@ -288,6 +366,11 @@ class Grid:
         self,
         topography_source: dict | None = None,
         hmin: float | None = None,
+        prefill: str | None = None,
+        prefill_kwargs: dict | None = None,
+        regrid_method: str | None = None,
+        extrap_method: str | None = None,
+        extrap_kwargs: dict | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -314,6 +397,28 @@ class Grid:
             Minimum ocean depth in meters.
             If not provided, `hmin` will remain unchanged (i.e., the existing value will not be overwritten).
 
+        prefill : str, optional
+            Source-side fill applied before regridding (see the class docstring
+            for the available options). If not provided, the existing value
+            will not be overwritten.
+
+        prefill_kwargs : dict, optional
+            Method-specific options for ``prefill``. If not provided, the
+            existing value will not be overwritten.
+
+        regrid_method : str, optional
+            Horizontal regrid engine (``"auto"``, ``"xesmf"``, or ``"scipy"``;
+            see the class docstring). If not provided, the existing value will
+            not be overwritten.
+
+        extrap_method : str, optional
+            xESMF destination extrapolation (see the class docstring). If not
+            provided, the existing value will not be overwritten.
+
+        extrap_kwargs : dict, optional
+            Method-specific options for ``extrap_method``. If not provided, the
+            existing value will not be overwritten.
+
         verbose : bool, optional
             If True, print detailed information about the processing steps and timing.
             Defaults to False.
@@ -329,6 +434,17 @@ class Grid:
         if hmin is None:
             hmin = self.hmin
 
+        if prefill is None:
+            prefill = self.prefill
+        if prefill_kwargs is None:
+            prefill_kwargs = self.prefill_kwargs
+        if regrid_method is None:
+            regrid_method = self.regrid_method
+        if extrap_method is None:
+            extrap_method = self.extrap_method
+        if extrap_kwargs is None:
+            extrap_kwargs = self.extrap_kwargs
+
         # This can only happen for externally generated grids read via Grid.from_file()
         if topography_source is None:
             raise ValueError(
@@ -342,6 +458,15 @@ class Grid:
                 "Minimal ocean depth is not available. "
                 "Please provide `hmin` explicitly when calling `update_topography()`."
             )
+
+        regrid_config = RegridConfig.from_options(
+            prefill=prefill,
+            prefill_kwargs=prefill_kwargs,
+            regrid_method=regrid_method,
+            extrap_method=extrap_method,
+            extrap_kwargs=extrap_kwargs,
+            xesmf_available=_xesmf_available(),
+        )
 
         name = topography_source["name"]  # type: ignore[index]
 
@@ -357,13 +482,39 @@ class Grid:
                 target_coords=target_coords,
                 topography_source=topography_source,
                 hmin=hmin,
+                regrid_config=regrid_config,
+                prefill_kwargs=prefill_kwargs,
                 verbose=verbose,
+            )
+
+            # Record the raw user-set regrid options (only when set, so grids
+            # built with the defaults round-trip portably), plus the engine
+            # actually used as provenance.
+            for attr, value in (
+                ("topography_prefill", prefill),
+                ("topography_regrid_method", regrid_method),
+                ("topography_extrap_method", extrap_method),
+            ):
+                if value is not None:
+                    ds.attrs[attr] = value
+                else:
+                    ds.attrs.pop(attr, None)
+            ds.attrs["topography_regrid_engine_used"] = (
+                "xesmf" if regrid_config.use_xesmf else "scipy"
             )
 
             # Update the grid's dataset and related attributes
             self.ds = ds
             self.topography_source = topography_source
             self.hmin = hmin
+            self.prefill = (
+                None if regrid_config.prefill is None else str(regrid_config.prefill)
+            )
+            self.prefill_kwargs = prefill_kwargs
+            self.regrid_method = regrid_method
+            self.extrap_method = extrap_method
+            self.extrap_kwargs = extrap_kwargs
+            self._regrid = regrid_config
 
     def update_vertical_coordinate(
         self, N=None, theta_s=None, theta_b=None, hc=None, verbose=False
@@ -867,6 +1018,15 @@ class Grid:
             topo_source = None
         grid.topography_source = topo_source
 
+        # Restore the raw regrid options (only written to the file when the
+        # user set them; absent means the auto defaults). The dict-valued
+        # kwargs cannot be stored as netCDF attributes and always reset.
+        grid.prefill = ds.attrs.get("topography_prefill", None)
+        grid.regrid_method = ds.attrs.get("topography_regrid_method", None)
+        grid.extrap_method = ds.attrs.get("topography_extrap_method", None)
+        grid.prefill_kwargs = None
+        grid.extrap_kwargs = None
+
         if "mask_shapefile" in ds.attrs:
             mask_shapefile = ds.attrs["mask_shapefile"]
         else:
@@ -1014,9 +1174,12 @@ class Grid:
         """
         cls = self.__class__
         cls_name = cls.__name__
-        # Filter attributes to exclude 'ds' and those with None values
+        # Filter attributes to exclude 'ds', private attributes, and those
+        # with None values
         attr_dict = {
-            k: v for k, v in self.__dict__.items() if k != "ds" and v is not None
+            k: v
+            for k, v in self.__dict__.items()
+            if k != "ds" and not k.startswith("_") and v is not None
         }
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"

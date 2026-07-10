@@ -2985,23 +2985,24 @@ def _concatenate_longitudes(
     use_dask: bool = False,
 ) -> xr.Dataset:
     """
-    Concatenate longitude dimension to handle global grids that cross
+    Extend the longitude dimension to handle global grids that cross
     the 0/360-degree or -180/180-degree boundary.
 
-    Extends the longitude dimension either lower, upper, or both sides
-    by +/- 360 degrees and duplicates the corresponding variables along
-    that dimension.
+    Wraps data from the opposite side of the globe using
+    :func:`xarray.Dataset.pad` with ``mode="wrap"``, then assigns the
+    correct shifted longitude coordinates.  Only the longitude dimension
+    is padded; all other dimensions and variables are left unchanged.
 
     Parameters
     ----------
     ds : xr.Dataset
-        Input xarray Dataset to be concatenated.
+        Input xarray Dataset to be extended.
     dim_names : Mapping[str, str]
         Dictionary or mapping containing dimension names. Must include "longitude".
     end : str
         Specifies which side(s) to extend:
-        - "lower": extend by subtracting 360 degrees.
-        - "upper": extend by adding 360 degrees.
+        - "lower": extend by subtracting 360 degrees (prepend wrapped data).
+        - "upper": extend by adding 360 degrees (append wrapped data).
         - "both": extend on both sides.
     use_dask : bool, default False
         Accepted for backward compatibility; no longer causes eager rechunking.
@@ -3011,42 +3012,34 @@ def _concatenate_longitudes(
     Returns
     -------
     xr.Dataset
-        Dataset with longitude dimension extended and data variables duplicated.
+        Dataset with longitude dimension extended and data variables wrapped.
 
     Notes
     -----
-    Only data variables containing the longitude dimension are concatenated;
-    others are left unchanged.
+    Data variables that do not contain the longitude dimension are left
+    unchanged by :func:`xarray.Dataset.pad`.
     """
-    ds_concat = xr.Dataset()
-
     lon_name = dim_names["longitude"]
     lon = ds[lon_name]
+    n = lon.sizes[lon_name]
 
     match end:
         case "lower":
-            lon_concat = xr.concat([lon - 360, lon], dim=lon_name)
-            n_copies = 2
+            pad_width = (n, 0)
+            lon_new = xr.concat([lon - 360, lon], dim=lon_name)
         case "upper":
-            lon_concat = xr.concat([lon, lon + 360], dim=lon_name)
-            n_copies = 2
+            pad_width = (0, n)
+            lon_new = xr.concat([lon, lon + 360], dim=lon_name)
         case "both":
-            lon_concat = xr.concat([lon - 360, lon, lon + 360], dim=lon_name)
-            n_copies = 3
+            pad_width = (n, n)
+            lon_new = xr.concat([lon - 360, lon, lon + 360], dim=lon_name)
         case _:
             raise ValueError(f"Invalid `end` value: {end}")
 
-    for var in ds.variables:
-        if lon_name in ds[var].dims:
-            field = ds[var]
-            field_concat = xr.concat([field] * n_copies, dim=lon_name)
-            ds_concat[var] = field_concat
-        else:
-            ds_concat[var] = ds[var]
+    ds_extended = ds.pad({lon_name: pad_width}, mode="wrap")
+    ds_extended = ds_extended.assign_coords({lon_name: lon_new.values})
 
-    ds_concat = ds_concat.assign_coords({lon_name: lon_concat.values})
-
-    return ds_concat
+    return ds_extended
 
 
 def choose_subdomain(

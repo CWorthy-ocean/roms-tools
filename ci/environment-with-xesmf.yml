@@ -5,6 +5,7 @@ channels:
 dependencies:
   - python>=3.11
   - numpy>2,<2.3
+  - scipy<1.18.0
   - xesmf
   # testing
   - zarr

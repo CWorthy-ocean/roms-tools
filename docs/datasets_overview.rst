@@ -381,7 +381,7 @@ Monthly coastal river discharge for ~1,000 of the world's largest rivers. Downlo
 GloFAS
 ~~~~~~
 
-Global daily river discharge from the Global Flood Awareness System (GloFAS) v4.0. Must be downloaded and preprocessed by the user before use. ROMS-Tools expects a NetCDF file in which river mouths have been placed on coastal cells using the GloFAS Large-scale Drainage Direction (LDD) algorithm.
+Global daily river discharge from the Global Flood Awareness System (GloFAS) v4.0. Must be downloaded and preprocessed by the user before use. ROMS-Tools expects a NetCDF file in which river mouths have been placed on coastal cells using the GloFAS Large-scale Drainage Direction (LDD) algorithm. For a ready-to-run preprocessing workflow, see the :doc:`process_GloFAS` notebook.
 
 :Version: v4.0
 :Required for: River Forcing (discharge; ``source={"name": "GLOFAS", "path": ...}``)

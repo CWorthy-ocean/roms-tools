@@ -44,6 +44,7 @@
 * New "Downloading ERA5 data" section in the datasets documentation shows how to pre-save ERA5 surface forcing (one file per day, NetCDF or Zarr) from the analysis-ready ARCO cloud store for offline/local use. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
 * Added support for the GloFAS v4.0 global river discharge dataset as an alternative to Dai & Trenberth, along with performance improvements and bug fixes to the river forcing pipeline. ([#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
 * The end-to-end example notebook can now be downloaded as a plain Python script from the docs ([#630](https://github.com/CWorthy-ocean/roms-tools/pull/630))
+* `RiverForcing` now accepts a `SurfaceForcing` object that can apply spatial and temporal variability to river temperature. ([#639](https://github.com/CWorthy-ocean/roms-tools/pull/639))
 
 
 ### Internal Changes

@@ -64,6 +64,13 @@ DEFAULT_NR_BUFFER_POINTS = (
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
 # This default will be applied consistently across all datasets requiring lateral fill.
 
+# Default streaming path to the ARCO ERA5 archive on Google Cloud. Shared by
+# any forcing class that can source Tair from ERA5 (e.g. SurfaceForcing,
+# RiverForcing) via `resolve_era5_source`.
+DEFAULT_ERA5_ARCO_PATH = (
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
+
 # Default lateral chunk size for Dask-backed LatLonDataset subclasses (latitude/longitude).
 _DEFAULT_LAT_LON_LATERAL_CHUNK = 50
 
@@ -2256,6 +2263,40 @@ class ERA5ARCODataset(ERA5Dataset):
             raise RuntimeError(msg)
 
         super().__post_init__()
+
+
+def resolve_era5_source(
+    path: str | Path | None,
+) -> tuple[str, bool, type[ERA5Dataset]]:
+    """Resolve an ERA5 source path, defaulting to the ARCO cloud archive when
+    none is given, and pick the matching dataset class.
+
+    This is a free function rather than a method on ``ERA5Dataset`` or
+    ``ERA5Dataset`` because it decides *which* of the two classes to
+    instantiate, and because it's shared by unrelated forcing classes
+    (``SurfaceForcing``, ``RiverForcing``) that have no inheritance
+    relationship to either.
+
+    Parameters
+    ----------
+    path : str, Path, or None
+        User-provided ERA5 path. If falsy, defaults to
+        ``DEFAULT_ERA5_ARCO_PATH``.
+
+    Returns
+    -------
+    resolved_path : str
+        The path to use, with the ARCO default applied if none was given.
+    is_arco : bool
+        Whether ``resolved_path`` points at the ARCO cloud archive
+        (``gs://`` or ``gcs://``).
+    dataset_cls : type[ERA5Dataset]
+        ``ERA5ARCODataset`` for cloud paths, ``ERA5Dataset`` otherwise.
+    """
+    resolved_path = str(path) if path else DEFAULT_ERA5_ARCO_PATH
+    is_arco = resolved_path.startswith("gs://") or resolved_path.startswith("gcs://")
+    dataset_cls = ERA5ARCODataset if is_arco else ERA5Dataset
+    return resolved_path, is_arco, dataset_cls
 
 
 @dataclass(kw_only=True)

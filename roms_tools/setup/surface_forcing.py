@@ -9,16 +9,16 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
+    DEFAULT_ERA5_ARCO_PATH,
     CESMBGCSurfaceForcingDataset,
-    ERA5ARCODataset,
     ERA5Correction,
-    ERA5Dataset,
     LatLonDataset,
     MBLco2Dataset,
     SODARestoringSurfaceDataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
+    resolve_era5_source,
 )
 from roms_tools.plot import plot
 from roms_tools.processing_methods import (
@@ -47,10 +47,6 @@ from roms_tools.utils import (
     rotate_velocities,
     save_datasets,
     transpose_dimensions,
-)
-
-DEFAULT_ERA5_ARCO_PATH = (
-    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
 
 # Number of forcing time steps per block when interpolating the radiation-correction
@@ -577,16 +573,12 @@ class SurfaceForcing:
                 # Add 1 hr since radiation time will shift by 1 hr
                 if data_dict["end_time"] is not None:
                     data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
-                if str(self.source["path"]).startswith("gs://") or str(
-                    self.source["path"]
-                ).startswith("gcs://"):
-                    if not self.use_dask:
-                        raise ValueError(
-                            "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
-                        )
-                    data = ERA5ARCODataset(**data_dict)
-                else:
-                    data = ERA5Dataset(**data_dict)
+                _, is_arco, dataset_cls = resolve_era5_source(self.source["path"])
+                if is_arco and not self.use_dask:
+                    raise ValueError(
+                        "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
+                    )
+                data = dataset_cls(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'

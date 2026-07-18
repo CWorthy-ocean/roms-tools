@@ -13,6 +13,7 @@ from matplotlib.axes import Axes
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
+    GLODAPv2BGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     LatLonDataset,
@@ -25,12 +26,13 @@ from roms_tools.regrid import (
     LateralRegridToROMS,
     VerticalRegrid,
 )
+from roms_tools.setup.bgc_model import bgc_variable_info
 from roms_tools.setup.utils import (
+    BGC_DATASET_NAMES,
     BGC_INTERPOLATION_METHODS,
     RawDataSource,
     build_bgc_vertical_coords,
     compute_barotropic_velocity,
-    compute_missing_bgc_variables,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -188,6 +190,12 @@ class InitialConditions:
     bgc_interpolation_method: str = "depth"
     """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
     ``"density_mld"``."""
+    use_vars: list[str] | None = None
+    """Optional down-selection of the BGC variables written from ``bgc_source``. When
+    set, only these variables are kept (presence-only check — a ``ValueError`` is
+    raised if any requested variable is not provided by the source). No MARBL
+    derivation is performed here; call :meth:`BGCMarbl.process_bgc_fields` on the
+    finished object(s) to complete the tracer set."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -206,8 +214,14 @@ class InitialConditions:
         processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
+            # BGC processing appends the source's own (raw) tracers to the shared
+            # ``processed_fields`` dict (physics T/S are already present and are used as
+            # the target for density/MLD vertical interpolation). MARBL tracer
+            # derivation/fill is intentionally NOT done here — call
+            # ``BGCMarbl().process_bgc_fields()`` on the finished object for that.
+            phys_keys = set(processed_fields)
             processed_fields = self._process_data(processed_fields, type="bgc")
-            processed_fields = compute_missing_bgc_variables(processed_fields)
+            self._apply_use_vars(processed_fields, phys_keys)
 
         for var_name in processed_fields:
             processed_fields[var_name] = transpose_dimensions(
@@ -229,6 +243,20 @@ class InitialConditions:
         self.ds = ds
 
     def _process_data(self, processed_fields, type="physics"):
+        # BGC "constants" source: broadcast each user-supplied value onto the finalized
+        # physics tracer grid (temp on sigma levels). No dataset load or regridding.
+        if type == "bgc" and self.bgc_source["name"] == "constants":
+            template = processed_fields["temp"]
+            constants = self.bgc_source["constants"]
+            for var, val in constants.items():
+                processed_fields[var] = xr.full_like(template, float(val))
+            # These raw tracers are validated/described model-agnostically (only ALK is
+            # NaN-checked); the metadata is needed by _validate.
+            object.__setattr__(
+                self, "variable_info_bgc", bgc_variable_info(list(constants.keys()))
+            )
+            return processed_fields
+
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data(forcing_type=type)
@@ -315,6 +343,30 @@ class InitialConditions:
                 )
 
         return processed_fields
+
+    def _apply_use_vars(self, processed_fields, phys_keys):
+        """Down-select the BGC variables in ``processed_fields`` to ``self.use_vars``.
+
+        ``phys_keys`` is the set of keys present before BGC processing, so the newly
+        added BGC keys are ``processed_fields - phys_keys``. This is a presence-only
+        check: it raises ``ValueError`` if any requested variable is not among the
+        source's own regridded BGC variables. No MARBL/derivation logic is applied —
+        that is handled later by :meth:`BGCMarbl.process_bgc_fields`.
+        """
+        if self.use_vars is None:
+            return
+        bgc_keys = [k for k in processed_fields if k not in phys_keys]
+        requested = list(self.use_vars)
+        missing = [v for v in requested if v not in bgc_keys]
+        if missing:
+            src_name = (self.bgc_source or {}).get("name", "?")
+            raise ValueError(
+                f"use_vars requested variable(s) not present in the '{src_name}' BGC "
+                f"source: {sorted(missing)}. Available here: {sorted(bgc_keys)}."
+            )
+        for k in bgc_keys:
+            if k not in requested:
+                del processed_fields[k]
 
     def _regrid_laterally(
         self,
@@ -542,14 +594,22 @@ class InitialConditions:
             "climatology": self.source.get("climatology", False),
         }
         if self.bgc_source is not None:
-            if "name" not in self.bgc_source.keys():
+            if not isinstance(self.bgc_source, dict) or "name" not in self.bgc_source:
+                raise ValueError("`bgc_source` must be a dict including a 'name'.")
+            name = self.bgc_source["name"]
+            if name == "constants":
+                if not self.bgc_source.get("constants"):
+                    raise ValueError(
+                        "For bgc_source={'name': 'constants', ...} you must provide a "
+                        "non-empty 'constants' mapping."
+                    )
+            elif name not in BGC_DATASET_NAMES:
                 raise ValueError(
-                    "`bgc_source` must include a 'name' if it is provided."
+                    f"Unknown BGC source name '{name}'. Valid options: "
+                    f"'constants' or one of {sorted(BGC_DATASET_NAMES)}."
                 )
-            if "path" not in self.bgc_source.keys():
-                raise ValueError(
-                    "`bgc_source` must include a 'path' if it is provided."
-                )
+            elif "path" not in self.bgc_source:
+                raise ValueError("`bgc_source` must include a 'path'.")
             # set self.bgc_source["climatology"] to False if not provided
             self.bgc_source = {
                 **self.bgc_source,
@@ -593,6 +653,7 @@ class InitialConditions:
             "bgc": {
                 "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
                 "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+                "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
                 "ROMS": defaultdict(lambda: ROMSDataset),
             },
         }

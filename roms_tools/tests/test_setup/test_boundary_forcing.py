@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 import textwrap
@@ -11,7 +12,7 @@ import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
-from roms_tools import BoundaryForcing, Grid
+from roms_tools import BGCMarbl, BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.boundary_forcing import _interpolate_phys_to_bgc_time
 from roms_tools.setup.utils import _xesmf_available
@@ -114,49 +115,139 @@ def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
         k in boundary_forcing.boundaries for k in ["south", "east", "north", "west"]
     )
 
-    expected_bgc_variables = [
-        "PO4",
-        "NO3",
-        "SiO3",
-        "NH4",
-        "Fe",
-        "Lig",
-        "O2",
-        "DIC",
-        "DIC_ALT_CO2",
-        "ALK",
-        "ALK_ALT_CO2",
-        "DOC",
-        "DON",
-        "DOP",
-        "DOCr",
-        "DONr",
-        "DOPr",
-        "zooC",
-        "spChl",
-        "spC",
-        "spP",
-        "spFe",
-        "spCaCO3",
-        "diatChl",
-        "diatC",
-        "diatP",
-        "diatFe",
-        "diatSi",
-        "diazChl",
-        "diazC",
-        "diazP",
-        "diazFe",
+    # The forcing object now contains only the source's own (regridded) variables;
+    # MARBL derivation/fill is done separately by BGCMarbl.process_bgc_fields().
+    # Every present BGC variable must be a recognised MARBL name (tracer or the
+    # interpretable CHL input), and the core nutrients must always be present.
+    known = BGCMarbl().known_vars()
+    active_dirs = [
+        d for d in ["south", "east", "north", "west"] if boundary_forcing.boundaries[d]
     ]
-
-    for direction in ["south", "east", "north", "west"]:
-        if boundary_forcing.boundaries[direction]:
-            for var in expected_bgc_variables:
-                assert f"{var}_{direction}" in boundary_forcing.ds
+    core = {"PO4", "NO3", "SiO3", "O2", "DIC", "ALK"}
+    for direction in active_dirs:
+        present = {
+            str(v)[: -(len(direction) + 1)]
+            for v in boundary_forcing.ds.data_vars
+            if str(v).endswith(f"_{direction}")
+        }
+        present_bgc = {p for p in present if p in known}
+        assert present_bgc, f"no BGC variables on {direction} boundary"
+        assert present_bgc <= known
+        assert core <= present_bgc
 
     assert len(boundary_forcing.ds.bry_time) == 12
     assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
     assert hasattr(boundary_forcing.ds, "climatology")
+
+
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
+    ],
+)
+def test_process_bgc_fields_completes_boundary(boundary_forcing_fixture, request):
+    """BGCMarbl.process_bgc_fields() fills the full MARBL tracer set and drops CHL."""
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
+
+    # Work on a copy so the session-scoped fixture is not mutated.
+    bf = copy.copy(boundary_forcing)
+    bf.ds = boundary_forcing.ds.copy(deep=True)
+
+    result = BGCMarbl().process_bgc_fields(bf)
+    assert result is bf
+
+    marbl = BGCMarbl()
+    active_dirs = [d for d in ["south", "east", "north", "west"] if bf.boundaries[d]]
+    for direction in active_dirs:
+        for var in marbl.tracer_vars():
+            assert f"{var}_{direction}" in bf.ds, f"{var}_{direction} missing"
+        # CHL is consumed during expansion and must not remain.
+        assert f"CHL_{direction}" not in bf.ds
+
+
+def _small_bgc_grid():
+    return Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+
+
+def test_bgc_constants_source(use_dask):
+    """A constants BGC source broadcasts each value onto the boundary grid."""
+    bf = BoundaryForcing(
+        grid=_small_bgc_grid(),
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"name": "constants", "constants": {"Fe": 3.0e-3}},
+        type="bgc",
+        use_dask=use_dask,
+    )
+    active = [d for d in ["south", "east", "north", "west"] if bf.boundaries[d]]
+    for d in active:
+        assert f"Fe_{d}" in bf.ds
+        assert "s_rho" in bf.ds[f"Fe_{d}"].dims
+        assert np.allclose(bf.ds[f"Fe_{d}"].values, 3.0e-3)
+    # Two bracketing time records for a static source.
+    assert len(bf.ds.bry_time) == 2
+
+    # Fe is a key field: BGCMarbl derives Lig (= Fe * 3) into this object.
+    BGCMarbl().process_bgc_fields(bf)
+    for d in active:
+        assert np.allclose(bf.ds[f"Lig_{d}"].values, 3.0 * 3.0e-3)
+
+
+def test_bgc_constants_source_requires_mapping(use_dask):
+    with pytest.raises(ValueError, match="non-empty 'constants' mapping"):
+        BoundaryForcing(
+            grid=_small_bgc_grid(),
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            source={"name": "constants"},
+            type="bgc",
+            use_dask=use_dask,
+        )
+
+
+def test_use_vars_downselects_source_variables(use_dask):
+    """use_vars keeps only the requested variables present in the source."""
+    bf = BoundaryForcing(
+        grid=_small_bgc_grid(),
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"name": "constants", "constants": {"Fe": 3.0e-3, "NO3": 24.0}},
+        type="bgc",
+        use_vars=["Fe"],
+        use_dask=use_dask,
+    )
+    active = [d for d in ["south", "east", "north", "west"] if bf.boundaries[d]]
+    for d in active:
+        assert f"Fe_{d}" in bf.ds
+        assert f"NO3_{d}" not in bf.ds  # down-selected out
+
+
+def test_use_vars_absent_variable_raises(use_dask):
+    """use_vars errors if a requested variable is not present in the source data."""
+    with pytest.raises(ValueError, match="use_vars requested variable"):
+        BoundaryForcing(
+            grid=_small_bgc_grid(),
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            source={"name": "constants", "constants": {"Fe": 3.0e-3}},
+            type="bgc",
+            use_vars=["ALK"],  # not provided by this constants source
+            use_dask=use_dask,
+        )
 
 
 def _assert_no_nan_in_boundary_fields(boundary_forcing):
@@ -600,12 +691,19 @@ def test_correct_depth_coords_zero_zeta(boundary_forcing_fixture, request, use_d
 def test_computed_missing_optional_fields(
     bgc_boundary_forcing_from_unified_climatology,
 ):
-    ds = bgc_boundary_forcing_from_unified_climatology.ds
+    bf_fixture = bgc_boundary_forcing_from_unified_climatology
+
+    # Missing tracers are filled by BGCMarbl.process_bgc_fields(), not at
+    # construction time.  Work on a copy so the session fixture is not mutated.
+    bf = copy.copy(bf_fixture)
+    bf.ds = bf_fixture.ds.copy(deep=True)
+    BGCMarbl().process_bgc_fields(bf)
+    ds = bf.ds
 
     # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
 
     for direction in ["south", "east", "north", "west"]:
-        if bgc_boundary_forcing_from_unified_climatology.boundaries[direction]:
+        if bf.boundaries[direction]:
             # 'DOCr' was missing in the source data and should have been filled with a constant default value
             assert np.allclose(
                 ds[f"DOCr_{direction}"].std(), 0.0, rtol=1e-10, atol=1e-10

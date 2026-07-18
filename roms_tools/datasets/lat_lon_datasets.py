@@ -1828,6 +1828,262 @@ class UnifiedBGCDataset(UnifiedDataset):
 
 
 @dataclass(kw_only=True)
+class GLODAPv2Dataset(LatLonDataset):
+    """GLODAPv2 2016b gridded dataset — one per-variable file per data variable.
+
+    Files are named ``GLODAPv2.2016b.{var}.nc`` and live in the directory given by
+    ``filename``.  Each file holds one variable on a 1° × 1° lat/lon grid with
+    coordinate names ``lat``, ``lon``, and ``Depth``.  There is **no time dimension**;
+    the data represent an observational climatology.
+
+    Parameters
+    ----------
+    filename : str or Path
+        Path to the **directory** that contains the GLODAP 2016b netCDF files.
+    """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+    _file_prefix: ClassVar[str] = "GLODAPv2.2016b"
+
+    needs_lateral_fill: bool = True
+    has_encoded_times: bool = False  # no time coordinate in these files
+
+    def load_data(self) -> xr.Dataset:
+        """Open and merge per-variable GLODAP files from the given directory.
+
+        Each variable named in ``var_names`` / ``opt_var_names`` maps to a file
+        ``{directory}/{prefix}.{file_var_name}.nc``.  Files for optional variables
+        that are not present on disk are silently skipped.  All datasets are merged
+        into one using :func:`xarray.merge`, which is dask-lazy when ``use_dask=True``.
+        """
+        base_dir = Path(self.filename)
+        if not base_dir.is_dir():
+            raise FileNotFoundError(f"GLODAP directory not found: {base_dir}")
+
+        all_file_vars = set(self.var_names.values()) | set(self.opt_var_names.values())
+        required_file_vars = set(self.var_names.values())
+
+        open_kwargs: dict = {"decode_times": False}
+        if self.use_dask:
+            open_kwargs["chunks"] = self.chunks or {}
+
+        datasets: list[xr.Dataset] = []
+        missing_required: list[str] = []
+        for file_var in sorted(all_file_vars):
+            filepath = base_dir / f"{self._file_prefix}.{file_var}.nc"
+            if not filepath.exists():
+                if file_var in required_file_vars:
+                    missing_required.append(file_var)
+                continue
+            ds_one = xr.open_dataset(filepath, **open_kwargs)
+            # Each GLODAP file carries per-variable metadata arrays (e.g.
+            # Input_mean, SnR) that conflict across files at merge time.
+            # Keep only the target data variable plus the shared 1-D depth
+            # lookup (Depth) so that clean_up() can promote it to a coordinate.
+            keep = [v for v in [file_var, "Depth"] if v in ds_one.data_vars]
+            datasets.append(ds_one[keep])
+
+        if missing_required:
+            raise FileNotFoundError(
+                f"Required GLODAP variable files not found in {base_dir}: "
+                f"{sorted(missing_required)}"
+            )
+        if not datasets:
+            raise FileNotFoundError(
+                f"No GLODAP files found in {base_dir} with prefix '{self._file_prefix}'."
+            )
+
+        return xr.merge(datasets)
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Rename GLODAP native coordinates/variables to roms-tools conventions.
+
+        GLODAP files store the depth grid as a 1-D data variable ``Depth`` on
+        an unlabelled ``depth_surface`` dimension.  This method promotes it to a
+        proper dimension coordinate and renames all axes to the package standard
+        (``latitude``, ``longitude``, ``depth``).
+        """
+        # Promote the 1-D Depth data variable to a dimension coordinate and
+        # rename the underlying dimension from depth_surface → depth.
+        if "Depth" in ds.data_vars:
+            depth_dim = ds["Depth"].dims[0]  # "depth_surface"
+            ds = ds.assign_coords({depth_dim: ds["Depth"].values})
+            ds = ds.drop_vars("Depth")
+            ds = ds.rename({depth_dim: "depth"})
+        # Rename the lat/lon dimension coordinates to package convention.
+        rename = {}
+        if "lon" in ds.coords:
+            rename["lon"] = "longitude"
+        if "lat" in ds.coords:
+            rename["lat"] = "latitude"
+        if rename:
+            ds = ds.rename(rename)
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "depth": "depth",
+        }
+        # Build a preliminary land/ocean mask from the NaN pattern at the
+        # surface depth of the first available data variable.  apply_lateral_fill()
+        # expects self.ds["mask"] to exist.  For GLODAP the mask is rebuilt after
+        # the depth-fill pass in extrapolate_deepest_to_bottom() so that variables
+        # whose shallowest data is below depth[0] are also correctly treated as ocean.
+        data_vars = [v for v in ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = ds[data_vars[0]].isel(depth=0, drop=True)
+            ds["mask"] = xr.where(surface.isnull(), 0, 1)
+        return ds
+
+    def extrapolate_deepest_to_bottom(self) -> None:
+        """Forward- and backward-fill vertical NaN gaps for the sparse GLODAP grid.
+
+        The standard forward (downward) fill is not enough for GLODAP: a variable
+        can be NaN at the surface even when data exists at a deeper level, or two
+        variables can have different surface coverage so the mask (built from the
+        first variable) marks a cell as ocean while a second variable has NaN there.
+
+        This override adds a backward (upward) fill after the forward fill so that
+        the shallowest valid value is propagated to the surface.  The mask is then
+        rebuilt from the first non-mask variable at depth=0 so that apply_lateral_fill()
+        never encounters NaN values at ocean grid points.
+        """
+        if "depth" not in self.dim_names:
+            return
+        dim = self.dim_names["depth"]
+        for var_name in self.ds.data_vars:
+            if dim not in self.ds[var_name].dims:
+                continue
+            self.ds[var_name] = self.ds[var_name].ffill(dim=dim)
+            self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
+
+        # Rebuild the mask now that all variables have surface values wherever
+        # data exists at any depth.
+        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = self.ds[data_vars[0]].isel(depth=0, drop=True)
+            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+
+    @staticmethod
+    def _compute_density(
+        temperature: xr.DataArray,
+        salinity: xr.DataArray,
+    ) -> xr.DataArray:
+        """Compute seawater density from temperature and salinity (dask-lazy).
+
+        Parameters
+        ----------
+        temperature : xr.DataArray
+            In-situ temperature (°C), shape (depth, lat, lon).
+        salinity : xr.DataArray
+            Practical salinity (PSU), shape (depth, lat, lon).
+
+        Returns
+        -------
+        xr.DataArray
+            Density in kg m⁻³, same shape as inputs.
+
+        Notes
+        -----
+        **Placeholder implementation** — returns a spatially uniform value of
+        1025 kg m⁻³ regardless of T/S.  Replace the body of this method with a
+        full equation-of-state (e.g. TEOS-10 via ``gsw``) when available.
+        The placeholder uses :func:`xarray.full_like` so the result is dask-lazy
+        and carries the same chunk structure as the inputs.
+        """
+        return xr.full_like(temperature, 1025.0)
+
+
+@dataclass(kw_only=True)
+class GLODAPv2BGCDataset(GLODAPv2Dataset):
+    """GLODAPv2 2016b mapped to ROMS BGC variable names.
+
+    Loads six core BGC tracers plus temperature and salinity (T/S).  T/S serve
+    two roles:
+
+    1. **Unit conversion** in :meth:`post_process`: µmol kg⁻¹ → mmol m⁻³ using
+       TEOS-10 sigma-0 density.
+    2. **Density coordinate** for density-space vertical interpolation when the
+       downstream pipeline uses ``bgc_interpolation_method`` of ``"density"`` /
+       ``"density_mld"``.
+
+    After vertical interpolation the pipeline drops T/S via the
+    ``bgc_source_ts`` mechanism; they are never written to ROMS output.
+
+    Variables loaded
+    ----------------
+    BGC (kept in output): PO4, NO3, SiO3 (silicate), O2 (oxygen), DIC (TCO2),
+    ALK (TAlk).
+
+    Ancillary (for density, dropped by pipeline after vertical regrid):
+    temperature, salinity (stored internally as ``temp_bgc`` / ``salt_bgc``).
+
+    Notes
+    -----
+    GLODAPv2 values are in **µmol kg⁻¹**.  :meth:`post_process` converts to
+    **mmol m⁻³** using ``val × (sigma0 + 1000) / 1000`` via TEOS-10.
+    """
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "Depth",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "silicate",
+            "O2": "oxygen",
+            "DIC": "TCO2",
+            "ALK": "TAlk",
+        }
+    )
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            # T/S for density-coordinate interpolation and unit conversion.
+            # Stable internal keys so the pipeline can locate them without
+            # knowing dataset-specific variable names.
+            "temp_bgc": "temperature",
+            "salt_bgc": "salinity",
+        }
+    )
+    # Internal keys of the T/S pair that define the source density coordinate.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
+
+    def post_process(self) -> None:
+        """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³.
+
+        Uses TEOS-10 sigma-0 from the loaded T/S to compute density (dask-lazy).
+        T/S remain in ``self.ds`` so the downstream pipeline can use them as the
+        source density coordinate for density-space vertical interpolation; the
+        pipeline drops them after regridding via ``bgc_source_ts``.
+
+        If T/S are absent (e.g. the file did not include them), falls back to a
+        uniform 1025 kg m⁻³ density.
+        """
+        from roms_tools.setup.utils import compute_potential_density
+
+        if "temperature" in self.ds.data_vars and "salinity" in self.ds.data_vars:
+            sigma0 = compute_potential_density(
+                self.ds["temperature"], self.ds["salinity"]
+            )
+            density = sigma0 + 1000.0  # kg m⁻³
+        else:
+            density = self._compute_density(
+                next(iter(self.ds.data_vars.values())),
+                next(iter(self.ds.data_vars.values())),
+            )
+
+        conversion_factor = density / 1000.0  # µmol kg⁻¹ → mmol m⁻³
+
+        for file_var in self.var_names.values():
+            if file_var in self.ds.data_vars:
+                self.ds[file_var] = self.ds[file_var] * conversion_factor
+
+
+@dataclass(kw_only=True)
 class UnifiedBGCSurfaceDataset(UnifiedDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {

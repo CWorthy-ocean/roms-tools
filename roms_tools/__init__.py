@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
 from roms_tools.setup.grid import Grid  # noqa: I001, F401
 from roms_tools.analysis.roms_output import ROMSOutput  # noqa: F401
 from roms_tools.analysis.cdr_ensemble import Ensemble  # noqa: F401
+from roms_tools.setup.bgc_model import BGCModel, BGCMarbl  # noqa: F401
 from roms_tools.setup.boundary_forcing import BoundaryForcing  # noqa: F401
 from roms_tools.setup.cdr_forcing import CDRForcing  # noqa: F401
 from roms_tools.setup.cdr_release import TracerPerturbation, VolumeRelease  # noqa: F401
@@ -24,6 +25,7 @@ from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
 from roms_tools.datasets.lat_lon_datasets import get_glorys_bounds  # noqa: F401
 from roms_tools.tiling.join import open_partitions, join_netcdf  # noqa: F401
 from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat  # noqa: F401
+from roms_tools.setup.utils import compute_potential_density  # noqa: F401
 
 
 # Configure logging when the package is imported

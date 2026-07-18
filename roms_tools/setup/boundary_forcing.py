@@ -12,6 +12,7 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
+    GLODAPv2BGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     UnifiedBGCDataset,
@@ -28,13 +29,14 @@ from roms_tools.regrid import (
     LateralRegridToROMS,
     VerticalRegrid,
 )
+from roms_tools.setup.bgc_model import bgc_variable_info
 from roms_tools.setup.utils import (
+    BGC_DATASET_NAMES,
     RawDataSource,
     add_time_info_to_ds,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
     compute_barotropic_velocity,
-    compute_missing_bgc_variables,
     deserialize_forcing_data,
     from_yaml,
     get_boundary_coords,
@@ -306,6 +308,12 @@ class BoundaryForcing:
     ``"density_mld"``."""
     physics_forcing: "BoundaryForcing | None" = None
     """Physics BoundaryForcing object supplying T/S for density-based BGC interpolation."""
+    use_vars: list[str] | None = None
+    """Optional down-selection of the BGC variables written from ``source`` (only
+    applies when ``type="bgc"``). When set, only these variables are kept (presence-only
+    check — a ``ValueError`` is raised if any requested variable is not provided by the
+    source). No MARBL derivation is performed here; call
+    :meth:`BGCMarbl.process_bgc_fields` on the finished object(s) to complete the set."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -324,6 +332,12 @@ class BoundaryForcing:
         self._input_checks()
 
         target_coords = get_target_coords(self.grid)
+
+        # BGC "constants" source: no dataset to load/regrid. Broadcast the user-supplied
+        # values onto each active boundary's rho grid and finish early.
+        if self.type == "bgc" and self.source["name"] == "constants":
+            self.ds = self._process_bgc_constants(target_coords)
+            return
 
         data = self._get_data()
 
@@ -649,13 +663,25 @@ class BoundaryForcing:
                 )
 
             if self.type == "bgc":
-                processed_fields = compute_missing_bgc_variables(processed_fields)
+                # Keep only the source's own (raw) tracers, optionally down-selected via
+                # ``use_vars``. MARBL derivation/fill is done later by
+                # ``BGCMarbl().process_bgc_fields()`` on the finished object(s).
+                processed_fields = self._apply_use_vars(processed_fields)
 
             # Write the boundary data into dataset
             ds = self._write_into_dataset(direction, processed_fields, ds)
 
+        if self.type == "bgc" and "time" not in ds.dims:
+            # Static BGC dataset source (no time axis, e.g. GLODAP climatology).
+            ds = self._bracket_static_time(ds)
+
         # Add global information
         ds = self._add_global_metadata(data, ds)
+
+        if self.type == "bgc":
+            # Describe the BGC variables actually present model-agnostically (only ALK is
+            # NaN-validated), so validation does not trip over ``use_vars``-dropped vars.
+            self.variable_info = bgc_variable_info(self._present_bgc_bare_names(ds))
 
         if not self.bypass_validation:
             self._validate(ds)
@@ -772,6 +798,113 @@ class BoundaryForcing:
             target_depth_dim=s_dim,
         )
 
+    def _process_bgc_constants(self, target_coords) -> xr.Dataset:
+        """Build a BGC boundary dataset from a ``constants`` source.
+
+        Broadcasts each ``source["constants"]`` value onto every active boundary's
+        rho grid (depth x horizontal). Static sources carry no time dimension, so the
+        result is expanded to two records bracketing ``start_time``/``end_time`` (one
+        if they coincide) — ROMS interpolates linearly between boundary records, so
+        this yields a constant-in-time boundary condition. MARBL derivation/fill is not
+        performed here; call :meth:`BGCMarbl.process_bgc_fields` on the finished object.
+        """
+        if self.start_time is None or self.end_time is None:
+            raise ValueError(
+                "A 'constants' BGC source requires `start_time` and `end_time` so the "
+                "static field can be bracketed with boundary time records."
+            )
+        self._set_boundary_info()
+
+        ds = xr.Dataset()
+        for direction, is_enabled in self.boundaries.items():
+            if not is_enabled:
+                continue
+            # zeta = 0: SSH is not applicable to BGC fields. Precompute both depth
+            # types so plotting always works.
+            self._get_depth_coordinates(0, direction, "rho", "layer")
+            self._get_depth_coordinates(0, direction, "rho", "interface")
+
+            template = self.ds_depth_coords[f"layer_depth_rho_{direction}"]
+            fields = {
+                var: xr.full_like(template, float(val))
+                for var, val in self.source["constants"].items()
+            }
+            fields = self._apply_use_vars(fields)
+            for var_name in fields:
+                fields[var_name] = transpose_dimensions(fields[var_name])
+            ds = self._write_into_dataset(direction, fields, ds)
+
+        ds = self._bracket_static_time(ds)
+
+        ds = self._add_global_metadata(None, ds, climatology=False)
+
+        self.variable_info = bgc_variable_info(self._present_bgc_bare_names(ds))
+
+        if not self.bypass_validation:
+            self._validate(ds)
+
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+
+        return ds
+
+    def _bracket_static_time(self, ds: xr.Dataset) -> xr.Dataset:
+        """Give a static (no-time) BGC dataset the two bracketing time records ROMS needs.
+
+        Static sources (a ``constants`` source, or an observational climatology such as
+        GLODAP that carries no time axis) produce no ``time`` dimension. ROMS interpolates
+        linearly between boundary records, so repeating the field at ``start_time`` and
+        ``end_time`` (one record if they coincide) yields a constant-in-time boundary
+        condition. A dataset that already has a ``time`` dim is returned unchanged.
+        """
+        if "time" in ds.dims:
+            return ds
+        if self.start_time is None or self.end_time is None:
+            raise ValueError(
+                "A static BGC source (constants or a no-time climatology) requires "
+                "`start_time` and `end_time` so the field can be bracketed with "
+                "boundary time records."
+            )
+        t0 = np.datetime64(self.start_time, "ns")
+        t1 = np.datetime64(self.end_time, "ns")
+        time_vals = [t0] if t0 == t1 else [t0, t1]
+        return ds.expand_dims({"time": time_vals}, axis=0)
+
+    def _apply_use_vars(self, fields: dict) -> dict:
+        """Down-select ``fields`` (bare BGC var name -> DataArray) to ``self.use_vars``.
+
+        Presence-only check: raises ``ValueError`` if any requested variable is not
+        present in this source's own (regridded) fields. No MARBL/derivation logic is
+        applied — that is handled later by :meth:`BGCMarbl.process_bgc_fields`.
+        """
+        if self.use_vars is None:
+            return fields
+        requested = list(self.use_vars)
+        missing = [v for v in requested if v not in fields]
+        if missing:
+            raise ValueError(
+                f"use_vars requested variable(s) not present in the "
+                f"'{self.source['name']}' BGC source: {sorted(missing)}. "
+                f"Available here: {sorted(fields)}."
+            )
+        return {v: fields[v] for v in requested}
+
+    def _present_bgc_bare_names(self, ds) -> set[str]:
+        """Bare BGC variable names present in ``ds`` across active boundaries.
+
+        ``ds`` stores variables suffixed by direction (``PO4_south``); this strips the
+        suffix of each active boundary so the model-agnostic metadata can be built.
+        """
+        active = [d for d, on in self.boundaries.items() if on]
+        bare: set[str] = set()
+        for v in ds.data_vars:
+            name = str(v)
+            for d in active:
+                if name.endswith(f"_{d}"):
+                    bare.add(name[: -(len(d) + 1)])
+                    break
+        return bare
+
     def _input_checks(self) -> None:
         """Validate and normalize user-provided input parameters."""
         # -------------------------------------------------------
@@ -805,10 +938,26 @@ class BoundaryForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
 
-        if "path" not in self.source:
-            if self.source["name"] != "GLORYS":
+        name = self.source["name"]
+        if self.type == "bgc":
+            if name == "constants":
+                if not self.source.get("constants"):
+                    raise ValueError(
+                        "For source={'name': 'constants', ...} you must provide a "
+                        "non-empty 'constants' mapping."
+                    )
+            elif name not in BGC_DATASET_NAMES:
+                raise ValueError(
+                    f"Unknown BGC source name '{name}'. Valid options: "
+                    f"'constants' or one of {sorted(BGC_DATASET_NAMES)}."
+                )
+            elif "path" not in self.source:
                 raise ValueError("`source` must include a 'path'.")
-            self.source["path"] = GLORYSDefaultDataset.dataset_name
+        else:
+            if "path" not in self.source:
+                if name != "GLORYS":
+                    raise ValueError("`source` must include a 'path'.")
+                self.source["path"] = GLORYSDefaultDataset.dataset_name
 
         # Assign default value
         self.source["climatology"] = self.source.get("climatology", False)
@@ -866,6 +1015,7 @@ class BoundaryForcing:
             "bgc": {
                 "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
                 "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+                "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
             },
         }
 
@@ -1118,7 +1268,7 @@ class BoundaryForcing:
 
             self.ds_depth_coords[key] = depth
 
-    def _add_global_metadata(self, data, ds=None):
+    def _add_global_metadata(self, data, ds=None, climatology=None):
         if ds is None:
             ds = xr.Dataset()
         ds.attrs["title"] = "ROMS boundary forcing file created by ROMS-Tools"
@@ -1143,9 +1293,9 @@ class BoundaryForcing:
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
 
-        ds, bry_time = add_time_info_to_ds(
-            ds, self.model_reference_date, data.climatology
-        )
+        # ``data`` is None for a "constants" source; fall back to the explicit flag.
+        clim = data.climatology if data is not None else bool(climatology)
+        ds, bry_time = add_time_info_to_ds(ds, self.model_reference_date, clim)
 
         ds = ds.assign_coords({"bry_time": bry_time})
         ds = ds.swap_dims({"time": "bry_time"})

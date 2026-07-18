@@ -55,6 +55,14 @@ HEADER_CHAR = "="
 
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
+# Registered BGC source names understood by InitialConditions / BoundaryForcing.
+# A ``bgc_source``/``source`` dict whose ``"name"`` is one of these is looked up in
+# the per-class dataset registry; the special ``"constants"`` name is handled
+# separately (broadcast of a user-supplied mapping onto the target grid).
+BGC_DATASET_NAMES: frozenset[str] = frozenset(
+    {"CESM_REGRIDDED", "UNIFIED", "GLODAP", "ROMS"}
+)
+
 
 def log_the_separator() -> None:
     """Log a separator line using HEADER_CHAR repeated HEADER_SZ times."""
@@ -429,6 +437,10 @@ def get_variable_metadata():
             "long_name": "vertically integrated v-flux component",
             "units": "m/s",
         },
+        "CHL": {
+            "long_name": "total chlorophyll",
+            "units": "mg/m^3",
+        },
         "PO4": {
             "long_name": "dissolved inorganic phosphate",
             "units": "mmol/m^3",
@@ -632,80 +644,6 @@ def get_variable_metadata():
         "nhy": {"long_name": "NHy decomposition", "units": "kg/m^2/s"},
     }
     return d
-
-
-def compute_missing_bgc_variables(bgc_data):
-    """Fills in missing biogeochemical (BGC) variables in the input dictionary.
-
-    This function checks for missing BGC variables in the provided dictionary and
-    computes them based on predefined relationships with existing variables. The
-    relationships specify either a multiplication factor applied to an existing
-    variable or a constant value if no related variable is available. The resulting
-    variables are added to the dictionary.
-
-    Parameters
-    ----------
-    bgc_data : dict
-        A dictionary containing biogeochemical variables as xarray DataArrays.
-        Missing variables are computed and added to this dictionary.
-
-        Assumptions:
-        - If `Fe` is part of the input dictionary, it is in units of mmol m-3.
-        - If `CHL` is part of the input dictionary, it is in units of mg m-3.
-        - If `ALK` is part of the input dictionary, it is in units of meq m-3 = mmol m-3.
-        - If `DIC` is part of the input dictionary, it is in units of mmol m-3.
-
-    Returns
-    -------
-    dict
-        The updated dictionary with missing BGC variables filled in.
-
-    Notes
-    -----
-    - If `NH4`, `DOC`, `DON`, `DOP`, `DOCr`, `DONr`, and `DOPr` are not part of the input
-      dictionary, they are filled with constant values.
-    - `CHL` is removed from the dictionary after the necessary calculations.
-    """
-    # Define the relationships for missing variables
-    variable_relations = {
-        "NH4": (None, 10**-6),  # mmol m-3
-        "Lig": ("Fe", 3),  # mmol m-3
-        "DIC_ALT_CO2": ("DIC", 1),  # mmol m-3
-        "ALK_ALT_CO2": ("ALK", 1),  # meq m-3 = mmol m-3
-        "DOC": (None, 10**-6),  # mmol m-3
-        "DON": (None, 1.0),  # mmol m-3
-        "DOP": (None, 0.1),  # mmol m-3
-        "DOCr": (None, 10**-6),  # mmol m-3
-        "DONr": (None, 0.8),  # mmol m-3
-        "DOPr": (None, 0.003),  # mmol m-3
-        "zooC": ("CHL", 1.35),  # mmol m-3
-        "spChl": ("CHL", 0.675),  # mg m-3
-        "spC": ("CHL", 3.375),  # mmol m-3
-        "spP": ("CHL", 0.03),  # mmol m-3
-        "spFe": ("CHL", 1.35e-5),  # mmol m-3
-        "spCaCO3": ("CHL", 0.0675),  # mmol m-3
-        "diatChl": ("CHL", 0.0675),  # mg m-3
-        "diatC": ("CHL", 0.2025),  # mmol m-3
-        "diatP": ("CHL", 0.02),  # mmol m-3
-        "diatFe": ("CHL", 1.35e-6),  # mmol m-3
-        "diatSi": ("CHL", 0.0675),  # mmol m-3
-        "diazChl": ("CHL", 0.0075),  # mg m-3
-        "diazC": ("CHL", 0.0375),  # mmol m-3
-        "diazP": ("CHL", 0.01),  # mmol m-3
-        "diazFe": ("CHL", 7.5e-7),  # mmol m-3
-    }
-
-    # Fill in missing variables using the defined relationships
-    for var_name, (base_var, factor) in variable_relations.items():
-        if var_name not in bgc_data:
-            if base_var:
-                bgc_data[var_name] = bgc_data[base_var] * factor
-            else:
-                bgc_data[var_name] = factor * xr.ones_like(bgc_data["ALK"])
-
-    bgc_data.pop("CHL", None)
-
-    return bgc_data
 
 
 def compute_potential_density(

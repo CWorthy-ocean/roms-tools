@@ -257,6 +257,33 @@ class InitialConditions:
             )
             return processed_fields
 
+        # BGC "ESPER" source: derive tracers from the finalized physics T/S already on
+        # the ROMS grid via PyESPER (no dataset load, no regridding). Lazy when physics
+        # T/S are dask-backed.
+        if type == "bgc" and self.bgc_source["name"] == "ESPER":
+            from roms_tools.setup.esper import ESPER_SUPPORTED_VARS, estimate_bgc_fields
+
+            temp = processed_fields["temp"]
+            salt = processed_fields["salt"]
+            depth = self.ds_depth_coords["layer_depth_rho"]
+            lon = self.grid.ds["lon_rho"]
+            lat = self.grid.ds["lat_rho"]
+            year = (
+                self.ini_time.year
+                + (self.ini_time.timetuple().tm_yday - 1) / 365.25
+            )
+            fields = estimate_bgc_fields(
+                temp, salt, lon, lat, depth,
+                source=self.bgc_source,
+                roms_variables=ESPER_SUPPORTED_VARS,
+                est_dates=year,
+            )
+            processed_fields.update(fields)
+            object.__setattr__(
+                self, "variable_info_bgc", bgc_variable_info(list(fields))
+            )
+            return processed_fields
+
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data(forcing_type=type)
@@ -603,6 +630,10 @@ class InitialConditions:
                         "For bgc_source={'name': 'constants', ...} you must provide a "
                         "non-empty 'constants' mapping."
                     )
+            elif name == "ESPER":
+                from roms_tools.setup.esper import validate_esper_source
+
+                validate_esper_source(self.bgc_source)
             elif name not in BGC_DATASET_NAMES:
                 raise ValueError(
                     f"Unknown BGC source name '{name}'. Valid options: "

@@ -339,6 +339,11 @@ class BoundaryForcing:
             self.ds = self._process_bgc_constants(target_coords)
             return
 
+        # BGC "ESPER" source: derive tracers from physics_forcing T/S via PyESPER.
+        if self.type == "bgc" and self.source["name"] == "ESPER":
+            self.ds = self._process_bgc_esper(target_coords)
+            return
+
         data = self._get_data()
 
         # Regrid engine is chosen independently of the prefill via the resolved
@@ -870,6 +875,78 @@ class BoundaryForcing:
         time_vals = [t0] if t0 == t1 else [t0, t1]
         return ds.expand_dims({"time": time_vals}, axis=0)
 
+    def _process_bgc_esper(self, target_coords) -> xr.Dataset:
+        """Build a BGC boundary dataset from an ``ESPER`` source.
+
+        Derives BGC tracers from the companion physics ``physics_forcing`` T/S (already on
+        the ROMS grid) via PyESPER -- no dataset load, no lateral/vertical regridding. The
+        estimates inherit ``physics_forcing``'s time axis, so the result is a genuine
+        time-varying boundary condition (not a static bracket). Lazy when the physics T/S
+        are dask-backed. MARBL derivation/fill is not performed here; call
+        :meth:`BGCMarbl.process_bgc_fields` on the finished object.
+        """
+        from roms_tools.setup.esper import (
+            ESPER_SUPPORTED_VARS,
+            _decimal_year,
+            estimate_bgc_fields,
+        )
+
+        pf = self.physics_forcing
+        self._set_boundary_info()
+        climatology = bool(self.source.get("climatology", False))
+
+        ds = xr.Dataset()
+        for direction, is_enabled in self.boundaries.items():
+            if not is_enabled:
+                continue
+            # zeta = 0: SSH is not applicable to BGC fields.
+            self._get_depth_coordinates(0, direction, "rho", "layer")
+            self._get_depth_coordinates(0, direction, "rho", "interface")
+            depth = self.ds_depth_coords[f"layer_depth_rho_{direction}"]
+
+            temp = pf.ds[f"temp_{direction}"]
+            salt = pf.ds[f"salt_{direction}"]
+            # Physics BC vars carry a "bry_time" dim with an "abs_time" datetime coord.
+            # Swap to the datetime view named "time" so the shared _add_global_metadata
+            # can rebuild bry_time from it (as the dataset/constants paths do).
+            if "abs_time" in temp.coords:
+                temp = temp.swap_dims({"bry_time": "abs_time"}).rename(
+                    {"abs_time": "time"}
+                )
+                salt = salt.swap_dims({"bry_time": "abs_time"}).rename(
+                    {"abs_time": "time"}
+                )
+            est_dates = (
+                _decimal_year(temp["time"]) if "time" in temp.dims else None
+            )
+
+            lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
+            lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
+
+            fields = estimate_bgc_fields(
+                temp, salt, lon, lat, depth,
+                source=self.source,
+                roms_variables=ESPER_SUPPORTED_VARS,
+                est_dates=est_dates,
+            )
+            fields = self._apply_use_vars(fields)
+            for var_name in fields:
+                fields[var_name] = transpose_dimensions(fields[var_name])
+            ds = self._write_into_dataset(direction, fields, ds)
+
+        # ds carries a "time" dim inherited from physics_forcing; convert to bry_time.
+        ds = self._add_global_metadata(None, ds, climatology=climatology)
+
+        self.variable_info = bgc_variable_info(self._present_bgc_bare_names(ds))
+
+        if not self.bypass_validation:
+            self._validate(ds)
+
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+
+        return ds
+
     def _apply_use_vars(self, fields: dict) -> dict:
         """Down-select ``fields`` (bare BGC var name -> DataArray) to ``self.use_vars``.
 
@@ -945,6 +1022,15 @@ class BoundaryForcing:
                     raise ValueError(
                         "For source={'name': 'constants', ...} you must provide a "
                         "non-empty 'constants' mapping."
+                    )
+            elif name == "ESPER":
+                from roms_tools.setup.esper import validate_esper_source
+
+                validate_esper_source(self.source)
+                if self.physics_forcing is None:
+                    raise ValueError(
+                        "An ESPER BGC BoundaryForcing requires `physics_forcing` (a "
+                        "physics BoundaryForcing supplying T/S on the ROMS grid)."
                     )
             elif name not in BGC_DATASET_NAMES:
                 raise ValueError(

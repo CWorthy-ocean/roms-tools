@@ -49,6 +49,8 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
@@ -416,14 +418,14 @@ class BoundaryForcing:
             # (float64 + deepest-to-bottom + fill) before this loop.
 
             # Precomputed static source masks for the xESMF masked-bilinear
-            # path, matched to the field type: ``mask`` (tracer validity) for
-            # tracers and ``zeta``, ``mask_vel`` (velocity validity) for u/v.
+            # path, matched to the field type: ``mask`` (scalar-field validity)
+            # for tracers and ``zeta``, ``mask_vel`` (velocity validity) for u/v.
             # Reusing these stored 2D fields avoids recomputing a mask from the
             # full (lazy) source series. ``None`` means the source is already
             # NaN-free (e.g. the pre-filled UNIFIED BGC dataset, which carries
             # no mask, or a whole-domain prefill above) so the regridder uses
             # plain bilinear; irrelevant on the scipy path.
-            tracer_mask = select_source_mask(
+            scalar_mask = select_source_mask(
                 bdry_data.ds, is_vector=False, use_xesmf=use_xesmf, prefill=prefill
             )
             vector_mask = select_source_mask(
@@ -455,11 +457,11 @@ class BoundaryForcing:
                 if self.adjust_depth_for_sea_surface_height:
                     # Regrid sea surface height ('zeta') onto a 2-cell-wide margin.
                     # This is needed to correctly infer depth coordinates at u- and v-points along the boundary.
-                    # 'zeta' is a scalar, so it uses the tracer mask (not the
+                    # 'zeta' is a scalar, so it uses the scalar mask (not the
                     # velocity mask of the vector regridder); build a dedicated
                     # regridder on the same vector-margin target.
                     zeta_vector_regrid = build_lateral_regridder(
-                        {"lat": lat, "lon": lon}, bdry_data, regrid, tracer_mask
+                        {"lat": lat, "lon": lon}, bdry_data, regrid, scalar_mask
                     )
                     zeta_vector = zeta_vector_regrid.apply(
                         bdry_data.ds[var_names["zeta"]["name"]]
@@ -477,7 +479,7 @@ class BoundaryForcing:
                 lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
                 lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
                 lateral_regrid = build_lateral_regridder(
-                    {"lat": lat, "lon": lon}, bdry_data, regrid, tracer_mask
+                    {"lat": lat, "lon": lon}, bdry_data, regrid, scalar_mask
                 )
                 for var_name in filtered_vars:
                     processed_fields[var_name] = lateral_regrid.apply(
@@ -1329,10 +1331,11 @@ class BoundaryForcing:
         self,
         filepath: str | Path,
         group: bool = True,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
     ) -> None:
-        """Save the boundary forcing fields to one or more netCDF4 files.
+        """Save the boundary forcing fields to one or more NetCDF files.
 
-        This method saves the dataset to disk as either a single netCDF4 file or multiple files, depending on the `group` parameter.
+        This method saves the dataset to disk as either a single NetCDF file or multiple files, depending on the `group` parameter.
         If `group` is `True`, the dataset is divided into subsets (e.g., monthly or yearly) based on the temporal frequency
         of the data, and each subset is saved to a separate file.
 
@@ -1343,6 +1346,8 @@ class BoundaryForcing:
             time-based information (e.g., year or month) to distinguish the subsets.
         group : bool, optional
             Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `True`.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -1363,7 +1368,10 @@ class BoundaryForcing:
             output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            format=format,
         )
 
         return saved_filenames

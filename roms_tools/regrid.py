@@ -249,7 +249,7 @@ def select_source_mask(ds, *, is_vector, use_xesmf, prefill):
     ``boundary_forcing.py``): a mask is only meaningful on the xESMF path with no
     source prefill (a prefilled source is already NaN-free, so plain bilinear is
     used). Velocity fields use ``"mask_vel"`` when the source provides it, falling
-    back to the tracer ``"mask"``.
+    back to the scalar-field ``"mask"``.
 
     Parameters
     ----------
@@ -270,10 +270,10 @@ def select_source_mask(ds, *, is_vector, use_xesmf, prefill):
     """
     if not (use_xesmf and prefill is None):
         return None
-    tracer = ds["mask"] if "mask" in ds.data_vars else None
+    scalar = ds["mask"] if "mask" in ds.data_vars else None
     if is_vector:
-        return ds["mask_vel"] if "mask_vel" in ds.data_vars else tracer
-    return tracer
+        return ds["mask_vel"] if "mask_vel" in ds.data_vars else scalar
+    return scalar
 
 
 def build_lateral_regridder(target_coords, data, regrid_config, source_mask):

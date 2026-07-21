@@ -399,6 +399,21 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
             (filepath.with_suffix(".nc")).unlink()
 
 
+def test_grid_save_netcdf3_64bit_data(counter_clockwise_rotated_grid, tmp_path):
+    grid = counter_clockwise_rotated_grid
+    filepath = tmp_path / "test_grid"
+
+    grid.save(filepath, format="NETCDF3_64BIT_DATA")
+
+    nc_path = filepath.with_suffix(".nc")
+    assert nc_path.exists()
+
+    grid_from_file = Grid(filename=nc_path)
+    grid.filename = grid_from_file.filename
+    assert grid == grid_from_file
+    xr.testing.assert_equal(grid.ds, grid_from_file.ds)
+
+
 @pytest.mark.parametrize(
     "grid_fixture",
     [

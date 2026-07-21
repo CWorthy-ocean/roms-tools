@@ -45,7 +45,7 @@ from roms_tools.setup.utils import (
     validate_names,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets
+from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat, save_datasets
 
 INCLUDE_ALL_RIVER_NAMES = "all"
 MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
@@ -1337,13 +1337,16 @@ class RiverForcing:
     def save(
         self,
         filepath: str | Path,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
     ) -> None:
-        """Save the river forcing to netCDF4 file.
+        """Save the river forcing to a NetCDF file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path and filename for the output files.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -1360,7 +1363,7 @@ class RiverForcing:
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(dataset_list, output_filenames)
+        saved_filenames = save_datasets(dataset_list, output_filenames, format=format)
 
         return saved_filenames
 

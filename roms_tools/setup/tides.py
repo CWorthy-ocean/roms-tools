@@ -28,6 +28,8 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
@@ -518,14 +520,20 @@ class TidalForcing:
             cmap_name="RdBu_r",
         )
 
-    def save(self, filepath: str | Path) -> None:
-        """Save the tidal forcing information to a netCDF4 file.
+    def save(
+        self,
+        filepath: str | Path,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+    ) -> None:
+        """Save the tidal forcing information to a NetCDF file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The path or filename where the dataset will be saved. If a directory is specified,
             the file will be saved with a default name within that directory.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -543,7 +551,10 @@ class TidalForcing:
         output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            format=format,
         )
 
         return saved_filenames

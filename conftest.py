@@ -379,6 +379,8 @@ def initial_conditions(use_dask: bool) -> InitialConditions:
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -392,6 +394,8 @@ def initial_conditions_on_large_grid(large_grid, use_dask):
         grid=large_grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -421,6 +425,8 @@ def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -454,6 +460,8 @@ def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialCondi
             "name": "CESM_REGRIDDED",
             "climatology": True,  # type: ignore[dict-item]
         },
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -484,6 +492,8 @@ def initial_conditions_with_unified_bgc_from_climatology(
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -521,6 +531,8 @@ def initial_conditions_with_unified_bgc_density(
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         bgc_interpolation_method="density",
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 

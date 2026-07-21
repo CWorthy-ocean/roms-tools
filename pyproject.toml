@@ -23,7 +23,7 @@ dependencies = [
     "xarray>=2022.6.0,<2025.8.0",
     "numpy>2.0,<2.3",
     "pooch",
-    "matplotlib",
+    "matplotlib<3.11",
     "cartopy",
     "packaging",
     "scipy >= 1.18.0",

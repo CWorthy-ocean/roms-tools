@@ -521,20 +521,20 @@ class InitialConditions:
                     prefill=self._regrid.prefill,
                 )
 
-            tracer_rg = build_lateral_regridder(
+            scalar_rg = build_lateral_regridder(
                 target_coords, data, self._regrid, _mask(False)
             )
             has_vel = any(var_names[v]["location"] in ("u", "v") for v in var_names)
             vector_rg = (
                 build_lateral_regridder(target_coords, data, self._regrid, _mask(True))
                 if has_vel
-                else tracer_rg
+                else scalar_rg
             )
             for var_name in var_names:
                 rg = (
                     vector_rg
                     if var_names[var_name]["location"] in ("u", "v")
-                    else tracer_rg
+                    else scalar_rg
                 )
                 processed_fields[var_name] = rg.apply(
                     data.ds[var_names[var_name]["name"]]

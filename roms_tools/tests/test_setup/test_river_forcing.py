@@ -201,6 +201,15 @@ class TestRiverForcingGeneral:
         assert "river_tracer" in river_forcing.ds
         assert "river_time" in river_forcing.ds
 
+    @pytest.mark.parametrize("river_forcing_fixture", TRACER_FIXTURES)
+    def test_river_tracer_dimension_order(self, river_forcing_fixture, request):
+        river_forcing = request.getfixturevalue(river_forcing_fixture)
+        assert river_forcing.ds["river_tracer"].dims == (
+            "river_time",
+            "ntracers",
+            "nriver",
+        )
+
     @pytest.mark.parametrize("river_forcing_fixture", CLIMATOLOGY_FIXTURES)
     def test_climatology_attributes(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)

@@ -623,6 +623,7 @@ class RiverForcing:
             xr.concat(tracer_arrays, dim="ntracers")
             .assign_coords(ntracers=ds["river_tracer"].ntracers)
             .astype(np.float32)
+            .transpose("river_time", "ntracers", "nriver")
         )
         return ds
 
@@ -778,8 +779,8 @@ class RiverForcing:
         n_rivers = river_volume.sizes["nriver"]
 
         ds["river_tracer"] = xr.DataArray(
-            np.zeros((n_tracers, n_river_time, n_rivers), dtype=np.float32),
-            dims=("ntracers", "river_time", "nriver"),
+            np.zeros((n_river_time, n_tracers, n_rivers), dtype=np.float32),
+            dims=("river_time", "ntracers", "nriver"),
         )
         ds["river_tracer"].attrs = {"long_name": "River tracer data"}
 

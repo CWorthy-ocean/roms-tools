@@ -1297,6 +1297,17 @@ class InitialConditions:
         #     )
         #     print("  OK", name, flush=True)
         print(ds)
+
+        import numpy as np
+
+        ds = ds.assign_coords(
+            abs_time=("ocean_time", ds["abs_time"].values.astype("float64"))
+        )
+        ds["abs_time"].encoding["_FillValue"] = np.nan
+        ds["abs_time"].attrs["units"] = "days since 2010-01-01 00:00:00"
+        ds["abs_time"].attrs["calendar"] = "proleptic_gregorian"
+        # ds.to_netcdf("physics_doubletime.nc", format="NETCDF3_64BIT_DATA")
+
         ds.drop_encoding().to_netcdf(f"{filepath}.nc", format=format)
         return [str(filepath)]
         # dataset_list = [ds]

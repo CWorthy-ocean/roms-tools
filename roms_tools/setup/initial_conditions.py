@@ -1276,7 +1276,9 @@ class InitialConditions:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        dataset_list = [self.ds]
+        ds = _rechunk_for_write(self.ds) if self.use_dask else self.ds
+
+        dataset_list = [ds]
         output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
@@ -1344,6 +1346,42 @@ class InitialConditions:
             **initial_conditions_params,
             use_dask=use_dask,
         )
+
+
+def _rechunk_for_write(ds: xr.Dataset) -> xr.Dataset:
+    """Rechunk a dataset into whole horizontal fields before writing to NetCDF.
+
+    The initial conditions are saved with ``xr.save_mfdataset`` to a single file,
+    which drains the dask graph in one serial stream. When the horizontal dims are
+    tiled (as they are after regridding source data that is laterally chunked), that
+    serial write becomes thousands of small, non-contiguous writes -- the worst access
+    pattern for parallel filesystems (e.g. GPFS), which are optimized for large,
+    block-aligned writes.
+
+    Keeping the horizontal dims whole (and the small vertical extent whole) turns those
+    many small writes into a few large contiguous ones. Any remaining chunking falls
+    along ``time``. This does not add write concurrency -- it makes the serial write
+    efficient.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The (dask-backed) dataset to rechunk.
+
+    Returns
+    -------
+    xr.Dataset
+        The rechunked dataset. Horizontal and vertical dims are single chunks (``-1``);
+        ``time``, if present, is chunked one record at a time.
+    """
+    # ``-1`` means "one chunk spanning the whole dim".
+    chunks = {}
+    for dim in ("eta_rho", "eta_v", "xi_rho", "xi_u", "s_rho", "s_w"):
+        if dim in ds.dims:
+            chunks[dim] = -1
+    if "time" in ds.dims:
+        chunks["time"] = 1
+    return ds.chunk(chunks)
 
 
 def _set_dask_chunks(location: str, chunk_size: int):

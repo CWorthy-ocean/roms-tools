@@ -1293,7 +1293,9 @@ class InitialConditions:
                 dict(ds[name].encoding),
                 flush=True,
             )
-            sub.to_netcdf(f"probe_{name}.nc", format="NETCDF3_64BIT_DATA")
+            sub.to_netcdf(
+                filepath.parent / f"probe_{name}.nc", format="NETCDF3_64BIT_DATA"
+            )
             print("  OK", name, flush=True)
 
         dataset_list = [ds]

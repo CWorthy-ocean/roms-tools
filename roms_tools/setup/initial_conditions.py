@@ -11,6 +11,7 @@ import xarray as xr
 from matplotlib.axes import Axes
 
 from roms_tools import Grid
+from roms_tools._memlog import mem_log
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     GLORYSDataset,
@@ -57,6 +58,8 @@ from roms_tools.utils import (
 from roms_tools.vertical_coordinate import (
     compute_depth,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(kw_only=True)
@@ -280,35 +283,48 @@ class InitialConditions:
     """An xarray Dataset containing the depth coordinates."""
 
     def __post_init__(self):
+        # Instrumentation gate: only pay for timing/memory reads when the
+        # roms_tools.setup.initial_conditions logger is at DEBUG (forge's
+        # --verbose sets the roms_tools logger to DEBUG; see cstar_forge/run.py).
+        verbose = logger.isEnabledFor(logging.DEBUG)
+
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
 
         self._resolve_prefill_options()
-        self._input_checks()
+        with mem_log("IC._input_checks", enabled=verbose):
+            self._input_checks()
 
         processed_fields = {}
-        processed_fields = self._process_data(processed_fields, type="physics")
+        with mem_log("IC._process_data(physics)", enabled=verbose):
+            processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
-            processed_fields = self._process_data(processed_fields, type="bgc")
-            processed_fields = compute_missing_bgc_variables(processed_fields)
+            with mem_log("IC._process_data(bgc)", enabled=verbose):
+                processed_fields = self._process_data(processed_fields, type="bgc")
+                processed_fields = compute_missing_bgc_variables(processed_fields)
 
-        for var_name in processed_fields:
-            processed_fields[var_name] = transpose_dimensions(
-                processed_fields[var_name]
-            )
+        with mem_log("IC.transpose_dimensions", enabled=verbose):
+            for var_name in processed_fields:
+                processed_fields[var_name] = transpose_dimensions(
+                    processed_fields[var_name]
+                )
 
         d_meta = get_variable_metadata()
-        ds = self._write_into_dataset(processed_fields, d_meta)
+        with mem_log("IC._write_into_dataset", enabled=verbose):
+            ds = self._write_into_dataset(processed_fields, d_meta)
 
-        ds = self._add_global_metadata(ds)
+        with mem_log("IC._add_global_metadata", enabled=verbose):
+            ds = self._add_global_metadata(ds)
 
         if not self.bypass_validation:
-            self._validate(ds)
+            with mem_log("IC._validate", enabled=verbose):
+                self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+        with mem_log("IC.substitute_nans_by_fillvalue", enabled=verbose):
+            for var_name in ds.data_vars:
+                ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
 

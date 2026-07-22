@@ -52,7 +52,6 @@ from roms_tools.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
-    save_datasets,
     transpose_dimensions,
 )
 from roms_tools.vertical_coordinate import (
@@ -1278,39 +1277,41 @@ class InitialConditions:
 
         # ds = _rechunk_for_write(self.ds) if self.use_dask else self.ds
         ds = self.ds.load()
+        #
+        # for name in list(ds.variables):  # note: .variables, includes coords
+        #     sub = (
+        #         ds[[name]]
+        #         if name in ds.data_vars
+        #         else ds[[]].assign_coords({name: ds[name]})
+        #     )
+        #     print(
+        #         "trying",
+        #         name,
+        #         ds[name].dtype,
+        #         ds[name].dims,
+        #         dict(ds[name].encoding),
+        #         flush=True,
+        #     )
+        #     sub.to_netcdf(
+        #         filepath.parent / f"probe_{name}.nc", format="NETCDF3_64BIT_DATA"
+        #     )
+        #     print("  OK", name, flush=True)
 
-        for name in list(ds.variables):  # note: .variables, includes coords
-            sub = (
-                ds[[name]]
-                if name in ds.data_vars
-                else ds[[]].assign_coords({name: ds[name]})
-            )
-            print(
-                "trying",
-                name,
-                ds[name].dtype,
-                ds[name].dims,
-                dict(ds[name].encoding),
-                flush=True,
-            )
-            sub.to_netcdf(
-                filepath.parent / f"probe_{name}.nc", format="NETCDF3_64BIT_DATA"
-            )
-            print("  OK", name, flush=True)
+        ds.drop_encoding().to_netcdf(f"{filepath}.nc", format=format)
+        return [str(filepath)]
+        # dataset_list = [ds]
+        # output_filenames = [str(filepath)]
+        # import dask
+        #
+        # with dask.config.set(scheduler="synchronous"):
+        #     saved_filenames = save_datasets(
+        #         dataset_list,
+        #         output_filenames,
+        #         use_dask=self.use_dask,
+        #         format=format,
+        #     )
 
-        dataset_list = [ds]
-        output_filenames = [str(filepath)]
-        import dask
-
-        with dask.config.set(scheduler="synchronous"):
-            saved_filenames = save_datasets(
-                dataset_list,
-                output_filenames,
-                use_dask=self.use_dask,
-                format=format,
-            )
-
-        return saved_filenames
+        # return saved_filenames
 
     def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of

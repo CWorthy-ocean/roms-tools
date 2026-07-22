@@ -1374,6 +1374,8 @@ def _rechunk_for_write(ds: xr.Dataset) -> xr.Dataset:
         The rechunked dataset. Horizontal and vertical dims are single chunks (``-1``);
         ``time``, if present, is chunked one record at a time.
     """
+    from dask.base import is_dask_collection
+
     # ``-1`` means "one chunk spanning the whole dim".
     chunks = {}
     for dim in ("eta_rho", "eta_v", "xi_rho", "xi_u", "s_rho", "s_w"):
@@ -1381,7 +1383,22 @@ def _rechunk_for_write(ds: xr.Dataset) -> xr.Dataset:
             chunks[dim] = -1
     if "time" in ds.dims:
         chunks["time"] = 1
-    return ds.chunk(chunks)
+    if not chunks:
+        return ds
+
+    # ``Dataset.chunk`` rechunks *every* variable, which would also promote tiny,
+    # eager 1D metadata coords (e.g. the datetime ``abs_time``) from numpy to dask.
+    # Encoding a chunked datetime to NetCDF then fails unless both units and dtype
+    # are prescribed, which the 1D-encoding patch in ``save_datasets`` does not do.
+    # So remember which variables were eager and restore them afterwards, leaving
+    # only the large (already dask-backed) fields rechunked.
+    eager = {
+        name for name, var in ds.variables.items() if not is_dask_collection(var.data)
+    }
+    ds = ds.chunk(chunks)
+    for name in eager:
+        ds[name] = ds[name].compute()
+    return ds
 
 
 def _set_dask_chunks(location: str, chunk_size: int):

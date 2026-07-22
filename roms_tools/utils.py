@@ -852,6 +852,61 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
+def _save_datasets_nofill(
+    dataset_list,
+    output_filenames,
+    format: NetCDFFormat,
+) -> None:
+    """Write datasets to classic-format NetCDF files with library prefill disabled.
+
+    For the classic formats (``NETCDF3_*``, including CDF-5), the netCDF-C library
+    defaults to ``NC_FILL``: every variable is physically pre-written with fill
+    values before the real data lands, doubling the write volume. This is
+    especially costly on parallel filesystems. HDF5-backed ``NETCDF4`` files
+    handle fill values lazily and are unaffected.
+
+    xarray exposes no way to disable prefill, so this replicates the relevant
+    core of ``xr.save_mfdataset`` (netcdf4 engine) using xarray's store API and
+    calls ``set_fill_off()`` on each underlying ``netCDF4.Dataset`` *before* any
+    variable is defined — eager (non-dask) variables are written during
+    ``dump_to_store``, which ends define mode and would otherwise trigger the
+    fill pass for every variable in the file.
+
+    With prefill off, any region never written to contains uninitialized bytes
+    instead of ``_FillValue``. roms-tools always writes every variable in full,
+    so no such regions exist.
+    """
+    from xarray.backends.api import dump_to_store
+    from xarray.backends.common import ArrayWriter
+    from xarray.backends.netCDF4_ import NetCDF4DataStore
+
+    stores = []
+    try:
+        delayed_writes = []
+        for dataset, path in zip(dataset_list, output_filenames, strict=True):
+            store = NetCDF4DataStore.open(path, mode="w", format=format)
+            stores.append(store)
+            store.ds.set_fill_off()
+
+            unlimited_dims = dataset.encoding.get("unlimited_dims", None)
+            if unlimited_dims is not None and isinstance(unlimited_dims, str):
+                unlimited_dims = [unlimited_dims]
+
+            writer = ArrayWriter()
+            dump_to_store(dataset, store, writer, unlimited_dims=unlimited_dims)
+            delayed = writer.sync(compute=False)
+            if delayed is not None:
+                delayed_writes.append(delayed)
+
+        if delayed_writes:
+            import dask
+
+            dask.compute(*delayed_writes)
+    finally:
+        for store in stores:
+            store.close()
+
+
 def save_datasets(
     dataset_list,
     output_filenames,
@@ -925,13 +980,23 @@ def save_datasets(
             "Writing the following NetCDF files:\n%s", "\n".join(output_filenames)
         )
 
+    # Classic formats go through the prefill-free writer (see
+    # _save_datasets_nofill); NETCDF4/HDF5 doesn't prefill, so the stock
+    # xarray path is kept there.
+    if format == "NETCDF4":
+        write = partial(
+            xr.save_mfdataset, dataset_list, output_filenames, format=format
+        )
+    else:
+        write = partial(_save_datasets_nofill, dataset_list, output_filenames, format)
+
     if use_dask:
         from dask.diagnostics import ProgressBar
 
         with ProgressBar():
-            xr.save_mfdataset(dataset_list, output_filenames, format=format)
+            write()
     else:
-        xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        write()
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

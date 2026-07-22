@@ -1278,6 +1278,24 @@ class InitialConditions:
 
         # ds = _rechunk_for_write(self.ds) if self.use_dask else self.ds
         ds = self.ds.load()
+
+        for name in list(ds.variables):  # note: .variables, includes coords
+            sub = (
+                ds[[name]]
+                if name in ds.data_vars
+                else ds[[]].assign_coords({name: ds[name]})
+            )
+            print(
+                "trying",
+                name,
+                ds[name].dtype,
+                ds[name].dims,
+                dict(ds[name].encoding),
+                flush=True,
+            )
+            sub.to_netcdf(f"probe_{name}.nc", format="NETCDF3_64BIT_DATA")
+            print("  OK", name, flush=True)
+
         dataset_list = [ds]
         output_filenames = [str(filepath)]
         import dask

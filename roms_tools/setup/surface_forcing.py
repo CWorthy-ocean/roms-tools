@@ -9,7 +9,6 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
-    DEFAULT_ERA5_ARCO_PATH,
     CESMBGCSurfaceForcingDataset,
     ERA5Correction,
     LatLonDataset,
@@ -452,10 +451,9 @@ class SurfaceForcing:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
             if self.source["name"] == "ERA5":
-                logging.info(
-                    "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
-                )
-                self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+                # ERA5's default path (the ARCO cloud archive) is applied
+                # later, by `resolve_era5_source` in `_get_data`.
+                self.source["path"] = None
             elif self.source["name"] == "MBL_co2":
                 logging.info(
                     "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
@@ -573,7 +571,19 @@ class SurfaceForcing:
                 # Add 1 hr since radiation time will shift by 1 hr
                 if data_dict["end_time"] is not None:
                     data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
-                _, is_arco, dataset_cls = resolve_era5_source(self.source["path"])
+                resolved_path, is_arco, dataset_cls = resolve_era5_source(
+                    self.source["path"]
+                )
+                if not self.source["path"]:
+                    # Only rewrite when defaulting -- an explicitly provided
+                    # path (str or Path) is left exactly as given, so
+                    # `self.source` round-trips (e.g. through `to_yaml`)
+                    # without silently changing its type.
+                    logging.info(
+                        "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
+                    )
+                    self.source["path"] = resolved_path
+                    data_dict["filename"] = resolved_path
                 if is_arco and not self.use_dask:
                     raise ValueError(
                         "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."

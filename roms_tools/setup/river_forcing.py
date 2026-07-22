@@ -217,8 +217,19 @@ def _smooth_and_floor_air_temp(
     xr.DataArray
         Smoothed, floored air temperature, degC, same shape as ``tair``.
     """
+    if tair.sizes[time_dim] < 2:
+        # A single time step has nothing to smooth over (and `np.diff` on it
+        # is empty, making `dt_days` NaN below) -- just floor it.
+        return tair.clip(min=0.0)
+
     dt_days = np.median(np.diff(tair[time_dim].values)) / np.timedelta64(1, "D")
     window_size = max(round(window_days / dt_days), 1)
+    # Clamp to the available record length: a window wider than the data
+    # (e.g. the default 30-day window against a short forcing period) would
+    # otherwise make dask's rolling `map_overlap` raise an opaque
+    # "overlapping depth ... larger than your array" error instead of just
+    # smoothing over what's available.
+    window_size = min(window_size, tair.sizes[time_dim])
 
     if tair.chunks is not None:
         # Rolling reductions need the rolled dimension in a single chunk.
@@ -384,6 +395,17 @@ class RiverForcing:
         where to sample air temperature from at each river's injection
         point(s), used to derive river temperature. When not provided,
         river temperature keeps its flat default from ``get_tracer_defaults()``.
+
+        Always samples real (non-climatological) ERA5 air temperature --
+        like every other river tracer, river temperature is written onto
+        the single ``river_time`` axis shared by the whole ``river_tracer``
+        array, so it has no independent climatology setting of its own.
+        Whether the stored result ends up climatological is decided by the
+        discharge data / ``convert_to_climatology`` when ``include_bgc`` is
+        ``False``, or by the BGC dataset's own time axis requirements
+        (``requires_calendar_discharge_time``) when BGC is included, since
+        that can force a climatological discharge record onto a real
+        calendar-year axis. Not by this parameter.
     river_temp_smoothing_window_days : float, optional
         Length (days) of the rolling-mean window applied to air temperature
         before using it as a river temperature estimate. Defaults to 30 (one month). The
@@ -448,9 +470,20 @@ class RiverForcing:
     temperature. When ``None``, river temperature keeps its flat default from
     ``get_tracer_defaults()``.
 
+    Always samples real (non-climatological) ERA5 air temperature -- like
+    every other river tracer, river temperature is written onto the single
+    ``river_time`` axis shared by the whole ``river_tracer`` array, so it
+    has no independent climatology setting of its own. Whether the stored
+    result ends up climatological is decided by the discharge data /
+    ``convert_to_climatology`` when ``include_bgc`` is ``False``, or by the
+    BGC dataset's own time axis requirements
+    (``requires_calendar_discharge_time``) when BGC is included, since that
+    can force a climatological discharge record onto a real calendar-year
+    axis. Not by this parameter.
+
     Loads only ``Tair``, narrowed to a bounding box around the river
     locations at read time, and selects the ERA5 grid cell nearest each
-    river cell via a vectorized nearest-neighbor lookup -- not a full
+    river cell via a vectorized nearest-neighbor lookup; no full
     ``SurfaceForcing`` object (regrid, radiation/wind correction, other
     physics variables) is built.
     """
@@ -621,12 +654,11 @@ class RiverForcing:
         return {**source, "climatology": source.get("climatology", False)}
 
     def _normalized_surface_forcing_source(self) -> RawDataSource | None:
-        """Validate and apply defaults to ``surface_forcing_source``.
+        """Validate ``surface_forcing_source``.
 
         Returns ``None`` when not provided. Otherwise checks that
         ``"name"`` is ``"ERA5"`` -- currently the only source supported for
-        sampling river temperature -- applying a ``"climatology"`` default
-        of ``False`` when omitted. The ARCO default path is applied later,
+        sampling river temperature. The ARCO default path is applied later,
         by ``resolve_era5_source``, so ``"path"`` is left as-is here.
 
         Raises
@@ -648,7 +680,7 @@ class RiverForcing:
                 "temperature."
             )
 
-        return {**source, "climatology": source.get("climatology", False)}
+        return dict(source)
 
     def _normalized_bgc_source(self) -> BgcSource | None:
         """Validate ``bgc_source`` into a typed model when BGC is enabled.
@@ -916,7 +948,7 @@ class RiverForcing:
             filename=resolved_path,
             start_time=self.start_time,
             end_time=self.end_time,
-            climatology=bool(self.surface_forcing_source["climatology"]),
+            climatology=False,
             use_dask=True,
             initial_slice_bounds=(
                 _bounding_box_with_buffer(river_lats, river_lons) if is_arco else None

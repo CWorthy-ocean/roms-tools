@@ -1300,3 +1300,30 @@ def test_default_era5_dataset_loading(small_grid: Grid) -> None:
 
     expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
     assert set(sf.ds.data_vars).issuperset(expected_vars)
+
+
+def test_era5_default_path_requires_dask(small_grid: Grid, caplog) -> None:
+    """Omitting a path for ERA5 defaults to the ARCO cloud path (resolved via
+    `resolve_era5_source` in `_get_data`) and requires `use_dask=True`.
+
+    Regression test for the dedup of `SurfaceForcing`'s ERA5 default-path
+    logic into the shared `resolve_era5_source` helper: this doesn't touch
+    the network, since the `use_dask` check fires before any streaming.
+    """
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(
+            ValueError, match="Cloud-based ERA5 access requires `use_dask=True`"
+        ):
+            SurfaceForcing(
+                grid=small_grid,
+                source={"name": "ERA5"},
+                type="physics",
+                start_time=start_time,
+                end_time=end_time,
+                use_dask=False,
+            )
+
+    assert "defaulting to ARCO ERA5 dataset on Google Cloud" in caplog.text

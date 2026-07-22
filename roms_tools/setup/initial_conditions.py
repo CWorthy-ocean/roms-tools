@@ -1275,7 +1275,7 @@ class InitialConditions:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        # ds = _rechunk_for_write(self.ds) if self.use_dask else self.ds
+        ds = _rechunk_for_write(self.ds) if self.use_dask else self.ds
         ds = self.ds.load()
         #
         # for name in list(ds.variables):  # note: .variables, includes coords
@@ -1296,7 +1296,7 @@ class InitialConditions:
         #         filepath.parent / f"probe_{name}.nc", format="NETCDF3_64BIT_DATA"
         #     )
         #     print("  OK", name, flush=True)
-
+        print(ds)
         ds.drop_encoding().to_netcdf(f"{filepath}.nc", format=format)
         return [str(filepath)]
         # dataset_list = [ds]

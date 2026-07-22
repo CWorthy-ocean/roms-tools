@@ -1276,17 +1276,19 @@ class InitialConditions:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        ds = _rechunk_for_write(self.ds) if self.use_dask else self.ds
-
+        # ds = _rechunk_for_write(self.ds) if self.use_dask else self.ds
+        ds = self.ds.load()
         dataset_list = [ds]
         output_filenames = [str(filepath)]
+        import dask
 
-        saved_filenames = save_datasets(
-            dataset_list,
-            output_filenames,
-            use_dask=self.use_dask,
-            format=format,
-        )
+        with dask.config.set(scheduler="synchronous"):
+            saved_filenames = save_datasets(
+                dataset_list,
+                output_filenames,
+                use_dask=self.use_dask,
+                format=format,
+            )
 
         return saved_filenames
 

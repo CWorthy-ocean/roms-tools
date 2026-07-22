@@ -465,28 +465,10 @@ class RiverForcing:
     """Reference date for the ROMS simulation."""
 
     surface_forcing_source: RawDataSource | None = None
-    """ERA5 source dict (e.g. ``{"name": "ERA5", "path": ...}``) used to sample
-    air temperature at each river's injection point(s) and derive river
-    temperature. When ``None``, river temperature keeps its flat default from
-    ``get_tracer_defaults()``.
-
-    Always samples real (non-climatological) ERA5 air temperature -- like
-    every other river tracer, river temperature is written onto the single
-    ``river_time`` axis shared by the whole ``river_tracer`` array, so it
-    has no independent climatology setting of its own. Whether the stored
-    result ends up climatological is decided by the discharge data /
-    ``convert_to_climatology`` when ``include_bgc`` is ``False``, or by the
-    BGC dataset's own time axis requirements
-    (``requires_calendar_discharge_time``) when BGC is included, since that
-    can force a climatological discharge record onto a real calendar-year
-    axis. Not by this parameter.
-
-    Loads only ``Tair``, narrowed to a bounding box around the river
-    locations at read time, and selects the ERA5 grid cell nearest each
-    river cell via a vectorized nearest-neighbor lookup; no full
-    ``SurfaceForcing`` object (regrid, radiation/wind correction, other
-    physics variables) is built.
-    """
+    """ERA5 source dict used to sample air temperature at each river's
+    injection point(s) and derive river temperature. See class docstring for
+    climatology behavior. When ``None``, river temperature keeps its flat
+    default."""
 
     river_temp_smoothing_window_days: float = 30.0
     """Length of the rolling-mean window (days) used to smooth air temperature

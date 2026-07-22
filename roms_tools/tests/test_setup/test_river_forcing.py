@@ -245,6 +245,34 @@ def synthetic_era5_tair_file(tmp_path):
 
 
 @pytest.fixture
+def synthetic_era5_tair_file_with_lon_gradient(tmp_path):
+    """A local ERA5-format Tair file whose value depends only on longitude.
+
+    Constant in time and latitude (``temp_degC = lon - 320.0``, i.e. 0 to
+    37 degC across the fixture's own longitude range) so that sampling at a
+    river's *averaged* mouth coordinate is distinguishable from sampling at
+    any one of its individual grid cells, without smoothing or time-ramp
+    effects muddying the comparison.
+    """
+    path = tmp_path / "synthetic_era5_tair_lon_gradient.nc"
+    lats = np.arange(55.0, 72.0, 0.5, dtype=np.float32)
+    lons = np.arange(320.0, 357.0, 0.5, dtype=np.float32)
+    times = np.arange(np.datetime64("1998-01-01"), np.datetime64("1998-01-11")).astype(
+        "datetime64[ns]"
+    )
+
+    temp_degc = lons - 320.0
+    temp_kelvin = (temp_degc + 273.15).astype(np.float64)
+
+    tair_kelvin = np.broadcast_to(
+        temp_kelvin[None, None, :], (len(times), len(lats), len(lons))
+    ).copy()
+
+    _write_synthetic_era5_tair_file(path, lats, lons, times, tair_kelvin)
+    return path
+
+
+@pytest.fixture
 def synthetic_glofas_single_station_file(tmp_path):
     """A synthetic single-station GloFAS file spanning 1998-01-01 to 01-10."""
     path = tmp_path / "glofas_single_station.nc"
@@ -1369,13 +1397,15 @@ class TestNormalizedSurfaceForcingSource:
 
     def test_stray_climatology_key_is_inert(self):
         """`surface_forcing_source` has no climatology option: a caller-supplied
-        'climatology' key is neither rejected nor honored -- river temperature
+        'climatology' key is neither rejected nor honored -- it passes through
+        `_normalized_surface_forcing_source` unchanged, but river temperature
         always samples real ERA5 data regardless (see `_get_river_surface_temp`,
-        which hardcodes `climatology=False`).
+        which hardcodes `climatology=False` and never reads this key).
         """
         rf = self._make_dummy({"name": "ERA5", "climatology": True})
         normalized = rf._normalized_surface_forcing_source()
         assert normalized["name"] == "ERA5"
+        assert normalized["climatology"] is True
 
 
 class TestResolveSurfaceForcingSource:
@@ -1479,8 +1509,28 @@ class TestRiverForcingTemperatureFromERA5:
         self,
         iceland_test_grid,
         synthetic_glofas_single_station_file,
-        synthetic_era5_tair_file,
+        synthetic_era5_tair_file_with_lon_gradient,
     ):
+        """The multi-cell river's temperature must come from one sample at
+        the *mean* of its cells' coordinates, not e.g. an average of
+        per-cell samples or a single cell's own value.
+
+        `MULTI_CELL_COASTAL_INDICES`' real longitudes on `iceland_test_grid`
+        are 339.80, 340.70, 341.62 (mean 340.71). Against the lon-gradient
+        fixture's 0.5-degree grid (`temp_degC = lon - 320.0`), the nearest
+        grid longitude to each of those differs from the nearest grid
+        longitude to their mean:
+
+        - cell 1 (339.80) -> nearest grid lon 340.0 -> 20.0 degC
+        - cell 2 (340.70) -> nearest grid lon 340.5 -> 20.5 degC
+        - cell 3 (341.62) -> nearest grid lon 341.5 -> 21.5 degC
+        - naive average of the three per-cell samples -> 20.667 degC
+        - mean coordinate (340.71) -> nearest grid lon 340.5 -> 20.5 degC
+
+        Only the last of these matches the code's documented "one sample at
+        the averaged coordinate" behavior; the others would still pass a
+        weaker "is finite and non-negative" check.
+        """
         glofas_path, station_name = synthetic_glofas_single_station_file
         rf = RiverForcing(
             grid=iceland_test_grid,
@@ -1489,13 +1539,15 @@ class TestRiverForcingTemperatureFromERA5:
             source={"name": "GLOFAS", "path": glofas_path},
             convert_to_climatology="never",
             indices={station_name: list(MULTI_CELL_COASTAL_INDICES)},
-            surface_forcing_source={"name": "ERA5", "path": synthetic_era5_tair_file},
+            surface_forcing_source={
+                "name": "ERA5",
+                "path": synthetic_era5_tair_file_with_lon_gradient,
+            },
         )
         temp = rf.ds["river_tracer"].isel(
             ntracers=rf.ds.tracer_name.values.tolist().index("temp")
         )
-        assert np.isfinite(temp.values).all()
-        assert (temp.values >= 0.0).all()
+        np.testing.assert_allclose(temp.values, 20.5, atol=1e-3)
 
     def test_climatological_path_uses_downloaded_era5_file(self, iceland_test_grid):
         fname = download_test_data("ERA5_regional_test_data.nc")
@@ -1556,6 +1608,13 @@ class TestRiverForcingTemperatureFromERA5:
 
         assert "Use provided river indices." in caplog.text
         assert rf == rf_from_file
+        # `RiverForcing`'s dataclass-generated `==` is a weaker check than it
+        # looks: `xr.Dataset.__bool__` returns `bool(self.data_vars)` (just
+        # "is it non-empty"), not an element-wise reduction, so `==` above
+        # would report equal even if `ds`'s actual contents diverged.
+        # `assert_equal` catches that (same pattern as `test_grid.py`'s
+        # `xr.testing.assert_equal(grid.ds, grid_from_file.ds)`).
+        xr.testing.assert_equal(rf.ds, rf_from_file.ds)
         filepath.unlink()
 
 

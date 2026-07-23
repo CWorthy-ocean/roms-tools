@@ -82,6 +82,7 @@
 * Notebooks updated to document density-space BGC interpolation ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620))
 * Remove example support for CESM data. Boundary, Surface, Initial. ([#633](https://github.com/CWorthy-ocean/roms-tools/pull/633))
 * Added subchunking example code and information on new datasets docs page. ([#627](https://github.com/CWorthy-ocean/roms-tools/pull/627))
+* The CO2 unit "µmol mol⁻¹" was causing a netcdf conversion error so these units have been changed to "umol mol-1".
 
 ### Bugfixes
 

@@ -69,6 +69,7 @@
 * Monthly discharge climatology is expanded to calendar mid-month dates when combined with year-indexed RIVR2O BGC (`expand_monthly_climatology_time_axis`) ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
 * CDR analysis tests cover tonnes-CO2 uptake and renamed efficiency fields; `compute_cdr_metrics` requires `DIC_source` in the input dataset alongside other CDR variables. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * Nesting operations (align_grids and make_nesting_info) now use more efficient gridding techniques
+* Update xgcm API calls to enable support for xgcm>0.10
 
 ### Documentation
 

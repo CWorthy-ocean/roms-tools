@@ -82,7 +82,7 @@
 * Notebooks updated to document density-space BGC interpolation ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620))
 * Remove example support for CESM data. Boundary, Surface, Initial. ([#633](https://github.com/CWorthy-ocean/roms-tools/pull/633))
 * Added subchunking example code and information on new datasets docs page. ([#627](https://github.com/CWorthy-ocean/roms-tools/pull/627))
-* The CO2 unit "µmol mol⁻¹" was causing a netcdf conversion error so these units have been changed to "umol mol-1".
+
 
 ### Bugfixes
 
@@ -94,6 +94,7 @@
 * Fix timer logging messages during mask generation so durations render correctly when closing narrow channels and filling enclosed basins
 * Fix for hanging when using the default of streaming from Copernicus for GLORYS output. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
 * Fix for river forcing indexing, sorting and plotting so that river_forcing.plot() and river_forcing.plot_locations() correctly shows top 20 largest rivers when plotting.
+* The CO2 unit "µmol mol⁻¹" was causing a netcdf conversion error so these units have been changed to "umol mol-1". ([#645](https://github.com/CWorthy-ocean/roms-tools/pull/645))
 
 ## v3.5.0
 

@@ -1547,7 +1547,7 @@ class MBLco2Dataset(MBLDataset):
                 "co2": (
                     ("time", "latitude"),
                     co2,
-                    {"units": "µmol mol⁻¹", "long_name": "CO2, Marine boundary layer"},
+                    {"units": "umol mol-1", "long_name": "CO2, Marine boundary layer"},
                 )
             },
             coords={

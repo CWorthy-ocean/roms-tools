@@ -707,10 +707,10 @@ def get_variable_metadata():
             "flux_units": "mmol/s",
             "integrated_units": "mmol",
         },
-        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "µmol mol⁻¹"},
+        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "umol mol-1"},
         "xco2_air_alt": {
             "long_name": "CO2, Marine Boundary Layer; alternative CO2",
-            "units": "µmol mol⁻¹",
+            "units": "umol mol-1",
         },
         "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
         "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},

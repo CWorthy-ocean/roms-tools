@@ -1296,65 +1296,6 @@ class InitialConditions:
         #         filepath.parent / f"probe_{name}.nc", format="NETCDF3_64BIT_DATA"
         #     )
         #     print("  OK", name, flush=True)
-        print(ds)
-
-        import numpy as np
-
-        # ds = ic.ds  (or however you hold the dataset before writing)
-
-        # --- inspect what you currently have -------------------------------------
-        print(
-            "before:",
-            ds["abs_time"].dtype,
-            "encoding:",
-            dict(ds["abs_time"].encoding),
-            "attrs:",
-            dict(ds["abs_time"].attrs),
-        )
-
-        # --- convert abs_time -> int ---------------------------------------------
-        # abs_time is "days since 2010-01-01" (see attrs). If the values are whole
-        # days (a single IC snapshot at day 0, day 1, ...), int is exact and lossless.
-        # Round first so 1.0 -> 1, guarding against float dust like 0.9999999.
-        vals = ds["abs_time"].values
-        int_vals = np.rint(vals).astype("int32")  # int32 matches the working file
-
-        # sanity check the cast is lossless (fail loudly rather than silently truncate)
-        if not np.allclose(vals[~np.isnan(vals)], int_vals[~np.isnan(vals)]):
-            raise ValueError(
-                "abs_time values are not whole numbers; int cast would lose data"
-            )
-
-        ds = ds.assign_coords(abs_time=("ocean_time", int_vals))
-
-        # --- fill value: the working file has NONE, and that's correct ------------
-        # A coordinate axis should not carry a _FillValue — every element is a real
-        # coordinate, there is nothing to mask. The hanging file's double abs_time had
-        # _FillValue = NaN, which is (a) meaningless on a monotonic time axis and
-        # (b) impossible to represent in an int variable anyway (there is no int NaN).
-        # So the right move is to REMOVE any fill value, not pick a new one.
-        ds["abs_time"].encoding.pop("_FillValue", None)
-        ds["abs_time"].encoding["_FillValue"] = (
-            None  # belt-and-suspenders: tell xarray "no fill"
-        )
-        ds["abs_time"].attrs.pop("_FillValue", None)
-
-        # preserve the CF time attributes (these live in attrs, not encoding)
-        ds["abs_time"].attrs.setdefault("long_name", "absolute time")
-        ds["abs_time"].attrs.setdefault("units", "days since 2010-01-01 00:00:00")
-        ds["abs_time"].attrs.setdefault("calendar", "proleptic_gregorian")
-
-        # pin the on-disk dtype so xarray doesn't silently re-promote to double
-        ds["abs_time"].encoding["dtype"] = "int32"
-
-        print(
-            "after: ",
-            ds["abs_time"].dtype,
-            "encoding:",
-            dict(ds["abs_time"].encoding),
-            "attrs:",
-            dict(ds["abs_time"].attrs),
-        )
 
         # # --- write ----------------------------------------------------------------
         # ds.to_netcdf("ic_int_abstime.nc", format="NETCDF3_64BIT_DATA")
@@ -1367,7 +1308,8 @@ class InitialConditions:
         # ds["abs_time"].attrs["units"] = "days since 2010-01-01 00:00:00"
         # ds["abs_time"].attrs["calendar"] = "proleptic_gregorian"
         # ds.to_netcdf("physics_doubletime.nc", format="NETCDF3_64BIT_DATA")
-
+        logger.info("done loading, begin saving")
+        logger.info(ds)
         ds.drop_encoding().to_netcdf(f"{filepath}.nc", format=format)
         return [str(filepath)]
         # dataset_list = [ds]

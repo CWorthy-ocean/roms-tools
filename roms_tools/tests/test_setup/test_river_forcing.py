@@ -761,8 +761,9 @@ class TestRiverForcingWithOverlappingIndices:
         # Check no river's volume increased
         for name in ds["river_name"].values:
             river_idx = np.where(ds["river_name"].values == name)[0].item()
-            assert float(ds_out["river_volume"].isel(nriver=river_idx)) <= float(
-                ds["river_volume"].isel(nriver=river_idx)
+            assert (
+                ds_out["river_volume"].isel(nriver=river_idx).item()
+                <= ds["river_volume"].isel(nriver=river_idx).item()
             )
 
         # Check rivers that contribute to overlapping indices have strictly decreased volume
@@ -772,8 +773,9 @@ class TestRiverForcingWithOverlappingIndices:
                 idx in overlapping for idx in idx_list
             ):
                 river_idx = np.where(ds["river_name"].values == name)[0].item()
-                assert float(ds_out["river_volume"].isel(nriver=river_idx)) < float(
-                    ds["river_volume"].isel(nriver=river_idx)
+                assert (
+                    ds_out["river_volume"].isel(nriver=river_idx).item()
+                    < ds["river_volume"].isel(nriver=river_idx).item()
                 )
 
         # Check that total volume is preserved (within tolerance)
@@ -785,7 +787,7 @@ class TestRiverForcingWithOverlappingIndices:
 
         # Check that the synthetic river volume is positive and tracer is not NaN
         synthetic_idx = ds_out.sizes["nriver"] - 1
-        assert float(ds_out["river_volume"].isel(nriver=synthetic_idx)) > 0
+        assert ds_out["river_volume"].isel(nriver=synthetic_idx).item() > 0
         assert not np.isnan(ds_out["river_tracer"].isel(nriver=synthetic_idx).item())
 
     def test_volume_sort_after_overlap(self, mock_river_dataset_with_simple_overlap):

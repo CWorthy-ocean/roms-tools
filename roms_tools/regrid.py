@@ -436,7 +436,7 @@ class VerticalRegrid:
         self.grid = xgcm.Grid(
             ds,
             coords={source_dim: {"center": source_dim}},
-            periodic=False,
+            padding="fill",
             autoparse_metadata=False,
         )
         self.source_dim = source_dim

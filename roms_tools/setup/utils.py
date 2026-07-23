@@ -959,7 +959,7 @@ def compute_mld(
     grid = xgcm.Grid(
         sigma0.to_dataset(name="sigma0"),
         coords={depth_dim: {"center": depth_dim}},
-        periodic=False,
+        padding="fill",
         autoparse_metadata=False,
     )
     with warnings.catch_warnings():

@@ -5,7 +5,12 @@ readme = "README.md"
 authors = [
     {name = "Nora Loose", email = "nora.loose@gmail.com"},
     {name = "Thomas Nicholas", email = "tom@cworthy.org"},
-    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"}
+    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"},
+    {name = "Ben Saenz", email = "ben.saenz@cworthy.org"},
+    {name = "Ulla Heede", email = "ulla@cworthy.org"},
+    {name = "Abigale Wyatt", email = "abigale@cworthy.org"},
+    {name = "Kristen Thyng", email = "kristen.thyng@cworthy.org"},
+    {name = "Chris McBride", email = "christopher.mcbride@cworthy.org"},
 ]
 license = {text = "Apache-2"}
 classifiers = [

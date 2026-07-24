@@ -1763,17 +1763,26 @@ def query_kdtree_nearest(
     distances_km = 2 * 6371.0 * np.arcsin(np.clip(distances / 2, 0, 1))
     eta_out = cand_eta[nearest_idx]
     xi_out = cand_xi[nearest_idx]
+
+    warn_count = 0
     for i in range(len(distances_km)):
         if distances_km[i] > warn_dist_km:
             label = labels[i] if labels is not None else f"point {i}"
-            logging.warning(
-                "River '%s' is %.1f km from nearest coastal cell (%d, %d). "
-                "Check river mouth location.",
-                label,
-                distances_km[i],
-                int(eta_out[i]),
-                int(xi_out[i]),
-            )
+            if warn_count < 20:
+                logging.warning(
+                    "River '%s' is %.1f km from nearest coastal cell (%d, %d). "
+                    "Check river mouth location.",
+                    label,
+                    distances_km[i],
+                    int(eta_out[i]),
+                    int(xi_out[i]),
+                )
+            elif warn_count == 20:
+                logging.warning(
+                    "Further distance warnings suppressed (>20 rivers exceed %.1f km threshold).",
+                    warn_dist_km,
+                )
+            warn_count += 1
     return eta_out, xi_out, distances_km
 
 

@@ -310,10 +310,7 @@ def _sample_tair_at_river_mouths(
 
     grid_lat = tair[lat_name].values
     grid_lon = tair[lon_name].values
-    if straddle:
-        grid_lon = np.where(grid_lon > 180, grid_lon - 360, grid_lon)
-    else:
-        grid_lon = np.where(grid_lon < 0, grid_lon + 360, grid_lon)
+    grid_lon = np.where(grid_lon < 0, grid_lon + 360, grid_lon)  # ERA5 is always 0-360
 
     lon2d, lat2d = np.meshgrid(grid_lon, grid_lat)
     row2d, col2d = np.meshgrid(
@@ -843,7 +840,10 @@ class RiverForcing:
                 cell_lats.append(float(self.grid.ds.lat_rho[eta_rho, xi_rho]))
             lons.append(np.mean(cell_lons))
             lats.append(np.mean(cell_lats))
-        return np.asarray(lons), np.asarray(lats)
+        lons_arr = np.asarray(lons)
+        # Match ERA5 convention: ERA5 uses 0-360, so convert negative longitudes
+        lons_arr = np.where(lons_arr < 0, lons_arr + 360, lons_arr)
+        return lons_arr, np.asarray(lats)
 
     def _check_surface_forcing_source_coverage(self, tair: xr.DataArray) -> None:
         """Raise if the air-temperature source's real time range doesn't
@@ -961,6 +961,20 @@ class RiverForcing:
         logging.info("Loading surface air temperature...")
         with ProgressBar():
             river_tair = river_tair.compute()
+
+        if river_tair.isnull().any():
+            nan_rivers = [
+                river_names[i]
+                for i in np.where(river_tair.isnull().any(dim="time").values)[0]
+            ]
+            raise ValueError(
+                "Sampled air temperature contains NaN for river(s): "
+                f"{nan_rivers}. Please check source data."
+            )
+
+        discharge_climatology = (
+            str(ds.attrs.get(DISCHARGE_CLIMATOLOGY_ATTR, "")).lower() == "true"
+        )
 
         discharge_climatology = (
             str(ds.attrs.get(DISCHARGE_CLIMATOLOGY_ATTR, "")).lower() == "true"

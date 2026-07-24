@@ -1849,10 +1849,9 @@ class RiverForcing:
             ax.plot(
                 xticks,
                 field.isel(nriver=nriver),
-                marker="x",
-                markersize=8,
-                markeredgewidth=2,
-                lw=2,
+                marker=".",
+                markersize=4,
+                lw=1.5,
                 label=name,
                 color=colors[name],
             )

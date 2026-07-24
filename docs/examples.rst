@@ -22,6 +22,7 @@ The following examples cover task-specific workflows for the Perlmutter and Anvi
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>
    Creating surface forcing <surface_forcing>
+   Preprocessing GloFAS river discharge <process_GloFAS>
    Creating river forcing <river_forcing>
    Creating tidal forcing <tides>
    Creating carbon dioxide removal forcing <cdr_forcing>

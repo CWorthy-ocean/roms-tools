@@ -1,0 +1,2 @@
+Requirement already satisfied: scipy in /Users/ullaheede/miniconda3/envs/romstools-test/lib/python3.12/site-packages (1.17.1)
+Requirement already satisfied: numpy<2.7,>=1.26.4 in /Users/ullaheede/miniconda3/envs/romstools-test/lib/python3.12/site-packages (from scipy) (2.2.6)

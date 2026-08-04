@@ -18,11 +18,9 @@ Installation from PyPI (pip)
 
     pip install roms-tools
 
-If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend for parallel and out-of-core computation), you can install ``ROMS-Tools`` along with the additional dependency via::
+``dask`` (recommended for parallel and out-of-core computation) is included by default.
 
-    pip install roms-tools[dask]
-
-If you want to use ``ROMS-Tools`` with ``dask`` and all packages required for streaming source data directly from the cloud, install it with the additional dependencies via::
+If you want to use ``ROMS-Tools`` with all packages required for streaming source data directly from the cloud, install it with the additional dependencies via::
 
     pip install roms-tools[stream]
 
@@ -32,9 +30,9 @@ If you want to use the :meth:`~roms_tools.ROMSOutput.create_movie` functionality
 
 If you already have ``ffmpeg`` installed (e.g. via conda or your system package manager), the ``[movie]`` extra is not needed.
 
-Multiple extras can be combined. For example, to use both ``dask`` and movie creation::
+Multiple extras can be combined. For example, to use both streaming and movie creation::
 
-    pip install roms-tools[dask,movie]
+    pip install roms-tools[stream,movie]
 
 Note: The PyPI versions of ``ROMS-Tools`` do not include ``xesmf``, so some features will be unavailable.
 
@@ -57,12 +55,9 @@ Finally, install ``ROMS-Tools`` in the same environment::
 
     pip install -e .
 
-If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend), you can
-install ``ROMS-Tools`` along with the additional dependency via::
+``dask`` (recommended for parallel and out-of-core computation) is included by default.
 
-    pip install ".[dask]"
-
-If you want to use ``ROMS-Tools`` together with ``dask`` and all packages required for
+If you want to use ``ROMS-Tools`` with all packages required for
 streaming source data directly from the cloud, you can
 install ``ROMS-Tools`` along with the additional dependencies via::
 
@@ -75,4 +70,4 @@ do not have ``ffmpeg`` installed by other means, install with the ``movie`` extr
 
 Multiple extras can be combined, for example::
 
-    pip install ".[dask,movie]"
+    pip install ".[stream,movie]"

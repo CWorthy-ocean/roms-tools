@@ -414,7 +414,7 @@ def _check_load_data_dask(use_dask: bool) -> None:
     if use_dask and not has_dask():
         msg = (
             "Dask is required but not installed. Install it with:\n"
-            "  • `pip install roms-tools[dask]` or\n"
+            "  • `pip install dask[diagnostics]` or\n"
             "  • `conda install dask`\n"
             "Alternatively, install `roms-tools` with conda to include all dependencies."
         )

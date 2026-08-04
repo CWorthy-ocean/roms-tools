@@ -33,13 +33,9 @@ You can also install `ROMS-Tools` from `pip`:
 pip install roms-tools
 ```
 
-If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of-core computation), install it with the additional dependency:
+`dask` (recommended for parallel and out-of-core computation) is included by default.
 
-```bash
-pip install roms-tools[dask]
-```
-
-If you want to use `ROMS-Tools` with `dask` and all packages required for streaming source data directly from the cloud, install it with the additional dependencies:
+If you want to use `ROMS-Tools` with all packages required for streaming source data directly from the cloud, install it with the additional dependencies:
 
 ```bash
 pip install roms-tools[stream]
@@ -72,14 +68,9 @@ Finally, install `ROMS-Tools` in the same environment:
 pip install -e .
 ```
 
-If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of-core computation), you can
-install `ROMS-Tools` along with the additional dependency via:
+`dask` (recommended for parallel and out-of-core computation) is included by default.
 
-```bash
-pip install -e ".[dask]"
-```
-
-If you want to use `ROMS-Tools` with `dask` and all packages required for streaming source data directly from the cloud, you can
+If you want to use `ROMS-Tools` with all packages required for streaming source data directly from the cloud, you can
 install `ROMS-Tools` along with the additional dependencies via:
 
 ```bash

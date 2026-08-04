@@ -42,17 +42,14 @@ dependencies = [
     "gsw",
     "numba>=0.61.2",
     "pydantic>2,<3",
+    "dask[diagnostics]",
+    "h5netcdf",
 ]
 dynamic = ["version"]
 
 
 [project.optional-dependencies]
-dask = [
-    "dask[diagnostics]",
-    "zarr"
-]
 stream = [
-    "dask[diagnostics]",
     "gcsfs",
     "zarr",
     "copernicusmarine",
@@ -61,7 +58,6 @@ movie = [
     "imageio-ffmpeg",
 ]
 notebooks = [
-    "dask[diagnostics]",
     "gcsfs",
     "zarr",
     "copernicusmarine",

@@ -8,7 +8,8 @@ Install and activate the following conda environment::
     cd roms-tools
     conda env create -f ci/environment.yml
     conda activate romstools-test
-    pip install -e .
+    conda install -c conda-forge xesmf
+    pip install -e ".[dev]"
 
 You can check the functionality of the ROMS-Tools code by running the test suite::
 
@@ -40,7 +41,7 @@ Install and activate the following conda environment::
     cd roms-tools
     conda env create -f docs/environment.yml
     conda activate romstools-docs
-    pip install -e .
+    pip install -e ".[docs]"
 
 Navigate to the docs folder and build the docs with the activated environment::
 

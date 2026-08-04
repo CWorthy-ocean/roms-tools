@@ -10,7 +10,7 @@ on:
 
 jobs:
   test-without-dask:
-    name: ${{ matrix.python-version }}-build-without-dask
+    name: ${{ matrix.python-version }}-build (use_dask=False)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -36,9 +36,9 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .[movie] --force-reinstall
+           python -m pip install -e .[movie,dev] --force-reinstall
 
-      - name: Running Tests without Dask
+      - name: Running Tests (use_dask=False)
         shell: bash -l {0}
         run: |
            python -V
@@ -61,7 +61,7 @@ jobs:
           fail_ci_if_error: false
 
   test-with-dask-1:
-    name: 3.13-build-with-dask-1
+    name: 3.13-build (use_dask=True) - part 1
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -87,9 +87,9 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .[movie]  --force-reinstall
+           python -m pip install -e .[movie,dev]  --force-reinstall
 
-      - name: Running Tests with Dask
+      - name: Running Tests (use_dask=True)
         shell: bash -l {0}
         run: |
            python -V
@@ -112,7 +112,7 @@ jobs:
           fail_ci_if_error: false
 
   test-with-dask-2:
-    name: 3.13-build-with-dask-2
+    name: 3.13-build (use_dask=True) - part 2
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -138,9 +138,9 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .  --force-reinstall
+           python -m pip install -e .[dev]  --force-reinstall
 
-      - name: Running Tests with Dask
+      - name: Running Tests (use_dask=True)
         shell: bash -l {0}
         run: |
            python -V
@@ -190,7 +190,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .[stream,movie]  --force-reinstall
+           python -m pip install -e .[stream,movie,dev]  --force-reinstall
 
       - name: Running Tests with Streaming
         shell: bash -l {0}
@@ -219,7 +219,7 @@ jobs:
           fail_ci_if_error: false
 
   test-with-dask-and-xesmf-1:
-    name: 3.13-build-with-dask-and-xesmf-1
+    name: 3.13-build (use_dask=True, xesmf) - part 1
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -233,7 +233,7 @@ jobs:
           cache-downloads: true
           cache-environment: true
           micromamba-version: 'latest'
-          environment-file: ci/environment-with-xesmf.yml
+          environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
           cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
@@ -241,13 +241,16 @@ jobs:
       - name: Conda info
         run: conda info
 
+      - name: Install xesmf
+        run: micromamba install -y -n romstools-test -c conda-forge xesmf
+
       - name: Install roms-tools
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .[movie]  --force-reinstall
+           python -m pip install -e .[movie,dev]
 
-      - name: Running Tests with Dask and Xesmf
+      - name: Running Tests (use_dask=True, xesmf)
         shell: bash -l {0}
         run: |
            python -V
@@ -270,7 +273,7 @@ jobs:
           fail_ci_if_error: false
 
   test-with-dask-and-xesmf-2:
-    name: 3.13-build-with-dask-and-xesmf-2
+    name: 3.13-build (use_dask=True, xesmf) - part 2
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -284,7 +287,7 @@ jobs:
           cache-downloads: true
           cache-environment: true
           micromamba-version: 'latest'
-          environment-file: ci/environment-with-xesmf.yml
+          environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
           cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
@@ -292,13 +295,16 @@ jobs:
       - name: Conda info
         run: conda info
 
+      - name: Install xesmf
+        run: micromamba install -y -n romstools-test -c conda-forge xesmf
+
       - name: Install roms-tools
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .  --force-reinstall
+           python -m pip install -e .[dev]
 
-      - name: Running Tests with Dask and Xesmf
+      - name: Running Tests (use_dask=True, xesmf)
         shell: bash -l {0}
         run: |
            python -V
@@ -348,10 +354,10 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e . --force-reinstall
+           python -m pip install -e .[dev] --force-reinstall
            python -m pip install copernicusmarine
 
-      - name: Running Tests without Dask
+      - name: Running Tests (use_dask=True)
         shell: bash -l {0}
         env:
           COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
@@ -376,3 +382,25 @@ jobs:
           flags: glorys-regional-invariance
           name: glorys-regional-invariance
           fail_ci_if_error: false
+
+  test-windows:
+    name: windows-build (use_dask=False)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install roms-tools
+        shell: bash
+        run: |
+           python -V
+           python -m pip install -e ".[dev]"
+
+      - name: Running Tests
+        shell: bash
+        run: |
+           python -V
+           pytest --verbose roms_tools/tests

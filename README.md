@@ -58,23 +58,24 @@ cd roms-tools
 Next, install and activate the following conda environment:
 
 ```bash
-conda env create -f ci/environment-with-xesmf.yml
+conda env create -f ci/environment.yml
 conda activate romstools-test
+conda install -c conda-forge xesmf
 ```
 
-Finally, install `ROMS-Tools` in the same environment:
+Finally, install `ROMS-Tools` in the same environment, along with the `dev` extra (test/lint tooling):
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 ```
 
-`dask` (recommended for parallel and out-of-core computation) is included by default.
+`dask` (recommended for parallel and out-of-core computation) is included in the core dependencies by default.
 
 If you want to use `ROMS-Tools` with all packages required for streaming source data directly from the cloud, you can
 install `ROMS-Tools` along with the additional dependencies via:
 
 ```bash
-pip install -e ".[stream]"
+pip install -e ".[dev,stream]"
 ```
 
 ## Getting Started

@@ -8,7 +8,6 @@ Install and activate the following conda environment::
     cd roms-tools
     conda env create -f ci/environment.yml
     conda activate roms-tools-env
-    conda install -c conda-forge xesmf
     pip install -e ".[dev]"
 
 You can check the functionality of the ROMS-Tools code by running the test suite::

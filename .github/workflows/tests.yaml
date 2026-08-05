@@ -60,108 +60,6 @@ jobs:
           name: without-dask-py${{ matrix.python-version }}
           fail_ci_if_error: false
 
-  test-with-dask-1:
-    name: 3.13-build (use_dask=True) - part 1
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.13"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          cache-downloads: true
-          cache-environment: true
-          micromamba-version: 'latest'
-          environment-file: ci/environment.yml
-          create-args: |
-            python=${{ matrix.python-version }}
-          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
-
-      - name: Conda info
-        run: conda info
-
-      - name: Install roms-tools
-        shell: micromamba-shell {0}
-        run: |
-           python -V
-           python -m pip install -e .[movie,dev]  --force-reinstall
-
-      - name: Running Tests (use_dask=True)
-        shell: bash -l {0}
-        run: |
-           python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_setup/test_boundary_forcing.py --ignore=roms_tools/tests/test_setup/test_initial_conditions.py --ignore=roms_tools/tests/test_setup/test_surface_forcing.py
-
-      - name: Get coverage report
-        shell: bash -l {0}
-        run: |
-          coverage report -m || true
-          coverage xml || true
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4.0.1
-        continue-on-error: true
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: with-dask-1
-          name: with-dask-1-py${{ matrix.python-version }}
-          fail_ci_if_error: false
-
-  test-with-dask-2:
-    name: 3.13-build (use_dask=True) - part 2
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.13"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          cache-downloads: true
-          cache-environment: true
-          micromamba-version: 'latest'
-          environment-file: ci/environment.yml
-          create-args: |
-            python=${{ matrix.python-version }}
-          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
-
-      - name: Conda info
-        run: conda info
-
-      - name: Install roms-tools
-        shell: micromamba-shell {0}
-        run: |
-           python -V
-           python -m pip install -e .[dev]  --force-reinstall
-
-      - name: Running Tests (use_dask=True)
-        shell: bash -l {0}
-        run: |
-           python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/test_setup/test_boundary_forcing.py roms_tools/tests/test_setup/test_initial_conditions.py roms_tools/tests/test_setup/test_surface_forcing.py
-
-      - name: Get coverage report
-        shell: bash -l {0}
-        run: |
-          coverage report -m || true
-          coverage xml || true
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4.0.1
-        continue-on-error: true
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: with-dask-2
-          name: with-dask-2-py${{ matrix.python-version }}
-          fail_ci_if_error: false
-
   test-with-streaming:
     name: 3.13-build-with-streaming
     runs-on: ubuntu-latest
@@ -219,7 +117,7 @@ jobs:
           fail_ci_if_error: false
 
   test-with-dask-and-xesmf-1:
-    name: 3.13-build (use_dask=True, xesmf) - part 1
+    name: 3.13-build (use_dask=True) - part 1
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -241,8 +139,6 @@ jobs:
       - name: Conda info
         run: conda info
 
-      - name: Install xesmf
-        run: micromamba install -y -n roms-tools-env -c conda-forge xesmf
 
       - name: Install roms-tools
         shell: micromamba-shell {0}
@@ -273,7 +169,7 @@ jobs:
           fail_ci_if_error: false
 
   test-with-dask-and-xesmf-2:
-    name: 3.13-build (use_dask=True, xesmf) - part 2
+    name: 3.13-build (use_dask=True) - part 2
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -295,8 +191,6 @@ jobs:
       - name: Conda info
         run: conda info
 
-      - name: Install xesmf
-        run: micromamba install -y -n roms-tools-env -c conda-forge xesmf
 
       - name: Install roms-tools
         shell: micromamba-shell {0}

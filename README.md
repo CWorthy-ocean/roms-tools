@@ -14,7 +14,7 @@ A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://githu
 
 ## Installation
 
-### ⚡️ **Installation from Conda-Forge**
+### ⚡️ **Installation from conda-forge (recommended)**
 
 To install `ROMS-Tools` with all dependencies, including `xesmf`, `dask` and all packages required for streaming source data directly from the cloud, use:
 
@@ -25,7 +25,7 @@ conda install -c conda-forge roms-tools
 > [!Note]
 >  Installation from Conda-Forge is the recommended installation method to ensure all features of `ROMS-Tools` are available.
 
-### 📦 **Installation from PyPI (pip)**
+### 📦 **Installation from PyPI (pip) (recommend for Windows only)**
 
 You can also install `ROMS-Tools` from `pip`:
 

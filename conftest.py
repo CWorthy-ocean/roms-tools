@@ -1,10 +1,12 @@
 import enum
 import hashlib
+import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import h5py
+import matplotlib
 import pytest
 
 from roms_tools import (
@@ -27,6 +29,18 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.setup.nesting import align_grids, make_nesting_info
 from roms_tools.tests.river_test_utils import write_glofas_file
+
+# Guarantee a non-interactive matplotlib backend for the test suite unless the
+# caller has explicitly requested one (e.g. via the MPLBACKEND env var). This
+# must run before any test module does `import matplotlib.pyplot`, which is
+# why it lives at the top of the root conftest (loaded before test collection).
+# Without this, matplotlib's default backend selection can pick a GUI backend
+# (e.g. TkAgg) whose runtime is broken on some CI runners even though the
+# Python bindings import cleanly (e.g. Windows runners missing init.tcl),
+# causing plotting tests to crash with _tkinter.TclError instead of a clean,
+# deterministic Agg render.
+if not os.environ.get("MPLBACKEND"):
+    matplotlib.use("Agg")
 
 
 class SkippableOptions(enum.StrEnum):

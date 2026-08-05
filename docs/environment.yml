@@ -1,4 +1,4 @@
-name: romstools-docs
+name: roms-tools-docs-env
 channels:
   - conda-forge
   - nodefaults

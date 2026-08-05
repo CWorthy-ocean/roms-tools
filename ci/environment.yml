@@ -1,4 +1,4 @@
-name: romstools-test
+name: roms-tools-env
 channels:
   - conda-forge
   - nodefaults

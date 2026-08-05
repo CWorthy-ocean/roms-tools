@@ -242,7 +242,7 @@ jobs:
         run: conda info
 
       - name: Install xesmf
-        run: micromamba install -y -n romstools-test -c conda-forge xesmf
+        run: micromamba install -y -n roms-tools-env -c conda-forge xesmf
 
       - name: Install roms-tools
         shell: micromamba-shell {0}
@@ -296,7 +296,7 @@ jobs:
         run: conda info
 
       - name: Install xesmf
-        run: micromamba install -y -n romstools-test -c conda-forge xesmf
+        run: micromamba install -y -n roms-tools-env -c conda-forge xesmf
 
       - name: Install roms-tools
         shell: micromamba-shell {0}
@@ -386,6 +386,11 @@ jobs:
   test-windows:
     name: windows-build (use_dask=False)
     runs-on: windows-latest
+    env:
+      # The hosted Windows runner's Tcl/Tk install is broken (Can't find a usable
+      # init.tcl), which matplotlib hits by defaulting to the TkAgg backend.
+      # Force a non-interactive backend so plotting tests don't touch Tk at all.
+      MPLBACKEND: Agg
     steps:
       - uses: actions/checkout@v4
 

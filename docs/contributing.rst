@@ -7,13 +7,13 @@ Install and activate the following conda environment::
 
     cd roms-tools
     conda env create -f ci/environment.yml
-    conda activate romstools-test
+    conda activate roms-tools-env
     conda install -c conda-forge xesmf
     pip install -e ".[dev]"
 
 You can check the functionality of the ROMS-Tools code by running the test suite::
 
-    conda activate romstools-test
+    conda activate roms-tools-env
     pytest
 
 
@@ -23,7 +23,7 @@ Contributing code
 If you have written new code, you can run the tests as described in the previous step. You will likely have to iterate here several times until all tests pass.
 The next step is to make sure that the code is formatted properly. Activate the environment::
 
-    conda activate romstools-test
+    conda activate roms-tools-env
 
 You can now run all the linters with::
 
@@ -40,13 +40,13 @@ Install and activate the following conda environment::
 
     cd roms-tools
     conda env create -f docs/environment.yml
-    conda activate romstools-docs
+    conda activate roms-tools-docs-env
     pip install -e ".[docs]"
 
 Navigate to the docs folder and build the docs with the activated environment::
 
     cd docs
-    conda activate romstools-docs
+    conda activate roms-tools-docs-env
     make fresh
     make html
 

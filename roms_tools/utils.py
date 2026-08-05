@@ -59,6 +59,31 @@ def _path_list_from_input(files: FilePaths) -> list[Path]:
     return filepaths
 
 
+def _is_zarr_store(path: str | Path) -> bool:
+    """Heuristically detect whether `path` points to a local Zarr store.
+
+    Used to select the xarray "zarr" engine explicitly instead of relying on
+    xarray's own engine auto-detection (`xr.open_dataset` with no `engine`
+    given). That auto-detection probes each installed backend's
+    ``guess_can_open`` in turn and deliberately re-raises ``PermissionError``
+    rather than treating it as "this backend can't open it" (see
+    ``xarray.backends.plugins.guess_engine``). On Windows, opening a directory
+    (which is what a Zarr store is) via the netCDF backends' sniffing raises
+    ``PermissionError``/``EACCES``, so detection aborts before the zarr
+    backend ever gets a chance to try. POSIX raises ``IsADirectoryError``
+    there instead, which xarray does catch, masking the bug on Linux/macOS.
+
+    Parameters
+    ----------
+    path : str | Path
+        A local file or directory path. Remote/fsspec paths (e.g. ``s3://...``)
+        are not directories on the local filesystem, so this returns `False`
+        for them; those are handled via the explicit `read_zarr` flag instead.
+    """
+    p = Path(path)
+    return p.suffix == ".zarr" or p.is_dir()
+
+
 @dataclass
 class FileMatchResult:
     """The result of performing a wildcard search."""
@@ -589,8 +614,12 @@ def load_data(
     else:
         ds_list = []
         for file in match_result.matches:
+            # Decide the engine explicitly for zarr stores rather than letting
+            # xr.open_dataset auto-detect it; see `_is_zarr_store` for why.
+            engine = "zarr" if _is_zarr_store(file) else None
             ds = xr.open_dataset(
                 file,
+                engine=engine,
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
                 chunks=None,

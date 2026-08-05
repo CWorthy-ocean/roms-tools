@@ -59,7 +59,7 @@ Next, install and activate the following conda environment:
 
 ```bash
 conda env create -f ci/environment.yml
-conda activate romstools-test
+conda activate roms-tools-env
 conda install -c conda-forge xesmf
 ```
 

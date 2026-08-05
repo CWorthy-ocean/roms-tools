@@ -55,7 +55,7 @@ To obtain the latest development version, first clone
 Then, install and activate the following conda environment::
 
     conda env create -f ci/environment.yml
-    conda activate romstools-test
+    conda activate roms-tools-env
     conda install -c conda-forge xesmf
 
 Finally, install ``ROMS-Tools`` in the same environment, along with the ``dev`` extra

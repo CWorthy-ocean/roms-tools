@@ -99,6 +99,7 @@ jobs:
            python -V
            copernicusmarine login
            coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose roms_tools/tests/*
+        timeout-minutes: 20
 
       - name: Get coverage report
         shell: bash -l {0}

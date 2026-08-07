@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 4.0.1
 
 ### Breaking Changes
 

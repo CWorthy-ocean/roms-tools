@@ -17,6 +17,7 @@
 * Added an explicit Windows CI job; got rid of -no-xesmf jobs (which get tested through the Windows job) ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
 * Added explicit [dev] and [docs] pip extras ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
 * Changed default conda env name from `romstools-test` to `roms-tools-env` for standardization across the stack ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Add tool to finalize release notes prior to a release ([#649](https://github.com/CWorthy-ocean/roms-tools/pull/649))
 
 ## v4.0.0
 

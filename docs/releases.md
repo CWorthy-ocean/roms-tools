@@ -1,5 +1,24 @@
 # Release notes
 
+## 4.0.1
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
+* Simplified installation instructions: prefer conda for most end users, only use pip for Windows (no xesmf), only install from github if contributing or you need bleeding-edge updates. ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Removed xesmf/no-xesmf and dask/no-dask installation permutations for non-Windows users. Dask and xesmf are part of the core requirements to simplify the packaging matrix. You can still opt out of _using_ either one using per-method flags, but both are recommended for performance reasons. ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Added an explicit Windows CI job; got rid of -no-xesmf jobs (which get tested through the Windows job) ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Added explicit [dev] and [docs] pip extras ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Changed default conda env name from `romstools-test` to `roms-tools-env` for standardization across the stack ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Add tool to finalize release notes prior to a release ([#649](https://github.com/CWorthy-ocean/roms-tools/pull/649))
+
 ## v4.0.0
 
 ### Breaking Changes

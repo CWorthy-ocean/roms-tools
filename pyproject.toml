@@ -42,17 +42,14 @@ dependencies = [
     "gsw",
     "numba>=0.61.2",
     "pydantic>2,<3",
+    "dask[diagnostics]",
+    "h5netcdf",
 ]
 dynamic = ["version"]
 
 
 [project.optional-dependencies]
-dask = [
-    "dask[diagnostics]",
-    "zarr"
-]
 stream = [
-    "dask[diagnostics]",
     "gcsfs",
     "zarr",
     "copernicusmarine",
@@ -61,14 +58,28 @@ movie = [
     "imageio-ffmpeg",
 ]
 notebooks = [
-    "dask[diagnostics]",
-    "gcsfs",
-    "zarr",
-    "copernicusmarine",
+    "jupyter",
     "gdown",
-    "imageio-ffmpeg",
     "ipykernel",
-    "jupyter"
+]
+dev = [
+    "pytest",
+    "pytest-xdist",
+    "coverage",
+    "pre-commit>=3.8",
+    # test-data/fixture dependencies (not lint/test tooling per se, but required
+    # for the base test suite to collect and pass without conda):
+    "h5py",
+    "zarr",
+]
+docs = [
+    "sphinx",
+    "nbsphinx",
+    "sphinx-book-theme",
+    "sphinx-design",
+    "sphinxcontrib-bibtex",
+    "myst-parser",
+    "ipykernel",
 ]
 
 [project.urls]

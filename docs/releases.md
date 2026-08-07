@@ -1,5 +1,20 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
+* Update release notes finalizer to remove sections with nothing in them ([#652](https://github.com/CWorthy-ocean/roms-tools/pull/652))
+* Update release notes updater to handle unbulleted content ([#652](https://github.com/CWorthy-ocean/roms-tools/pull/652))
+
 ## 4.0.1
 
 ### Breaking Changes

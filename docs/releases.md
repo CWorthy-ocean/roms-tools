@@ -11,18 +11,16 @@
 
 ### Bug Fixes
 
-* Dask lateral chunking now takes effect for the unified BGC dataset. The chunk sizes were keyed by the pre-v2.1 dimension names, which xarray silently ignores when they are not dimensions of the file, so a v2.1 file was read with whole-globe lateral chunks.
+* The unified BGC dataset now actually receives the lateral dask chunking it asks for. The chunk sizes were keyed by the pre-v2.1 dimension names, and xarray silently ignores chunk keys that are not dimensions of the file, so a v2.1 file was read as a single lateral chunk. This is a correctness fix rather than a speed-up: a regional read is unaffected either way (the netCDF backend pushes the spatial selection down to the file, so the oversized chunk never materializes), but peak memory for operations that touch the full global field is roughly halved.
 
 ### Improvements
 
-* `UnifiedDataset` reads both unified BGC file generations: dimensions are renamed only where a pre-v2.1 file still uses `lon`/`lat`/`dep`, and `month` is recognised as either a day-of-year or an integer month index.
-* New `roms_tools.setup.utils.climatology_mid_month_days` helper gives monthly climatologies a single mid-month day convention, shared by `assign_dates_to_climatology` and the unified BGC dataset.
-* A pre-v2.1 file's dimensions are swapped onto their coordinate variables rather than renamed, so `depth`/`latitude`/`longitude` come out indexed for either file generation (this also silences an xarray `UserWarning` on every legacy load).
+* `UnifiedDataset` reads both unified BGC file generations: dimensions are renamed only where a pre-v2.1 file still uses `lon`/`lat`/`dep`, and `month` is recognised as either a day-of-year or an integer month index. New `roms_tools.setup.utils.climatology_mid_month_days` helper gives monthly climatologies a single mid-month day convention, shared by `assign_dates_to_climatology` and the unified BGC dataset. A pre-v2.1 file's dimensions are swapped onto their coordinate variables rather than renamed, so `depth`/`latitude`/`longitude` come out indexed for either file generation (this also silences an xarray `UserWarning` on every legacy load).
 
 ### Miscellaneous
 
 * Test data: `coarsened_UNIFIED_bgc_dataset_v2_1.nc` is added and used by the unified BGC fixtures; the pre-v2.1 coarse file stays registered so both layouts remain covered by the tests.
-* Notebooks and dataset pages point at `BGCdataset_v2_1.nc`, describe the World Ocean Atlas 2023 provenance of its nutrients, oxygen, temperature and salinity, and state that the file is filled across land and below the seafloor so `ROMS-Tools` applies no lateral fill to it.
+* Notebooks and dataset pages point at `BGCdataset_v2_1.nc`.
 
 ## 4.0.1
 

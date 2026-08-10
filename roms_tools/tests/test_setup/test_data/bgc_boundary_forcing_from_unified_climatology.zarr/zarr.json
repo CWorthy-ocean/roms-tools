@@ -1,12 +1,14 @@
 {
   "attributes": {
     "title": "ROMS boundary forcing file created by ROMS-Tools",
-    "roms_tools_version": "10000.dev364+g785fa77b7.d20260612",
+    "roms_tools_version": "4.0.0a3.dev13+g0ec9df5b3",
     "start_time": "2021-06-29 00:00:00",
     "end_time": "2021-06-30 00:00:00",
     "source": "UNIFIED",
     "model_reference_date": "2000-01-01 00:00:00",
-    "apply_2d_horizontal_fill": "True",
+    "prefill": "2d_lateral_fill",
+    "regrid_method": "scipy",
+    "extrap_method": "inverse_dist",
     "adjust_depth_for_sea_surface_height": "False",
     "theta_s": 5.0,
     "theta_b": 2.0,
@@ -55,7 +57,7 @@
         ],
         "attributes": {
           "long_name": "absolute time",
-          "units": "hours since 2000-01-16 12:00:00",
+          "units": "days since 2000-01-16 00:00:00",
           "calendar": "proleptic_gregorian"
         },
         "dimension_names": [
@@ -88,7 +90,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -107,6 +109,8 @@
         "attributes": {
           "long_name": "eastern boundary alkalinity, alternative CO2",
           "units": "meq/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -142,7 +146,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -161,6 +165,8 @@
         "attributes": {
           "long_name": "northern boundary alkalinity, alternative CO2",
           "units": "meq/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -196,7 +202,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -215,6 +221,8 @@
         "attributes": {
           "long_name": "southern boundary alkalinity, alternative CO2",
           "units": "meq/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -250,7 +258,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -269,6 +277,8 @@
         "attributes": {
           "long_name": "eastern boundary alkalinity",
           "units": "meq/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -304,7 +314,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -323,6 +333,8 @@
         "attributes": {
           "long_name": "northern boundary alkalinity",
           "units": "meq/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -358,7 +370,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -377,6 +389,8 @@
         "attributes": {
           "long_name": "southern boundary alkalinity",
           "units": "meq/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -408,7 +422,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -460,7 +474,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -479,6 +493,8 @@
         "attributes": {
           "long_name": "eastern boundary diatom carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -514,7 +530,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -533,6 +549,8 @@
         "attributes": {
           "long_name": "northern boundary diatom carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -568,7 +586,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -587,6 +605,8 @@
         "attributes": {
           "long_name": "southern boundary diatom carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -622,7 +642,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -641,6 +661,8 @@
         "attributes": {
           "long_name": "eastern boundary diatom chloropyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -676,7 +698,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -695,6 +717,8 @@
         "attributes": {
           "long_name": "northern boundary diatom chloropyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -730,7 +754,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -749,6 +773,8 @@
         "attributes": {
           "long_name": "southern boundary diatom chloropyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -784,7 +810,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -803,6 +829,8 @@
         "attributes": {
           "long_name": "eastern boundary diatom iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -838,7 +866,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -857,6 +885,8 @@
         "attributes": {
           "long_name": "northern boundary diatom iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -892,7 +922,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -911,6 +941,8 @@
         "attributes": {
           "long_name": "southern boundary diatom iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -946,7 +978,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -965,6 +997,8 @@
         "attributes": {
           "long_name": "eastern boundary diatom phosphorus",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1000,7 +1034,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1019,6 +1053,8 @@
         "attributes": {
           "long_name": "northern boundary diatom phosphorus",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1054,7 +1090,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1073,6 +1109,8 @@
         "attributes": {
           "long_name": "southern boundary diatom phosphorus",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1108,7 +1146,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1127,6 +1165,8 @@
         "attributes": {
           "long_name": "eastern boundary diatom silicate",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1162,7 +1202,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1181,6 +1221,8 @@
         "attributes": {
           "long_name": "northern boundary diatom silicate",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1216,7 +1258,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1235,6 +1277,8 @@
         "attributes": {
           "long_name": "southern boundary diatom silicate",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1270,7 +1314,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1289,6 +1333,8 @@
         "attributes": {
           "long_name": "eastern boundary diazotroph carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1324,7 +1370,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1343,6 +1389,8 @@
         "attributes": {
           "long_name": "northern boundary diazotroph carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1378,7 +1426,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1397,6 +1445,8 @@
         "attributes": {
           "long_name": "southern boundary diazotroph carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1432,7 +1482,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1451,6 +1501,8 @@
         "attributes": {
           "long_name": "eastern boundary diazotroph chloropyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1486,7 +1538,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1505,6 +1557,8 @@
         "attributes": {
           "long_name": "northern boundary diazotroph chloropyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1540,7 +1594,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1559,6 +1613,8 @@
         "attributes": {
           "long_name": "southern boundary diazotroph chloropyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1594,7 +1650,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1613,6 +1669,8 @@
         "attributes": {
           "long_name": "eastern boundary diazotroph iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1648,7 +1706,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1667,6 +1725,8 @@
         "attributes": {
           "long_name": "northern boundary diazotroph iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1702,7 +1762,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1721,6 +1781,8 @@
         "attributes": {
           "long_name": "southern boundary diazotroph iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1756,7 +1818,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1775,6 +1837,8 @@
         "attributes": {
           "long_name": "eastern boundary diazotroph phosphorus",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1810,7 +1874,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1829,6 +1893,8 @@
         "attributes": {
           "long_name": "northern boundary diazotroph phosphorus",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1864,7 +1930,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1883,6 +1949,8 @@
         "attributes": {
           "long_name": "southern boundary diazotroph phosphorus",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1918,7 +1986,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1937,6 +2005,8 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic carbon, alternative CO2",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TCO2.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1972,7 +2042,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -1991,6 +2061,8 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic carbon, alternative CO2",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TCO2.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2026,7 +2098,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2045,6 +2117,8 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic carbon, alternative CO2",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TCO2.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2080,7 +2154,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2099,6 +2173,8 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic carbon",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TCO2.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2134,7 +2210,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2153,6 +2229,8 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic carbon",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TCO2.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2188,7 +2266,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2207,6 +2285,8 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic carbon",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TCO2.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2242,7 +2322,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2261,6 +2341,8 @@
         "attributes": {
           "long_name": "eastern boundary dissolved organic carbon",
           "units": "mmol/m^3",
+          "source": "based on 3D CESM climatology regridded at low-resolution by Abigale Wyatt",
+          "source file": "/data/project7/pdamien/DATA/BGC/CESM/CESM-climatology_lowres_regridded.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2296,7 +2378,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2315,6 +2397,8 @@
         "attributes": {
           "long_name": "northern boundary dissolved organic carbon",
           "units": "mmol/m^3",
+          "source": "based on 3D CESM climatology regridded at low-resolution by Abigale Wyatt",
+          "source file": "/data/project7/pdamien/DATA/BGC/CESM/CESM-climatology_lowres_regridded.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2350,7 +2434,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2369,6 +2453,8 @@
         "attributes": {
           "long_name": "southern boundary dissolved organic carbon",
           "units": "mmol/m^3",
+          "source": "based on 3D CESM climatology regridded at low-resolution by Abigale Wyatt",
+          "source file": "/data/project7/pdamien/DATA/BGC/CESM/CESM-climatology_lowres_regridded.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2404,7 +2490,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2423,6 +2509,8 @@
         "attributes": {
           "long_name": "eastern boundary refractory dissolved organic carbon",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2458,7 +2546,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2477,6 +2565,8 @@
         "attributes": {
           "long_name": "northern boundary refractory dissolved organic carbon",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2512,7 +2602,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2531,6 +2621,8 @@
         "attributes": {
           "long_name": "southern boundary refractory dissolved organic carbon",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2566,7 +2658,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2585,6 +2677,8 @@
         "attributes": {
           "long_name": "eastern boundary dissolved organic nitrogen",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2620,7 +2714,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2639,6 +2733,8 @@
         "attributes": {
           "long_name": "northern boundary dissolved organic nitrogen",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2674,7 +2770,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2693,6 +2789,8 @@
         "attributes": {
           "long_name": "southern boundary dissolved organic nitrogen",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2728,7 +2826,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2747,6 +2845,8 @@
         "attributes": {
           "long_name": "eastern boundary refractory dissolved organic nitrogen",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2782,7 +2882,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2801,6 +2901,8 @@
         "attributes": {
           "long_name": "northern boundary refractory dissolved organic nitrogen",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2836,7 +2938,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2855,6 +2957,8 @@
         "attributes": {
           "long_name": "southern boundary refractory dissolved organic nitrogen",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2890,7 +2994,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2909,6 +3013,8 @@
         "attributes": {
           "long_name": "eastern boundary dissolved organic phosphorus",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2944,7 +3050,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -2963,6 +3069,8 @@
         "attributes": {
           "long_name": "northern boundary dissolved organic phosphorus",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2998,7 +3106,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3017,6 +3125,8 @@
         "attributes": {
           "long_name": "southern boundary dissolved organic phosphorus",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3052,7 +3162,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3071,6 +3181,8 @@
         "attributes": {
           "long_name": "eastern boundary refractory dissolved organic phosphorus",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3106,7 +3218,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3125,6 +3237,8 @@
         "attributes": {
           "long_name": "northern boundary refractory dissolved organic phosphorus",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3160,7 +3274,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3179,6 +3293,8 @@
         "attributes": {
           "long_name": "southern boundary refractory dissolved organic phosphorus",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3214,7 +3330,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3233,6 +3349,8 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic iron",
           "units": "mmol/m^3",
+          "source": "Monthly reconstructions based on in situ data",
+          "source file": "/data/project7/pdamien/DATA/BGC/MappedIron/Monthly_dFe.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3268,7 +3386,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3287,6 +3405,8 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic iron",
           "units": "mmol/m^3",
+          "source": "Monthly reconstructions based on in situ data",
+          "source file": "/data/project7/pdamien/DATA/BGC/MappedIron/Monthly_dFe.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3322,7 +3442,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3341,6 +3461,8 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic iron",
           "units": "mmol/m^3",
+          "source": "Monthly reconstructions based on in situ data",
+          "source file": "/data/project7/pdamien/DATA/BGC/MappedIron/Monthly_dFe.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3376,7 +3498,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3395,6 +3517,8 @@
         "attributes": {
           "long_name": "eastern boundary iron binding ligand",
           "units": "mmol/m^3",
+          "source": "Monthly reconstructions based on in situ data",
+          "source file": "/data/project7/pdamien/DATA/BGC/MappedIron/Monthly_dFe.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3430,7 +3554,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3449,6 +3573,8 @@
         "attributes": {
           "long_name": "northern boundary iron binding ligand",
           "units": "mmol/m^3",
+          "source": "Monthly reconstructions based on in situ data",
+          "source file": "/data/project7/pdamien/DATA/BGC/MappedIron/Monthly_dFe.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3484,7 +3610,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3503,6 +3629,8 @@
         "attributes": {
           "long_name": "southern boundary iron binding ligand",
           "units": "mmol/m^3",
+          "source": "Monthly reconstructions based on in situ data",
+          "source file": "/data/project7/pdamien/DATA/BGC/MappedIron/Monthly_dFe.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3583,7 +3711,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3602,6 +3730,8 @@
         "attributes": {
           "long_name": "eastern boundary dissolved ammonia",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3637,7 +3767,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3656,6 +3786,8 @@
         "attributes": {
           "long_name": "northern boundary dissolved ammonia",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3691,7 +3823,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3710,6 +3842,8 @@
         "attributes": {
           "long_name": "southern boundary dissolved ammonia",
           "units": "mmol/m^3",
+          "source": "GLODAPv2",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3745,7 +3879,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3762,8 +3896,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_nitrate_per_unit_mass_in_sea_water",
           "long_name": "eastern boundary dissolved inorganic nitrate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/no3/woa23_all_n*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3799,7 +3938,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3816,8 +3955,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_nitrate_per_unit_mass_in_sea_water",
           "long_name": "northern boundary dissolved inorganic nitrate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/no3/woa23_all_n*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3853,7 +3997,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3870,8 +4014,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_nitrate_per_unit_mass_in_sea_water",
           "long_name": "southern boundary dissolved inorganic nitrate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/no3/woa23_all_n*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3907,7 +4056,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3924,8 +4073,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_oxygen_per_unit_mass_in_sea_water",
           "long_name": "eastern boundary dissolved oxygen",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/o2/woa23_all_o*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -3961,7 +4115,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -3978,8 +4132,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_oxygen_per_unit_mass_in_sea_water",
           "long_name": "northern boundary dissolved oxygen",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/o2/woa23_all_o*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4015,7 +4174,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4032,8 +4191,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_oxygen_per_unit_mass_in_sea_water",
           "long_name": "southern boundary dissolved oxygen",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/o2/woa23_all_o*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4069,7 +4233,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4086,8 +4250,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_phosphate_per_unit_mass_in_sea_water",
           "long_name": "eastern boundary dissolved inorganic phosphate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/po4/woa23_all_p*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4123,7 +4292,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4140,8 +4309,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_phosphate_per_unit_mass_in_sea_water",
           "long_name": "northern boundary dissolved inorganic phosphate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/po4/woa23_all_p*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4177,7 +4351,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4194,8 +4368,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_phosphate_per_unit_mass_in_sea_water",
           "long_name": "southern boundary dissolved inorganic phosphate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/po4/woa23_all_p*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4231,7 +4410,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4248,8 +4427,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_silicate_per_unit_mass_in_sea_water",
           "long_name": "eastern boundary dissolved inorganic silicate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/sio4/woa23_all_i*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4285,7 +4469,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4302,8 +4486,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_silicate_per_unit_mass_in_sea_water",
           "long_name": "northern boundary dissolved inorganic silicate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/sio4/woa23_all_i*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4339,7 +4528,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4356,8 +4545,13 @@
           }
         ],
         "attributes": {
+          "standard_name": "moles_of_silicate_per_unit_mass_in_sea_water",
           "long_name": "southern boundary dissolved inorganic silicate",
+          "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
+          "grid_mapping": "crs",
           "units": "mmol/m^3",
+          "source": "WOA23",
+          "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/sio4/woa23_all_i*_01.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4393,7 +4587,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4412,6 +4606,8 @@
         "attributes": {
           "long_name": "eastern boundary small phytoplankton carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4447,7 +4643,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4466,6 +4662,8 @@
         "attributes": {
           "long_name": "northern boundary small phytoplankton carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4501,7 +4699,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4520,6 +4718,8 @@
         "attributes": {
           "long_name": "southern boundary small phytoplankton carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4555,7 +4755,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4574,6 +4774,8 @@
         "attributes": {
           "long_name": "eastern boundary small phytoplankton CaCO3",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4609,7 +4811,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4628,6 +4830,8 @@
         "attributes": {
           "long_name": "northern boundary small phytoplankton CaCO3",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4663,7 +4867,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4682,6 +4886,8 @@
         "attributes": {
           "long_name": "southern boundary small phytoplankton CaCO3",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4717,7 +4923,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4736,6 +4942,8 @@
         "attributes": {
           "long_name": "eastern boundary small phytoplankton chlorophyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4771,7 +4979,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4790,6 +4998,8 @@
         "attributes": {
           "long_name": "northern boundary small phytoplankton chlorophyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4825,7 +5035,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4844,6 +5054,8 @@
         "attributes": {
           "long_name": "southern boundary small phytoplankton chlorophyll",
           "units": "mg/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4879,7 +5091,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4898,6 +5110,8 @@
         "attributes": {
           "long_name": "eastern boundary small phytoplankton iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4933,7 +5147,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -4952,6 +5166,8 @@
         "attributes": {
           "long_name": "northern boundary small phytoplankton iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -4987,7 +5203,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -5006,6 +5222,8 @@
         "attributes": {
           "long_name": "southern boundary small phytoplankton iron",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -5041,7 +5259,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -5060,6 +5278,8 @@
         "attributes": {
           "long_name": "eastern boundary small phytoplankton phosphorous",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -5095,7 +5315,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -5114,6 +5334,8 @@
         "attributes": {
           "long_name": "northern boundary small phytoplankton phosphorous",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -5149,7 +5371,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -5168,6 +5390,8 @@
         "attributes": {
           "long_name": "southern boundary small phytoplankton phosphorous",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -5203,7 +5427,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -5222,6 +5446,8 @@
         "attributes": {
           "long_name": "eastern boundary zooplankton carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -5257,7 +5483,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -5276,6 +5502,8 @@
         "attributes": {
           "long_name": "northern boundary zooplankton carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -5311,7 +5539,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": "NaN",
         "codecs": [
           {
             "name": "bytes",
@@ -5330,6 +5558,8 @@
         "attributes": {
           "long_name": "southern boundary zooplankton carbon",
           "units": "mmol/m^3",
+          "source": "GLORYS2V4 hindcast + Aqua-MODIS",
+          "source file": "/data/project7/pdamien/DATA/BGC/GLORYS2V4/glorys2v4_mean_2000-2020.nc",
           "coordinates": "abs_time month",
           "_FillValue": "AAAAAAAA+H8="
         },

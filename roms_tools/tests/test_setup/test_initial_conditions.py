@@ -448,7 +448,7 @@ def test_interpolation_from_climatology(use_dask):
     )
 
     # Unified BGC climatology
-    fname_bgc = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+    fname_bgc = download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")
     ds = xr.open_dataset(fname_bgc)
 
     # check if interpolated value for Feb 14 is indeed February value from climatology
@@ -461,10 +461,11 @@ def test_interpolation_from_climatology(use_dask):
     )
     assert np.allclose(ds["Alk"].isel(month=1), bgc_data.ds["Alk"], equal_nan=True)
 
-    # check if interpolated value for Jan 30.25 is indeed average of January and February value from climatology
+    # check if interpolated value for Jan 30 is indeed average of January and February
+    # value from climatology (the records sit at days 15 and 45, so day 30 is halfway)
     bgc_data = UnifiedBGCDataset(
         filename=fname_bgc,
-        start_time=datetime(2012, 1, 30, 6),  # time: 6 am, Jan 30
+        start_time=datetime(2012, 1, 30),
         climatology=True,
         use_dask=use_dask,
         apply_post_processing=False,
@@ -787,7 +788,7 @@ def test_ic_density_vs_depth_interpolation(use_dask):
     """
     grid = _ic_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     common_kwargs = dict(
         grid=grid,

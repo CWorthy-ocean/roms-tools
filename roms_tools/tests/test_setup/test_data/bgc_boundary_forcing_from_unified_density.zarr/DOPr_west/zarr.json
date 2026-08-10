@@ -9,9 +9,9 @@
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        1,
+        12,
         3,
-        3
+        5
       ]
     }
   },
@@ -21,7 +21,7 @@
       "separator": "/"
     }
   },
-  "fill_value": 0.0,
+  "fill_value": "NaN",
   "codecs": [
     {
       "name": "bytes",
@@ -40,6 +40,8 @@
   "attributes": {
     "long_name": "western boundary refractory dissolved organic phosphorus",
     "units": "mmol/m^3",
+    "source": "GLODAPv2",
+    "source file": "/data/project7/pdamien/DATA/BGC/GLODAP/GLODAPv2.2016b_MappedClimatologies/GLODAPv2.2016b.TAlk.nc",
     "coordinates": "abs_time month",
     "_FillValue": "AAAAAAAA+H8="
   },

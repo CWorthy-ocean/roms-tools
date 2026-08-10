@@ -275,6 +275,26 @@ def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
     return field.fillna(fill_value)
 
 
+def climatology_mid_month_days() -> np.ndarray:
+    """Return the day-of-year of the center of each month of a monthly climatology.
+
+    A monthly climatology carries no calendar dates of its own, so ROMS-Tools places
+    each of the twelve records at the center of its month. These are the day-of-year
+    values used for that placement, and they are the single convention shared by all
+    monthly climatologies (e.g. CESM, and the unified BGC dataset from v2.1 on, which
+    stores ``month`` as an integer index rather than a day-of-year).
+
+    Returns
+    -------
+    numpy.ndarray
+        Twelve day-of-year values, one per month, in ascending order.
+    """
+    # Cumulative days at mid-month, i.e. half of January followed by the remaining
+    # month-to-month strides.
+    increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
+    return np.cumsum(increments)
+
+
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     """Assigns climatology dates to the dataset's time dimension.
 
@@ -294,9 +314,7 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     xr.Dataset
         The updated xarray Dataset with climatological dates assigned to the specified time dimension.
     """
-    # Define the days in each month and convert to timedelta
-    increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
-    days = np.cumsum(increments)
+    days = climatology_mid_month_days()
     timedelta_ns = np.array(days, dtype="timedelta64[D]").astype("timedelta64[ns]")
     time = xr.DataArray(timedelta_ns, dims=[time_dim])
     ds = ds.assign_coords({"time": time})

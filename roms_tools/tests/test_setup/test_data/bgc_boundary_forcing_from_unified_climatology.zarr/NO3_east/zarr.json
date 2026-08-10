@@ -21,7 +21,7 @@
       "separator": "/"
     }
   },
-  "fill_value": "NaN",
+  "fill_value": 0.0,
   "codecs": [
     {
       "name": "bytes",
@@ -38,13 +38,8 @@
     }
   ],
   "attributes": {
-    "standard_name": "moles_of_nitrate_per_unit_mass_in_sea_water",
     "long_name": "eastern boundary dissolved inorganic nitrate",
-    "cell_methods": "area: mean depth: mean time: mean within years time: mean over years",
-    "grid_mapping": "crs",
     "units": "mmol/m^3",
-    "source": "WOA23",
-    "source_file": "/anvil/projects/x-ees250129/Datasets/BGC/WOA2023/no3/woa23_all_n*_01.nc",
     "coordinates": "abs_time month",
     "_FillValue": "AAAAAAAA+H8="
   },

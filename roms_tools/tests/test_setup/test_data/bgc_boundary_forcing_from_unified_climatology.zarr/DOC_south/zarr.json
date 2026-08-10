@@ -21,7 +21,7 @@
       "separator": "/"
     }
   },
-  "fill_value": "NaN",
+  "fill_value": 0.0,
   "codecs": [
     {
       "name": "bytes",
@@ -40,8 +40,6 @@
   "attributes": {
     "long_name": "southern boundary dissolved organic carbon",
     "units": "mmol/m^3",
-    "source": "based on 3D CESM climatology regridded at low-resolution by Abigale Wyatt",
-    "source file": "/data/project7/pdamien/DATA/BGC/CESM/CESM-climatology_lowres_regridded.nc",
     "coordinates": "abs_time month",
     "_FillValue": "AAAAAAAA+H8="
   },

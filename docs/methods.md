@@ -180,7 +180,7 @@ The 10m wind components are treated as two independent scalar fields-—zonal an
 4. **Radiation Correction**: If specified, shortwave radiation is corrected. It is widely recognized that global data products like ERA5 can have biases in radiation due to uncertain cloud-radiative feedbacks. `ROMS-Tools` includes functionality to correct for these biases. If `correct_radiation = True`, a multiplicative correction factor is applied to the ERA5 shortwave radiation. The correction factors have been pre-computed based on the differences between ERA5 climatology and the COREv2 climatology.
 
 ```{note}
-By default, the source data includes one time record before `start_time` and one after `end_time`. This temporal bracketing ensures ROMS can interpolate forcing values at the exact simulation boundaries. Set `pad_times=False` when creating a {py:obj}`roms_tools.SurfaceForcing` object to instead select only records within `[start_time, end_time]` inclusive.
+By default, the source data includes one time record before `start_time` and one after `end_time`. This temporal bracketing ensures ROMS can interpolate forcing values at the exact simulation boundaries. Set `start_time_pad=False` and/or `end_time_pad=False` when creating a {py:obj}`roms_tools.SurfaceForcing` object to instead select only records at or after `start_time` and/or at or before `end_time`, respectively.
 ```
 
 As a result of these processes, the following fields are produced on the ROMS grid:
@@ -316,7 +316,7 @@ In both Option A and B the ocean velocity components are treated as two independ
 6. **Computation of barotropic velocities**: To obtain the barotropic velocities, the rotated and regridded velocities are vertically integrated.
 
 ```{note}
-By default, the source data includes one time record before `start_time` and one after `end_time`. This temporal bracketing ensures ROMS can interpolate forcing values at the exact simulation boundaries. Set `pad_times=False` when creating a {py:obj}`roms_tools.BoundaryForcing` object to instead select only records within `[start_time, end_time]` inclusive.
+By default, the source data includes one time record before `start_time` and one after `end_time`. This temporal bracketing ensures ROMS can interpolate forcing values at the exact simulation boundaries. Set `start_time_pad=False` and/or `end_time_pad=False` when creating a {py:obj}`roms_tools.BoundaryForcing` object to instead select only records at or after `start_time` and/or at or before `end_time`, respectively.
 ```
 
 As a result of these processes, the following fields are produced at each of the user-specified **boundaries** of the ROMS grid:

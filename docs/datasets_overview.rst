@@ -42,7 +42,7 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
    * - Unified BGC Dataset
      - BGC Initial, Boundary & Surface Forcing; Salinity Restoring
      - Yes
-     - `Google Drive <https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq>`_
+     - `Google Drive <https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgdcef>`_
    * - ERA5
      - Surface Forcing
      - Optional (streaming supported)
@@ -236,7 +236,7 @@ The file is filled across land and below the seafloor, so it has no missing valu
 Use version 2.1 or later (``BGCdataset_v2_1.nc``). Earlier versions are still read, with a warning: they name their dimensions ``lon``/``lat``/``dep``, and the oldest ones lack the ``temp_WOA``/``salt_WOA`` fields required for density-space BGC interpolation and salinity restoring.
 
 :Required for: BGC Initial Conditions, BGC Boundary Forcing, BGC Surface Forcing, Surface Forcing (Restoring Forces; Salinity)
-:Available at: `Google Drive <https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq>`_
+:Available at: `Google Drive <https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgdcef>`_
 
 For download instructions see :doc:`datasets`.
 

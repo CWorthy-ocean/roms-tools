@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from roms_tools.utils import save_datasets
+from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat, save_datasets
 
 DIM_INFO = {
     # eta-direction
@@ -172,6 +172,7 @@ def partition_netcdf(
     np_xi: int = 1,
     output_dir: str | Path | None = None,
     include_coarse_dims: bool = True,
+    format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
 ) -> list[Path]:
     """Partition one or more ROMS NetCDF files into smaller spatial tiles and save them to disk.
 
@@ -197,6 +198,8 @@ def partition_netcdf(
         Whether to include coarse grid dimensions (`eta_coarse`, `xi_coarse`) in the partitioning.
         If False, these dimensions will not be split. Relevant if none of the coarse resolution variables are actually used by ROMS.
         Default is True.
+    format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+        NetCDF file format. Defaults to ``"NETCDF4"``.
 
     Returns
     -------
@@ -231,7 +234,10 @@ def partition_netcdf(
         ]
 
         saved = save_datasets(
-            partitioned_datasets, paths_to_partitioned_files, verbose=False
+            partitioned_datasets,
+            paths_to_partitioned_files,
+            verbose=False,
+            format=format,
         )
         all_saved_filenames.extend(saved)
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import partial
 from importlib.util import find_spec
 from pathlib import Path
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,14 @@ import xarray as xr
 from roms_tools.constants import R_EARTH
 
 FilePaths: TypeAlias = str | Path | list[Path | str]
+
+NetCDFFormat = Literal[
+    "NETCDF4",
+    "NETCDF3_CLASSIC",
+    "NETCDF3_64BIT_OFFSET",
+    "NETCDF3_64BIT_DATA",
+]
+DEFAULT_NETCDF_FORMAT: NetCDFFormat = "NETCDF4"
 
 
 def _path_list_from_input(files: FilePaths) -> list[Path]:
@@ -49,6 +57,31 @@ def _path_list_from_input(files: FilePaths) -> list[Path]:
         raise TypeError("'files' should be str, Path, or List[Path | str]")
 
     return filepaths
+
+
+def _is_zarr_store(path: str | Path) -> bool:
+    """Heuristically detect whether `path` points to a local Zarr store.
+
+    Used to select the xarray "zarr" engine explicitly instead of relying on
+    xarray's own engine auto-detection (`xr.open_dataset` with no `engine`
+    given). That auto-detection probes each installed backend's
+    ``guess_can_open`` in turn and deliberately re-raises ``PermissionError``
+    rather than treating it as "this backend can't open it" (see
+    ``xarray.backends.plugins.guess_engine``). On Windows, opening a directory
+    (which is what a Zarr store is) via the netCDF backends' sniffing raises
+    ``PermissionError``/``EACCES``, so detection aborts before the zarr
+    backend ever gets a chance to try. POSIX raises ``IsADirectoryError``
+    there instead, which xarray does catch, masking the bug on Linux/macOS.
+
+    Parameters
+    ----------
+    path : str | Path
+        A local file or directory path. Remote/fsspec paths (e.g. ``s3://...``)
+        are not directories on the local filesystem, so this returns `False`
+        for them; those are handled via the explicit `read_zarr` flag instead.
+    """
+    p = Path(path)
+    return p.suffix == ".zarr" or p.is_dir()
 
 
 @dataclass
@@ -406,7 +439,7 @@ def _check_load_data_dask(use_dask: bool) -> None:
     if use_dask and not has_dask():
         msg = (
             "Dask is required but not installed. Install it with:\n"
-            "  • `pip install roms-tools[dask]` or\n"
+            "  • `pip install dask[diagnostics]` or\n"
             "  • `conda install dask`\n"
             "Alternatively, install `roms-tools` with conda to include all dependencies."
         )
@@ -581,8 +614,12 @@ def load_data(
     else:
         ds_list = []
         for file in match_result.matches:
+            # Decide the engine explicitly for zarr stores rather than letting
+            # xr.open_dataset auto-detect it; see `_is_zarr_store` for why.
+            engine = "zarr" if _is_zarr_store(file) else None
             ds = xr.open_dataset(
                 file,
+                engine=engine,
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
                 chunks=None,
@@ -819,11 +856,11 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     Returns
     -------
     xarray.DataArray
-        The DataArray with dimensions reordered so that 'time', 's_*', 'eta_*',
+        The DataArray with dimensions reordered so that 'time', 's_*', 'depth', 'eta_*',
         and 'xi_*' are first, in that order, if they exist.
     """
     # List of preferred dimension patterns
-    preferred_order = ["time", "s_", "eta_", "xi_"]
+    preferred_order = ["time", "s_", "depth", "eta_", "xi_"]
 
     # Get the existing dimensions in the DataArray
     dims = list(da.dims)
@@ -844,8 +881,14 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
-def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
-    """Save the list of datasets to netCDF4 files.
+def save_datasets(
+    dataset_list,
+    output_filenames,
+    use_dask=False,
+    verbose=True,
+    format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+):
+    """Save the list of datasets to NetCDF files.
 
     Parameters
     ----------
@@ -858,6 +901,8 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     verbose : bool, optional
         Whether to log information about the files being written. If True, logs the output filenames.
         Defaults to True.
+    format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+        NetCDF file format passed to ``xarray.save_mfdataset``. Defaults to ``"NETCDF4"``.
 
     Returns
     -------
@@ -900,7 +945,7 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
                     else:
                         da.encoding["dtype"] = "float64"
 
-    saved_filenames = []
+    saved_filenames: list[Path] = []
     _patch_1d_encodings(dataset_list)
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
@@ -913,9 +958,9 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
         from dask.diagnostics import ProgressBar
 
         with ProgressBar():
-            xr.save_mfdataset(dataset_list, output_filenames)
+            xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
-        xr.save_mfdataset(dataset_list, output_filenames)
+        xr.save_mfdataset(dataset_list, output_filenames, format=format)
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 
@@ -1318,6 +1363,7 @@ def interpolate_from_climatology(
     time_dim: str,
     time_coord: str,
     time: xr.DataArray | pd.DatetimeIndex,
+    interp_chunk_size: int | None = None,
 ) -> xr.DataArray | xr.Dataset:
     """Interpolates a climatological field to specified time points.
 
@@ -1339,6 +1385,11 @@ def interpolate_from_climatology(
     time : xarray.DataArray or pandas.DatetimeIndex
         The target time points for interpolation. These are internally converted to `day_of_year`
         before performing interpolation.
+    interp_chunk_size : int, optional
+        If given, the temporal interpolation is performed in blocks of this many
+        target time steps and concatenated, so the interpolated time axis stays
+        chunked (bounded memory, cheap time-slicing) instead of being produced as a
+        single large chunk. Defaults to None (a single interpolation call).
 
     Returns
     -------
@@ -1378,7 +1429,11 @@ def interpolate_from_climatology(
             day_of_year = np_times_to_fractional_days(time)
 
         data_array_interpolated = interpolate_cyclic_time(
-            data_array, time_dim, time_coord, day_of_year
+            data_array,
+            time_dim,
+            time_coord,
+            day_of_year,
+            interp_chunk_size=interp_chunk_size,
         )
 
         # expand dims if single element
@@ -1399,11 +1454,60 @@ def interpolate_from_climatology(
         raise TypeError("Input 'field' must be an xarray.DataArray or xarray.Dataset.")
 
 
+def _interpolate_in_time_blocks(
+    source: xr.DataArray,
+    time_dim: str,
+    targets: np.ndarray | xr.DataArray,
+    block_size: int,
+) -> xr.DataArray:
+    """Interpolate ``source`` onto ``targets`` along ``time_dim`` in blocks.
+
+    Interpolating the target axis block-by-block (rather than in a single
+    ``.interp`` call) keeps each block a separate dask task, so the interpolated
+    time axis stays chunked. This bounds peak memory for long target axes and makes
+    slicing a few time steps cheap, at the cost of a larger task graph. The result is
+    identical to a single ``.interp`` call; only the chunking differs.
+
+    Parameters
+    ----------
+    source : xarray.DataArray
+        The field to interpolate; its ``time_dim`` must be a single chunk.
+    time_dim : str
+        Name of the dimension in ``source`` being interpolated.
+    targets : numpy.ndarray or xarray.DataArray
+        The 1-D target coordinate values to interpolate onto.
+    block_size : int
+        Number of target steps per block.
+
+    Returns
+    -------
+    xarray.DataArray
+        ``source`` interpolated onto ``targets``, chunked along the target axis.
+    """
+    if isinstance(targets, xr.DataArray):
+        concat_dim = targets.dims[0]
+        n = targets.sizes[concat_dim]
+        blocks = (
+            targets.isel({concat_dim: slice(i, i + block_size)})
+            for i in range(0, n, block_size)
+        )
+    else:
+        # An ndarray target keeps the source dimension name on the output.
+        concat_dim = time_dim
+        targets = np.atleast_1d(np.asarray(targets))
+        n = targets.shape[0]
+        blocks = (targets[i : i + block_size] for i in range(0, n, block_size))
+
+    pieces = [source.interp(**{time_dim: block}, method="linear") for block in blocks]
+    return xr.concat(pieces, dim=concat_dim)
+
+
 def interpolate_cyclic_time(
     data_array: xr.DataArray,
     time_dim: str,
     time_coord: str,
     day_of_year: int | float | np.ndarray | xr.DataArray | Sequence[int | float],
+    interp_chunk_size: int | None = None,
 ) -> xr.DataArray:
     """Interpolates a DataArray cyclically across the start and end of the year.
 
@@ -1457,9 +1561,15 @@ def interpolate_cyclic_time(
     )
     data_array_concat[time_dim] = time_concat
 
-    # Interpolate to specified times
-    data_array_interpolated = data_array_concat.interp(
-        **{time_dim: day_of_year}, method="linear"
-    )
+    # A single interpolation call emits the interpolated axis as one dask chunk, which
+    # for a long target axis materialises one large (N, ...) block. When a chunk size
+    # is given and the target is longer than one block, interpolate the target in
+    # blocks instead so the axis stays chunked. Short/scalar targets fall through to a
+    # single call, which is behaviour-identical and avoids edge cases.
+    n_targets = getattr(day_of_year, "size", None) or np.size(day_of_year)
+    if interp_chunk_size is not None and n_targets > interp_chunk_size:
+        return _interpolate_in_time_blocks(
+            data_array_concat, time_dim, day_of_year, interp_chunk_size
+        )
 
-    return data_array_interpolated
+    return data_array_concat.interp(**{time_dim: day_of_year}, method="linear")

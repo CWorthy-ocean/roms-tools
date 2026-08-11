@@ -23,6 +23,7 @@ from roms_tools.setup.tides import TidalForcing  # noqa: F401
 from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
 from roms_tools.datasets.lat_lon_datasets import get_glorys_bounds  # noqa: F401
 from roms_tools.tiling.join import open_partitions, join_netcdf  # noqa: F401
+from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat  # noqa: F401
 
 
 # Configure logging when the package is imported

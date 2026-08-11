@@ -1,10 +1,12 @@
 import enum
 import hashlib
+import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import h5py
+import matplotlib
 import pytest
 
 from roms_tools import (
@@ -15,7 +17,7 @@ from roms_tools import (
     SurfaceForcing,
     TidalForcing,
 )
-from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.download import download_rivr2o_test_data, download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
@@ -26,6 +28,19 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.nesting import align_grids, make_nesting_info
+from roms_tools.tests.river_test_utils import write_glofas_file
+
+# Guarantee a non-interactive matplotlib backend for the test suite unless the
+# caller has explicitly requested one (e.g. via the MPLBACKEND env var). This
+# must run before any test module does `import matplotlib.pyplot`, which is
+# why it lives at the top of the root conftest (loaded before test collection).
+# Without this, matplotlib's default backend selection can pick a GUI backend
+# (e.g. TkAgg) whose runtime is broken on some CI runners even though the
+# Python bindings import cleanly (e.g. Windows runners missing init.tcl),
+# causing plotting tests to crash with _tkinter.TclError instead of a clean,
+# deterministic Agg render.
+if not os.environ.get("MPLBACKEND"):
+    matplotlib.use("Agg")
 
 
 class SkippableOptions(enum.StrEnum):
@@ -351,6 +366,8 @@ def tidal_forcing(use_dask: bool) -> TidalForcing:
         grid=grid,
         source={"name": "TPXO", "path": fname_dict},  # type: ignore[dict-item]
         ntides=1,
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -378,6 +395,8 @@ def initial_conditions(use_dask: bool) -> InitialConditions:
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -391,6 +410,8 @@ def initial_conditions_on_large_grid(large_grid, use_dask):
         grid=large_grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -420,6 +441,8 @@ def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -453,6 +476,8 @@ def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialCondi
             "name": "CESM_REGRIDDED",
             "climatology": True,  # type: ignore[dict-item]
         },
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -483,6 +508,47 @@ def initial_conditions_with_unified_bgc_from_climatology(
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def initial_conditions_with_unified_bgc_density(
+    use_dask: bool,
+) -> InitialConditions:
+    """Unified-BGC initial conditions using density-space interpolation.
+
+    Same as ``initial_conditions_with_unified_bgc_from_climatology`` but with
+    ``bgc_interpolation_method="density"``. The BGC tracers are placed on the model's
+    density surfaces (target T/S come from the physics in the same object).
+    """
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        bgc_interpolation_method="density",
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -536,7 +602,12 @@ def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
-        apply_2d_horizontal_fill=False,
+        prefill=None,
+        # Pin to scipy so this regression fixture is deterministic across platforms
+        # and regardless of whether xESMF is installed (xESMF/ESMPy weights differ
+        # slightly across builds); the xESMF default is covered separately by the
+        # NaN-free and cross-engine tolerance tests.
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -551,7 +622,7 @@ def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid) -> BoundaryF
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
         use_dask=use_dask,
     )
 
@@ -583,7 +654,10 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
+        # scipy regrid keeps this fixture byte-identical to the legacy AMG output
+        # (the new default 'auto' would use xESMF); see test_validation regression.
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -613,7 +687,63 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
+        prefill="2d_lateral_fill",
+        # scipy regrid keeps this fixture byte-identical to the legacy AMG output
+        # (the new default 'auto' would use xESMF); see test_validation regression.
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing:
+    """Unified-BGC boundary forcing using density-space interpolation.
+
+    Unlike ``bgc_boundary_forcing_from_unified_climatology`` (depth-space), density
+    interpolation needs the model (physics) T/S as the target density coordinate,
+    supplied via a companion physics ``BoundaryForcing`` passed as ``physics_forcing``.
+    Uses the North Atlantic GLORYS physics so the target T/S overlap the domain.
+    """
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    physics_bc = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_phys, "name": "GLORYS"},
+        type="physics",
+        apply_2d_horizontal_fill=False,
+        # Pin to scipy: this physics BC supplies the target density coordinate for
+        # the BGC density interpolation below, so an engine-dependent physics field
+        # would make the whole fixture non-deterministic across platforms/xESMF.
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        type="bgc",
+        physics_forcing=physics_bc,
+        bgc_interpolation_method="density",
         apply_2d_horizontal_fill=True,
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -643,6 +773,11 @@ def surface_forcing(use_dask: bool) -> SurfaceForcing:
         source={"name": "ERA5", "path": fname},
         correct_radiation=False,
         coarse_grid_mode="never",
+        # Pin to scipy + 2d_lateral_fill so this regression fixture is deterministic
+        # across platforms (the xESMF default varies by version, and CI runs a
+        # no-xESMF leg); the default path is covered by structural tests.
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -702,6 +837,9 @@ def coarse_surface_forcing(use_dask: bool) -> SurfaceForcing:
         coarse_grid_mode="always",
         source={"name": "ERA5", "path": fname},
         correct_radiation=False,
+        # Pin to scipy + 2d_lateral_fill for deterministic cross-platform regression.
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -733,6 +871,9 @@ def corrected_surface_forcing(use_dask: bool) -> SurfaceForcing:
         source={"name": "ERA5", "path": fname},
         correct_radiation=True,
         coarse_grid_mode="never",
+        # Pin to scipy + 2d_lateral_fill for deterministic cross-platform regression.
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -791,6 +932,9 @@ def bgc_surface_forcing(use_dask: bool) -> SurfaceForcing:
         source={"name": "CESM_REGRIDDED", "path": fname_bgc},
         type="bgc",
         coarse_grid_mode="never",
+        # scipy + 2d_lateral_fill reproduce the legacy AMG+scipy output byte-for-byte
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -820,6 +964,9 @@ def bgc_surface_forcing_from_climatology(use_dask: bool) -> SurfaceForcing:
         source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
+        # scipy + 2d_lateral_fill reproduce the legacy AMG+scipy output byte-for-byte
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -849,6 +996,9 @@ def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForci
         source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
+        # scipy + 2d_lateral_fill reproduce the legacy AMG+scipy output byte-for-byte
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -886,7 +1036,7 @@ def bgc_surface_forcing_from_mbl_co2(use_dask: bool) -> SurfaceForcing:
 def restoring_surface_forcing_from_unified_climatology(
     use_dask: bool,
 ) -> SurfaceForcing:
-    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    """Fixture for creating a SurfaceForcing object with salinity restoring forces from unified climatology."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -918,7 +1068,7 @@ def restoring_surface_forcing_from_unified_climatology(
 def restoring_surface_forcing_from_woa_climatology(
     use_dask: bool,
 ) -> SurfaceForcing:
-    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    """Fixture for creating a SurfaceForcing object with salinity restoring forces from WOA climatology."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -941,6 +1091,38 @@ def restoring_surface_forcing_from_woa_climatology(
         source={"name": "WOA", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="restoring",
         restoring_forces=["sss"],
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def restoring_surface_forcing_from_soda(
+    use_dask: bool,
+) -> SurfaceForcing:
+    """Fixture for creating a SurfaceForcing object with DIC/ALK restoring forces from OceanSODA."""
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
+
+    fname_bgc = Path(download_test_data("coarsened_OceanSODA_dataset.nc"))
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "SODA", "path": fname_bgc},  # type: ignore[dict-item]
+        type="restoring",
+        restoring_forces=["sDIC", "sALK"],
         coarse_grid_mode="never",
         use_dask=use_dask,
     )
@@ -993,6 +1175,70 @@ def river_forcing_with_bgc() -> RiverForcing:
 
     return RiverForcing(
         grid=grid, start_time=start_time, end_time=end_time, include_bgc=True
+    )
+
+
+@pytest.fixture(scope="session")
+def rivr2o_test_data_paths() -> list[str]:
+    """Paths to coarse regional RIVR2O test files (2000-2002) from roms-tools-test-data."""
+    return download_rivr2o_test_data()
+
+
+@pytest.fixture(scope="session")
+def glofas_test_file(tmp_path_factory):
+    """Write a minimal synthetic GloFAS-format NetCDF file for integration tests."""
+    import numpy as np
+
+    path = tmp_path_factory.mktemp("glofas") / "glofas_test.nc"
+    times = np.array(
+        ["1998-01-15", "1998-02-15"],
+        dtype="datetime64[ns]",
+    )
+    lats = np.array([65.12, 65.12, 64.82, 65.47, 63.72], dtype=np.float32)
+    lons = np.array([-20.43, -20.43, -22.78, -23.62, -17.53], dtype=np.float32)
+    names = [
+        "GloFAS_65.12N_20.43W",
+        "GloFAS_65.12N_20.43W_b",
+        "GloFAS_64.82N_22.78W",
+        "GloFAS_65.47N_23.62W",
+        "GloFAS_63.72N_17.53W",
+    ]
+    flow = np.tile(
+        np.array([500.0, 200.0, 100.0, 300.0, 400.0], dtype=np.float32), (2, 1)
+    )
+    vol = np.array([500.0, 200.0, 100.0, 300.0, 400.0], dtype=np.float32)
+    write_glofas_file(path, lats, lons, flow, names, times, vol=vol)
+    return path
+
+
+@pytest.fixture(scope="session")
+def river_forcing_with_glofas(glofas_test_file) -> RiverForcing:
+    """RiverForcing using a synthetic GloFAS-format discharge file."""
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+    return RiverForcing(
+        grid=grid,
+        start_time=datetime(1998, 1, 1),
+        end_time=datetime(1998, 3, 1),
+        source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+    )
+
+
+@pytest.fixture(scope="session")
+def river_forcing_with_rivr2o_bgc(rivr2o_test_data_paths: list[str]) -> RiverForcing:
+    """RiverForcing with Dai discharge and RIVR2O BGC from the test-data repository."""
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+
+    return RiverForcing(
+        grid=grid,
+        start_time=datetime(2000, 1, 1),
+        end_time=datetime(2002, 3, 1),
+        include_bgc=True,
+        bgc_source={"name": "RIVR2O", "path": rivr2o_test_data_paths},
+        convert_to_climatology="if_any_missing",
     )
 
 

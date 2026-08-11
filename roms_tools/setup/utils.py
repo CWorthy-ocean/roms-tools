@@ -2,22 +2,45 @@ import importlib.metadata
 import logging
 import time
 import typing
+import warnings
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+import dask
+import gsw
 import numba as nb
 import numpy as np
 import pandas as pd
 import xarray as xr
+import xgcm
 import yaml
 from pydantic import BaseModel
+from scipy.spatial import cKDTree
 
 from roms_tools.constants import R_EARTH
+
+# Re-exported from the single-source-of-truth ``processing_methods`` module so that
+# existing ``from roms_tools.setup.utils import ...`` call sites keep working.
+from roms_tools.processing_methods import (  # noqa: F401
+    BGC_INTERPOLATION_METHODS,
+    EXTRAP_METHODS,
+    PREFILL_ALLOWED_KWARGS,
+    REGRID_METHODS,
+    XESMF_PREFILL_METHODS,
+    BgcInterpMethod,
+    RegridConfig,
+    _xesmf_available,
+    resolve_regrid_engine,
+    validate_extrap,
+    validate_prefill,
+)
+from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -31,6 +54,92 @@ HEADER_SZ = 96
 HEADER_CHAR = "="
 
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
+
+
+def apply_source_prefill(data, regrid_config, prefill_kwargs) -> None:
+    """Apply a whole-domain source prefill when the config requests one.
+
+    No-op when ``regrid_config.prefill is None`` (the default NaN-aware path).
+    Only valid for lat/lon source datasets, which implement ``apply_prefill``.
+
+    Parameters
+    ----------
+    data : LatLonDataset
+        The source dataset object (must implement ``apply_prefill``).
+    regrid_config : RegridConfig
+        The resolved regrid configuration.
+    prefill_kwargs : dict or None
+        Method-specific options forwarded to ``apply_prefill``.
+    """
+    if regrid_config.prefill is not None:
+        data.apply_prefill(
+            str(regrid_config.prefill),
+            prefill_kwargs=prefill_kwargs,
+            prefill_was_user_set=True,
+        )
+
+
+def apply_scipy_fallback_fill(data, regrid_config) -> None:
+    """Nearest-neighbor pre-fill the source on the scipy, no-prefill path.
+
+    When xESMF is unavailable and no explicit prefill was requested, the source
+    is nearest-neighbor filled so the subsequent scipy interpolation cannot
+    propagate NaNs. No-op on the xESMF path or when a prefill is set. Only valid
+    for lat/lon source datasets, which implement ``apply_nearest_neighbor_fill``.
+    """
+    if regrid_config.prefill is None and not regrid_config.use_xesmf:
+        data.apply_nearest_neighbor_fill()
+
+
+def check_source_coverage(data, target_coords, source_name) -> None:
+    """Raise if the ROMS grid extends beyond the source data's coverage.
+
+    Used only on the default no-prefill xESMF path, where destination
+    extrapolation would otherwise silently fill points that lie outside the
+    source coverage. (On the scipy / prefill path such points become NaN and are
+    caught by the standard NaN validation instead.) Coastal gaps *within* the
+    source coverage are still filled by the masked regrid + extrapolation; this
+    only guards against a grid that outruns the source data.
+
+    Parameters
+    ----------
+    data : LatLonDataset
+        The source dataset object; ``data.ds`` and ``data.dim_names`` are used.
+    target_coords : dict
+        Target-grid ``{"lat": ..., "lon": ...}`` DataArrays.
+    source_name : str
+        Name of the source (for the error message), e.g. ``"GLORYS"``.
+    """
+    lat = data.ds[data.dim_names["latitude"]]
+    lon = data.ds[data.dim_names["longitude"]]
+    extents = {
+        "latitude": (
+            float(target_coords["lat"].min()),
+            float(target_coords["lat"].max()),
+            float(lat.min()),
+            float(lat.max()),
+        ),
+        "longitude": (
+            float(target_coords["lon"].min()),
+            float(target_coords["lon"].max()),
+            float(lon.min()),
+            float(lon.max()),
+        ),
+    }
+    tol = 1e-6
+    outside = [
+        name
+        for name, (tmin, tmax, smin, smax) in extents.items()
+        if tmin < smin - tol or tmax > smax + tol
+    ]
+    if outside:
+        raise ValueError(
+            f"The ROMS grid (including the interpolation margin) extends beyond "
+            f"the {source_name} source data coverage in "
+            f"{', '.join(outside)}. The default masked-bilinear regrid would "
+            f"extrapolate these points. Provide source data that covers the full "
+            f"domain plus a margin."
+        )
 
 
 def log_the_separator() -> None:
@@ -69,6 +178,22 @@ class Timed:
             log_the_separator()
 
 
+_DEFAULT_NAN_CHECK_MESSAGE = (
+    "NaN values found in regridded field. This likely occurs because the ROMS grid, including "
+    "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
+    "dataset covers the entire area required by the ROMS grid."
+)
+
+
+def nan_flag(field, mask):
+    """Lazy boolean: True if ``field`` has any NaN at wet points (``mask == 1``).
+
+    Returns an unevaluated (0-d) DataArray so callers can batch several flags into a
+    single ``dask`` computation; see :func:`nan_check_batch`.
+    """
+    return xr.where(mask == 1, field, 0).isnull().any()
+
+
 def nan_check(field, mask, error_message=None) -> None:
     """Checks for NaN values at wet points in the field.
 
@@ -94,17 +219,40 @@ def nan_check(field, mask, error_message=None) -> None:
         If the field contains NaN values at any of the wet points indicated by the mask.
         The error message will explain the potential cause and suggest ensuring the dataset's coverage.
     """
-    # Replace values in field with 0 where mask is not 1
-    da = xr.where(mask == 1, field, 0)
     if error_message is None:
-        error_message = (
-            "NaN values found in regridded field. This likely occurs because the ROMS grid, including "
-            "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
-            "dataset covers the entire area required by the ROMS grid."
-        )
-    # Check if any NaN values exist in the modified field
-    if da.isnull().any().values:
+        error_message = _DEFAULT_NAN_CHECK_MESSAGE
+    if bool(nan_flag(field, mask).values):
         raise ValueError(error_message)
+
+
+def nan_check_batch(items) -> None:
+    """Validate several fields for NaNs at wet points in a single computation.
+
+    Parameters
+    ----------
+    items : iterable of (field, mask, error_message)
+        One tuple per field to check. ``error_message`` may be ``None`` to use the
+        default message.
+
+    Notes
+    -----
+    All NaN-at-wet-point flags are evaluated in one ``dask.compute`` so that a lazy
+    subgraph shared across fields (e.g. a density/MLD interpolation coordinate reused
+    across BGC tracers) is computed once rather than once per field.
+
+    Raises
+    ------
+    ValueError
+        For the first field (in iteration order) found to contain NaNs at wet points.
+    """
+    items = list(items)
+    if not items:
+        return
+    flags = [nan_flag(field, mask) for field, mask, _ in items]
+    results = dask.compute(*flags)
+    for (_field, _mask, error_message), result in zip(items, results):
+        if bool(np.asarray(result)):
+            raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
@@ -153,6 +301,152 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     time = xr.DataArray(timedelta_ns, dims=[time_dim])
     ds = ds.assign_coords({"time": time})
     return ds
+
+
+def calendar_midmonth_dates(start_time: datetime, end_time: datetime) -> list[datetime]:
+    """Return 15th-of-month dates between ``start_time`` and ``end_time``."""
+    dates: list[datetime] = []
+    year, month = start_time.year, start_time.month
+    while (year, month) <= (end_time.year, end_time.month):
+        candidate = datetime(year, month, 15)
+        if start_time <= candidate <= end_time:
+            dates.append(candidate)
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    if not dates:
+        # Window is shorter than a month and skips every 15th; fall back to a
+        # single representative mid-month date clamped into the window so the
+        # correct climatology month is still selected.
+        candidate = datetime(start_time.year, start_time.month, 15)
+        dates.append(min(max(candidate, start_time), end_time))
+    return dates
+
+
+def month_to_time_index(month_coord: np.ndarray | xr.DataArray) -> dict[int, int]:
+    """Map calendar month (1-12) to index along a monthly climatology axis."""
+    values = np.asarray(month_coord).astype(int)
+    return {int(month): idx for idx, month in enumerate(values)}
+
+
+def tile_monthly_climatology_on_calendar(
+    ds: xr.Dataset,
+    calendar_dates: Sequence[datetime],
+    *,
+    month_coord: str = "month",
+    time_dim: str = "river_time",
+) -> xr.Dataset:
+    """Repeat monthly climatology fields along a calendar date axis."""
+    if month_coord not in ds:
+        raise ValueError(f"Dataset must contain coordinate '{month_coord}'.")
+
+    month_to_index = month_to_time_index(ds[month_coord])
+    ds_base = ds.drop_vars(month_coord, errors="ignore")
+    pieces = [
+        ds_base.isel({time_dim: month_to_index[dt.month]}) for dt in calendar_dates
+    ]
+    ds_tiled = xr.concat(pieces, dim=time_dim)
+    return ds_tiled.assign_coords(
+        {time_dim: np.array(calendar_dates, dtype="datetime64[ns]")}
+    )
+
+
+def expand_monthly_climatology_time_axis(
+    ds: xr.Dataset,
+    start_time: datetime,
+    end_time: datetime,
+    model_reference_date: datetime | np.datetime64,
+    *,
+    time_dim: str = "river_time",
+    month_coord: str = "month",
+    discharge_climatology_attr: str = "discharge_climatology",
+) -> xr.Dataset:
+    """Expand a monthly climatology dataset to calendar mid-month times."""
+    calendar_dates = calendar_midmonth_dates(start_time, end_time)
+    ds_expanded = tile_monthly_climatology_on_calendar(
+        ds,
+        calendar_dates,
+        month_coord=month_coord,
+        time_dim=time_dim,
+    )
+    ds_expanded.attrs.pop("climatology", None)
+    ds_expanded.attrs[discharge_climatology_attr] = "True"
+    ds_expanded, time = add_time_info_to_ds(
+        ds_expanded,
+        model_reference_date,
+        climatology=False,
+        time_name=time_dim,
+    )
+    logging.info(
+        "Repeated 12-month discharge climatology on %d calendar river_time steps "
+        "(%s to %s).",
+        len(calendar_dates),
+        calendar_dates[0].date(),
+        calendar_dates[-1].date(),
+    )
+    return ds_expanded.assign_coords({time_dim: time})
+
+
+def interpolate_dynamic_bgc_by_calendar_year(
+    dynamic: dict[str, xr.DataArray],
+    abs_time: xr.DataArray,
+    *,
+    time_dim: str = "river_time",
+) -> dict[str, xr.DataArray]:
+    """Linearly interpolate interior gap years in dynamic BGC concentrations.
+
+    Each tracer is collapsed to one value per calendar year (mean of finite
+    ``river_time`` steps in that year), missing years are inserted, interior NaN
+    years are linearly interpolated along the year axis, and the result is
+    broadcast back to every ``river_time`` step. Leading and trailing NaN years
+    are filled by backward- and forward-fill respectively so partial boundary years
+    use the nearest full year's concentration. This prevents unrealistic concentrations
+    being generated from highly seasonal discharge data.
+    """
+    calendar_years = abs_time.dt.year
+    if time_dim not in calendar_years.dims:
+        raise ValueError(
+            f"abs_time must have dimension {time_dim!r}, got dims {calendar_years.dims}."
+        )
+
+    start_year = int(calendar_years.min())
+    end_year = int(calendar_years.max())
+    full_years = np.arange(start_year, end_year + 1)
+    year_at_steps = calendar_years.values
+
+    interpolated: dict[str, xr.DataArray] = {}
+    for tracer_name, values in dynamic.items():
+        if time_dim not in values.dims:
+            raise ValueError(
+                f"Dynamic tracer {tracer_name!r} must have dimension {time_dim!r}."
+            )
+
+        tagged = values.assign_coords(calendar_year=calendar_years)
+        # Treat years with less than a quarter of the year as missing and interpolate.
+        min_fraction: float = 0.25
+        step_counts = tagged.groupby("calendar_year").count(dim=time_dim)
+        annual = (
+            tagged.groupby("calendar_year")
+            .mean(dim=time_dim, skipna=True)
+            .where(step_counts >= min_fraction * step_counts.median())
+            .reindex(calendar_year=full_years)
+            .chunk({"calendar_year": -1})
+            .interpolate_na(dim="calendar_year", method="linear")
+            .ffill(dim="calendar_year")
+            .bfill(dim="calendar_year")
+        )
+
+        year_indexer = xr.DataArray(
+            year_at_steps,
+            dims=[time_dim],
+            coords={time_dim: values.coords[time_dim]},
+        )
+        filled = annual.sel(calendar_year=year_indexer, drop=True)
+        dims = [d for d in (time_dim, "nriver") if d in values.dims]
+        interpolated[tracer_name] = filled.transpose(*dims).astype(np.float32)
+
+    return interpolated
 
 
 def get_variable_metadata():
@@ -207,6 +501,8 @@ def get_variable_metadata():
         },
         "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
         "sss": {"long_name": "sea surface salinity", "units": "PSU"},
+        "sDIC": {"long_name": "sea surface DIC", "units": "mmol/m3"},
+        "sALK": {"long_name": "sea surface ALK", "units": "mmol/m3"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -411,10 +707,10 @@ def get_variable_metadata():
             "flux_units": "mmol/s",
             "integrated_units": "mmol",
         },
-        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "µmol mol⁻¹"},
+        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "umol mol-1"},
         "xco2_air_alt": {
             "long_name": "CO2, Marine Boundary Layer; alternative CO2",
-            "units": "µmol mol⁻¹",
+            "units": "umol mol-1",
         },
         "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
         "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},
@@ -498,6 +794,329 @@ def compute_missing_bgc_variables(bgc_data):
     return bgc_data
 
 
+def compute_potential_density(
+    temp: "xr.DataArray", salt: "xr.DataArray"
+) -> "xr.DataArray":
+    """Compute sigma-0 potential density anomaly (kg/m³ - 1000) via TEOS-10 (gsw).
+
+    Wraps gsw.sigma0 with apply_ufunc for dask compatibility. Treats practical
+    salinity as Absolute Salinity and in-situ temperature as Conservative
+    Temperature — an approximation sufficient for density-coordinate interpolation.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        In-situ temperature (°C).
+    salt : xr.DataArray
+        Practical salinity (PSU).
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 (kg/m³ - 1000).
+    """
+    density = xr.apply_ufunc(
+        gsw.sigma0,
+        salt,
+        temp,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+    # apply_ufunc preserves the input dim order, but normalize to the package's
+    # canonical order so this public function returns a predictable layout to
+    # users who call it directly.
+    density = transpose_dimensions(density)
+    density.name = "sigma0"
+    density.attrs["long_name"] = "potential density anomaly"
+    density.attrs["units"] = "kg/m^3 - 1000"
+    return density
+
+
+# Internal variable-name keys for the single source temperature/salinity pair used to
+# build the BGC density coordinate. A BGC dataset declares these keys in its
+# ``opt_var_names`` (mapping them to whatever the file calls the fields, e.g.
+# ``temp_WOA``/``salt_WOA``); the density-space interpolation in
+# ``InitialConditions``/``BoundaryForcing`` detects, uses, and then drops them. The keys
+# are deliberately NOT ``temp``/``salt`` so they cannot collide with the physics model
+# T/S that share ``processed_fields`` in ``InitialConditions``.
+BGC_SOURCE_TEMP = "temp_bgc"
+BGC_SOURCE_SALT = "salt_bgc"
+
+
+def _compute_density_coord(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth_dim: str,
+) -> "xr.DataArray":
+    """Build a strictly monotonic potential-density coordinate for density-space
+    interpolation.
+
+    Computes sigma-0 from ``temp``/``salt`` and adds a tiny depth-index perturbation
+    (matching the reference MATLAB implementation) so the profile is strictly
+    increasing along ``depth_dim`` — required by the ``xgcm`` transform that consumes
+    it as a coordinate. The result is single-chunked along ``depth_dim``, which
+    ``xgcm.transform`` also requires.
+
+    The same helper builds both the *source* coordinate (``depth_dim`` = the BGC
+    source depth dimension) and the *target* coordinate (``depth_dim`` = the ROMS
+    ``s_rho`` dimension); the inputs differ (BGC's own T/S for the source, the model's
+    T/S for the target), but the construction is identical.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        Temperature (°C) on the grid whose density coordinate is wanted.
+    salt : xr.DataArray
+        Practical salinity (PSU) on the same grid.
+    depth_dim : str
+        Name of the vertical dimension along which the coordinate must be monotonic.
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 plus monotonicity perturbation, single-
+        chunked along ``depth_dim``.
+    """
+    density = compute_potential_density(temp, salt)
+    n_depth = density.sizes[depth_dim]
+    density = density + xr.DataArray(np.arange(n_depth) * 1e-7, dims=[depth_dim])
+    # xgcm.transform requires a single chunk along the dim being transformed.
+    return density.chunk({depth_dim: -1})
+
+
+# Available BGC vertical-interpolation methods (selected via
+# ``bgc_interpolation_method`` on ``InitialConditions``/``BoundaryForcing``):
+#   "depth"       — linear interpolation in depth (the conservative default).
+#   "density"     — linear interpolation in potential-density (isopycnal) space.
+#   "density_mld" — linear interpolation in depth within two segments split at the
+#                   mixed layer depth (MLD), with the MLD matched between source and
+#                   target. Avoids the surface degeneracy of pure density space.
+# Mixed-layer-depth detection defaults (density-threshold criterion, de Boyer
+# Montégut et al. 2004): the MLD is the depth at which potential density first exceeds
+# the value at ``MLD_REFERENCE_DEPTH`` by ``MLD_DENSITY_THRESHOLD``.
+MLD_DENSITY_THRESHOLD = 0.03  # kg/m^3
+MLD_REFERENCE_DEPTH = 10.0  # m
+
+
+def compute_mld(
+    sigma0: "xr.DataArray",
+    depth: "xr.DataArray",
+    depth_dim: str,
+    reference_depth: float = MLD_REFERENCE_DEPTH,
+    threshold: float = MLD_DENSITY_THRESHOLD,
+) -> "xr.DataArray":
+    """Compute the mixed layer depth (MLD) from a potential-density field.
+
+    Density-threshold criterion (de Boyer Montégut et al. 2004): the MLD is the
+    (positive) depth at which sigma-0 first exceeds its value at ``reference_depth`` by
+    ``threshold`` kg/m³, found by linear interpolation to the crossing. Fully mixed
+    columns (no crossing) return the full water-column depth; all-NaN (land) columns
+    return NaN. Works per horizontal column, so both 1D and spatially varying (3D)
+    ``depth`` coordinates and either vertical orientation (surface-first or
+    surface-last) are supported.
+
+    The crossing is found with ``xgcm.transform`` — the same engine as xroms'
+    ``mld``/``isoslice`` (so results are consistent with xroms; pass
+    ``reference_depth=0`` for the surface-referenced xroms convention). Like all
+    ``xgcm`` linear transforms it assumes a monotonic profile and does an endpoint
+    flip rather than a full sort, so for a non-monotonic upper-ocean profile (a density
+    inversion / barrier layer) it returns the linear-search crossing rather than
+    guaranteeing the shallowest one.
+
+    Parameters
+    ----------
+    sigma0 : xr.DataArray
+        Potential density anomaly (e.g. from :func:`compute_potential_density`) with
+        vertical dimension ``depth_dim``.
+    depth : xr.DataArray
+        Positive-down depth (m) aligned with ``sigma0`` along ``depth_dim``. May be
+        1D (broadcast over the horizontal) or share ``sigma0``'s horizontal dims.
+    depth_dim : str
+        Name of the vertical dimension.
+    reference_depth : float, optional
+        Depth (m) at which the reference density is taken. Default 10 m (de Boyer
+        Montégut). Columns shallower than ``reference_depth`` fall back to the
+        shallowest level. Pass 0 for the surface-referenced xroms convention.
+    threshold : float, optional
+        Density excess (kg/m³) defining the base of the mixed layer. Default 0.03.
+
+    Returns
+    -------
+    xr.DataArray
+        MLD as positive depth (m), with ``depth_dim`` removed.
+
+    References
+    ----------
+    de Boyer Montégut, C., Madec, G., Fischer, A. S., Lazar, A., & Iudicone, D. (2004).
+    Mixed layer depth over the global ocean. J. Geophys. Res. Oceans, 109(C12).
+    See also xroms ``roms_seawater.mld`` and the NCL ``mixed_layer_depth`` routine.
+    """
+    absz = np.abs(depth).broadcast_like(sigma0)
+    if sigma0.chunks is not None:
+        sigma0 = sigma0.chunk({depth_dim: -1})
+        absz = absz.chunk({depth_dim: -1})
+
+    grid = xgcm.Grid(
+        sigma0.to_dataset(name="sigma0"),
+        coords={depth_dim: {"center": depth_dim}},
+        padding="fill",
+        autoparse_metadata=False,
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
+        # Reference density: sigma-0 interpolated to ``reference_depth`` (NaN where the
+        # column does not span it), with a shallowest-level fallback for shallow columns.
+        sig_ref = grid.transform(
+            sigma0,
+            depth_dim,
+            target=np.array([float(reference_depth)]),
+            target_data=absz.rename("zref"),
+            method="linear",
+        ).isel(zref=0, drop=True)
+        surface = sigma0.where(absz == absz.min(depth_dim)).max(depth_dim)
+        sig_ref = sig_ref.where(sig_ref.notnull(), surface)
+
+        # MLD: the depth at which (sigma0 - sig_ref) crosses ``threshold``.
+        iso = (sigma0 - sig_ref).rename("iso")
+        mld = grid.transform(
+            absz,
+            depth_dim,
+            target=np.array([float(threshold)]),
+            target_data=iso,
+            method="linear",
+        ).isel(iso=0, drop=True)
+
+    # No crossing (fully mixed) -> full water-column depth; land (all-NaN) -> NaN.
+    bottom = absz.where(sigma0.notnull()).max(depth_dim)
+    mld = mld.where(mld.notnull(), bottom)
+    mld = mld.where(~sigma0.isnull().all(depth_dim))
+    mld = np.abs(mld)
+    mld.name = "mld"
+    mld.attrs["long_name"] = "mixed layer depth"
+    mld.attrs["units"] = "m"
+    return mld
+
+
+def _compute_mld_warp(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth: "xr.DataArray",
+    depth_dim: str,
+    target_mld: "xr.DataArray",
+    target_H: "xr.DataArray | None" = None,
+    reference_depth: float = MLD_REFERENCE_DEPTH,
+    threshold: float = MLD_DENSITY_THRESHOLD,
+) -> "xr.DataArray":
+    """Build the warped *source* depth coordinate for MLD-anchored interpolation.
+
+    Maps each source depth into the target's depth space so that the source mixed
+    layer depth aligns with the target's:
+
+    - mixed layer ``[surface, MLD_src]`` maps to ``[surface, MLD_tgt]`` (scaled so the
+      source MLD lands on the target MLD), and
+    - below the MLD the map is **1:1 in depth** (``d_warp = MLD_tgt + (|z| - MLD_src)``),
+      preserving the *absolute* depth of sub-mixed-layer features below the MLD.
+
+    Paired in :func:`build_bgc_vertical_coords` with the *real* target depth, this makes
+    ``VerticalRegrid.apply`` interpolate linearly in depth within each segment with the
+    MLD matched. The 1:1 lower segment (rather than stretching the source bottom onto
+    the target bottom) is deliberate: when the target is much shallower than the source
+    it would otherwise compress the entire deep source column into the thin target
+    layer. With 1:1, source water below the target floor is simply edge-clamped/unused.
+
+    Columns lacking a resolved mixed layer — fully mixed source, fully mixed target,
+    NaN MLD, or a degenerate (≈0) source/target MLD — fall back to the identity map
+    (``d_warp = |z|``), i.e. plain depth interpolation for that column. Because
+    ``xgcm.transform`` is per-column independent, stratified and degenerate columns
+    coexist in one call.
+
+    Returns the warped depth plus the same monotonicity perturbation as
+    :func:`_compute_density_coord`, single-chunked along ``depth_dim``.
+    """
+    # ``depth`` is assumed ordered shallow->deep along ``depth_dim`` (surface first),
+    # as for BGC source depth levels; the warp is then co-monotonic with the index-based
+    # perturbation below (same orientation convention as ``_compute_density_coord``).
+    sigma0 = compute_potential_density(temp, salt)
+    absz = np.abs(depth)
+    mld_src = compute_mld(
+        sigma0, depth, depth_dim, reference_depth=reference_depth, threshold=threshold
+    )
+    H_src = absz.where(sigma0.notnull()).max(depth_dim)
+
+    # A resolved mixed layer on both sides is required for a strictly monotonic warp;
+    # otherwise fall back to the identity (depth) map. A fully mixed source has
+    # mld_src == H_src; a fully mixed target has target_mld == target_H.
+    eps = 1e-6
+    can_warp = (
+        (H_src - mld_src > eps)
+        & (mld_src > eps)
+        & (target_mld > eps)
+        & mld_src.notnull()
+        & target_mld.notnull()
+    )
+    if target_H is not None:
+        can_warp = can_warp & (
+            target_H - target_mld > eps
+        )  # fully-mixed target -> identity
+
+    ml = absz <= mld_src
+    warp_mixed = absz * (target_mld / mld_src)
+    warp_below = target_mld + (absz - mld_src)  # 1:1 in depth below the MLD
+    warped = xr.where(ml, warp_mixed, warp_below)
+    d_warp = xr.where(can_warp, warped, absz)
+
+    n_depth = d_warp.sizes[depth_dim]
+    d_warp = d_warp + xr.DataArray(np.arange(n_depth) * 1e-7, dims=[depth_dim])
+    return d_warp.chunk({depth_dim: -1})
+
+
+def build_bgc_vertical_coords(
+    method: str,
+    *,
+    source_temp: "xr.DataArray",
+    source_salt: "xr.DataArray",
+    source_depth: "xr.DataArray",
+    source_depth_dim: str,
+    target_temp: "xr.DataArray",
+    target_salt: "xr.DataArray",
+    target_depth: "xr.DataArray",
+    target_depth_dim: str,
+) -> "tuple[xr.DataArray, xr.DataArray]":
+    """Build the ``(source, target)`` vertical coordinate pair fed to
+    ``VerticalRegrid.apply`` for non-depth BGC interpolation.
+
+    For ``"density"`` both coordinates are potential-density coordinates (the depth
+    arguments are unused). For ``"density_mld"`` the source is a warped depth that
+    aligns the source MLD with the target MLD and the target is its real depth, so the
+    transform interpolates linearly in depth within the two MLD segments.
+    """
+    if method == BgcInterpMethod.density:
+        return (
+            _compute_density_coord(source_temp, source_salt, source_depth_dim),
+            _compute_density_coord(target_temp, target_salt, target_depth_dim),
+        )
+    if method == BgcInterpMethod.density_mld:
+        target_sigma0 = compute_potential_density(target_temp, target_salt)
+        target_mld = compute_mld(target_sigma0, target_depth, target_depth_dim)
+        target_H = (
+            np.abs(target_depth).where(target_sigma0.notnull()).max(target_depth_dim)
+        )
+        source_coord = _compute_mld_warp(
+            source_temp,
+            source_salt,
+            source_depth,
+            source_depth_dim,
+            target_mld,
+            target_H=target_H,
+        )
+        target_coord = np.abs(target_depth).chunk({target_depth_dim: -1})
+        return source_coord, target_coord
+    raise ValueError(
+        f"Unknown BGC interpolation method {method!r}; "
+        f"expected one of {BGC_INTERPOLATION_METHODS}."
+    )
+
+
 def compute_missing_surface_bgc_variables(bgc_data):
     """Fills in missing surface biogeochemical (BGC) variables in the input dictionary.
 
@@ -538,6 +1157,47 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
+# Canonical ROMS-MARBL tracer list for river forcing and related setup code.
+# Defined here (not in river_datasets) so RiverForcing, BGC dataset classes, and
+# tracer metadata share one schema without circular imports between setup and datasets.
+MARBL_TRACER_NAMES = (
+    "temp",
+    "salt",
+    "PO4",
+    "NO3",
+    "SiO3",
+    "NH4",
+    "Fe",
+    "Lig",
+    "O2",
+    "DIC",
+    "DIC_ALT_CO2",
+    "ALK",
+    "ALK_ALT_CO2",
+    "DOC",
+    "DON",
+    "DOP",
+    "DOPr",
+    "DONr",
+    "DOCr",
+    "zooC",
+    "spChl",
+    "spC",
+    "spP",
+    "spFe",
+    "spCaCO3",
+    "diatChl",
+    "diatC",
+    "diatP",
+    "diatFe",
+    "diatSi",
+    "diazChl",
+    "diazC",
+    "diazP",
+    "diazFe",
+)
+
+
 def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
@@ -563,42 +1223,7 @@ def get_tracer_metadata_dict(
         containing 'units' and 'long_name' for each tracer.
     """
     if include_bgc:
-        tracer_names = [
-            "temp",
-            "salt",
-            "PO4",
-            "NO3",
-            "SiO3",
-            "NH4",
-            "Fe",
-            "Lig",
-            "O2",
-            "DIC",
-            "DIC_ALT_CO2",
-            "ALK",
-            "ALK_ALT_CO2",
-            "DOC",
-            "DON",
-            "DOP",
-            "DOPr",
-            "DONr",
-            "DOCr",
-            "zooC",
-            "spChl",
-            "spC",
-            "spP",
-            "spFe",
-            "spCaCO3",
-            "diatChl",
-            "diatC",
-            "diatP",
-            "diatFe",
-            "diatSi",
-            "diazChl",
-            "diazC",
-            "diazP",
-            "diazFe",
-        ]
+        tracer_names = list(MARBL_TRACER_NAMES)
     else:
         tracer_names = ["temp", "salt"]
 
@@ -672,52 +1297,37 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
 
 
 def get_tracer_defaults() -> dict[str, float]:
-    """Returns constant default tracer concentrations for ROMS-MARBL.
+    """Return constant default tracer concentrations for ROMS-MARBL.
 
-    These values represent typical physical and biogeochemical tracer levels
-    (e.g., temperature, salinity, nutrients, carbon) in freshwater.
+    Values are read from ``river_tracer_defaults.nc`` (recommended values at
+    ``value_option`` index 0) from the roms-tools-data repository.
+
+    This accessor lives in ``setup.utils`` rather than ``river_datasets`` so
+    ``RiverForcing``, fill sources, and other setup code can reuse the same
+    defaults without pulling in dataset implementations at import time. The
+    dataset class is loaded lazily in :func:`_load_tracer_defaults` to avoid a
+    circular import: ``river_datasets`` imports :data:`MARBL_TRACER_NAMES` from
+    here for schema validation.
 
     Returns
     -------
     dict
-        Dictionary of tracer names and their default concentrations
+        Dictionary of tracer names and their default concentrations.
     """
-    return {
-        "temp": 17.0,  # degrees C
-        "salt": 1.0,  # psu
-        "PO4": 2.7,  # mmol m-3
-        "NO3": 24.2,  # mmol m-3
-        "SiO3": 13.2,  # mmol m-3
-        "NH4": 2.2,  # mmol m-3
-        "Fe": 1.79,  # mmol m-3
-        "Lig": 3 * 1.79,  # mmol m-3, inferred from Fe
-        "O2": 187.5,  # mmol m-3
-        "DIC": 2370.0,  # mmol m-3
-        "DIC_ALT_CO2": 2370.0,  # mmol m-3
-        "ALK": 2310.0,  # meq m-3
-        "ALK_ALT_CO2": 2310.0,  # meq m-3
-        "DOC": 1e-4,  # mmol m-3
-        "DON": 1.0,  # mmol m-3
-        "DOP": 0.1,  # mmol m-3
-        "DOPr": 0.003,  # mmol m-3
-        "DONr": 0.8,  # mmol m-3
-        "DOCr": 1e-6,  # mmol m-3
-        "zooC": 2.7,  # mmol m-3
-        "spChl": 1.35,  # mg m-3
-        "spC": 6.75,  # mmol m-3
-        "spP": 1.5 * 0.03,  # mmol m-3, inferred from ?
-        "spFe": 2.7e-5,  # mmol m-3
-        "spCaCO3": 0.135,  # mmol m-3
-        "diatChl": 0.135,  # mg m-3
-        "diatC": 0.405,  # mmol m-3
-        "diatP": 1.5 * 0.02,  # mmol m-3, inferred from ?
-        "diatFe": 2.7e-6,  # mmol m-3
-        "diatSi": 0.135,  # mmol m-3
-        "diazChl": 0.015,  # mg m-3
-        "diazC": 0.075,  # mmol m-3
-        "diazP": 1.5 * 0.01,  # mmol m-3, inferred from ?
-        "diazFe": 1.5e-6,  # mmol m-3
-    }
+    return _load_tracer_defaults()
+
+
+@lru_cache(maxsize=1)
+def _load_tracer_defaults() -> dict[str, float]:
+    """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
+
+    ``RiverTracerDefaultsDataset`` is imported inside this function so
+    ``river_datasets`` can import :data:`MARBL_TRACER_NAMES` from this module
+    without a circular dependency at module load time.
+    """
+    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
+
+    return RiverTracerDefaultsDataset().defaults
 
 
 def extract_single_value(data):
@@ -1126,6 +1736,142 @@ def _gc_dist_radians(lon1, lat1, lon2, lat2):
     return dis
 
 
+# --- cKDTree-based spatial lookup helpers ---
+def latlon_to_xyz(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Convert lat/lon coordinates (degrees) to unit-sphere XYZ vectors.
+
+    Used to prepare query and candidate points for cKDTree distance queries,
+    where chord distance on the unit sphere approximates great-circle distance.
+
+    Parameters
+    ----------
+    lat : np.ndarray
+        Latitudes in degrees.
+    lon : np.ndarray
+        Longitudes in degrees.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(N, 3)`` with unit-sphere XYZ coordinates, one row
+        per input point.
+    """
+    lat_r = np.deg2rad(lat)
+    lon_r = np.deg2rad(lon)
+    return np.column_stack(
+        [np.cos(lat_r) * np.cos(lon_r), np.cos(lat_r) * np.sin(lon_r), np.sin(lat_r)]
+    )
+
+
+def find_coastal_cells(mask: np.ndarray) -> np.ndarray:
+    """Identify coastal grid cells using a 4-neighbor convolution.
+
+    A coastal cell is defined as a land cell (mask=0) that is adjacent to
+    at least one ocean cell (mask=1) in the N/S/E/W directions.
+
+    The 4-neighbor kernel counts how many of the cardinal neighbors are ocean.
+    Convolving with this kernel over the mask gives, for each cell, the number
+    of ocean neighbors. Land cells with at least one ocean neighbor are coastal.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2D array of shape (eta_rho, xi_rho) where 1=ocean and 0=land.
+
+    Returns
+    -------
+    np.ndarray
+        2D boolean array of the same shape, True where cells are coastal.
+    """
+    from scipy.ndimage import convolve
+
+    kernel = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
+    faces = convolve(mask, kernel, mode="constant", cval=0.0)
+    return (1 - mask) * (faces > 0)
+
+
+def build_kdtree_from_latlon(lat, lon):
+    """Build a cKDTree on the unit sphere from lat/lon arrays."""
+    return cKDTree(latlon_to_xyz(lat, lon))
+
+
+def query_kdtree_nearest(
+    tree,
+    query_lat,
+    query_lon,
+    cand_eta,
+    cand_xi,
+    *,
+    warn_dist_km=100.0,
+    labels=None,
+    workers=-1,
+):
+    """Query a cKDTree for the nearest candidate grid cell to each query point.
+
+    For each query point (river mouth), finds the nearest candidate grid cell
+    (e.g. coastal cell) using Euclidean distance on the unit sphere, which
+    approximates great-circle distance. Emits a warning if the nearest cell
+    is farther than ``warn_dist_km``.
+
+    Parameters
+    ----------
+    tree : cKDTree
+        Tree built from candidate grid cell XYZ coordinates, e.g. via
+        ``build_kdtree_from_latlon``.
+    query_lat : array-like
+        Latitudes of query points (river mouths) in degrees.
+    query_lon : array-like
+        Longitudes of query points (river mouths) in degrees.
+    cand_eta : np.ndarray
+        Eta (row) indices of the candidate grid cells.
+    cand_xi : np.ndarray
+        Xi (column) indices of the candidate grid cells.
+    warn_dist_km : float, optional
+        Distance threshold in km beyond which a warning is logged. Default 100 km.
+    labels : list[str], optional
+        River names for use in warning messages. If None, points are labelled
+        by index.
+    workers : int, optional
+        Number of parallel workers for the tree query. Default -1 (all CPUs).
+
+    Returns
+    -------
+    eta_out : np.ndarray
+        Eta indices of the nearest candidate cell for each query point.
+    xi_out : np.ndarray
+        Xi indices of the nearest candidate cell for each query point.
+    distances_km : np.ndarray
+        Great-circle distances in km from each query point to its nearest cell.
+    """
+    distances, nearest_idx = tree.query(
+        latlon_to_xyz(query_lat, query_lon), workers=workers
+    )
+    distances_km = 2 * 6371.0 * np.arcsin(np.clip(distances / 2, 0, 1))
+    eta_out = cand_eta[nearest_idx]
+    xi_out = cand_xi[nearest_idx]
+
+    warn_count = 0
+    for i in range(len(distances_km)):
+        if distances_km[i] > warn_dist_km:
+            label = labels[i] if labels is not None else f"point {i}"
+            if warn_count < 20:
+                logging.warning(
+                    "River '%s' is %.1f km from nearest coastal cell (%d, %d). "
+                    "Check river mouth location.",
+                    label,
+                    distances_km[i],
+                    int(eta_out[i]),
+                    int(xi_out[i]),
+                )
+            elif warn_count == 20:
+                logging.warning(
+                    "Further distance warnings suppressed (>20 rivers exceed %.1f km threshold).",
+                    warn_dist_km,
+                )
+            warn_count += 1
+    return eta_out, xi_out, distances_km
+
+
 @nb.njit(
     [
         nb.float64[:, :](
@@ -1391,7 +2137,9 @@ def deserialize_datetime(
     return value
 
 
-def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+def serialize_source_dict(
+    src: dict[str, Any] | BaseModel | None,
+) -> dict[str, Any] | None:
     """Serialize a source or BGC source dictionary for YAML or JSON output.
 
     This function performs the following transformations:
@@ -1417,7 +2165,10 @@ def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
     if src is None:
         return None
 
-    src = deepcopy(src)
+    if isinstance(src, BaseModel):
+        src = src.model_dump(mode="python")
+    else:
+        src = deepcopy(src)
 
     # Serialize paths
     if "path" in src:
@@ -1507,7 +2258,7 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
         Serialized representation of the forcing object.
     """
     exclude_list = exclude or []
-    exclude_set: set[str] = {"grid", "parent_grid", "ds", *exclude_list}
+    exclude_set: set[str] = {"grid", "parent_grid", "ds", "_bgc_dataset", *exclude_list}
 
     # --- Serialize top-level grid(s) ---
     yaml_data = {}
@@ -1597,6 +2348,17 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
             f"No {forcing_object_name} configuration found in the YAML file."
         )
 
+    return deserialize_forcing_data(forcing_data)
+
+
+def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
+    """Restore datetimes, paths, and source/bgc_source dicts in a forcing-data block.
+
+    Converts ISO date strings to ``datetime`` objects, path-like strings back to
+    ``Path`` objects, and ``source``/``bgc_source`` nested dictionaries back to their
+    proper form. Used for both the top-level forcing block and nested forcing blocks
+    (e.g. an embedded ``physics_forcing``).
+    """
     # Convert ISO date strings to datetime objects
     for key, value in forcing_data.items():
         forcing_data[key] = deserialize_datetime(value)

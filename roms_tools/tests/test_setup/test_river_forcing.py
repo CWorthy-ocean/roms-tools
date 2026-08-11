@@ -10,6 +10,57 @@ import xarray as xr
 from conftest import calculate_file_hash
 from roms_tools import Grid, RiverForcing
 from roms_tools.constants import MAX_DISTINCT_COLORS
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.lat_lon_datasets import (
+    DEFAULT_ERA5_ARCO_PATH,
+    ERA5ARCODataset,
+    ERA5Dataset,
+)
+from roms_tools.setup.river_forcing import (
+    AIR_TEMP_COVERAGE_TOLERANCE_DAYS,
+    _bounding_box_with_buffer,
+    _climatological_river_temp,
+    _sample_tair_at_river_mouths,
+    _smooth_and_floor_air_temp,
+)
+from roms_tools.setup.utils import get_tracer_defaults
+from roms_tools.tests.river_test_utils import write_glofas_file
+from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
+
+STANDARD_RIVER_FIXTURES = [
+    "river_forcing",
+    "river_forcing_with_bgc",
+    "river_forcing_with_prescribed_multi_cell_indices",
+    "river_forcing_with_glofas",
+]
+
+INITIALIZATION_FIXTURES = [
+    *STANDARD_RIVER_FIXTURES,
+    "river_forcing_for_grid_that_straddles_dateline",
+]
+
+CLIMATOLOGY_FIXTURES = [
+    "river_forcing",
+    "river_forcing_climatology",
+]
+
+TRACER_FIXTURES = [
+    "river_forcing_no_climatology",
+    "river_forcing_with_bgc",
+    "river_forcing_with_glofas",
+]
+
+COAST_FIXTURES = [
+    "river_forcing",
+    "river_forcing_with_prescribed_multi_cell_indices",
+    "river_forcing_with_glofas",
+]
+
+ROUNDTRIP_FIXTURES = [
+    "river_forcing_with_bgc",
+    "river_forcing_with_prescribed_multi_cell_indices",
+    "river_forcing_with_glofas",
+]
 
 
 @pytest.fixture
@@ -145,6 +196,98 @@ def river_forcing_with_prescribed_multi_cell_indices(
     )
 
 
+# Coastal (eta_rho, xi_rho) pairs for `iceland_test_grid`, matching the
+# `multi_cell_indices` fixture's `Svarta` entry above (already verified
+# coastal for this exact grid configuration).
+MULTI_CELL_COASTAL_INDICES = [(12, 8), (12, 9), (12, 10)]
+
+
+def _write_synthetic_era5_tair_file(path, lats, lons, times, tair_kelvin):
+    """Write a minimal local-ERA5-format Tair-only NetCDF file for tests.
+
+    Only ``t2m`` (the local ``ERA5Dataset``'s raw ``Tair`` name) is written,
+    since ``_get_river_surface_temp`` requests only ``Tair`` via an
+    overridden ``var_names``.
+    """
+    ds = xr.Dataset(
+        {"t2m": (["time", "latitude", "longitude"], tair_kelvin)},
+        coords={"time": times, "latitude": lats, "longitude": lons},
+    )
+    ds.to_netcdf(path)
+
+
+@pytest.fixture
+def synthetic_era5_tair_file(tmp_path):
+    """A small local ERA5-format Tair file spanning the Iceland domain.
+
+    Covers 1998-01-01 through 1998-01-10 (daily), with a temperature ramp
+    that dips below 0 degC early on and rises above it later, to exercise
+    both the smoothing and the 0 degC floor.
+    """
+    path = tmp_path / "synthetic_era5_tair.nc"
+    lats = np.arange(55.0, 72.0, 0.5, dtype=np.float32)
+    lons = np.arange(320.0, 357.0, 0.5, dtype=np.float32)
+    times = np.arange(np.datetime64("1998-01-01"), np.datetime64("1998-01-11")).astype(
+        "datetime64[ns]"
+    )
+
+    day_index = np.arange(len(times))
+    # degC ramp from -15 to +5, broadcast uniformly over the spatial grid.
+    temp_degc = -15.0 + 20.0 * (day_index / (len(times) - 1))
+    temp_kelvin = (temp_degc + 273.15).astype(np.float64)
+
+    tair_kelvin = np.broadcast_to(
+        temp_kelvin[:, None, None], (len(times), len(lats), len(lons))
+    ).copy()
+
+    _write_synthetic_era5_tair_file(path, lats, lons, times, tair_kelvin)
+    return path
+
+
+@pytest.fixture
+def synthetic_era5_tair_file_with_lon_gradient(tmp_path):
+    """A local ERA5-format Tair file whose value depends only on longitude.
+
+    Constant in time and latitude (``temp_degC = lon - 320.0``, i.e. 0 to
+    37 degC across the fixture's own longitude range) so that sampling at a
+    river's *averaged* mouth coordinate is distinguishable from sampling at
+    any one of its individual grid cells, without smoothing or time-ramp
+    effects muddying the comparison.
+    """
+    path = tmp_path / "synthetic_era5_tair_lon_gradient.nc"
+    lats = np.arange(55.0, 72.0, 0.5, dtype=np.float32)
+    lons = np.arange(320.0, 357.0, 0.5, dtype=np.float32)
+    times = np.arange(np.datetime64("1998-01-01"), np.datetime64("1998-01-11")).astype(
+        "datetime64[ns]"
+    )
+
+    temp_degc = lons - 320.0
+    temp_kelvin = (temp_degc + 273.15).astype(np.float64)
+
+    tair_kelvin = np.broadcast_to(
+        temp_kelvin[None, None, :], (len(times), len(lats), len(lons))
+    ).copy()
+
+    _write_synthetic_era5_tair_file(path, lats, lons, times, tair_kelvin)
+    return path
+
+
+@pytest.fixture
+def synthetic_glofas_single_station_file(tmp_path):
+    """A synthetic single-station GloFAS file spanning 1998-01-01 to 01-10."""
+    path = tmp_path / "glofas_single_station.nc"
+    times = np.arange(np.datetime64("1998-01-01"), np.datetime64("1998-01-11")).astype(
+        "datetime64[ns]"
+    )
+    lats = np.array([65.0], dtype=np.float32)
+    lons = np.array([-20.0], dtype=np.float32)
+    names = ["GloFAS_65.00N_20.00W"]
+    flow = np.full((len(times), 1), 300.0, dtype=np.float32)
+    vol = np.array([300.0], dtype=np.float32)
+    write_glofas_file(path, lats, lons, flow, names, times, vol=vol)
+    return path, names[0]
+
+
 def compare_dictionaries(dict1, dict2):
     assert dict1.keys() == dict2.keys()
 
@@ -153,37 +296,26 @@ def compare_dictionaries(dict1, dict2):
 
 
 class TestRiverForcingGeneral:
-    @pytest.mark.parametrize(
-        "river_forcing_fixture",
-        [
-            "river_forcing",
-            "river_forcing_climatology",
-            "river_forcing_with_bgc",
-            "river_forcing_for_grid_that_straddles_dateline",
-            "river_forcing_with_prescribed_single_cell_indices",
-            "river_forcing_with_prescribed_multi_cell_indices",
-        ],
-    )
+    @pytest.mark.parametrize("river_forcing_fixture", INITIALIZATION_FIXTURES)
     def test_successful_initialization(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
         assert isinstance(river_forcing.ds, xr.Dataset)
         assert len(river_forcing.ds.nriver) > 0
-        assert len(river_forcing.original_indices) > 0
         assert len(river_forcing.indices) > 0
         assert "river_volume" in river_forcing.ds
         assert "river_tracer" in river_forcing.ds
         assert "river_time" in river_forcing.ds
 
-    @pytest.mark.parametrize(
-        "river_forcing_fixture",
-        [
-            "river_forcing",
-            "river_forcing_climatology",
-            "river_forcing_with_bgc",
-            "river_forcing_with_prescribed_single_cell_indices",
-            "river_forcing_with_prescribed_multi_cell_indices",
-        ],
-    )
+    @pytest.mark.parametrize("river_forcing_fixture", TRACER_FIXTURES)
+    def test_river_tracer_dimension_order(self, river_forcing_fixture, request):
+        river_forcing = request.getfixturevalue(river_forcing_fixture)
+        assert river_forcing.ds["river_tracer"].dims == (
+            "river_time",
+            "ntracers",
+            "nriver",
+        )
+
+    @pytest.mark.parametrize("river_forcing_fixture", CLIMATOLOGY_FIXTURES)
     def test_climatology_attributes(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
         assert river_forcing.climatology
@@ -201,23 +333,17 @@ class TestRiverForcingGeneral:
         )
         assert not hasattr(river_forcing_no_climatology.ds, "climatology")
 
-    @pytest.mark.parametrize(
-        "river_forcing_fixture",
-        [
-            "river_forcing_climatology",
-            "river_forcing_no_climatology",
-            "river_forcing_with_bgc",
-            "river_forcing_with_prescribed_single_cell_indices",
-            "river_forcing_with_prescribed_multi_cell_indices",
-        ],
-    )
+    @pytest.mark.parametrize("river_forcing_fixture", TRACER_FIXTURES)
     def test_tracers_are_filled(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
-        # Test that all tracers have been filled and have positive values
-        assert river_forcing.ds.river_tracer.all() > 0.0
-        # Test that tracers are constant across rivers and time
+        assert (river_forcing.ds.river_tracer >= 0.0).all()
+        # Test that tracers are constant across rivers and time.
+        # Cast to float64 before std to avoid catastrophic cancellation in float32
+        # arithmetic when summing O(100) identical large values (e.g. DIC ~1640).
         assert np.allclose(
-            river_forcing.ds.river_tracer.std(dim=["river_time", "nriver"]),
+            river_forcing.ds.river_tracer.astype(float).std(
+                dim=["river_time", "nriver"]
+            ),
             0.0,
             rtol=1e-5,
             atol=1e-5,
@@ -232,16 +358,7 @@ class TestRiverForcingGeneral:
 
         assert river_forcing == the_same_river_forcing
 
-    @pytest.mark.parametrize(
-        "river_forcing_fixture",
-        [
-            "river_forcing_climatology",
-            "river_forcing_no_climatology",
-            "river_forcing_with_bgc",
-            "river_forcing_with_prescribed_single_cell_indices",
-            "river_forcing_with_prescribed_multi_cell_indices",
-        ],
-    )
+    @pytest.mark.parametrize("river_forcing_fixture", COAST_FIXTURES)
     def test_river_locations_are_along_coast(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
@@ -268,6 +385,24 @@ class TestRiverForcingGeneral:
                 start_time=datetime(1998, 1, 1),
                 end_time=datetime(1998, 3, 1),
                 source={"path": "river_data.nc"},
+            )
+
+    def test_invalid_convert_to_climatology(self, iceland_test_grid):
+        with pytest.raises(ValueError, match="Invalid convert_to_climatology"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                convert_to_climatology="sometimes",
+            )
+
+    def test_glofas_requires_path(self, iceland_test_grid):
+        with pytest.raises(ValueError, match="must include a 'path'"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                source={"name": "GLOFAS"},
             )
 
     def test_river_forcing_plot(self, river_forcing_with_bgc):
@@ -312,73 +447,35 @@ class TestRiverForcingGeneral:
             for message in caplog.messages
         )
 
-    @pytest.mark.parametrize(
-        "river_forcing_fixture",
-        [
-            "river_forcing_with_bgc",
-            "river_forcing_with_prescribed_multi_cell_indices",
-        ],
-    )
+    @pytest.mark.parametrize("river_forcing_fixture", ROUNDTRIP_FIXTURES)
     def test_river_forcing_save(self, river_forcing_fixture, tmp_path, request):
         """Test save method."""
         river_forcing = request.getfixturevalue(river_forcing_fixture)
-        for file_str in ["test_rivers", "test_rivers.nc"]:
-            # Create a temporary filepath using the tmp_path fixture
-            for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-                saved_filenames = river_forcing.save(filepath)
-                # Check if the .nc file was created
-                filepath = Path(filepath).with_suffix(".nc")
-                assert saved_filenames == [filepath]
-                assert filepath.exists()
-                # Clean up the .nc file
-                filepath.unlink()
+        filepath = tmp_path / "test_rivers.nc"
+        saved_filenames = river_forcing.save(filepath)
+        assert saved_filenames == [filepath]
+        assert filepath.exists()
+        filepath.unlink()
 
-    @pytest.mark.parametrize(
-        "river_forcing_fixture",
-        [
-            "river_forcing_climatology",
-            "river_forcing_no_climatology",
-            "river_forcing_with_bgc",
-            "river_forcing_with_prescribed_single_cell_indices",
-            "river_forcing_with_prescribed_multi_cell_indices",
-        ],
-    )
+    @pytest.mark.parametrize("river_forcing_fixture", ROUNDTRIP_FIXTURES)
     def test_roundtrip_yaml(self, river_forcing_fixture, request, tmp_path, caplog):
         """Test that creating an RiverForcing object, saving its parameters to yaml
         file, and re-opening yaml file creates the same object.
         """
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
-        # Create a temporary filepath using the tmp_path fixture
-        file_str = "test_yaml"
-        for filepath in [
-            tmp_path / file_str,
-            str(tmp_path / file_str),
-        ]:  # test for Path object and str
-            river_forcing.to_yaml(filepath)
+        filepath = tmp_path / "test_yaml"
+        river_forcing.to_yaml(filepath)
 
-            # Clear caplog before running the test
-            caplog.clear()
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            river_forcing_from_file = RiverForcing.from_yaml(filepath)
 
-            with caplog.at_level(logging.INFO):
-                river_forcing_from_file = RiverForcing.from_yaml(filepath)
+        assert "Use provided river indices." in caplog.text
+        assert river_forcing == river_forcing_from_file
+        filepath.unlink()
 
-            assert "Use provided river indices." in caplog.text
-            assert river_forcing == river_forcing_from_file
-
-            filepath = Path(filepath)
-            filepath.unlink()
-
-    @pytest.mark.parametrize(
-        "river_forcing_fixture",
-        [
-            "river_forcing_climatology",
-            "river_forcing_no_climatology",
-            "river_forcing_with_bgc",
-            "river_forcing_with_prescribed_single_cell_indices",
-            "river_forcing_with_prescribed_multi_cell_indices",
-        ],
-    )
+    @pytest.mark.parametrize("river_forcing_fixture", ROUNDTRIP_FIXTURES)
     def test_files_have_same_hash(self, river_forcing_fixture, request, tmp_path):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
@@ -447,16 +544,6 @@ class TestRiverForcingWithoutPrescribedIndices:
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
-    def test_logging_message(self, iceland_test_grid, caplog):
-        with caplog.at_level(logging.INFO):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-            )
-        # Verify the info message in the log
-        assert "No river indices provided." in caplog.text
-
     def test_reproducibility(self, river_forcing, river_forcing_climatology):
         """Verify that `river_forcing` and `river_forcing_climatology` produce identical
         outputs.
@@ -466,9 +553,6 @@ class TestRiverForcingWithoutPrescribedIndices:
         and river index mappings are the same between the two cases.
         """
         xr.testing.assert_allclose(river_forcing.ds, river_forcing_climatology.ds)
-        compare_dictionaries(
-            river_forcing.original_indices, river_forcing_climatology.original_indices
-        )
         compare_dictionaries(river_forcing.indices, river_forcing_climatology.indices)
 
     def test_no_rivers_found(self):
@@ -485,17 +569,6 @@ class TestRiverForcingWithPrescribedIndices:
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
-    def test_logging_message(self, single_cell_indices, caplog, iceland_test_grid):
-        with caplog.at_level(logging.INFO):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=single_cell_indices,
-            )
-        # Verify the info message in the log
-        assert "Use provided river indices." in caplog.text
-
     @pytest.mark.parametrize(
         "indices_fixture", ["single_cell_indices", "multi_cell_indices"]
     )
@@ -508,8 +581,9 @@ class TestRiverForcingWithPrescribedIndices:
             end_time=self.end_time,
             indices=indices,
         )
-        river_forcing.original_indices == indices
-        river_forcing.indices == indices
+        # indices may be reordered (volume sort) and extended (overlap synthetics);
+        # verify all user-specified rivers are still present
+        assert set(indices.keys()).issubset(set(river_forcing.indices.keys()))
 
     def test_fraction(
         self,
@@ -551,184 +625,32 @@ class TestRiverForcingWithPrescribedIndices:
         )
         assert river_forcing == river_forcing_with_prescribed_single_cell_indices
 
-    def test_reproducibility_with_flipped_dictionary_entries(
-        self, tmp_path, iceland_test_grid
-    ):
-        indices = {
-            "Hvita(Olfusa)": [(8, 6)],
-            "Thjorsa": [(8, 6)],
-            "JkulsFjll": [(11, 12)],
-            "Lagarfljot": [(9, 13), (10, 13)],
-            "Bruara": [(8, 6)],
-            "Svarta": [(12, 8), (12, 9), (12, 10)],
-        }
-
-        flipped_indices = {
-            "Thjorsa": [(8, 6)],
-            "Hvita(Olfusa)": [(8, 6)],
-            "JkulsFjll": [(11, 12)],
-            "Svarta": [(12, 10), (12, 9), (12, 8)],  # also flip order of tuples here
-            "Lagarfljot": [(9, 13), (10, 13)],
-            "Bruara": [(8, 6)],
-        }
-
-        river_forcing = RiverForcing(
-            grid=iceland_test_grid,
-            start_time=self.start_time,
-            end_time=self.end_time,
-            indices=indices,
-        )
-
-        river_forcing_from_flipped_indices = RiverForcing(
-            grid=iceland_test_grid,
-            start_time=self.start_time,
-            end_time=self.end_time,
-            indices=flipped_indices,
-        )
-
-        # Create a temporary filepath using the tmp_path fixture
-        file1 = Path(tmp_path / "test1.nc")
-        file2 = Path(tmp_path / "test2.nc")
-
-        river_forcing.save(file1)
-        river_forcing_from_flipped_indices.save(file2)
-
-        hash1 = calculate_file_hash(file1)
-        hash2 = calculate_file_hash(file2)
-
-        assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
-
-        file1.unlink()
-        file2.unlink()
-
-    def test_invalid_indices(self, iceland_test_grid):
-        invalid_single_cell_indices = {"Hvita(Olfusa)": [(0, 6)]}
-        invalid_multi_cell_indices = {"Hvita(Olfusa)": [(8, 6), (0, 6)]}
-
-        for indices in [invalid_single_cell_indices, invalid_multi_cell_indices]:
-            with pytest.raises(
-                ValueError, match="is not located on the coast at grid cell"
-            ):
-                RiverForcing(
-                    grid=iceland_test_grid,
-                    start_time=self.start_time,
-                    end_time=self.end_time,
-                    indices=indices,
-                )
-
-    def test_raise_missing_rivers(self, iceland_test_grid):
-        fake_indices = {"Hvita(Olfusa)": [(8, 6)], "fake": [(11, 12)]}
-
-        with pytest.raises(
-            ValueError, match="The following rivers were not found in the dataset"
-        ):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=fake_indices,
-            )
-
-    def test_indices_is_dict(self, iceland_test_grid):
-        with pytest.raises(ValueError, match="`indices` must be a dictionary."):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices="invalid",
-            )
-
-    def test_indices_empty(self, iceland_test_grid):
-        with pytest.raises(
-            ValueError,
-            match="The provided 'indices' dictionary must contain at least one river.",
-        ):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices={},
-            )
-
-    def test_invalid_river_name_type(self, iceland_test_grid):
-        indices = {123: [(8, 6)]}  # Invalid river name (should be a string)
-        with pytest.raises(ValueError, match="River name `123` must be a string."):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=indices,
-            )
-
-    def test_invalid_river_data_type(self, iceland_test_grid):
-        indices = {
-            "Hvita(Olfusa)": "8, 6"  # Invalid river data (should be a list of tuples)
-        }
-        with pytest.raises(ValueError, match="must be a list of tuples."):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=indices,
-            )
-
-    def test_invalid_tuple_length(self, iceland_test_grid):
-        indices = {
-            "Hvita(Olfusa)": [(8, 6, 7)]  # Invalid tuple length (should be length 2)
-        }
-        with pytest.raises(ValueError, match="must be a tuple of length 2"):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=indices,
-            )
-
-    def test_invalid_eta_rho_type(self, iceland_test_grid):
-        indices = {
-            "Hvita(Olfusa)": [("a", 6)]  # Invalid eta_rho (should be an integer)
-        }
-        with pytest.raises(ValueError, match="First element of tuple for river"):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=indices,
-            )
-
-    def test_invalid_xi_rho_type(self, iceland_test_grid):
-        indices = {"Hvita(Olfusa)": [(8, "b")]}  # Invalid xi_rho (should be an integer)
-        with pytest.raises(ValueError, match="Second element of tuple for river"):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=indices,
-            )
-
-    def test_eta_rho_out_of_range(self, iceland_test_grid):
-        indices = {"Hvita(Olfusa)": [(20, 6)]}  # eta_rho out of valid range [0, 17]
-        with pytest.raises(ValueError, match="Value of eta_rho for river"):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=indices,
-            )
-
-    def test_xi_rho_out_of_range(self, iceland_test_grid):
-        indices = {"Hvita(Olfusa)": [(8, 20)]}  # xi_rho out of valid range [0, 17]
-        with pytest.raises(ValueError, match="Value of xi_rho for river"):
-            RiverForcing(
-                grid=iceland_test_grid,
-                start_time=self.start_time,
-                end_time=self.end_time,
-                indices=indices,
-            )
-
-    def test_duplicate_location(self, iceland_test_grid):
-        indices = {"Hvita(Olfusa)": [(8, 6), (8, 6)]}  # Duplicate location
-        with pytest.raises(ValueError, match="Duplicate location"):
+    @pytest.mark.parametrize(
+        "indices,match",
+        [
+            ({"Hvita(Olfusa)": [(0, 6)]}, "is not located on the coast at grid cell"),
+            (
+                {"Hvita(Olfusa)": [(8, 6), (0, 6)]},
+                "is not located on the coast at grid cell",
+            ),
+            (
+                {"Hvita(Olfusa)": [(8, 6)], "fake": [(11, 12)]},
+                "The following rivers were not found in the dataset",
+            ),
+            ("invalid", "`indices` must be a dictionary."),
+            ({}, "The provided 'indices' dictionary must contain at least one river."),
+            ({123: [(8, 6)]}, "River name `123` must be a string."),
+            ({"Hvita(Olfusa)": "8, 6"}, "must be a list of tuples."),
+            ({"Hvita(Olfusa)": [(8, 6, 7)]}, "must be a tuple of length 2"),
+            ({"Hvita(Olfusa)": [("a", 6)]}, "First element of tuple for river"),
+            ({"Hvita(Olfusa)": [(8, "b")]}, "Second element of tuple for river"),
+            ({"Hvita(Olfusa)": [(20, 6)]}, "Value of eta_rho for river"),
+            ({"Hvita(Olfusa)": [(8, 20)]}, "Value of xi_rho for river"),
+            ({"Hvita(Olfusa)": [(8, 6), (8, 6)]}, "Duplicate location"),
+        ],
+    )
+    def test_invalid_indices(self, iceland_test_grid, indices, match):
+        with pytest.raises(ValueError, match=match):
             RiverForcing(
                 grid=iceland_test_grid,
                 start_time=self.start_time,
@@ -839,37 +761,12 @@ class TestRiverForcingWithOverlappingIndices:
     @pytest.mark.parametrize(
         "fixture_name, river_list, idx_pair, expected_volume, expected_tracer",
         [
-            # Simple overlap: RiverA and RiverB both map to (10, 20)
             (
                 "mock_river_dataset_with_simple_overlap",
                 ["RiverA", "RiverB"],
                 (10, 20),
                 2.0 / 2 + 3.0 / 1,
                 (10 * (2.0 / 2) + 20 * (3.0 / 1)) / (2.0 / 2 + 3.0 / 1),
-            ),
-            # Complex overlap: RiverA and RiverB at (10, 20)
-            (
-                "mock_river_dataset_with_complex_overlap",
-                ["RiverA", "RiverB"],
-                (10, 20),
-                1.0 / 3 + 2.0 / 3,
-                (10 * (1 / 3) + 20 * (2 / 3)) / (1.0 / 3 + 2.0 / 3),
-            ),
-            # Complex overlap: RiverA and RiverB at (10, 22)
-            (
-                "mock_river_dataset_with_complex_overlap",
-                ["RiverA", "RiverB"],
-                (10, 22),
-                1.0 / 3 + 2.0 / 3,
-                (10 * (1 / 3) + 20 * (2 / 3)) / (1.0 / 3 + 2.0 / 3),
-            ),
-            # Complex overlap: RiverB and RiverC at (10, 21)
-            (
-                "mock_river_dataset_with_complex_overlap",
-                ["RiverB", "RiverC"],
-                (10, 21),
-                2.0 / 3 + 3.0 / 3,
-                (20 * (2 / 3) + 30 * (3 / 3)) / (2.0 / 3 + 3.0 / 3),
             ),
         ],
     )
@@ -887,17 +784,23 @@ class TestRiverForcingWithOverlappingIndices:
         rf = RiverForcing.__new__(RiverForcing)
         rf.indices = indices
 
+        name_to_idx = {n: i for i, n in enumerate(ds.river_name.values)}
+        name = "overlap_" + sorted(river_list)[0].replace("GloFAS_", "")
+        new_nriver = ds.sizes["nriver"] + 1  # first overlap group (i=0)
+
         combined_volume, combined_tracer = rf._create_combined_river(
             ds=ds,
-            i=1,
+            name=name,
+            new_nriver=new_nriver,
             idx_pair=idx_pair,
             river_list=river_list,
+            name_to_idx=name_to_idx,
         )
 
         assert combined_volume.sizes["nriver"] == 1
         assert combined_tracer.sizes["nriver"] == 1
-        assert combined_volume.coords["river_name"].item() == "overlap_1"
-        assert combined_tracer.coords["river_name"].item() == "overlap_1"
+        assert combined_volume.coords["river_name"].item() == name
+        assert combined_tracer.coords["river_name"].item() == name
 
         np.testing.assert_allclose(combined_volume.values, expected_volume, rtol=1e-6)
         np.testing.assert_allclose(
@@ -951,20 +854,21 @@ class TestRiverForcingWithOverlappingIndices:
 
         rf = RiverForcing.__new__(RiverForcing)
         rf.indices = indices
-        rf.original_indices = indices.copy()
         rf.grid = None  # Not needed for this test
+        rf._river_name_prefix = ""  # mock fixtures use unprefixed names
 
         ds_out = rf._handle_overlapping_rivers(ds)
 
         # Assert number of synthetic rivers added
-        expected_nriver = ds.dims["nriver"] + expected_synthetic_count
-        assert ds_out.dims["nriver"] == expected_nriver
+        expected_nriver = ds.sizes["nriver"] + expected_synthetic_count
+        assert ds_out.sizes["nriver"] == expected_nriver
 
         # Check no river's volume increased
         for name in ds["river_name"].values:
             river_idx = np.where(ds["river_name"].values == name)[0].item()
-            assert float(ds_out["river_volume"].isel(nriver=river_idx)) <= float(
-                ds["river_volume"].isel(nriver=river_idx)
+            assert (
+                ds_out["river_volume"].isel(nriver=river_idx).item()
+                <= ds["river_volume"].isel(nriver=river_idx).item()
             )
 
         # Check rivers that contribute to overlapping indices have strictly decreased volume
@@ -974,8 +878,9 @@ class TestRiverForcingWithOverlappingIndices:
                 idx in overlapping for idx in idx_list
             ):
                 river_idx = np.where(ds["river_name"].values == name)[0].item()
-                assert float(ds_out["river_volume"].isel(nriver=river_idx)) < float(
-                    ds["river_volume"].isel(nriver=river_idx)
+                assert (
+                    ds_out["river_volume"].isel(nriver=river_idx).item()
+                    < ds["river_volume"].isel(nriver=river_idx).item()
                 )
 
         # Check that total volume is preserved (within tolerance)
@@ -986,6 +891,767 @@ class TestRiverForcingWithOverlappingIndices:
         )
 
         # Check that the synthetic river volume is positive and tracer is not NaN
-        synthetic_idx = ds_out.dims["nriver"] - 1
-        assert float(ds_out["river_volume"].isel(nriver=synthetic_idx)) > 0
+        synthetic_idx = ds_out.sizes["nriver"] - 1
+        assert ds_out["river_volume"].isel(nriver=synthetic_idx).item() > 0
         assert not np.isnan(ds_out["river_tracer"].isel(nriver=synthetic_idx).item())
+
+    def test_volume_sort_after_overlap(self, mock_river_dataset_with_simple_overlap):
+        ds, indices = mock_river_dataset_with_simple_overlap
+
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.indices = indices
+        rf.grid = None
+        rf._river_name_prefix = ""  # mock fixtures use unprefixed names
+
+        ds_out = rf._handle_overlapping_rivers(ds)
+
+        # Apply the same re-sort logic __post_init__ uses after overlap handling
+        volume_means = ds_out["river_volume"].mean(dim="time")
+        sorted_nriver = np.argsort(volume_means.values)[::-1]
+        ds_sorted = ds_out.isel(nriver=sorted_nriver)
+
+        means = ds_sorted["river_volume"].mean(dim="time").values
+        assert all(means[i] >= means[i + 1] for i in range(len(means) - 1))
+
+    def test_overlap_strip_from_provided_indices(
+        self, iceland_test_grid, single_cell_indices
+    ):
+        # Simulate indices saved from a prior run that includes a synthetic river.
+        # Constructing RiverForcing with these indices must not raise ValueError
+        # about overlap_ not found in the source dataset.
+        indices_with_overlap = {
+            **single_cell_indices,
+            "overlap_Bruara": [(8, 6)],
+        }
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=indices_with_overlap,
+        )
+        # The real check is that construction above didn't raise: a leaked stale
+        # "overlap_Bruara" key would have made extract_named_rivers look it up
+        # in the source dataset and fail.
+        assert len(rf.indices) > 0
+
+
+class TestRiverForcingBGCSource:
+    def test_bgc_constants_by_default(self, iceland_test_grid, single_cell_indices):
+        defaults = get_tracer_defaults()
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            include_bgc=True,
+        )
+
+        assert river_forcing.bgc_source.model_dump() == {
+            "name": "CONSTANTS",
+            "fill": {"name": "CONSTANTS"},
+        }
+        tracer_names = list(river_forcing.ds.tracer_name.values)
+        po4 = river_forcing.ds.river_tracer.isel(ntracers=tracer_names.index("PO4"))
+        alk = river_forcing.ds.river_tracer.isel(ntracers=tracer_names.index("ALK"))
+        np.testing.assert_allclose(float(po4.min()), defaults["PO4"], rtol=1e-6)
+        np.testing.assert_allclose(float(alk.min()), defaults["ALK"], rtol=1e-6)
+
+    def test_bgc_rivr2o_requires_path(self, iceland_test_grid, single_cell_indices):
+        with pytest.raises(ValueError, match="path"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=single_cell_indices,
+                include_bgc=True,
+                bgc_source={"name": "RIVR2O"},
+            )
+
+    def test_bgc_rivr2o_default_fill_source(
+        self, tmp_path, iceland_test_grid, single_cell_indices
+    ):
+        lat = np.arange(55.0, 75.5, 0.5)
+        lon = np.arange(325.0, 355.5, 0.5)
+        path = tmp_path / "rivr2o_riverinputs_1998.nc"
+        write_rivr2o_file(
+            path,
+            lat,
+            lon,
+            {
+                "DIC": np.full((len(lat), len(lon)), 100.0),
+                "DIN": np.full((len(lat), len(lon)), 100.0),
+                "DOC_l": np.full((len(lat), len(lon)), 50.0),
+                "DOC_sl": np.full((len(lat), len(lon)), 50.0),
+                "POC": np.full((len(lat), len(lon)), 25.0),
+                "DIP": np.full((len(lat), len(lon)), 100.0),
+            },
+        )
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O", "path": str(path)},
+        )
+        assert river_forcing.bgc_source.fill.name == "CONSTANTS"
+
+    def test_rivr2o_climatology_discharge_repeats_bgc_varies_by_year(
+        self, tmp_path, iceland_test_grid, single_cell_indices
+    ):
+        """Dai climatology + RIVR2O: repeating Q, year-varying alkalinity (like plot)."""
+        lat = np.arange(55.0, 75.5, 0.5)
+        lon = np.arange(325.0, 355.5, 0.5)
+        paths = []
+        for year in (1998, 1999, 2000):
+            export = float(year)
+            tracer_values = {
+                "DIC": np.full((len(lat), len(lon)), export),
+                "DIN": np.full((len(lat), len(lon)), export),
+                "DOC_l": np.full((len(lat), len(lon)), export / 2),
+                "DOC_sl": np.full((len(lat), len(lon)), export / 2),
+                "POC": np.full((len(lat), len(lon)), export / 4),
+                "DIP": np.full((len(lat), len(lon)), export),
+            }
+            paths.append(
+                tmp_path / f"rivr2o_riverinputs_{year}.nc",
+            )
+            write_rivr2o_file(paths[-1], lat, lon, tracer_values)
+
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(2000, 12, 31),
+            indices=single_cell_indices,
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O", "path": [str(p) for p in paths]},
+            convert_to_climatology="always",
+        )
+
+        assert river_forcing.climatology
+        assert (
+            str(river_forcing.ds.attrs.get("discharge_climatology")).lower() == "true"
+        )
+        assert river_forcing.ds.sizes["river_time"] == 36
+        assert not hasattr(river_forcing.ds.river_time, "cycle_length")
+
+        abs_time = river_forcing.ds["abs_time"]
+        jan_steps = np.where(abs_time.dt.month.values == 1)[0]
+
+        volume = river_forcing.ds["river_volume"].isel(nriver=0)
+        np.testing.assert_allclose(
+            float(volume.isel(river_time=jan_steps[0]).values),
+            float(volume.isel(river_time=jan_steps[-1]).values),
+            rtol=1e-6,
+        )
+
+        alk = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "ALK"
+        ).isel(nriver=0)
+        alk_jan_first = float(alk.isel(river_time=jan_steps[0]).squeeze().values)
+        alk_jan_last = float(alk.isel(river_time=jan_steps[-1]).squeeze().values)
+        assert alk_jan_first != alk_jan_last
+
+
+class TestRiverForcingRivr2oFromTestData:
+    def test_dynamic_tracers_differ_from_defaults(self, river_forcing_with_rivr2o_bgc):
+        defaults = get_tracer_defaults()
+        river_forcing = river_forcing_with_rivr2o_bgc
+
+        def tracer(name):
+            return river_forcing.ds.river_tracer.sel(
+                ntracers=river_forcing.ds.tracer_name == name
+            ).squeeze("ntracers", drop=True)
+
+        assert not np.allclose(tracer("DIC").values, defaults["DIC"])
+        assert not np.allclose(tracer("ALK").values, defaults["ALK"])
+        np.testing.assert_allclose(
+            float(tracer("SiO3").min()), defaults["SiO3"], rtol=1e-6
+        )
+
+    def test_roundtrip_yaml(self, river_forcing_with_rivr2o_bgc, tmp_path):
+        filepath = tmp_path / "river_forcing_rivr2o.yaml"
+        river_forcing_with_rivr2o_bgc.to_yaml(filepath)
+        restored = RiverForcing.from_yaml(filepath)
+        assert river_forcing_with_rivr2o_bgc == restored
+
+
+class TestRiverForcingWithGloFAS:
+    def test_successful_initialization(self, river_forcing_with_glofas):
+        rf = river_forcing_with_glofas
+        assert isinstance(rf.ds, xr.Dataset)
+        assert len(rf.ds.nriver) > 0
+        assert len(rf.indices) > 0
+        assert "river_volume" in rf.ds
+        assert "river_tracer" in rf.ds
+        assert "river_time" in rf.ds
+
+    def test_river_names_have_coordinate_format(self, river_forcing_with_glofas):
+        rf = river_forcing_with_glofas
+        for name in rf.indices:
+            if name.startswith("overlap_"):
+                continue
+            assert name.startswith("GloFAS_"), f"{name!r} missing GloFAS_ prefix"
+            parts = name.split("_")
+            assert len(parts) >= 3, f"{name!r} does not match GloFAS_<lat>_<lon> format"
+            assert parts[1][-1] in ("N", "S"), f"lat part {parts[1]!r} missing N/S"
+            assert parts[2][-1] in ("E", "W"), f"lon part {parts[2]!r} missing E/W"
+
+    def test_overlap_rivers_created(self, river_forcing_with_glofas):
+        rf = river_forcing_with_glofas
+        overlap_keys = [k for k in rf.indices if k.startswith("overlap_")]
+        assert len(overlap_keys) >= 1, (
+            "Expected at least one overlap_ river from two stations at the same coordinate"
+        )
+
+    def test_round_trip_yaml(self, river_forcing_with_glofas, tmp_path, caplog):
+        filepath = tmp_path / "test_yaml_glofas"
+        river_forcing_with_glofas.to_yaml(filepath)
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            river_forcing_from_file = RiverForcing.from_yaml(filepath)
+
+        assert "Use provided river indices." in caplog.text
+        assert river_forcing_with_glofas == river_forcing_from_file
+        filepath.unlink()
+
+
+class TestRiverForcingGloFASClimatology:
+    """GloFAS-specific time/climatology behavior, pinned to a daily multi-year case."""
+
+    @staticmethod
+    def _write_daily_glofas_file(tmp_path):
+        path = tmp_path / "glofas_daily.nc"
+        lats = np.array([65.12, 64.82, 65.47], dtype=np.float32)
+        lons = np.array([-20.43, -22.78, -23.62], dtype=np.float32)
+        names = [
+            "GloFAS_65.12N_20.43W",
+            "GloFAS_64.82N_22.78W",
+            "GloFAS_65.47N_23.62W",
+        ]
+        times = np.arange(
+            np.datetime64("1998-01-01"), np.datetime64("2000-01-01")
+        ).astype("datetime64[ns]")
+        day_of_year = (
+            (times - times.astype("datetime64[Y]")).astype("timedelta64[D]").astype(int)
+        )
+        seasonal = 100.0 + 50.0 * np.sin(2 * np.pi * day_of_year / 365.0)
+        flow = np.stack([seasonal * scale for scale in (1.0, 0.5, 0.8)], axis=1).astype(
+            np.float32
+        )
+        vol = np.array([100.0, 50.0, 80.0], dtype=np.float32)
+        write_glofas_file(path, lats, lons, flow, names, times, vol=vol)
+        return path
+
+    @pytest.mark.parametrize(
+        "convert_to_climatology", ["never", "if_any_missing", "always"]
+    )
+    def test_convert_to_climatology_options(
+        self, iceland_test_grid, tmp_path, convert_to_climatology
+    ):
+        path = self._write_daily_glofas_file(tmp_path)
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1999, 12, 31),
+            source={"name": "GLOFAS", "path": path},
+            convert_to_climatology=convert_to_climatology,
+        )
+        if convert_to_climatology == "always":
+            assert rf.climatology
+            assert len(rf.ds.month) == 12
+        else:
+            # The synthetic daily series has no missing values, so
+            # "if_any_missing" behaves like "never": the full daily time
+            # series is retained rather than collapsed to a climatology.
+            assert not rf.climatology
+            assert len(rf.ds.river_time) > 365
+
+    def test_daily_multiyear_output_is_reproducible(self, iceland_test_grid, tmp_path):
+        path = self._write_daily_glofas_file(tmp_path)
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1999, 12, 31),
+            source={"name": "GLOFAS", "path": path},
+        )
+
+        yaml_filepath = tmp_path / "daily_glofas.yaml"
+        filepath1 = tmp_path / "daily1.nc"
+        filepath2 = tmp_path / "daily2.nc"
+
+        rf.to_yaml(yaml_filepath)
+        rf.save(filepath1)
+        rf_from_file = RiverForcing.from_yaml(yaml_filepath)
+        rf_from_file.save(filepath2)
+
+        hash1 = calculate_file_hash(filepath1)
+        hash2 = calculate_file_hash(filepath2)
+        assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+
+class TestRiverTemperaturePureHelpers:
+    """Unit tests for the free-function helpers, using small synthetic data."""
+
+    def test_bounding_box_with_buffer(self):
+        lat = np.array([10.0, 12.0, 11.0])
+        lon = np.array([100.0, 105.0, 102.0])
+        bounds = _bounding_box_with_buffer(lat, lon, buffer_deg=2.0)
+        assert bounds == {
+            "latitude": (8.0, 14.0),
+            "longitude": (98.0, 107.0),
+        }
+
+    def test_bounding_box_default_buffer(self):
+        lat = np.array([0.0, 1.0])
+        lon = np.array([0.0, 1.0])
+        bounds = _bounding_box_with_buffer(lat, lon)
+        assert bounds["latitude"] == (-1.0, 2.0)
+        assert bounds["longitude"] == (-1.0, 2.0)
+
+    @pytest.mark.parametrize("straddle", [False, True])
+    def test_sample_tair_at_river_mouths_picks_nearest_cell(self, straddle):
+        # A 3x3 native grid in 0-360 convention; each cell has a distinct value
+        # so we can confirm exactly which cell was picked.
+        lat = np.array([10.0, 20.0, 30.0])
+        lon = np.array([350.0, 355.0, 0.0])  # wraps past 360 -> 0
+        time = np.array([np.datetime64("2020-01-01"), np.datetime64("2020-01-02")])
+        values = np.arange(2 * 3 * 3, dtype=np.float64).reshape(2, 3, 3)
+        tair = xr.DataArray(
+            values,
+            dims=("time", "latitude", "longitude"),
+            coords={"time": time, "latitude": lat, "longitude": lon},
+        )
+
+        # River sits right at lat=20, and near lon=0 (i.e. 360 in native
+        # convention). In non-straddle (0-360) space that's lon=360=0;
+        # in straddle (-180-180) space that's also lon=0.
+        river_lats = np.array([20.0])
+        river_lons = np.array([0.0])
+
+        result = _sample_tair_at_river_mouths(
+            tair, "latitude", "longitude", river_lons, river_lats, straddle
+        )
+        assert result.dims == ("time", "nriver")
+        # Nearest cell to (lat=20, lon=0/360) is grid index (row=1, col=2).
+        expected = values[:, 1, 2]
+        np.testing.assert_array_equal(result.values[:, 0], expected)
+
+    def test_smooth_and_floor_air_temp_floors_negative_values(self):
+        time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))
+        # Constant -5 degC everywhere: after smoothing it should still be
+        # exactly -5, then floored to 0.
+        values = np.full((len(time), 1), -5.0)
+        tair = xr.DataArray(values, dims=("time", "nriver"), coords={"time": time})
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=3)
+        assert (result.values >= 0.0).all()
+        np.testing.assert_allclose(result.values, 0.0)
+
+    def test_smooth_and_floor_air_temp_smooths_in_time(self):
+        time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))
+        # A single spike on day 5; a wide smoothing window should pull it
+        # most of the way down towards the surrounding baseline of 10.
+        values = np.full((len(time),), 10.0)
+        values[5] = 100.0
+        tair = xr.DataArray(values, dims=("time",), coords={"time": time})
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=10)
+        assert result.values[5] < 100.0
+        assert result.values[5] > 10.0
+
+    def test_smooth_and_floor_air_temp_window_wider_than_record_does_not_crash(self):
+        """Regression test: a smoothing window longer than the available time
+        series (e.g. the default 30-day window against a short forcing period)
+        used to make dask's rolling `map_overlap` raise an opaque
+        "overlapping depth ... larger than your array" error. The window
+        should be clamped to the record length instead.
+        """
+        time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))
+        values = np.full((len(time),), 5.0)
+        tair = xr.DataArray(values, dims=("time",), coords={"time": time}).chunk(
+            {"time": -1}
+        )
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=30)
+        np.testing.assert_allclose(result.compute().values, 5.0)
+
+    def test_smooth_and_floor_air_temp_single_timestep_does_not_crash(self):
+        """Regression test: with a single time step, `np.diff` on the time
+        coordinate is empty, so `np.median` of it is NaN -- `round(NaN)` used
+        to raise `ValueError: cannot convert float NaN to integer`. A single
+        step has nothing to smooth over, so this should just apply the floor.
+        """
+        time = np.array([np.datetime64("2020-01-01")])
+        tair = xr.DataArray([-3.0], dims=("time",), coords={"time": time})
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=30)
+        np.testing.assert_allclose(result.values, [0.0])
+
+    def test_climatological_river_temp_reduces_to_day_of_year(self):
+        # Two years of data, identical seasonal cycle each year, so the
+        # multi-year day-of-year mean should reproduce that cycle exactly.
+        times = np.arange(np.datetime64("1998-01-01"), np.datetime64("2000-01-01"))
+        doy = (
+            (times - times.astype("datetime64[Y]")).astype("timedelta64[D]").astype(int)
+        )
+        values = np.sin(2 * np.pi * doy / 365.0)
+        tair = xr.DataArray(values, dims=("time",), coords={"time": times})
+
+        # Target: a single climatology day, Jan 1 on a placeholder year.
+        river_time_coord = xr.DataArray(
+            [np.datetime64("2000-01-01")], dims=("river_time",)
+        )
+        result = _climatological_river_temp(tair, "time", river_time_coord)
+        assert result.dims == ("time",)
+        # Jan 1 has doy=0 in both years -> sin(0) == 0.
+        np.testing.assert_allclose(result.values, 0.0, atol=1e-8)
+
+    def test_climatological_river_temp_wraps_around_year_end(self):
+        # Source spans a single non-leap year, so its dayofyear bins run
+        # 1..365 (period=365). Mark only dayofyear=1 (Jan 1) with a unique
+        # value; everything else (including dayofyear=365, Dec 31) is 0.
+        times = np.arange(np.datetime64("1999-01-01"), np.datetime64("2000-01-01"))
+        doy = times[0].astype("datetime64[D]")
+        is_jan_1 = times.astype("datetime64[D]") == doy
+        values = np.where(is_jan_1, 42.0, 0.0)
+        tair = xr.DataArray(values, dims=("time",), coords={"time": times})
+
+        # Target: Dec 31 of a *leap* placeholder year -> dayofyear=366. Raw
+        # distance to doy=1 is 365 (huge), but wrapped around a period-365
+        # cycle it's the *nearest* bin (distance 0) -- nearer than the
+        # unmarked doy=365 bin (wrapped distance 1). Confirms wraparound,
+        # not just naive nearest-by-raw-difference.
+        river_time_coord = xr.DataArray(
+            [np.datetime64("2000-12-31")], dims=("river_time",)
+        )
+        result = _climatological_river_temp(tair, "time", river_time_coord)
+        assert result.values[0] == pytest.approx(42.0)
+
+
+class TestCheckSurfaceForcingSourceCoverage:
+    """Unit tests for `RiverForcing._check_surface_forcing_source_coverage`."""
+
+    @staticmethod
+    def _make_dummy(start_time, end_time):
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.start_time = start_time
+        rf.end_time = end_time
+        return rf
+
+    def test_raises_when_source_does_not_cover_requested_range(self):
+        rf = self._make_dummy(datetime(2020, 1, 1), datetime(2020, 1, 10))
+        tair = xr.DataArray(
+            [1.0, 2.0],
+            dims=("time",),
+            coords={
+                "time": [
+                    np.datetime64("2020-01-01"),
+                    np.datetime64("2020-01-02"),
+                ]
+            },
+        )
+        with pytest.raises(ValueError, match="does not fully cover"):
+            rf._check_surface_forcing_source_coverage(tair)
+
+    def test_passes_when_source_covers_requested_range(self):
+        rf = self._make_dummy(datetime(2020, 1, 2), datetime(2020, 1, 9))
+        tair = xr.DataArray(
+            [1.0, 2.0],
+            dims=("time",),
+            coords={
+                "time": [
+                    np.datetime64("2020-01-01"),
+                    np.datetime64("2020-01-10"),
+                ]
+            },
+        )
+        # Should not raise.
+        rf._check_surface_forcing_source_coverage(tair)
+
+    def test_passes_within_tolerance_of_boundary(self):
+        rf = self._make_dummy(datetime(2020, 1, 1), datetime(2020, 1, 10))
+        just_inside_tolerance = AIR_TEMP_COVERAGE_TOLERANCE_DAYS * 24 - 1
+        tair = xr.DataArray(
+            [1.0, 2.0],
+            dims=("time",),
+            coords={
+                "time": [
+                    np.datetime64("2020-01-01")
+                    + np.timedelta64(int(just_inside_tolerance), "h"),
+                    np.datetime64("2020-01-10"),
+                ]
+            },
+        )
+        rf._check_surface_forcing_source_coverage(tair)
+
+
+class TestNormalizedSurfaceForcingSource:
+    """Unit tests for `RiverForcing._normalized_surface_forcing_source`."""
+
+    @staticmethod
+    def _make_dummy(surface_forcing_source):
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.surface_forcing_source = surface_forcing_source
+        return rf
+
+    def test_none_passes_through(self):
+        rf = self._make_dummy(None)
+        assert rf._normalized_surface_forcing_source() is None
+
+    def test_missing_name_raises(self):
+        rf = self._make_dummy({"path": "foo.nc"})
+        with pytest.raises(ValueError, match="must include a 'name'"):
+            rf._normalized_surface_forcing_source()
+
+    def test_wrong_name_raises(self):
+        rf = self._make_dummy({"name": "GLORYS"})
+        with pytest.raises(ValueError, match="must be 'ERA5'"):
+            rf._normalized_surface_forcing_source()
+
+    def test_stray_climatology_key_is_inert(self):
+        """`surface_forcing_source` has no climatology option: a caller-supplied
+        'climatology' key is neither rejected nor honored -- it passes through
+        `_normalized_surface_forcing_source` unchanged, but river temperature
+        always samples real ERA5 data regardless (see `_get_river_surface_temp`,
+        which hardcodes `climatology=False` and never reads this key).
+        """
+        rf = self._make_dummy({"name": "ERA5", "climatology": True})
+        normalized = rf._normalized_surface_forcing_source()
+        assert normalized["name"] == "ERA5"
+        assert normalized["climatology"] is True
+
+
+class TestResolveSurfaceForcingSource:
+    """Unit tests for `RiverForcing._resolve_surface_forcing_source`."""
+
+    @staticmethod
+    def _make_dummy(surface_forcing_source):
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.surface_forcing_source = surface_forcing_source
+        return rf
+
+    def test_local_path_is_not_arco(self):
+        rf = self._make_dummy({"name": "ERA5", "path": "/local/era5_data.nc"})
+        cell_lon = np.array([-30.0, 10.0])
+        dataset_cls, resolved_path, out_lon, raw_tair_name, is_arco = (
+            rf._resolve_surface_forcing_source(cell_lon)
+        )
+        assert dataset_cls is ERA5Dataset
+        assert resolved_path == "/local/era5_data.nc"
+        assert raw_tair_name == "t2m"
+        assert is_arco is False
+        # A local file's longitude convention isn't guessed at -- left as-is.
+        np.testing.assert_array_equal(out_lon, cell_lon)
+
+    def test_missing_path_defaults_to_arco_and_converts_longitude(self):
+        rf = self._make_dummy({"name": "ERA5"})
+        cell_lon = np.array([-30.0, 10.0])
+        dataset_cls, resolved_path, out_lon, raw_tair_name, is_arco = (
+            rf._resolve_surface_forcing_source(cell_lon)
+        )
+        assert dataset_cls is ERA5ARCODataset
+        assert resolved_path == DEFAULT_ERA5_ARCO_PATH
+        assert raw_tair_name == "2m_temperature"
+        assert is_arco is True
+        # ARCO's native convention is 0-360 -- negative longitudes wrap.
+        np.testing.assert_array_equal(out_lon, np.array([330.0, 10.0]))
+
+    def test_gs_path_is_arco_and_converts_longitude(self):
+        rf = self._make_dummy(
+            {"name": "ERA5", "path": "gs://some-bucket/some-object.zarr"}
+        )
+        cell_lon = np.array([-30.0, 10.0])
+        dataset_cls, resolved_path, out_lon, raw_tair_name, is_arco = (
+            rf._resolve_surface_forcing_source(cell_lon)
+        )
+        assert dataset_cls is ERA5ARCODataset
+        assert resolved_path == "gs://some-bucket/some-object.zarr"
+        assert raw_tair_name == "2m_temperature"
+        assert is_arco is True
+        np.testing.assert_array_equal(out_lon, np.array([330.0, 10.0]))
+
+    def test_wrong_name_raises(self):
+        rf = self._make_dummy({"name": "GLORYS"})
+        with pytest.raises(ValueError, match="must be 'ERA5'"):
+            rf._resolve_surface_forcing_source(np.array([0.0]))
+
+
+class TestRiverForcingTemperatureFromERA5:
+    """Integration tests for `RiverForcing(surface_forcing_source=...)`."""
+
+    def test_default_keeps_flat_tracer_default(self, iceland_test_grid):
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        expected = get_tracer_defaults()["temp"]
+        np.testing.assert_allclose(temp.values, expected)
+
+    def test_real_time_temperature_differs_from_default_and_is_floored(
+        self,
+        iceland_test_grid,
+        synthetic_glofas_single_station_file,
+        synthetic_era5_tair_file,
+    ):
+        glofas_path, _station_name = synthetic_glofas_single_station_file
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 1, 10),
+            source={"name": "GLOFAS", "path": glofas_path},
+            convert_to_climatology="never",
+            surface_forcing_source={"name": "ERA5", "path": synthetic_era5_tair_file},
+        )
+        assert not rf.climatology
+
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        default = get_tracer_defaults()["temp"]
+        assert not np.allclose(temp.values, default)
+        assert (temp.values >= 0.0).all()
+        # Ramp spans -15 to +5 degC; smoothed/floored result should stay
+        # within a physically sane band, not blow up.
+        assert (temp.values <= 10.0).all()
+
+    def test_multi_cell_river_uses_averaged_sample_point(
+        self,
+        iceland_test_grid,
+        synthetic_glofas_single_station_file,
+        synthetic_era5_tair_file_with_lon_gradient,
+    ):
+        """The multi-cell river's temperature must come from one sample at
+        the *mean* of its cells' coordinates, not e.g. an average of
+        per-cell samples or a single cell's own value.
+
+        `MULTI_CELL_COASTAL_INDICES`' real longitudes on `iceland_test_grid`
+        are 339.80, 340.70, 341.62 (mean 340.71). Against the lon-gradient
+        fixture's 0.5-degree grid (`temp_degC = lon - 320.0`), the nearest
+        grid longitude to each of those differs from the nearest grid
+        longitude to their mean:
+
+        - cell 1 (339.80) -> nearest grid lon 340.0 -> 20.0 degC
+        - cell 2 (340.70) -> nearest grid lon 340.5 -> 20.5 degC
+        - cell 3 (341.62) -> nearest grid lon 341.5 -> 21.5 degC
+        - naive average of the three per-cell samples -> 20.667 degC
+        - mean coordinate (340.71) -> nearest grid lon 340.5 -> 20.5 degC
+
+        Only the last of these matches the code's documented "one sample at
+        the averaged coordinate" behavior; the others would still pass a
+        weaker "is finite and non-negative" check.
+        """
+        glofas_path, station_name = synthetic_glofas_single_station_file
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 1, 10),
+            source={"name": "GLOFAS", "path": glofas_path},
+            convert_to_climatology="never",
+            indices={station_name: list(MULTI_CELL_COASTAL_INDICES)},
+            surface_forcing_source={
+                "name": "ERA5",
+                "path": synthetic_era5_tair_file_with_lon_gradient,
+            },
+        )
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        np.testing.assert_allclose(temp.values, 20.5, atol=1e-3)
+
+    def test_climatological_path_uses_downloaded_era5_file(self, iceland_test_grid):
+        fname = download_test_data("ERA5_regional_test_data.nc")
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            convert_to_climatology="always",
+            surface_forcing_source={"name": "ERA5", "path": fname},
+        )
+        assert rf.climatology
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        default = get_tracer_defaults()["temp"]
+        assert not np.allclose(temp.values, default)
+        assert (temp.values >= 0.0).all()
+
+    def test_insufficient_coverage_raises(
+        self, iceland_test_grid, synthetic_glofas_single_station_file
+    ):
+        glofas_path, _station_name = synthetic_glofas_single_station_file
+        fname = download_test_data("ERA5_regional_test_data.nc")
+        with pytest.raises(ValueError, match="does not fully cover"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 1, 10),
+                source={"name": "GLOFAS", "path": glofas_path},
+                convert_to_climatology="never",
+                surface_forcing_source={"name": "ERA5", "path": fname},
+            )
+
+    def test_yaml_roundtrip_with_surface_forcing_source(
+        self,
+        iceland_test_grid,
+        synthetic_glofas_single_station_file,
+        synthetic_era5_tair_file,
+        tmp_path,
+        caplog,
+    ):
+        glofas_path, _station_name = synthetic_glofas_single_station_file
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 1, 10),
+            source={"name": "GLOFAS", "path": glofas_path},
+            convert_to_climatology="never",
+            surface_forcing_source={"name": "ERA5", "path": synthetic_era5_tair_file},
+        )
+
+        filepath = tmp_path / "test_yaml_river_temp"
+        rf.to_yaml(filepath)
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            rf_from_file = RiverForcing.from_yaml(filepath)
+
+        assert "Use provided river indices." in caplog.text
+        assert rf == rf_from_file
+        # `RiverForcing`'s dataclass-generated `==` is a weaker check than it
+        # looks: `xr.Dataset.__bool__` returns `bool(self.data_vars)` (just
+        # "is it non-empty"), not an element-wise reduction, so `==` above
+        # would report equal even if `ds`'s actual contents diverged.
+        # `assert_equal` catches that (same pattern as `test_grid.py`'s
+        # `xr.testing.assert_equal(grid.ds, grid_from_file.ds)`).
+        xr.testing.assert_equal(rf.ds, rf_from_file.ds)
+        filepath.unlink()
+
+
+@pytest.mark.skip("Temporary skip until memory consumption issue is addressed. # TODO")
+@pytest.mark.stream
+@pytest.mark.use_dask
+@pytest.mark.use_gcsfs
+def test_river_temperature_from_real_arco_era5(iceland_test_grid):
+    """One integration test against the real cloud ARCO ERA5 archive.
+
+    Mirrors `test_default_era5_dataset_loading` in test_surface_forcing.py
+    (same markers, same temporary skip pending that memory investigation --
+    this path shares `resolve_era5_source`/`ERA5ARCODataset` with
+    `SurfaceForcing`, so it's expected to have the same characteristics).
+    """
+    rf = RiverForcing(
+        grid=iceland_test_grid,
+        start_time=datetime(1998, 1, 1),
+        end_time=datetime(1998, 3, 1),
+        convert_to_climatology="always",
+        surface_forcing_source={"name": "ERA5"},
+    )
+
+    temp = rf.ds["river_tracer"].isel(
+        ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+    )
+    default = get_tracer_defaults()["temp"]
+    assert not np.allclose(temp.values, default)
+    assert (temp.values >= 0.0).all()

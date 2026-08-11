@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from typing import Any, ClassVar, Literal, cast
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
 
+import fsspec
 import numpy as np
 import xarray as xr
 
@@ -29,10 +31,13 @@ from roms_tools.datasets.utils import (
     select_relevant_times,
     validate_start_end_time,
 )
-from roms_tools.fill import LateralFill
+from roms_tools.fill import LateralFill, nearest_neighbor_fill
+from roms_tools.processing_methods import METHOD_META, PrefillMethod
+from roms_tools.regrid import _xesmf_extrap_kwargs
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
+    compute_potential_density,
     get_target_coords,
 )
 from roms_tools.utils import (
@@ -58,6 +63,13 @@ DEFAULT_NR_BUFFER_POINTS = (
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
 # This default will be applied consistently across all datasets requiring lateral fill.
+
+# Default streaming path to the ARCO ERA5 archive on Google Cloud. Shared by
+# any forcing class that can source Tair from ERA5 (e.g. SurfaceForcing,
+# RiverForcing) via `resolve_era5_source`.
+DEFAULT_ERA5_ARCO_PATH = (
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
 
 # Default lateral chunk size for Dask-backed LatLonDataset subclasses (latitude/longitude).
 _DEFAULT_LAT_LON_LATERAL_CHUNK = 50
@@ -660,59 +672,233 @@ class LatLonDataset:
             return coords_ds
 
         if return_copy:
-            return LatLonDataset.from_ds(self, subdomain)
+            return type(self).from_ds(self, subdomain)
         else:
             self.ds = subdomain
             return None
 
-    def apply_lateral_fill(self):
-        """Apply lateral fill to variables using the dataset's mask and grid dimensions.
+    def apply_prefill(
+        self,
+        method: str,
+        prefill_kwargs: dict | None = None,
+        prefill_was_user_set: bool = False,
+    ):
+        """Fill masked (land/void) cells in the source by the chosen method.
 
-        This method fills masked values in `self.ds` using `LateralFill` based on
-        the horizontal grid dimensions. A separate mask (`mask_vel`) is used for
-        velocity variables (e.g., `u`, `v`) if available in the dataset.
+        Thin dispatcher over the concrete fills so callers select a strategy by
+        name. After a prefill the source is NaN-free, so a subsequent regrid can
+        use plain bilinear (no destination extrapolation needed).
+
+        Parameters
+        ----------
+        method : str
+            One of:
+
+            - ``"2d_lateral_fill"`` -- iterative AMG Poisson fill
+              (:meth:`apply_lateral_fill`); no xESMF required.
+            - ``"nearest_neighbor"`` -- cheap distance-transform fill
+              (:meth:`apply_nearest_neighbor_fill`); no xESMF required.
+            - ``"inverse_dist"`` / ``"nearest_s2d"`` / ``"creep_fill"`` -- xESMF
+              source-on-source fill (:meth:`apply_xesmf_source_fill`).
+        prefill_kwargs : dict, optional
+            Method-specific kwargs. For the xESMF methods these are forwarded to
+            :meth:`apply_xesmf_source_fill` (e.g. ``num_src_pnts`` /
+            ``dist_exponent`` for ``"inverse_dist"``, ``num_levels`` for
+            ``"creep_fill"``). Ignored by the AMG and nearest-neighbor methods.
+        prefill_was_user_set : bool, optional
+            Whether the caller's ``prefill`` was set explicitly by the user (vs a
+            class default). Only used to decide whether to emit the
+            "source already NaN-free; prefill is a no-op" info-log when this
+            dataset does not need a lateral fill.
 
         Notes
         -----
-        This method assumes that the variables in the dataset use a dimension
-        ordering where latitude comes before longitude, i.e., ('latitude', 'longitude').
-        Ensure that this convention is followed to avoid unexpected behavior.
-
-        Looping over `self.ds.data_vars` instead of `self.var_names` ensures that each
-        dataset variable is filled only once, even if multiple entries in `self.var_names`
-        point to the same variable in the dataset.
+        All underlying fills early-return when ``self.needs_lateral_fill`` is
+        ``False`` (the source is already NaN-free, e.g. the unified BGC dataset).
+        In that case an explicit user ``prefill`` is a no-op; this is surfaced as
+        an info-log rather than silently ignored.
         """
-        if self.needs_lateral_fill:
-            lateral_fill = LateralFill(
-                self.ds["mask"],
-                (self.dim_names["latitude"], self.dim_names["longitude"]),
-            )
+        prefill_kwargs = prefill_kwargs or {}
 
-            separate_fill_for_velocities = False
-            # TODO: Replace hardcoded mask detection with a dictionary-based mask selection.
-            # This dictionary could assign which mask to use for what fields.
-            if "mask_vel" in self.ds.data_vars:
-                lateral_fill_vel = LateralFill(
-                    self.ds["mask_vel"],
-                    (self.dim_names["latitude"], self.dim_names["longitude"]),
+        if not self.needs_lateral_fill:
+            if prefill_was_user_set:
+                logging.info(
+                    "Source data is already NaN-free (needs_lateral_fill=False); "
+                    "prefill=%r is a no-op.",
+                    method,
                 )
-                separate_fill_for_velocities = True
+            return
 
-            for var_name in self.ds.data_vars:
-                if var_name.startswith("mask"):
-                    # Skip variables that are mask types
-                    continue
-                elif (
-                    separate_fill_for_velocities
-                    and "u" in self.var_names
-                    and "v" in self.var_names
-                    and var_name in [self.var_names["u"], self.var_names["v"]]
-                ):
-                    # Apply lateral fill with velocity mask for velocity variables if present
-                    self.ds[var_name] = lateral_fill_vel.apply(self.ds[var_name])
-                else:
-                    # Apply standard lateral fill for other variables
-                    self.ds[var_name] = lateral_fill.apply(self.ds[var_name])
+        # The two non-xESMF fills dispatch to dedicated methods; everything else in
+        # the registry that requires xESMF (inverse_dist / nearest_s2d / creep_fill)
+        # goes through the single source-on-source xESMF fill.
+        match method:
+            case PrefillMethod.lateral_fill_2d:
+                self.apply_lateral_fill()
+            case PrefillMethod.nearest_neighbor:
+                self.apply_nearest_neighbor_fill()
+            case _ if (
+                spec := METHOD_META.get(method)
+            ) is not None and spec.requires_xesmf:
+                self.apply_xesmf_source_fill(method=str(method), **prefill_kwargs)
+            case _:
+                raise ValueError(f"Unknown prefill method: {method!r}")
+
+    def _iter_fillable_vars(self):
+        """Yield ``(var_name, mask_name)`` for each non-mask data variable.
+
+        Centralizes the mask-selection rule shared by every fill method: a
+        velocity component uses ``"mask_vel"`` when that mask is present and both
+        ``u`` and ``v`` are known source variables; everything else uses
+        ``"mask"``. Iterating over ``self.ds.data_vars`` (not ``self.var_names``)
+        ensures each dataset variable is filled exactly once even when several
+        ``var_names`` entries alias the same variable.
+        """
+        use_vel_mask = (
+            "mask_vel" in self.ds.data_vars
+            and "u" in self.var_names
+            and "v" in self.var_names
+        )
+        vel_vars = {self.var_names["u"], self.var_names["v"]} if use_vel_mask else set()
+        for var_name in self.ds.data_vars:
+            if var_name.startswith("mask"):
+                continue
+            yield var_name, "mask_vel" if var_name in vel_vars else "mask"
+
+    def _fill_masked_vars(self, fill_one):
+        """Apply ``fill_one(da, mask_name)`` to every fillable variable.
+
+        ``fill_one`` receives the variable's DataArray and the name of the mask to
+        fill against (``"mask"`` or ``"mask_vel"``, chosen by
+        :meth:`_iter_fillable_vars`) and returns the filled DataArray. No-op when
+        the source is already NaN-free (``needs_lateral_fill`` is False).
+        """
+        if not self.needs_lateral_fill:
+            return
+        for var_name, mask_name in self._iter_fillable_vars():
+            self.ds[var_name] = fill_one(self.ds[var_name], mask_name)
+
+    def apply_lateral_fill(self):
+        """Fill masked values in `self.ds` with the iterative `LateralFill` (AMG).
+
+        A separate mask (`mask_vel`) is used for velocity variables when present;
+        see :meth:`_iter_fillable_vars`. Assumes a ('latitude', 'longitude')
+        dimension ordering.
+        """
+        dims = (self.dim_names["latitude"], self.dim_names["longitude"])
+        fillers: dict[str, LateralFill] = {}
+
+        def fill_one(da, mask_name):
+            if mask_name not in fillers:
+                fillers[mask_name] = LateralFill(self.ds[mask_name], dims)
+            return fillers[mask_name].apply(da)
+
+        self._fill_masked_vars(fill_one)
+
+    def apply_nearest_neighbor_fill(self):
+        """Fill masked values in `self.ds` using nearest-neighbor lookup.
+
+        A cheap alternative to :meth:`apply_lateral_fill` (the iterative Poisson
+        solver): each masked cell takes the value of the nearest valid (ocean) cell
+        via :func:`roms_tools.fill.nearest_neighbor_fill`, with the same per-variable
+        mask selection (:meth:`_iter_fillable_vars`).
+        """
+        dims = (self.dim_names["latitude"], self.dim_names["longitude"])
+        self._fill_masked_vars(
+            lambda da, mask_name: nearest_neighbor_fill(da, self.ds[mask_name], dims)
+        )
+
+    def apply_xesmf_source_fill(
+        self,
+        method: str = "inverse_dist",
+        num_levels: int = 100,
+        num_src_pnts: int | None = None,
+        dist_exponent: float | None = None,
+    ):
+        """Fill masked values by regridding the source onto its own grid (xESMF).
+
+        Unlike destination-side extrapolation during the boundary regrid, this
+        fills the 2D *source* field itself, where the valid ocean cells act as
+        seeds spread across the whole grid. Velocity variables use ``mask_vel``
+        when present, mirroring the other fills. The ``apply_xesmf_`` prefix
+        distinguishes this from the non-xESMF :meth:`apply_lateral_fill` (AMG) and
+        :meth:`apply_nearest_neighbor_fill` (scipy) fills.
+
+        Parameters
+        ----------
+        method : str
+            xESMF extrapolation method used for the fill (default
+            ``"inverse_dist"``):
+
+            - ``"inverse_dist"`` -- inverse-distance-weighted average of the
+              nearest source points; tuned by ``num_src_pnts`` / ``dist_exponent``.
+            - ``"nearest_s2d"`` -- single nearest source point.
+            - ``"creep_fill"`` -- truncated Laplace-style diffusion; smooth but
+              only reaches ``num_levels`` cells from ocean. **Not available in
+              current released xESMF** (requires a newer/unreleased xESMF + ESMF);
+              exposed through ``BoundaryForcing``'s ``prefill`` argument for use
+              once a supporting xESMF is installed.
+        num_levels : int
+            Number of creep iterations (``creep_fill`` only).
+        num_src_pnts : int, optional
+            Number of nearest source points to average (``inverse_dist`` only;
+            xESMF default is 8).
+        dist_exponent : float, optional
+            Inverse-distance weighting exponent (``inverse_dist`` only; xESMF
+            default is 2.0).
+        """
+        if not self.needs_lateral_fill:
+            return
+        import warnings
+
+        import xesmf as xe
+
+        lat = self.dim_names["latitude"]
+        lon = self.dim_names["longitude"]
+        lat_vals = self.ds[lat].values
+        lon_vals = self.ds[lon].values
+
+        def _build(mask_da):
+            ds_in = xr.Dataset(
+                {
+                    "mask": (
+                        ("lat", "lon"),
+                        mask_da.transpose(lat, lon).values.astype("int32"),
+                    )
+                },
+                coords={"lat": lat_vals, "lon": lon_vals},
+            )
+            ds_out = xr.Dataset(coords={"lat": lat_vals, "lon": lon_vals})
+            kwargs = dict(method="bilinear", unmapped_to_nan=True, extrap_method=method)
+            kwargs.update(
+                _xesmf_extrap_kwargs(
+                    method,
+                    {
+                        "num_levels": num_levels,
+                        "num_src_pnts": num_src_pnts,
+                        "dist_exponent": dist_exponent,
+                    },
+                )
+            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+                return xe.Regridder(ds_in, ds_out, **kwargs)
+
+        def _fill(da, rg):
+            renamed = da.rename({lat: "lat", lon: "lon"})
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+                out = rg(renamed, keep_attrs=True)
+            return out.rename({"lat": lat, "lon": lon})
+
+        regridders: dict[str, xe.Regridder] = {}
+
+        def fill_one(da, mask_name):
+            if mask_name not in regridders:
+                regridders[mask_name] = _build(self.ds[mask_name])
+            return _fill(da, regridders[mask_name])
+
+        self._fill_masked_vars(fill_one)
 
     def extrapolate_deepest_to_bottom(self):
         """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth
@@ -1375,7 +1561,7 @@ class MBLco2Dataset(MBLDataset):
                 "co2": (
                     ("time", "latitude"),
                     co2,
-                    {"units": "µmol mol⁻¹", "long_name": "CO2, Marine boundary layer"},
+                    {"units": "umol mol-1", "long_name": "CO2, Marine boundary layer"},
                 )
             },
             coords={
@@ -1400,6 +1586,119 @@ class MBLco2Dataset(MBLDataset):
         )
 
         return ds
+
+
+@dataclass(kw_only=True)
+class SODADataset(LatLonDataset):
+    """Represents global gridded marine carbonate system data calculated from machine learning estimates of Total Alkalinity and the fugacity of carbon dioxide. Data taken from NOAA's OceanSODA-ETHZ version 2025. Monthly data for years 1982-2024 at 1 degree resolution for the surface water.
+
+    Notes
+    -----
+    No pre-processing is done so land points are nans. The `needs_lateral_fill` attribute is set to `True`.
+    Both variables `dic` and `talk` have units of micromol/kg, so density is calulated from the `temperature` and `salinity` in the datset to convert to units of mmol/m^3.
+    """
+
+    needs_lateral_fill: bool = True
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """This method calculates density from T and S in the dataset, and then uses it to convert
+        dic and talk from units of micromol/kg to mmol/m^3.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with monthly dic and talk data.
+        """
+        ds = ds.rename({"lon": "longitude", "lat": "latitude"})
+
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "time": "time",
+        }
+
+        ds = ds.assign_coords(
+            {
+                "latitude": ds["latitude"],
+                "longitude": ds["longitude"],
+            }
+        )
+
+        # Confirm the correct dataset is being used
+        if len(ds["time"]) != 516:
+            SODA_URL = "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
+            raise ValueError(f"Please use the OceanSODA dataset provided at {SODA_URL}")
+
+        ds["time"].attrs = {"units": "Datetime", "long_name": "Time"}
+
+        # Calculate density
+        sigma0 = compute_potential_density(ds["temperature"], ds["salinity"])
+        potential_density = sigma0 + 1000  # [kg/m^3]
+
+        # convert from micromol/kg to mmol/m^3
+        ds["dic"] = ds["dic"] * potential_density / 1000
+        ds["talk"] = ds["talk"] * potential_density / 1000
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class SODARestoringSurfaceDataset(SODADataset):
+    dataset_name: ClassVar[str] = (
+        "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
+    )
+    """The SODA dataset url"""
+
+    def __post_init__(self) -> None:
+        if not self.filename:
+            self.filename = self.dataset_name
+        self.ds_loader_fn = self._load_from_soda
+
+        super().__post_init__()
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {"sDIC": "dic", "sALK": "talk"}
+    )
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sDIC": "dic",
+            "sALK": "talk",
+        }
+    )
+
+    def _load_from_soda(self) -> xr.Dataset:
+        """Load a OceanSODA carbonate system dataset.
+
+        This reads in a nedCDF file from NOAA. The carbonate systme is determined via machine learning.
+        Data are available from 1982 through 2024.
+
+        Returns
+        -------
+        xr.Dataset
+            The converted xarray dataset
+        """
+        ds = xr.open_dataset(fsspec.open(self.filename).open(), engine="h5netcdf")
+
+        return ds
+
+    def post_process(self) -> None:
+        """
+        Processes SODAv2025 data values as follows:
+        - drop the year coordinate
+        - Apply a mask to the dataset based on locations of NaN values.
+        """
+        self.ds = self.ds.drop_vars("year")
+
+        condition = self.ds["dic"].isnull().any(dim=self.dim_names["time"])
+        self.ds["mask"] = xr.where(condition, 0, 1)
 
 
 @dataclass(kw_only=True)
@@ -1526,8 +1825,18 @@ class UnifiedBGCDataset(UnifiedDataset):
             "spCaCO3": "spCaCO3",
             "zooC": "zooC",
             "CHL": "CHL",
+            # Source temperature/salinity used to build the density coordinate for
+            # density-space interpolation of BGC tracers, under the stable internal keys
+            # ``temp_bgc``/``salt_bgc`` (declared as the density source in
+            # ``bgc_source_ts`` below). Optional: absent in older files, in which case
+            # interpolation falls back to depth space. If the file renames these
+            # variables, update only the values here.
+            "temp_bgc": "temp_WOA",
+            "salt_bgc": "salt_WOA",
         }
     )
+    # The opt_var_names keys (temp, salt) that supply the density-coordinate source.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
 
     climatology: bool = True
 
@@ -1561,10 +1870,10 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             "latitude": "lat",
         }
     )
-    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt_WOA"})
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "sss": "salt",
+            "sss": "salt_WOA",
         }
     )
 
@@ -1963,22 +2272,58 @@ class ERA5ARCODataset(ERA5Dataset):
         super().__post_init__()
 
 
+def resolve_era5_source(
+    path: str | Path | None,
+) -> tuple[str, bool, type[ERA5Dataset]]:
+    """Resolve an ERA5 source path, defaulting to the ARCO cloud archive when
+    none is given, and pick the matching dataset class.
+
+    This is a free function rather than a method on ``ERA5Dataset`` or
+    ``ERA5Dataset`` because it decides *which* of the two classes to
+    instantiate, and because it's shared by unrelated forcing classes
+    (``SurfaceForcing``, ``RiverForcing``) that have no inheritance
+    relationship to either.
+
+    Parameters
+    ----------
+    path : str, Path, or None
+        User-provided ERA5 path. If falsy, defaults to
+        ``DEFAULT_ERA5_ARCO_PATH``.
+
+    Returns
+    -------
+    resolved_path : str
+        The path to use, with the ARCO default applied if none was given.
+    is_arco : bool
+        Whether ``resolved_path`` points at the ARCO cloud archive
+        (``gs://`` or ``gcs://``).
+    dataset_cls : type[ERA5Dataset]
+        ``ERA5ARCODataset`` for cloud paths, ``ERA5Dataset`` otherwise.
+    """
+    resolved_path = str(path) if path else DEFAULT_ERA5_ARCO_PATH
+    is_arco = resolved_path.startswith("gs://") or resolved_path.startswith("gcs://")
+    dataset_cls = ERA5ARCODataset if is_arco else ERA5Dataset
+    return resolved_path, is_arco, dataset_cls
+
+
 @dataclass(kw_only=True)
 class ERA5Correction(LatLonDataset):
     """Global dataset to correct ERA5 radiation.
 
-    The dataset contains multiplicative correction factors for the ERA5 shortwave
-    radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
+    The dataset contains multiplicative correction factors for both ERA5 shortwave
+    and longwave radiation, obtained by comparing the COREv2 climatology to the
+    ERA5 climatology.
     """
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     filename: str = field(
-        default_factory=lambda: download_correction_data("SSR_correction.nc")
+        default_factory=lambda: download_correction_data("ERA5_correction.nc")
     )
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "swr_corr": "ssr_corr",  # multiplicative correction factor for ERA5 shortwave radiation
+            "lwr_corr": "strd_corr",  # multiplicative correction factor for ERA5 longwave radiation
         }
     )
     dim_names: dict[str, str] = field(
@@ -2147,7 +2492,7 @@ class TPXOManager:
     constituents from the TPXO dataset.
 
     This class handles multiple tidal constituents following the TPXO9v2a standard.
-    The self-attraction and loading (SAL) correction data is sourced internally from TPXO9v2a.
+    The self-attraction and loading (SAL) correction data is sourced internally from TPXO10v2a, which follows the TPXO9v2a standard.
 
     Parameters
     ----------
@@ -2164,9 +2509,6 @@ class TPXOManager:
         Reference date for the TPXO data. Defaults to January 1, 1992.
         Used as the baseline for tidal time series calculations.
 
-    allan_factor : float, optional
-        Factor used in tidal model computations. Defaults to 2.0.
-
     use_dask : bool, optional
         Whether to use Dask for chunking. If True, data is loaded lazily; if False, data is loaded eagerly. Defaults to False.
 
@@ -2180,11 +2522,10 @@ class TPXOManager:
     filenames: dict
     ntides: int
     reference_date: datetime = datetime(1992, 1, 1)
-    allan_factor: float = 2.0
     use_dask: bool | None = False
 
     def __post_init__(self):
-        fname_sal = download_sal_data("sal_tpxo9.v2a.nc")
+        fname_sal = download_sal_data("sal_tpxo10.v2a.nc")
 
         # Initialize the data_dict with TPXODataset instances
         data_dict = {
@@ -2201,7 +2542,7 @@ class TPXOManager:
                 location="h",
                 var_names={"sal_Re": "hRe", "sal_Im": "hIm"},
                 use_dask=self.use_dask,
-                tolerate_coord_mismatch=True,  # Allow coordinate mismatch since SAL is from TPXO9v2a and may not align exactly with newer grids
+                tolerate_coord_mismatch=True,  # Allow coordinate mismatch since SAL is from TPXO10v2a and may not align exactly with newer grids
             ),
             "u": TPXODataset(
                 filename=self.filenames["u"],
@@ -2234,7 +2575,7 @@ class TPXOManager:
 
     def get_omega(self):
         """Retrieve angular frequencies (omega) for tidal constituents from the TPXO9.v2
-        atlas.
+        atlas. Confirmed to be the same as for TPXO10v2a, 2026-06-12.
 
         This method returns the angular frequencies (in radians per second) for 15 tidal constituents,
         sourced from the TPXO tidal model and defined in the OTPSnc `constit.h` file, see https://www.tpxo.net/otps.
@@ -2576,11 +2917,11 @@ class TPXOManager:
         tpc = self.compute_equilibrium_tide(lon, lat)
 
         # Correct for SAL
-        tsc = self.allan_factor * (
+        tsc = (
             datasets["sal"].ds[datasets["sal"].var_names["sal_Re"]]
             + 1j * datasets["sal"].ds[datasets["sal"].var_names["sal_Im"]]
         )
-        tpc = tpc - tsc
+        tpc = tpc + tsc
 
         # Elevations and transports
         thc = (
@@ -2692,23 +3033,24 @@ def _concatenate_longitudes(
     use_dask: bool = False,
 ) -> xr.Dataset:
     """
-    Concatenate longitude dimension to handle global grids that cross
+    Extend the longitude dimension to handle global grids that cross
     the 0/360-degree or -180/180-degree boundary.
 
-    Extends the longitude dimension either lower, upper, or both sides
-    by +/- 360 degrees and duplicates the corresponding variables along
-    that dimension.
+    Wraps data from the opposite side of the globe using
+    :func:`xarray.Dataset.pad` with ``mode="wrap"``, then assigns the
+    correct shifted longitude coordinates.  Only the longitude dimension
+    is padded; all other dimensions and variables are left unchanged.
 
     Parameters
     ----------
     ds : xr.Dataset
-        Input xarray Dataset to be concatenated.
+        Input xarray Dataset to be extended.
     dim_names : Mapping[str, str]
         Dictionary or mapping containing dimension names. Must include "longitude".
     end : str
         Specifies which side(s) to extend:
-        - "lower": extend by subtracting 360 degrees.
-        - "upper": extend by adding 360 degrees.
+        - "lower": extend by subtracting 360 degrees (prepend wrapped data).
+        - "upper": extend by adding 360 degrees (append wrapped data).
         - "both": extend on both sides.
     use_dask : bool, default False
         Accepted for backward compatibility; no longer causes eager rechunking.
@@ -2718,42 +3060,34 @@ def _concatenate_longitudes(
     Returns
     -------
     xr.Dataset
-        Dataset with longitude dimension extended and data variables duplicated.
+        Dataset with longitude dimension extended and data variables wrapped.
 
     Notes
     -----
-    Only data variables containing the longitude dimension are concatenated;
-    others are left unchanged.
+    Data variables that do not contain the longitude dimension are left
+    unchanged by :func:`xarray.Dataset.pad`.
     """
-    ds_concat = xr.Dataset()
-
     lon_name = dim_names["longitude"]
     lon = ds[lon_name]
+    n = lon.sizes[lon_name]
 
     match end:
         case "lower":
-            lon_concat = xr.concat([lon - 360, lon], dim=lon_name)
-            n_copies = 2
+            pad_width = (n, 0)
+            lon_new = xr.concat([lon - 360, lon], dim=lon_name)
         case "upper":
-            lon_concat = xr.concat([lon, lon + 360], dim=lon_name)
-            n_copies = 2
+            pad_width = (0, n)
+            lon_new = xr.concat([lon, lon + 360], dim=lon_name)
         case "both":
-            lon_concat = xr.concat([lon - 360, lon, lon + 360], dim=lon_name)
-            n_copies = 3
+            pad_width = (n, n)
+            lon_new = xr.concat([lon - 360, lon, lon + 360], dim=lon_name)
         case _:
             raise ValueError(f"Invalid `end` value: {end}")
 
-    for var in ds.variables:
-        if lon_name in ds[var].dims:
-            field = ds[var]
-            field_concat = xr.concat([field] * n_copies, dim=lon_name)
-            ds_concat[var] = field_concat
-        else:
-            ds_concat[var] = ds[var]
+    ds_extended = ds.pad({lon_name: pad_width}, mode="wrap")
+    ds_extended = ds_extended.assign_coords({lon_name: lon_new.values})
 
-    ds_concat = ds_concat.assign_coords({lon_name: lon_concat.values})
-
-    return ds_concat
+    return ds_extended
 
 
 def choose_subdomain(

@@ -13,6 +13,8 @@ from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import ERA5Correction, GLORYSDataset
 from roms_tools.datasets.roms_dataset import ROMSDataset
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     _interpolate_generic,
     _path_list_from_input,
     generate_focused_coordinate_range,
@@ -28,6 +30,7 @@ from roms_tools.utils import (
     interpolate_from_v_to_rho,
     load_data,
     rotate_velocities,
+    save_datasets,
     unchunk_dask,
     wrap_longitudes,
 )
@@ -685,3 +688,23 @@ def test_unchunk_dask_roms_restart_test_data():
     out = unchunk_dask(ds, roms.dim_names, time_chunking=True)
     _assert_single_full_chunk(out["temp"], eta)
     _assert_single_full_chunk(out["temp"], xi)
+
+
+@pytest.mark.parametrize(
+    "netcdf_format",
+    [
+        DEFAULT_NETCDF_FORMAT,
+        "NETCDF3_64BIT_DATA",
+    ],
+)
+def test_save_datasets_netcdf_format(tmp_path, netcdf_format: NetCDFFormat):
+    ds = xr.Dataset({"a": ("x", np.arange(10))})
+    output_path = tmp_path / "test_output"
+
+    saved = save_datasets([ds], [str(output_path)], format=netcdf_format)
+
+    assert saved == [output_path.with_suffix(".nc")]
+    assert output_path.with_suffix(".nc").exists()
+
+    with xr.open_dataset(output_path.with_suffix(".nc")) as loaded:
+        xr.testing.assert_equal(ds, loaded)

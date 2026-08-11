@@ -5,7 +5,12 @@ readme = "README.md"
 authors = [
     {name = "Nora Loose", email = "nora.loose@gmail.com"},
     {name = "Thomas Nicholas", email = "tom@cworthy.org"},
-    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"}
+    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"},
+    {name = "Ben Saenz", email = "ben.saenz@cworthy.org"},
+    {name = "Ulla Heede", email = "ulla@cworthy.org"},
+    {name = "Abigale Wyatt", email = "abigale@cworthy.org"},
+    {name = "Kristen Thyng", email = "kristen.thyng@cworthy.org"},
+    {name = "Chris McBride", email = "christopher.mcbride@cworthy.org"},
 ]
 license = {text = "Apache-2"}
 classifiers = [
@@ -15,51 +20,66 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "xarray>=2022.6.0,<2025.8.0",
     "numpy>2.0,<2.3",
     "pooch",
-    "matplotlib",
+    "matplotlib<3.11",
     "cartopy",
     "packaging",
-    "scipy",
+    "scipy >= 1.18.0",
     "gcm_filters >=0.5.1",
     "netcdf4",
     "PyYAML",
     "pyamg",
     "bottleneck",
     "regionmask>=0.11.0",
-    "xgcm>=0.9.0",
+    "xgcm>0.10.0,<0.11",
+    "gsw",
     "numba>=0.61.2",
     "pydantic>2,<3",
+    "dask[diagnostics]",
+    "h5netcdf",
 ]
 dynamic = ["version"]
 
 
 [project.optional-dependencies]
-dask = [
-    "dask[diagnostics]",
-    "zarr"
-]
 stream = [
-    "dask[diagnostics]",
     "gcsfs",
     "zarr",
     "copernicusmarine",
+]
+movie = [
+    "imageio-ffmpeg",
 ]
 notebooks = [
-    "dask[diagnostics]",
-    "gcsfs",
-    "zarr",
-    "copernicusmarine",
+    "jupyter",
     "gdown",
     "ipykernel",
-    "jupyter"
+]
+dev = [
+    "pytest",
+    "pytest-xdist",
+    "coverage",
+    "pre-commit>=3.8",
+    # test-data/fixture dependencies (not lint/test tooling per se, but required
+    # for the base test suite to collect and pass without conda):
+    "h5py",
+    "zarr",
+]
+docs = [
+    "sphinx",
+    "nbsphinx",
+    "sphinx-book-theme",
+    "sphinx-design",
+    "sphinxcontrib-bibtex",
+    "myst-parser",
+    "ipykernel",
 ]
 
 [project.urls]
@@ -91,7 +111,7 @@ exclude = ["docs"]
 
 [tool.ruff.lint]
 extend-select = ["I", "E", "W", "F" , "D", "RUF", "UP"]
-ignore = ["E501", "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104"]
+ignore = ["E501", "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104", "UP040", "RUF043", "RUF059"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"

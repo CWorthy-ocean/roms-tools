@@ -49,6 +49,8 @@ River Forcing
    :toctree: generated/
 
    roms_tools.RiverForcing
+   roms_tools.datasets.river_datasets.DaiRiverDataset
+   roms_tools.datasets.river_datasets.GloFASRiverDataset
 
 CDR Forcing
 --------------------
@@ -67,6 +69,10 @@ Analyzing ROMS output
    :toctree: generated/
 
    roms_tools.ROMSOutput
+   roms_tools.ROMSOutput.plot
+   roms_tools.ROMSOutput.create_movie
+   roms_tools.ROMSOutput.regrid
+   roms_tools.ROMSOutput.cdr_metrics
    roms_tools.Ensemble
 
 =======
@@ -83,3 +89,5 @@ Utilities
    roms_tools.tiling.join.join_netcdf
    roms_tools.plot.plot
    roms_tools.datasets.lat_lon_datasets.get_glorys_bounds
+   roms_tools.setup.utils.compute_potential_density
+   roms_tools.setup.utils.compute_mld

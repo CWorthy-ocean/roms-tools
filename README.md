@@ -14,7 +14,7 @@ A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://githu
 
 ## Installation
 
-### ⚡️ **Installation from Conda-Forge**
+### ⚡️ **Installation from conda-forge (recommended)**
 
 To install `ROMS-Tools` with all dependencies, including `xesmf`, `dask` and all packages required for streaming source data directly from the cloud, use:
 
@@ -25,7 +25,7 @@ conda install -c conda-forge roms-tools
 > [!Note]
 >  Installation from Conda-Forge is the recommended installation method to ensure all features of `ROMS-Tools` are available.
 
-### 📦 **Installation from PyPI (pip)**
+### 📦 **Installation from PyPI (pip) (recommend for Windows only)**
 
 You can also install `ROMS-Tools` from `pip`:
 
@@ -33,13 +33,9 @@ You can also install `ROMS-Tools` from `pip`:
 pip install roms-tools
 ```
 
-If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of-core computation), install it with the additional dependency:
+`dask` (recommended for parallel and out-of-core computation) is included by default.
 
-```bash
-pip install roms-tools[dask]
-```
-
-If you want to use `ROMS-Tools` with `dask` and all packages required for streaming source data directly from the cloud, install it with the additional dependencies:
+If you want to use `ROMS-Tools` with all packages required for streaming source data directly from the cloud, install it with the additional dependencies:
 
 ```bash
 pip install roms-tools[stream]
@@ -62,28 +58,23 @@ cd roms-tools
 Next, install and activate the following conda environment:
 
 ```bash
-conda env create -f ci/environment-with-xesmf.yml
-conda activate romstools-test
+conda env create -f ci/environment.yml
+conda activate roms-tools-env
 ```
 
-Finally, install `ROMS-Tools` in the same environment:
+Finally, install `ROMS-Tools` in the same environment, along with the `dev` extra (test/lint tooling):
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 ```
 
-If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of-core computation), you can
-install `ROMS-Tools` along with the additional dependency via:
+`dask` (recommended for parallel and out-of-core computation) is included in the core dependencies by default.
 
-```bash
-pip install -e ".[dask]"
-```
-
-If you want to use `ROMS-Tools` with `dask` and all packages required for streaming source data directly from the cloud, you can
+If you want to use `ROMS-Tools` with all packages required for streaming source data directly from the cloud, you can
 install `ROMS-Tools` along with the additional dependencies via:
 
 ```bash
-pip install -e ".[stream]"
+pip install -e ".[dev,stream]"
 ```
 
 ## Getting Started

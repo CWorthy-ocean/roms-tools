@@ -1,4 +1,5 @@
 import importlib.metadata
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,25 +20,34 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
 from roms_tools.plot import plot
+from roms_tools.processing_methods import RegridConfig, _xesmf_available
 from roms_tools.regrid import (
     LateralRegridFromROMS,
-    LateralRegridToROMS,
     VerticalRegrid,
+    build_lateral_regridder,
+    select_source_mask,
 )
 from roms_tools.setup.utils import (
+    BGC_INTERPOLATION_METHODS,
     RawDataSource,
+    apply_scipy_fallback_fill,
+    apply_source_prefill,
+    build_bgc_vertical_coords,
+    check_source_coverage,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
-    nan_check,
+    nan_check_batch,
     pop_grid_data,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
@@ -111,8 +121,82 @@ class InitialConditions:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    bgc_interpolation_method : str, optional
+        Vertical interpolation method for BGC tracers. One of:
 
+        - ``"depth"`` (default): linear interpolation in depth.
+        - ``"density"``: linear interpolation in potential-density (isopycnal) space,
+          preserving water-mass properties. Density is computed from temperature and
+          salinity via TEOS-10 sigma-0 — the BGC source's own T/S for the source
+          coordinate and the physics T/S for the target.
+        - ``"density_mld"``: the mixed layer depth (MLD) is found in the source and
+          target density fields; the source mixed layer is scaled so its MLD matches the
+          target's, and below the MLD the tracer is interpolated 1:1 in depth. This keeps
+          the mixed layers aligned while preserving the absolute depth of sub-mixed-layer
+          features, and avoids the surface degeneracy of pure density space.
 
+        ``"density"`` and ``"density_mld"`` only apply when ``bgc_source`` is provided,
+        the physics source is a lat/lon dataset (not a ROMS restart), and the BGC source
+        carries temperature/salinity (e.g. the unified dataset's ``temp_WOA``/
+        ``salt_WOA``); otherwise interpolation falls back to depth space and notes in
+        the log. Interpolation uses ``xgcm.Grid.transform`` with the linear method
+        inside the source range and edge-value extrapolation outside
+        (``mask_edges=False``).
+    prefill : str or None, optional
+        How to fill NaN (land/void) cells in the *source* before regridding. The
+        default (``None``) applies **no** source prefill: with xESMF installed,
+        masked bilinear interpolation plus destination extrapolation
+        (``extrap_method``) produces NaN-free initial-condition fields directly;
+        without xESMF, the source is automatically pre-filled with a cheap
+        nearest-neighbor fill before scipy interpolation. Set ``prefill`` to fill
+        the whole-domain source first (the regrid is then plain bilinear and
+        ``extrap_method`` is ignored). Options:
+
+          - ``"2d_lateral_fill"`` -- legacy AMG Poisson fill (smoothest, slow;
+            no xESMF required). This reproduces the pre-v4 fill behavior.
+          - ``"inverse_dist"`` -- xESMF inverse-distance-weighted source fill
+            (tunable via ``prefill_kwargs``; requires xESMF).
+          - ``"nearest_s2d"`` -- xESMF nearest-source fill (requires xESMF).
+          - ``"nearest_neighbor"`` -- cheap distance-transform fill (no xESMF;
+            also the automatic fallback when xESMF is unavailable). Use for
+            cross-platform reproducibility or when xESMF is unavailable and the
+            AMG fill is too slow; not recommended when xESMF is available.
+          - ``"creep_fill"`` -- xESMF truncated Laplace-style diffusion source
+            fill (tunable via ``prefill_kwargs``; requires xESMF). **Not available
+            in current released xESMF** -- requires a newer/unreleased xESMF +
+            ESMF; provided for use once a supporting xESMF is installed.
+
+        Applies only to lat/lon physics/BGC sources; for a ROMS restart source it
+        is ignored (the legacy fill path is used) and a note is logged. Defaults to
+        ``None``.
+    prefill_kwargs : dict, optional
+        Method-specific options for ``prefill``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``; ``num_levels`` for
+        ``"creep_fill"``. Ignored by the other methods. Defaults to ``None``.
+    regrid_method : str or None, optional
+        Horizontal regrid engine, chosen independently of ``prefill``:
+
+          - ``None`` / ``"auto"`` (default) -- use xESMF if it is installed
+            (lazy, weight-reused, faster on large grids), otherwise scipy.
+          - ``"xesmf"`` -- force the xESMF regridder (raises if xESMF is absent).
+          - ``"scipy"`` -- force scipy ``interp``. Byte-reproducible with pre-v4
+            outputs; when ``prefill`` is ``None`` a nearest-neighbor source
+            pre-fill is applied automatically so scipy cannot propagate NaNs.
+
+        Note that ``inverse_dist`` / ``nearest_s2d`` *prefills* still require xESMF
+        for the fill step regardless of ``regrid_method``. Applies only to lat/lon
+        sources (ignored for a ROMS restart source). Defaults to ``None``.
+    extrap_method : str or None, optional
+        xESMF *destination* extrapolation used on the default path
+        (``prefill is None``) to fill target points whose source neighbors are
+        all land/out of range, guaranteeing NaN-free output. ``"inverse_dist"``
+        (the effective default) gives an inverse-distance-weighted average of the
+        nearest source points (smoothly varying); ``"nearest_s2d"`` uses the
+        single nearest source point. Ignored when ``prefill`` is set. Defaults to
+        ``None`` (treated as ``"inverse_dist"``).
+    extrap_kwargs : dict, optional
+        Method-specific options for ``extrap_method``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
 
     Examples
     --------
@@ -161,6 +245,32 @@ class InitialConditions:
     """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    bgc_interpolation_method: str = "depth"
+    """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
+    ``"density_mld"``."""
+    prefill: str | None = None
+    """Source-side fill applied before lateral regridding. ``None`` (default) applies
+    **no** whole-domain source fill: with xESMF the masked-bilinear regrid plus
+    destination extrapolation (``extrap_method``) produces NaN-free output directly;
+    without xESMF a nearest-neighbor pre-fill is applied automatically before scipy
+    interpolation. Set to ``"2d_lateral_fill"`` (legacy AMG Poisson fill),
+    ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``, or ``"creep_fill"``
+    to fill the whole-domain source first (the last three require xESMF).
+    Applies only to lat/lon sources; ignored for a ROMS restart source."""
+    prefill_kwargs: dict | None = None
+    """Method-specific options for ``prefill`` (e.g. ``num_src_pnts`` /
+    ``dist_exponent``). Applies only to lat/lon sources."""
+    regrid_method: str | None = None
+    """Horizontal regrid engine, chosen independently of ``prefill``: ``None``/``"auto"``
+    uses xESMF when installed (else scipy), ``"xesmf"`` forces xESMF, ``"scipy"`` forces
+    scipy. Applies only to lat/lon sources; ignored for a ROMS restart source."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation used on the default no-prefill path (``None`` is
+    treated as ``"inverse_dist"``) to fill target points whose source neighbors are all
+    masked. Ignored when ``prefill`` is set, on the scipy path, or for a ROMS restart
+    source."""
+    extrap_kwargs: dict | None = None
+    """Method-specific options for ``extrap_method``. Applies only to lat/lon sources."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -173,6 +283,7 @@ class InitialConditions:
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
 
+        self._resolve_prefill_options()
         self._input_checks()
 
         processed_fields = {}
@@ -201,6 +312,52 @@ class InitialConditions:
 
         self.ds = ds
 
+    def _resolve_prefill_options(self) -> None:
+        """Build the validated :class:`RegridConfig` from the public options.
+
+        Delegates all prefill/extrap/regrid validation to
+        :meth:`RegridConfig.from_options`, then writes the resolved ``prefill`` back
+        to the public field (as a plain string or ``None``) so the YAML round-trip
+        emits a clean ``prefill``. Derived state (``use_xesmf``, ``effective_extrap``,
+        ...) is read off ``self._regrid``. These options apply to lat/lon sources
+        only; the ROMS-restart path (see :meth:`_process_data`) ignores them.
+        """
+        self._regrid = RegridConfig.from_options(
+            prefill=self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            regrid_method=self.regrid_method,
+            extrap_method=self.extrap_method,
+            extrap_kwargs=self.extrap_kwargs,
+            xesmf_available=_xesmf_available(),
+        )
+        self.prefill = (
+            None if self._regrid.prefill is None else str(self._regrid.prefill)
+        )
+
+    def _warn_if_regrid_options_set_for_roms(self) -> None:
+        """Log a note when prefill/regrid options are set but the source is ROMS.
+
+        Mirrors the ``bgc_interpolation_method`` house style: the options are
+        accepted but have no effect on a ROMS restart source (which uses the
+        legacy lateral fill + ``LateralRegridFromROMS``), so we note the fallback
+        in the log rather than raising.
+        """
+        if any(
+            opt is not None
+            for opt in (
+                self.prefill,
+                self.prefill_kwargs,
+                self.regrid_method,
+                self.extrap_method,
+                self.extrap_kwargs,
+            )
+        ):
+            logging.info(
+                "prefill/regrid_method/extrap_method apply to lat/lon sources only; "
+                "ignoring them for the ROMS restart source and using the legacy "
+                "lateral fill."
+            )
+
     def _process_data(self, processed_fields, type="physics"):
         target_coords = get_target_coords(self.grid)
 
@@ -212,7 +369,20 @@ class InitialConditions:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
-        data.apply_lateral_fill()
+        if isinstance(data, ROMSDataset):
+            # ROMS restart source: the bespoke ROMS-grid fill feeds only
+            # ``LateralRegridFromROMS`` (unchanged). The prefill/regrid/extrap options
+            # do not apply here; warn if the user explicitly set any of them.
+            self._warn_if_regrid_options_set_for_roms()
+            data.apply_lateral_fill()
+        else:
+            source_name = (
+                self.source["name"] if type == "physics" else self.bgc_source["name"]
+            )
+            if self._regrid.extrap_is_active:
+                check_source_coverage(data, target_coords, source_name)
+            apply_source_prefill(data, self._regrid, self.prefill_kwargs)
+            apply_scipy_fallback_fill(data, self._regrid)
         data.rotate_velocities_to_east_and_north()
 
         self._set_variable_info(data, type=type)
@@ -274,7 +444,9 @@ class InitialConditions:
             self._get_depth_coordinates(zeta, location, "layer")
 
         # Vertical regridding
-        processed_fields = self._regrid_vertically(data, processed_fields, var_names)
+        processed_fields = self._regrid_vertically(
+            data, processed_fields, var_names, type=type
+        )
 
         # Compute barotropic velocities
         if "u" in var_names and "v" in var_names:
@@ -340,9 +512,33 @@ class InitialConditions:
             )
 
         else:
-            lateral_regrid_to_roms = LateralRegridToROMS(target_coords, data.dim_names)
+            # Velocity fields (location "u"/"v") use the velocity mask; build a
+            # separate vector regridder only when a velocity var is present so
+            # mask_vel-less sources (e.g. BGC) don't pay for unused xESMF weights.
+            def _mask(is_vector):
+                return select_source_mask(
+                    data.ds,
+                    is_vector=is_vector,
+                    use_xesmf=self._regrid.use_xesmf,
+                    prefill=self._regrid.prefill,
+                )
+
+            scalar_rg = build_lateral_regridder(
+                target_coords, data, self._regrid, _mask(False)
+            )
+            has_vel = any(var_names[v]["location"] in ("u", "v") for v in var_names)
+            vector_rg = (
+                build_lateral_regridder(target_coords, data, self._regrid, _mask(True))
+                if has_vel
+                else scalar_rg
+            )
             for var_name in var_names:
-                processed_fields[var_name] = lateral_regrid_to_roms.apply(
+                rg = (
+                    vector_rg
+                    if var_names[var_name]["location"] in ("u", "v")
+                    else scalar_rg
+                )
+                processed_fields[var_name] = rg.apply(
                     data.ds[var_names[var_name]["name"]]
                 )
 
@@ -353,6 +549,7 @@ class InitialConditions:
         data: ROMSDataset | LatLonDataset,
         processed_fields: dict[str, xr.DataArray],
         var_names: dict[str, dict[str, str | bool]],
+        type: str = "physics",
     ) -> dict[str, xr.DataArray]:
         """
         Perform vertical regridding of 3D variables to the model's vertical grid.
@@ -426,16 +623,74 @@ class InitialConditions:
                     data.ds, source_dim=data.dim_names["depth"]
                 )
 
-                for var_name in filtered_vars:
+                # The BGC dataset declares its own source temperature/salinity pair
+                # (``bgc_source_ts``, e.g. ``temp_bgc``/``salt_bgc``) that defines the
+                # source density coordinate. These are not ROMS output variables, so they
+                # are handled separately from the tracers and dropped afterwards.
+                ts_keys = tuple(getattr(data, "bgc_source_ts", ()))
+                aux_ts_vars = [
+                    v for v in ts_keys if v in filtered_vars and v in processed_fields
+                ]
+                tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
+
+                has_source_ts = len(aux_ts_vars) == 2
+                has_target_ts = (
+                    "temp" in processed_fields and "salt" in processed_fields
+                )
+                # Resolve the requested method against availability of the T/S needed
+                # to build the density/MLD coordinates; fall back to depth otherwise.
+                method = self.bgc_interpolation_method if type == "bgc" else "depth"
+                if method != "depth" and not (has_source_ts and has_target_ts):
+                    logging.info(
+                        f"{method!r} interpolation requested but the BGC source has "
+                        "no temperature/salinity; falling back to depth-space "
+                        "interpolation."
+                    )
+                    method = "depth"
+
+                source_coord = None
+                target_coord = None
+                if method != "depth":
+                    temp_key, salt_key = ts_keys
+                    s_dim = next(
+                        d for d in processed_fields["temp"].dims if d.startswith("s_")
+                    )
+                    # Source coordinate uses the BGC dataset's own T/S (already on its
+                    # source depth grid); target uses the model's (physics) sigma-level
+                    # T/S, present in the shared processed_fields from physics processing.
+                    source_coord, target_coord = build_bgc_vertical_coords(
+                        method,
+                        source_temp=processed_fields[temp_key],
+                        source_salt=processed_fields[salt_key],
+                        source_depth=data.ds[data.dim_names["depth"]],
+                        source_depth_dim=data.dim_names["depth"],
+                        target_temp=processed_fields["temp"],
+                        target_salt=processed_fields["salt"],
+                        target_depth=self.ds_depth_coords[f"layer_depth_{location}"],
+                        target_depth_dim=s_dim,
+                    )
+
+                for var_name in tracer_vars:
                     if var_name not in processed_fields:
                         continue
-                    processed_fields[var_name] = vertical_regrid.apply(
-                        processed_fields[var_name],
-                        source_depth_coords=data.ds[data.dim_names["depth"]],
-                        target_depth_coords=self.ds_depth_coords[
-                            f"layer_depth_{location}"
-                        ],
-                    )
+                    if method != "depth":
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
+                            source_depth_coords=source_coord,
+                            target_depth_coords=target_coord,
+                        )
+                    else:
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
+                            source_depth_coords=data.ds[data.dim_names["depth"]],
+                            target_depth_coords=self.ds_depth_coords[
+                                f"layer_depth_{location}"
+                            ],
+                        )
+
+                # Drop the auxiliary source T/S; they are not ROMS output variables.
+                for v in aux_ts_vars:
+                    processed_fields.pop(v, None)
 
         return processed_fields
 
@@ -470,6 +725,11 @@ class InitialConditions:
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
                 f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
+            )
+        if self.bgc_interpolation_method not in BGC_INTERPOLATION_METHODS:
+            raise ValueError(
+                f"`bgc_interpolation_method` must be one of "
+                f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
 
     def _get_data(
@@ -798,6 +1058,10 @@ class InitialConditions:
         else:
             variable_info = self.variable_info_physics
 
+        # Build the NaN checks lazily and evaluate them in a single computation so a
+        # lazy subgraph shared across variables (e.g. the density/MLD interpolation
+        # coordinate reused across BGC tracers) is computed once, not once per variable.
+        checks = []
         for var_name in variable_info:
             if variable_info[var_name]["validate"]:
                 if variable_info[var_name]["location"] == "rho":
@@ -806,8 +1070,9 @@ class InitialConditions:
                     mask = self.grid.ds.mask_u
                 elif variable_info[var_name]["location"] == "v":
                     mask = self.grid.ds.mask_v
-                ds[var_name].load()
-                nan_check(ds[var_name].squeeze(), mask)
+                checks.append((ds[var_name].squeeze(), mask, None))
+
+        nan_check_batch(checks)
 
     def _add_global_metadata(self, ds):
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"
@@ -825,6 +1090,10 @@ class InitialConditions:
         ds.attrs["source"] = self.source["name"]
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
+
+        ds.attrs["prefill"] = str(self.prefill)
+        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
@@ -965,13 +1234,19 @@ class InitialConditions:
             cmap_name=cmap_name,
         )
 
-    def save(self, filepath: str | Path) -> None:
-        """Save the initial conditions information to one netCDF4 file.
+    def save(
+        self,
+        filepath: str | Path,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+    ) -> None:
+        """Save the initial conditions information to one NetCDF file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path or filename where the dataset should be saved.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -989,7 +1264,10 @@ class InitialConditions:
         output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            format=format,
         )
 
         return saved_filenames

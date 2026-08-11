@@ -46,6 +46,8 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     normalize_longitude,
     save_datasets,
 )
@@ -892,13 +894,16 @@ class CDRForcing(BaseModel):
     def save(
         self,
         filepath: str | Path,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
     ) -> list[Path]:
-        """Save the volume source with tracers to netCDF4 file.
+        """Save the volume source with tracers to a NetCDF file.
 
         Parameters
         ----------
         filepath : str | Path
             The base path and filename for the output files.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -915,7 +920,7 @@ class CDRForcing(BaseModel):
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(dataset_list, output_filenames)
+        saved_filenames = save_datasets(dataset_list, output_filenames, format=format)
 
         return saved_filenames
 

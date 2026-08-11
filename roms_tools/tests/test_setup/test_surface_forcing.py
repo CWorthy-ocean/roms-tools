@@ -291,9 +291,12 @@ def test_successful_initialization_with_global_data(
 def test_nan_detection_initialization_with_regional_data(
     grid_fixture, request, use_dask
 ):
-    """Test handling of NaN values during initialization with regional data.
+    """Test handling of a grid that extends beyond the source data coverage.
 
-    Ensures ValueError is raised if NaN values are detected in the dataset.
+    Both regrid paths reject a grid that outruns the regional ERA5 data, with
+    different messages: the default (no-prefill xESMF) path raises an explicit
+    coverage error ("extends beyond ...") before extrapolating, while the scipy
+    fallback (no xESMF) propagates NaNs and is caught by the NaN check.
     """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
@@ -303,7 +306,7 @@ def test_nan_detection_initialization_with_regional_data(
     grid = request.getfixturevalue(grid_fixture)
 
     for coarse_grid_mode in ["always", "never"]:
-        with pytest.raises(ValueError, match="NaN values found"):
+        with pytest.raises(ValueError, match="extends beyond|NaN values found"):
             SurfaceForcing(
                 grid=grid,
                 coarse_grid_mode=coarse_grid_mode,
@@ -312,6 +315,113 @@ def test_nan_detection_initialization_with_regional_data(
                 source={"name": "ERA5", "path": fname},
                 use_dask=use_dask,
             )
+
+
+def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_dask):
+    """Physics default is no-prefill masked xESMF (scipy fallback); the legacy
+    scipy + 2d_lateral_fill path still works and produces different output.
+    """
+    from roms_tools.processing_methods import _xesmf_available
+
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+    common = dict(
+        grid=grid_that_straddles_dateline,
+        start_time=datetime(2020, 1, 31),
+        end_time=datetime(2020, 2, 2),
+        source={"name": "ERA5", "path": fname},
+        use_dask=use_dask,
+    )
+    fields = ["uwnd", "swrad", "Tair", "qair", "rain"]
+
+    # Default: no prefill; engine resolves to xESMF iff available.
+    default = SurfaceForcing(**common)
+    assert default.prefill is None
+    assert default._regrid.use_xesmf == _xesmf_available()
+    for var in fields:
+        assert not bool(default.ds[var].isnull().any())
+
+    # Legacy path (pre-change behavior) still works.
+    legacy = SurfaceForcing(**common, prefill="2d_lateral_fill", regrid_method="scipy")
+    assert legacy.prefill == "2d_lateral_fill"
+    assert not legacy._regrid.use_xesmf
+    for var in fields:
+        assert not bool(legacy.ds[var].isnull().any())
+
+    # The regrid/prefill choice actually changes the output (the "test that would
+    # have changed" for the new default).
+    if _xesmf_available():
+        assert not np.allclose(
+            default.ds["uwnd"].values, legacy.ds["uwnd"].values, equal_nan=True
+        )
+
+
+@pytest.mark.parametrize(
+    "source, sf_type, restoring_forces",
+    [
+        (
+            {
+                "name": "UNIFIED",
+                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "climatology": True,
+            },
+            "bgc",
+            None,
+        ),
+        (
+            {"name": "CESM_REGRIDDED", "path": "CESM_surface_global_test_data.nc"},
+            "bgc",
+            None,
+        ),
+        (
+            {
+                "name": "UNIFIED",
+                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "climatology": True,
+            },
+            "restoring",
+            ["sss"],
+        ),
+        (
+            {"name": "SODA", "path": "coarsened_OceanSODA_dataset.nc"},
+            "restoring",
+            ["sDIC", "sALK"],
+        ),
+    ],
+)
+def test_bgc_restoring_default_regrid_path(source, sf_type, restoring_forces, use_dask):
+    """bgc/restoring build NaN-free under the *default* masked-xESMF regrid.
+
+    The regression fixtures pin these to scipy + 2d_lateral_fill for byte-
+    reproducibility, so this guards the actual default path (which users get) --
+    in particular that each source's dim ordering / mask flows through xESMF
+    without error.
+    """
+    from roms_tools.processing_methods import _xesmf_available
+
+    grid = Grid(
+        nx=5, ny=5, size_x=1800, size_y=2400, center_lon=180, center_lat=61, rot=20
+    )
+    src = {**source, "path": Path(download_test_data(source["path"]))}
+    kwargs = dict(
+        grid=grid,
+        start_time=datetime(2020, 2, 1),
+        end_time=datetime(2020, 2, 1),
+        source=src,
+        type=sf_type,
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+    if restoring_forces is not None:
+        kwargs["restoring_forces"] = restoring_forces
+
+    # No regrid_method/prefill args -> the default (masked xESMF + extrapolation,
+    # scipy + nearest-neighbor fallback without xESMF).
+    sf = SurfaceForcing(**kwargs)
+    assert sf.prefill is None
+    assert sf._regrid.use_xesmf == _xesmf_available()
+    assert len(sf.ds.data_vars) > 0
+    for var in sf.ds.data_vars:
+        assert not bool(sf.ds[var].isnull().any()), f"{var} has NaNs"
 
 
 def test_no_longitude_intersection_initialization_with_regional_data(
@@ -403,6 +513,13 @@ def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, cap
         ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", None, True),
         ("WOA", "WOA_2018_quarterDeg_coarsened.nc", "restoring", ["sss"], True),
         ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", ["sss"], True),
+        (
+            "SODA",
+            "coarsened_OceanSODA_dataset.nc",
+            "restoring",
+            ["sDIC", "sALK"],
+            False,
+        ),
     ],
 )
 def test_nans_filled_in(
@@ -484,19 +601,26 @@ def test_time_attr(bgc_surface_forcing):
     [
         "restoring_surface_forcing_from_unified_climatology",
         "restoring_surface_forcing_from_woa_climatology",
+        "restoring_surface_forcing_from_soda",
     ],
 )
 def test_time_attr_climatology_restoring(surface_forcing_fixture, request):
     """Test that the 'cycle_length' attribute is present in the time coordinate of the
-    restoring forces dataset when using climatology data.
+    salinity restoring forces dataset when using climatology data, but not in sDIC and sALK
+    restoring forces, when the data is not climatolgy.
     """
     restoring_surface_forcing = request.getfixturevalue(surface_forcing_fixture)
-    for time_coord in ["sss_time"]:
+    if "sss" in restoring_surface_forcing.ds:
+        time_coord = "sss_time"
         assert hasattr(
             restoring_surface_forcing.ds[time_coord],
             "cycle_length",
         )
-    assert hasattr(restoring_surface_forcing.ds, "climatology")
+        assert hasattr(restoring_surface_forcing.ds, "climatology")
+    if "sDIC" in restoring_surface_forcing.ds:
+        for time_coord in ["sDIC_time", "sALK_time"]:
+            assert "cycle_length" not in restoring_surface_forcing.ds[time_coord].attrs
+            assert "climatolgy" not in restoring_surface_forcing.ds.attrs
 
 
 @pytest.mark.parametrize(
@@ -580,6 +704,12 @@ def test_surface_forcing_creation(
             True,
             Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
         ),
+        (
+            "restoring_surface_forcing_from_soda",
+            "SODA",
+            False,
+            Path(download_test_data("coarsened_OceanSODA_dataset.nc")),
+        ),
     ],
 )
 def test_surface_forcing_creation_restoring(
@@ -607,8 +737,12 @@ def test_surface_forcing_creation_restoring(
     }
     assert not sfc_forcing.use_coarse_grid
     assert sfc_forcing.ds.attrs["source"] == expected_name
-    for time_coord in ["sss_time"]:
+    if expected_name in ["WOA", "UNIFIED"]:
+        time_coord = "sss_time"
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
+    if expected_name in ["SODA"]:
+        for time_coord in ["sDIC_time", "sALK_time"]:
+            assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
 
 def test_surface_forcing_pco2_replication(bgc_surface_forcing_from_mbl_co2):
@@ -867,6 +1001,12 @@ def test_surface_forcing_restoring_plot(sfc_forcing_fixture, request):
     sfc_forcing.plot(var_name="sss", time=0)
 
 
+def test_surface_forcing_restoring_DIC_ALK_plot(restoring_surface_forcing_from_soda):
+    """Test plot method."""
+    restoring_surface_forcing_from_soda.plot(var_name="sDIC", time=0)
+    restoring_surface_forcing_from_soda.plot(var_name="sALK", time=0)
+
+
 def test_surface_forcing_restoring_save(
     restoring_surface_forcing_from_woa_climatology, tmp_path
 ):
@@ -898,6 +1038,37 @@ def test_surface_forcing_restoring_save(
             expected_filepath.unlink()
 
 
+def test_surface_forcing_restoring_DIC_ALK_save(
+    restoring_surface_forcing_from_soda, tmp_path
+):
+    """Test save method."""
+    for file_str in ["test_sf", "test_sf.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
+            # Test saving without grouping
+            saved_filenames = restoring_surface_forcing_from_soda.save(
+                filepath, group=False
+            )
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+            # Test saving with grouping
+            saved_filenames = restoring_surface_forcing_from_soda.save(
+                filepath, group=True
+            )
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}_2020.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+
 @pytest.mark.parametrize(
     "sfc_forcing_fixture",
     [
@@ -910,6 +1081,7 @@ def test_surface_forcing_restoring_save(
         "bgc_surface_forcing_from_unified_climatology",
         "restoring_surface_forcing_from_unified_climatology",
         "restoring_surface_forcing_from_woa_climatology",
+        "restoring_surface_forcing_from_soda",
         "bgc_surface_forcing_from_mbl_co2",
     ],
 )
@@ -1007,6 +1179,10 @@ def assert_roundtrip_hash_equal(
         ),
         (
             "bgc_surface_forcing_from_mbl_co2",
+            "2020",
+        ),
+        (
+            "restoring_surface_forcing_from_soda",
             "2020",
         ),
     ],
@@ -1124,3 +1300,30 @@ def test_default_era5_dataset_loading(small_grid: Grid) -> None:
 
     expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
     assert set(sf.ds.data_vars).issuperset(expected_vars)
+
+
+def test_era5_default_path_requires_dask(small_grid: Grid, caplog) -> None:
+    """Omitting a path for ERA5 defaults to the ARCO cloud path (resolved via
+    `resolve_era5_source` in `_get_data`) and requires `use_dask=True`.
+
+    Regression test for the dedup of `SurfaceForcing`'s ERA5 default-path
+    logic into the shared `resolve_era5_source` helper: this doesn't touch
+    the network, since the `use_dask` check fires before any streaming.
+    """
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(
+            ValueError, match="Cloud-based ERA5 access requires `use_dask=True`"
+        ):
+            SurfaceForcing(
+                grid=small_grid,
+                source={"name": "ERA5"},
+                type="physics",
+                start_time=start_time,
+                end_time=end_time,
+                use_dask=False,
+            )
+
+    assert "defaulting to ARCO ERA5 dataset on Google Cloud" in caplog.text

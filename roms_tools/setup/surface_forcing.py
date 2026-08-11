@@ -10,20 +10,27 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCSurfaceForcingDataset,
-    ERA5ARCODataset,
     ERA5Correction,
-    ERA5Dataset,
     LatLonDataset,
     MBLco2Dataset,
+    SODARestoringSurfaceDataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
+    resolve_era5_source,
 )
 from roms_tools.plot import plot
-from roms_tools.regrid import LateralRegridToROMS
+from roms_tools.processing_methods import (
+    RegridConfig,
+    _xesmf_available,
+)
+from roms_tools.regrid import build_lateral_regridder, select_source_mask
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
+    apply_scipy_fallback_fill,
+    apply_source_prefill,
+    check_source_coverage,
     compute_missing_surface_bgc_variables,
     from_yaml,
     get_target_coords,
@@ -36,19 +43,25 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     interpolate_from_climatology,
     rotate_velocities,
     save_datasets,
     transpose_dimensions,
 )
 
-DEFAULT_ERA5_ARCO_PATH = (
-    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
-)
+# Number of forcing time steps per block when interpolating the radiation-correction
+# climatology onto the forcing time axis. Keeps the interpolated time axis chunked so
+# long records don't build one giant task and slicing a few steps stays cheap. Larger
+# values mean fewer, bigger dask tasks; smaller values mean cheaper per-slice reads.
+_DEFAULT_CLIMATOLOGY_TIME_CHUNK = 100
 
 DEFAULT_MBL_co2_PATH = (
     "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
 )
+
+DEFAULT_SODA_PATH = "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
 
 
 @dataclass(kw_only=True)
@@ -87,7 +100,7 @@ class SurfaceForcing:
           - "restoring": for restoring forces.
 
     correct_radiation : bool
-        Whether to correct shortwave radiation. Default is True.
+        Whether to correct shortwave and longwave radiation. Default is True.
 
     wind_dropoff : bool, optional
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
@@ -95,8 +108,8 @@ class SurfaceForcing:
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
 
     restoring_forces : list[str], optional
-        Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
-        ```['sss',]```.
+        Specifies which variables to apply restoring forces to. Sea surface salinity, DIC and alkalinity are supported:
+        ```['sss', 'sDIC', 'sALK']```.
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -146,7 +159,7 @@ class SurfaceForcing:
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc", "restoring")."""
     correct_radiation: bool = True
-    """Whether to correct shortwave radiation."""
+    """Whether to correct shortwave and longwave radiation."""
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
@@ -168,6 +181,24 @@ class SurfaceForcing:
     """If True (default), include one dataset record before start_time and after end_time
     so ROMS can interpolate at exact simulation boundaries. If False, select only records
     within [start_time, end_time] inclusive."""
+    regrid_method: str = "auto"
+    """Horizontal regrid engine: ``"auto"`` (xESMF if installed, else scipy),
+    ``"xesmf"``, or ``"scipy"``."""
+    prefill: str | None = None
+    """Source-side fill applied before regridding. ``None`` (default) applies no
+    whole-domain fill: with xESMF the regrid is masked bilinear with inverse-distance
+    destination extrapolation; without xESMF the source is nearest-neighbor pre-filled
+    before scipy interpolation. Set to ``"2d_lateral_fill"`` (legacy AMG Poisson),
+    ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``, or ``"creep_fill"``
+    to fill the whole-domain source first (the last three require xESMF)."""
+    prefill_kwargs: dict | None = None
+    """Method-specific keyword arguments for ``prefill`` (e.g. ``num_src_pnts`` /
+    ``dist_exponent`` for ``"inverse_dist"``)."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation on the default no-prefill path; defaults to
+    ``"inverse_dist"``. Ignored when a ``prefill`` is set or on the scipy path."""
+    extrap_kwargs: dict | None = None
+    """Method-specific keyword arguments for ``extrap_method``."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -177,6 +208,20 @@ class SurfaceForcing:
 
     def __post_init__(self):
         self._input_checks()
+        # Resolve/validate the regrid engine + source-prefill + extrapolation options
+        # once (mirrors BoundaryForcing); derived decisions are read off self._regrid.
+        self._regrid = RegridConfig.from_options(
+            prefill=self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            regrid_method=self.regrid_method,
+            extrap_method=self.extrap_method,
+            extrap_kwargs=self.extrap_kwargs,
+            xesmf_available=_xesmf_available(),
+        )
+        # Persist the resolved prefill as a plain string (or None) for the YAML round-trip.
+        self.prefill = (
+            None if self._regrid.prefill is None else str(self._regrid.prefill)
+        )
 
         data = self._get_data()
 
@@ -202,6 +247,10 @@ class SurfaceForcing:
             for var in self.restoring_forces:
                 if var == "sss":
                     cppdefs_flags.add("SFLX_CORR")
+                if var == "sDIC":
+                    cppdefs_flags.add("CFLX_CORR")
+                if var == "sALK":
+                    cppdefs_flags.add("CFLX_CORR")
 
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
@@ -244,7 +293,17 @@ class SurfaceForcing:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
 
-        data.apply_lateral_fill()
+        # On the no-prefill xESMF path, destination extrapolation would silently fill
+        # points outside the source coverage. Guard against a grid that outruns the
+        # data (coastal gaps *within* coverage are still filled by the masked regrid).
+        regrid = self._regrid
+        if regrid.extrap_is_active:
+            check_source_coverage(data, target_coords, self.source["name"])
+
+        # Whole-domain source prefill when requested, else a nearest-neighbor
+        # pre-fill on the scipy path so interpolation cannot propagate NaNs.
+        apply_source_prefill(data, regrid, self.prefill_kwargs)
+        apply_scipy_fallback_fill(data, regrid)
 
         self._set_variable_info(data)
         var_names = {
@@ -254,9 +313,17 @@ class SurfaceForcing:
             if name in data.ds.data_vars
         }
 
+        # On the default (no-prefill) xESMF path, use the source "mask" for masked
+        # bilinear regridding; a set prefill / the scipy path leaves the source
+        # already NaN-free, so no mask is needed (plain bilinear / scipy interp).
+        source_mask = select_source_mask(
+            data.ds, is_vector=False, use_xesmf=regrid.use_xesmf, prefill=regrid.prefill
+        )
         processed_fields = {}
         # lateral regridding
-        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
+        lateral_regrid = build_lateral_regridder(
+            target_coords, data, regrid, source_mask
+        )
         for var_name in var_names:
             processed_fields[var_name] = lateral_regrid.apply(
                 data.ds[var_names[var_name]["name"]]
@@ -272,8 +339,11 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.correct_radiation:
-                processed_fields["swrad"] = self._apply_radiation_correction(
-                    processed_fields["swrad"], data
+                (
+                    processed_fields["swrad"],
+                    processed_fields["lwrad"],
+                ) = self._apply_radiation_corrections(
+                    processed_fields["swrad"], processed_fields["lwrad"], data
                 )
             if self.wind_dropoff:
                 (
@@ -331,15 +401,19 @@ class SurfaceForcing:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
             if self.source["name"] == "ERA5":
-                logging.info(
-                    "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
-                )
-                self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+                # ERA5's default path (the ARCO cloud archive) is applied
+                # later, by `resolve_era5_source` in `_get_data`.
+                self.source["path"] = None
             elif self.source["name"] == "MBL_co2":
                 logging.info(
                     "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
                 )
                 self.source["path"] = DEFAULT_MBL_co2_PATH
+            elif self.source["name"] == "SODA":
+                logging.info(
+                    "No path specified for SODA source; defaulting to the OceanSODA-ETHZ v2025 dataset from NCEI, NOAA."
+                )
+                self.source["path"] = DEFAULT_SODA_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 
@@ -363,18 +437,38 @@ class SurfaceForcing:
                     "When type='restoring', `restoring_forces` must be defined."
                 )
 
-            valid_vars = ["sss"]
+            valid_vars = ["sss", "sDIC", "sALK"]
             for var in self.restoring_forces:
                 if var not in valid_vars:
                     raise ValueError(
                         f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
                     )
+            has_dic = "sDIC" in self.restoring_forces
+            has_alk = "sALK" in self.restoring_forces
+            has_sss = "sss" in self.restoring_forces
+
+            if has_dic != has_alk:
+                raise ValueError(
+                    "'sDIC' and 'sALK' must both be present or both absent"
+                )
+
+            if has_dic and has_sss:
+                raise ValueError(
+                    "'sss' must be called separately from 'sDIC' and 'sALK'."
+                )
 
         # Check that climatology is false for t-varying co2
         if self.type == "bgc" and self.source["name"] == "MBL_co2":
             if self.source["climatology"]:
                 raise ValueError(
                     "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
+                )
+
+        # Check that climatology is false for restoring of 'sDIC' and 'sALK'
+        if self.type == "restoring" and self.source["name"] == "SODA":
+            if self.source["climatology"]:
+                raise ValueError(
+                    "When 'name' is 'SODA', monthly `dic` and `talk` data is expected. 'climatology' must be 'False'"
                 )
 
     def _determine_coarse_grid_usage(self, data):
@@ -428,16 +522,24 @@ class SurfaceForcing:
                 # Add 1 hr since radiation time will shift by 1 hr
                 if data_dict["end_time"] is not None:
                     data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
-                if str(self.source["path"]).startswith("gs://") or str(
+                resolved_path, is_arco, dataset_cls = resolve_era5_source(
                     self.source["path"]
-                ).startswith("gcs://"):
-                    if not self.use_dask:
-                        raise ValueError(
-                            "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
-                        )
-                    data = ERA5ARCODataset(**data_dict)
-                else:
-                    data = ERA5Dataset(**data_dict)
+                )
+                if not self.source["path"]:
+                    # Only rewrite when defaulting -- an explicitly provided
+                    # path (str or Path) is left exactly as given, so
+                    # `self.source` round-trips (e.g. through `to_yaml`)
+                    # without silently changing its type.
+                    logging.info(
+                        "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
+                    )
+                    self.source["path"] = resolved_path
+                    data_dict["filename"] = resolved_path
+                if is_arco and not self.use_dask:
+                    raise ValueError(
+                        "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
+                    )
+                data = dataset_cls(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -456,14 +558,22 @@ class SurfaceForcing:
                 )
 
         elif self.type == "restoring":
-            if self.source["name"] == "WOA":
-                data = WOARestoringSurfaceDataset(**data_dict)
-            elif self.source["name"] == "UNIFIED":
-                data = UnifiedRestoringSurfaceDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring".'
-                )
+            if "sss" in self.restoring_forces:
+                if self.source["name"] == "WOA":
+                    data = WOARestoringSurfaceDataset(**data_dict)
+                elif self.source["name"] == "UNIFIED":
+                    data = UnifiedRestoringSurfaceDataset(**data_dict)
+                else:
+                    raise ValueError(
+                        'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring", and restoring_forces is ["sss"].'
+                    )
+            if "sDIC" in self.restoring_forces:
+                if self.source["name"] == "SODA":
+                    data = SODARestoringSurfaceDataset(**data_dict)
+                else:
+                    raise ValueError(
+                        'Only "SODA" is a valid option for source["name"] when type is "restoring", and restoring_forces is ["sDIC", "sALK"].'
+                    )
 
         return data
 
@@ -546,83 +656,117 @@ class SurfaceForcing:
                 data.opt_var_names.keys()
             ):
                 variable_info[var_name] = default_info
-                if var_name == "sss":
+                if var_name in ["sss", "sDIC", "sALK"]:
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
 
         self.variable_info = variable_info
 
-    def _apply_radiation_correction(
-        self, radiation: xr.DataArray, data: LatLonDataset
-    ) -> xr.DataArray:
-        """Apply a climatological correction to shortwave radiation.
+    def _apply_radiation_corrections(
+        self,
+        swrad: xr.DataArray,
+        lwrad: xr.DataArray,
+        data: LatLonDataset,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Apply climatological corrections to shortwave and longwave radiation.
 
-        This method scales the input `radiation` field using a correction factor
-        derived from climatological data, interpolated in time and regridded
-        to the ROMS domain.
+        The correction dataset is loaded and preprocessed once. The 12-month
+        climatology is spatially regridded to the ROMS grid first (only 12
+        spatial interpolations per variable), then lazily interpolated in time
+        to match the full forcing time axis. Correction factors are rechunked
+        to align with the radiation fields before multiplication so that dask
+        can execute the multiply chunk-by-chunk during save().
 
         Parameters
         ----------
-        radiation : xr.DataArray
-            Shortwave radiation field to be corrected. Must include a `time` coordinate.
-
-        data : Dataset
-            Dataset containing ROMS grid and mask information used to align correction data.
+        swrad : xr.DataArray
+            Shortwave radiation field to be corrected. Must include a ``time`` coordinate.
+        lwrad : xr.DataArray
+            Longwave radiation field to be corrected. Must include a ``time`` coordinate.
+        data : LatLonDataset
+            ERA5 dataset providing the mask and spatial coordinates used to
+            align the correction data.
 
         Returns
         -------
-        radiation_corrected : xr.DataArray
-            Radiation field scaled by the correction factor, with original coordinates.
+        swrad_corrected : xr.DataArray
+            Shortwave radiation scaled by the SSR correction factor.
+        lwrad_corrected : xr.DataArray
+            Longwave radiation scaled by the STRD correction factor.
         """
         correction_data = self._get_correction_data()
-        # Match subdomain to forcing data to reuse the mask
+
         coords_correction = {
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
         # unchunk_lateral_dims=True required for lateral fill, consider trying False if lateral fill ever becomes optional
         correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
-        correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
+        correction_data.ds["mask"] = data.ds["mask"]
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 
-        correction_data.apply_lateral_fill()
+        # Use the same regrid engine / source-fill choice as the main data so the
+        # correction climatology is treated consistently.
+        regrid = self._regrid
+        apply_source_prefill(correction_data, regrid, self.prefill_kwargs)
+        apply_scipy_fallback_fill(correction_data, regrid)
 
-        # Temporal interpolation: Perform before spatial regridding for better performance
-        if self.use_dask:
-            # Perform temporal interpolation for each time slice to enforce chunking in time.
-            # This reduces memory usage by processing one time step at a time.
-            # The interpolated slices are then concatenated along the "time" dimension.
-            corr_factor = xr.concat(
-                [
-                    interpolate_from_climatology(
-                        field=correction_data.ds[correction_data.var_names["swr_corr"]],
-                        time_dim=correction_data.dim_names["time"],
-                        time_coord=correction_data.dim_names["time"],
-                        time=time,
-                    )
-                    for time in radiation.time
-                ],
-                dim="time",
-            )
-        else:
-            # Interpolate across all time steps at once
-            corr_factor = interpolate_from_climatology(
-                field=correction_data.ds[correction_data.var_names["swr_corr"]],
-                time_dim=correction_data.dim_names["time"],
-                time_coord=correction_data.dim_names["time"],
-                time=radiation.time,
-            )
-
-        # Spatial regridding
-        lateral_regrid = LateralRegridToROMS(
-            self.target_coords, correction_data.dim_names
+        source_mask = select_source_mask(
+            correction_data.ds,
+            is_vector=False,
+            use_xesmf=regrid.use_xesmf,
+            prefill=regrid.prefill,
         )
-        corr_factor = lateral_regrid.apply(corr_factor)
 
-        radiation_corrected = radiation * corr_factor
+        # Spatial regrid first: only 12 interpolations per variable regardless of
+        # the length of the forcing time series. lateral_regrid.apply() forces eager
+        # compute on the 12-step climatology, which is acceptable (~MB of data).
+        lateral_regrid = build_lateral_regridder(
+            self.target_coords, correction_data, regrid, source_mask
+        )
+        time_dim = correction_data.dim_names["time"]
 
-        return radiation_corrected
+        swr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["swr_corr"]]
+        )
+        lwr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["lwr_corr"]]
+        )
+
+        # Wrap back to dask so that temporal interpolation builds a lazy graph
+        # rather than materialising the full (N, ny, nx) output as numpy.
+        if self.use_dask:
+            swr_12 = swr_12.chunk({time_dim: len(swr_12[time_dim])})
+            lwr_12 = lwr_12.chunk({time_dim: len(lwr_12[time_dim])})
+
+        # Interpolate onto the forcing time axis in blocks (when using dask) so the
+        # result stays chunked along time: this bounds peak memory for long forcing
+        # records and makes slicing a few time steps (e.g. validation) cheap, instead
+        # of producing a single (N, ny, nx) chunk.
+        interp_chunk_size = _DEFAULT_CLIMATOLOGY_TIME_CHUNK if self.use_dask else None
+        swr_corr_factor = interpolate_from_climatology(
+            field=swr_12,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            time=swrad.time,
+            interp_chunk_size=interp_chunk_size,
+        )
+        lwr_corr_factor = interpolate_from_climatology(
+            field=lwr_12,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            time=lwrad.time,
+            interp_chunk_size=interp_chunk_size,
+        )
+
+        # Rechunk time to match the radiation fields so that the element-wise
+        # multiply is chunk-aligned and dask can execute it slice-by-slice.
+        if self.use_dask:
+            swr_corr_factor = swr_corr_factor.chunk(swrad.chunksizes)
+            lwr_corr_factor = lwr_corr_factor.chunk(lwrad.chunksizes)
+
+        return swrad * swr_corr_factor, lwrad * lwr_corr_factor
 
     def _apply_wind_correction(
         self, uwnd: xr.DataArray, vwnd: xr.DataArray
@@ -710,9 +854,14 @@ class SurfaceForcing:
                     "nhy_time",
                 ]
         elif self.type == "restoring":
-            time_coords = [
-                "sss_time",
-            ]
+            time_coords = []
+            for var in self.restoring_forces:
+                if var == "sss":
+                    time_coords.append("sss_time")
+                if var == "sDIC":
+                    time_coords.append("sDIC_time")
+                if var == "sALK":
+                    time_coords.append("sALK_time")
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
 
@@ -787,6 +936,9 @@ class SurfaceForcing:
         ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["prefill"] = str(self.prefill)
+        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         ds.attrs["type"] = self.type
         ds.attrs["source"] = self.source["name"]
@@ -873,10 +1025,11 @@ class SurfaceForcing:
         self,
         filepath: str | Path,
         group: bool = True,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
     ) -> None:
-        """Save the surface forcing fields to one or more netCDF4 files.
+        """Save the surface forcing fields to one or more NetCDF files.
 
-        This method saves the dataset to disk as either a single netCDF4 file or multiple files, depending on the `group` parameter.
+        This method saves the dataset to disk as either a single NetCDF file or multiple files, depending on the `group` parameter.
         If `group` is `True`, the dataset is divided into subsets (e.g., monthly or yearly) based on the temporal frequency
         of the data, and each subset is saved to a separate file.
 
@@ -887,6 +1040,8 @@ class SurfaceForcing:
             time-based information (e.g., year or month) to distinguish the subsets.
         group : bool, optional
             Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `True`.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -907,7 +1062,10 @@ class SurfaceForcing:
             output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            format=format,
         )
 
         return saved_filenames

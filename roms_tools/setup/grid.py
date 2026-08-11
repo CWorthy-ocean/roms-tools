@@ -25,6 +25,8 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    DEFAULT_NETCDF_FORMAT,
+    NetCDFFormat,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     save_datasets,
@@ -642,13 +644,19 @@ class Grid:
             add_colorbar=add_colorbar,
         )
 
-    def save(self, filepath: str | Path) -> None:
-        """Save the grid information to a netCDF4 file.
+    def save(
+        self,
+        filepath: str | Path,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+    ) -> None:
+        """Save the grid information to a NetCDF file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path or filename where the dataset should be saved.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format. Defaults to ``"NETCDF4"``.
 
         Returns
         -------
@@ -665,7 +673,7 @@ class Grid:
         dataset_list = [self.ds.load()]
         output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(dataset_list, output_filenames)
+        saved_filenames = save_datasets(dataset_list, output_filenames, format=format)
 
         return saved_filenames
 
@@ -710,8 +718,15 @@ class Grid:
                 "theta_s, theta_b, hc, and N."
             )
 
-        # Load the dataset from the file
-        ds = xr.open_dataset(filename)
+        # Load the dataset from the file. Grid files are small, so eagerly load
+        # the data and close the underlying file handle immediately, rather than
+        # keeping it open via lazy loading. On Windows, an open file handle
+        # prevents the file from later being overwritten or deleted (e.g. by a
+        # subsequent grid.save() to the same path, or pytest tmp dir cleanup),
+        # raising PermissionError; POSIX systems allow this, which masks the
+        # leak there.
+        with xr.open_dataset(filename) as f:
+            ds = f.load()
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
             ds = add_velocity_masks(ds)

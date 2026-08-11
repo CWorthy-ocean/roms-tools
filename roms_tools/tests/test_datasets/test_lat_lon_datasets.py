@@ -10,10 +10,12 @@ import xarray as xr
 
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
+    DEFAULT_ERA5_ARCO_PATH,
     GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
     ERA5ARCODataset,
     ERA5Correction,
+    ERA5Dataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     LatLonDataset,
@@ -21,8 +23,8 @@ from roms_tools.datasets.lat_lon_datasets import (
     _concatenate_longitudes,
     choose_subdomain,
     get_glorys_bounds,
+    resolve_era5_source,
 )
-from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
 from roms_tools.setup.utils import get_target_coords
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
@@ -522,6 +524,38 @@ def test_era5_correction_match_subdomain(use_dask):
     data.match_subdomain(target_coords)
     assert (data.ds["latitude"] == lats).all()
     assert (data.ds["longitude"] == lons).all()
+
+
+def test_resolve_era5_source_defaults_to_arco():
+    """No path -> the ARCO cloud default, with the matching dataset class."""
+    resolved_path, is_arco, dataset_cls = resolve_era5_source(None)
+    assert resolved_path == DEFAULT_ERA5_ARCO_PATH
+    assert is_arco is True
+    assert dataset_cls is ERA5ARCODataset
+
+
+@pytest.mark.parametrize("prefix", ["gs://", "gcs://"])
+def test_resolve_era5_source_cloud_path_is_arco(prefix):
+    path = f"{prefix}some-bucket/some-object.zarr"
+    resolved_path, is_arco, dataset_cls = resolve_era5_source(path)
+    assert resolved_path == path
+    assert is_arco is True
+    assert dataset_cls is ERA5ARCODataset
+
+
+def test_resolve_era5_source_local_path_is_not_arco():
+    resolved_path, is_arco, dataset_cls = resolve_era5_source("/local/era5_data.nc")
+    assert resolved_path == "/local/era5_data.nc"
+    assert is_arco is False
+    assert dataset_cls is ERA5Dataset
+
+
+def test_resolve_era5_source_accepts_path_object(tmp_path):
+    local_path = tmp_path / "era5_data.nc"
+    resolved_path, is_arco, dataset_cls = resolve_era5_source(local_path)
+    assert resolved_path == str(local_path)
+    assert is_arco is False
+    assert dataset_cls is ERA5Dataset
 
 
 @pytest.mark.use_gcsfs

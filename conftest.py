@@ -501,7 +501,7 @@ def initial_conditions_with_unified_bgc_from_climatology(
     )
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return InitialConditions(
         grid=grid,
@@ -539,7 +539,7 @@ def initial_conditions_with_unified_bgc_density(
     )
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return InitialConditions(
         grid=grid,
@@ -679,7 +679,7 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
         hc=250.0,  # critical depth
     )
 
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return BoundaryForcing(
         grid=grid,
@@ -718,7 +718,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
         hc=250.0,
     )
     fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     physics_bc = BoundaryForcing(
         grid=grid,
@@ -987,7 +987,7 @@ def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForci
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 1)
 
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -1050,7 +1050,7 @@ def restoring_surface_forcing_from_unified_climatology(
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 1)
 
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -1342,7 +1342,7 @@ def cesm_surface_bgc_data(use_dask: bool) -> CESMBGCSurfaceForcingDataset:
 
 @pytest.fixture(scope="session")
 def unified_bgc_data(use_dask: bool) -> UnifiedBGCDataset:
-    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")
 
     data = UnifiedBGCDataset(
         filename=fname,
@@ -1358,7 +1358,7 @@ def unified_bgc_data(use_dask: bool) -> UnifiedBGCDataset:
 
 @pytest.fixture(scope="session")
 def unified_surface_bgc_data(use_dask: bool) -> UnifiedBGCSurfaceDataset:
-    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")
 
     data = UnifiedBGCSurfaceDataset(
         filename=fname,

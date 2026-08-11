@@ -40,7 +40,7 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - Yes
      - `Copernicus Marine <https://data.marine.copernicus.eu/product/GLOBAL_MULTIYEAR_PHY_001_030/description>`_
    * - Unified BGC Dataset
-     - BGC Initial, Boundary & Surface Forcing
+     - BGC Initial, Boundary & Surface Forcing; Salinity Restoring
      - Yes
      - `Google Drive <https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq>`_
    * - ERA5
@@ -229,9 +229,13 @@ For download instructions see :doc:`datasets`.
 Unified BGC Dataset
 ~~~~~~~~~~~~~~~~~~~
 
-A unified biogeochemical climatology integrating multiple observational and model-based sources, including World Ocean Atlas nutrients, GLODAPv2 carbon chemistry, and CESM model output.
+A monthly biogeochemical climatology at 1° horizontal resolution, integrating multiple observational and model-based sources: World Ocean Atlas 2023 nutrients, oxygen, temperature and salinity; GLODAPv2 carbon chemistry; in-situ iron and nitrous oxide reconstructions; and CESM model output for the remaining nutrients and dissolved organic matter. It also carries the surface deposition fluxes (dust, iron, NOx, NHy) used for BGC surface forcing.
 
-:Required for: BGC Initial Conditions, BGC Boundary Forcing, BGC Surface Forcing
+The file is filled across land and below the seafloor, so it has no missing values at any depth level, and ``ROMS-Tools`` applies no lateral fill to it before regridding.
+
+Use version 2.1 or later (``BGCdataset_v2_1.nc``). Earlier versions are still read, with a warning: they name their dimensions ``lon``/``lat``/``dep``, and the oldest ones lack the ``temp_WOA``/``salt_WOA`` fields required for density-space BGC interpolation and salinity restoring.
+
+:Required for: BGC Initial Conditions, BGC Boundary Forcing, BGC Surface Forcing, Surface Forcing (Restoring Forces; Salinity)
 :Available at: `Google Drive <https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq>`_
 
 For download instructions see :doc:`datasets`.

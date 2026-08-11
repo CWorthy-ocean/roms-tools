@@ -1,12 +1,14 @@
 {
   "attributes": {
     "title": "ROMS boundary forcing file created by ROMS-Tools",
-    "roms_tools_version": "10000.dev364+g785fa77b7.d20260612",
+    "roms_tools_version": "4.0.0a3.dev13+g0ec9df5b3",
     "start_time": "2021-06-29 00:00:00",
     "end_time": "2021-06-30 00:00:00",
     "source": "UNIFIED",
     "model_reference_date": "2000-01-01 00:00:00",
-    "apply_2d_horizontal_fill": "True",
+    "prefill": "2d_lateral_fill",
+    "regrid_method": "scipy",
+    "extrap_method": "inverse_dist",
     "adjust_depth_for_sea_surface_height": "False",
     "theta_s": 5.0,
     "theta_b": 2.0,
@@ -55,7 +57,7 @@
         ],
         "attributes": {
           "long_name": "absolute time",
-          "units": "hours since 2000-01-16 12:00:00",
+          "units": "days since 2000-01-16 00:00:00",
           "calendar": "proleptic_gregorian"
         },
         "dimension_names": [

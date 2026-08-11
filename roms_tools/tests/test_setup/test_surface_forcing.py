@@ -361,7 +361,7 @@ def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_da
         (
             {
                 "name": "UNIFIED",
-                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "path": "coarsened_UNIFIED_bgc_dataset_v2_1.nc",
                 "climatology": True,
             },
             "bgc",
@@ -375,7 +375,7 @@ def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_da
         (
             {
                 "name": "UNIFIED",
-                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "path": "coarsened_UNIFIED_bgc_dataset_v2_1.nc",
                 "climatology": True,
             },
             "restoring",
@@ -510,9 +510,15 @@ def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, cap
             None,
             True,
         ),
-        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", None, True),
+        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset_v2_1.nc", "bgc", None, True),
         ("WOA", "WOA_2018_quarterDeg_coarsened.nc", "restoring", ["sss"], True),
-        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", ["sss"], True),
+        (
+            "UNIFIED",
+            "coarsened_UNIFIED_bgc_dataset_v2_1.nc",
+            "restoring",
+            ["sss"],
+            True,
+        ),
         (
             "SODA",
             "coarsened_OceanSODA_dataset.nc",
@@ -642,7 +648,7 @@ def test_time_attr_climatology_restoring(surface_forcing_fixture, request):
             "bgc_surface_forcing_from_unified_climatology",
             "UNIFIED",
             True,
-            Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
+            Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")),
         ),
         (
             "bgc_surface_forcing_from_mbl_co2",
@@ -702,7 +708,7 @@ def test_surface_forcing_creation(
             "restoring_surface_forcing_from_unified_climatology",
             "UNIFIED",
             True,
-            Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
+            Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")),
         ),
         (
             "restoring_surface_forcing_from_soda",

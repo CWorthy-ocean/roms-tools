@@ -20,12 +20,15 @@ from roms_tools.datasets.lat_lon_datasets import (
     GLORYSDefaultDataset,
     LatLonDataset,
     TPXODataset,
+    UnifiedBGCDataset,
+    UnifiedBGCSurfaceDataset,
+    UnifiedRestoringSurfaceDataset,
     _concatenate_longitudes,
     choose_subdomain,
     get_glorys_bounds,
     resolve_era5_source,
 )
-from roms_tools.setup.utils import get_target_coords
+from roms_tools.setup.utils import climatology_mid_month_days, get_target_coords
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -761,6 +764,87 @@ def test_climatology_error(use_dask):
 def test_horizontal_resolution(data_fixture, expected_resolution, request):
     data = request.getfixturevalue(data_fixture)
     assert np.isclose(data.resolution, expected_resolution)
+
+
+class TestUnifiedDatasetFileGenerations:
+    """The unified BGC dataset changed layout in v2.1.
+
+    From v2.1 on, the dimensions are named after their coordinate variables
+    (``longitude``/``latitude``/``depth``) and ``month`` is an integer index 1-12.
+    Earlier files use ``lon``/``lat``/``dep`` and a day-of-year ``month``. Both are
+    read, and both must land on the same standardized dataset.
+    """
+
+    @pytest.fixture(params=["legacy", "v2_1"])
+    def bgc_filename(self, request) -> tuple[str, Path]:
+        name = (
+            "coarsened_UNIFIED_bgc_dataset.nc"
+            if request.param == "legacy"
+            else "coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+        )
+        return request.param, Path(download_test_data(name))
+
+    @pytest.mark.parametrize(
+        "dataset_class",
+        [UnifiedBGCDataset, UnifiedBGCSurfaceDataset, UnifiedRestoringSurfaceDataset],
+    )
+    def test_both_generations_are_standardized(
+        self, dataset_class, bgc_filename, use_dask
+    ) -> None:
+        generation, filename = bgc_filename
+        data = dataset_class(filename=filename, climatology=True, use_dask=use_dask)
+
+        assert data.dim_names["latitude"] == "latitude"
+        assert data.dim_names["longitude"] == "longitude"
+        assert data.dim_names["time"] == "time"
+        assert {"latitude", "longitude", "time"} <= set(data.ds.dims)
+        assert not {"lat", "lon", "dep", "month"} & set(data.ds.dims)
+
+        # A monthly climatology is placed at the center of each month, regardless of
+        # whether the file supplied day-of-year values or a month index.
+        expected = np.array(climatology_mid_month_days(), dtype="timedelta64[D]")
+        if generation == "legacy":
+            # Pre-v2.1 files carry their own (slightly different) day-of-year values.
+            assert data.ds["time"].size == expected.size
+        else:
+            np.testing.assert_array_equal(
+                data.ds["time"].values.astype("timedelta64[D]"), expected
+            )
+
+    def test_legacy_generation_warns(self, caplog, use_dask) -> None:
+        filename = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+        with caplog.at_level(logging.WARNING):
+            UnifiedBGCDataset(filename=filename, climatology=True, use_dask=use_dask)
+
+        assert "predate v2.1" in caplog.text
+
+    def test_current_generation_does_not_warn(self, caplog, use_dask) -> None:
+        filename = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+        with caplog.at_level(logging.WARNING):
+            UnifiedBGCDataset(filename=filename, climatology=True, use_dask=use_dask)
+
+        assert "predate v2.1" not in caplog.text
+
+    def test_generations_agree_on_tracers(self, use_dask) -> None:
+        """The two layouts differ only in metadata, so the tracers must match."""
+        legacy = UnifiedBGCDataset(
+            filename=Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
+            climatology=True,
+            use_dask=use_dask,
+        )
+        current = UnifiedBGCDataset(
+            filename=Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")),
+            climatology=True,
+            use_dask=use_dask,
+        )
+
+        # Time labels differ by up to half a day (see class docstring), so compare the
+        # fields on their shared time index.
+        xr.testing.assert_allclose(
+            legacy.ds.drop_vars("time"), current.ds.drop_vars("time")
+        )
 
 
 class TestTPXODataset:

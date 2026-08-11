@@ -1006,7 +1006,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         hc=250.0,
     )
     fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     physics_bc = BoundaryForcing(
         grid=grid,
@@ -1130,7 +1130,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
 
 def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
     """An unknown ``bgc_interpolation_method`` is rejected."""
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
     grid = Grid(
         nx=3,
         ny=3,

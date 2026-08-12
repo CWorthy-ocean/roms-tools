@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
+* Fix test flakiness (exit code 143) from MPI-flavored esmf installations ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
+* Use a github cache for pooch data to speed up CI and avoid network errors ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
+* Exclude test files from packaged wheel to increase build speed and reduce package size ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
+
 ## 4.1.0
 
 ### Breaking Changes

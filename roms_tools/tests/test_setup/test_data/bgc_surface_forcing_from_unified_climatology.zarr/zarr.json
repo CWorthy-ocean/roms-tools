@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS surface forcing file created by ROMS-Tools",
-    "roms_tools_version": "3.6.1.dev26+g58d7c491b",
+    "roms_tools_version": "4.0.0a3.dev13+g0ec9df5b3",
     "start_time": "2020-02-01 00:00:00",
     "end_time": "2020-02-01 00:00:00",
     "source": "UNIFIED",
@@ -9,6 +9,9 @@
     "wind_dropoff": "False",
     "use_coarse_grid": "False",
     "model_reference_date": "2000-01-01 00:00:00",
+    "prefill": "2d_lateral_fill",
+    "regrid_method": "scipy",
+    "extrap_method": "inverse_dist",
     "type": "bgc",
     "climatology": "True"
   },
@@ -54,7 +57,7 @@
         ],
         "attributes": {
           "long_name": "absolute time",
-          "units": "hours since 2000-01-16 12:00:00",
+          "units": "days since 2000-01-16 00:00:00",
           "calendar": "proleptic_gregorian"
         },
         "dimension_names": [

@@ -77,6 +77,32 @@ def _should_skip_section(name: str) -> bool:
     )
 
 
+# Note texts that mean "nothing to report" rather than a real release note.
+# Authors write these in place of, or instead of, the template's "- N/A".
+_PLACEHOLDER_TEXTS = frozenset(
+    {"n/a", "na", "none", "nothing", "no", "no change", "no changes"}
+)
+
+
+# Sections eligible for the un-bulleted-prose fallback in :func:`parse_pr_body`
+# — only the categories we actually publish.
+_RELEASE_NOTE_SECTIONS = frozenset(s.lower() for s in SECTION_MAP)
+
+# Prose lines that are markup rather than a note: standalone HTML (typically
+# an embedded screenshot) and Markdown table rows.
+_NON_PROSE_LINE_RE = re.compile(r"^(?:<[^>]+>\s*$|\|)")
+
+
+def _is_placeholder(text: str) -> bool:
+    """
+    Return True if *text* is an "empty" placeholder rather than a real note.
+
+    Args:
+        text: A note's text, with any leading bullet marker already removed.
+    """
+    return text.strip().rstrip(".").strip().lower() in _PLACEHOLDER_TEXTS
+
+
 # Matches a PR link appended by this script: ([#NNN](url))
 _LINK_SUFFIX_RE = re.compile(r"\s*\(\[#\d+\]\([^)]*\)\)\s*$", re.IGNORECASE)
 
@@ -248,10 +274,18 @@ def parse_pr_body(
       boundaries so that non-standard headers (e.g. ``# Review Checklist``)
       are handled correctly.
     - Skips the Summary and any section whose name contains "checklist".
-    - Drops bullets whose stripped text is exactly ``N/A`` (case-insensitive).
+    - Drops notes that are "nothing to report" placeholders — ``N/A``,
+      ``None``, ``Nothing`` etc. (see :func:`_is_placeholder`).
     - Drops checklist-style bullets (``- [ ]`` / ``- [x]``) even if they
       appear under a content section, as a belt-and-suspenders guard.
-    - Strips inline HTML comments (``<!-- … -->``) before processing.
+    - Strips inline HTML comments (``<!-- … -->``) before processing, and
+      ignores fenced code blocks entirely.
+    - Falls back to prose when a section has **no** top-level bullets: some
+      authors delete the template's ``- `` markers and just write sentences.
+      Each blank-line-separated paragraph then becomes one note, with its
+      lines joined by spaces.  The fallback is per-section and only applies
+      when that section is bullet-free, so a section mixing an introductory
+      paragraph with bullets still yields exactly its bullets, as before.
 
     Args:
         body: Raw Markdown text of the PR description, or ``None`` if the PR has no body.
@@ -267,17 +301,29 @@ def parse_pr_body(
     current: str | None = None
     # Each element: [top_level_text, [sub_item, …]] — mutable for sub-item appends
     items: list[list] = []
+    # Un-bulleted prose in the current section, grouped into paragraphs
+    paragraphs: list[list[str]] = []
+    in_fence = False
 
     def _flush() -> None:
-        if current and not _should_skip_section(current):
-            good = [(t, s) for t, s in items if t.strip().lower() != "n/a"]
-            if good:
-                result[current] = [(t, s) for t, s in good]
+        if not current or _should_skip_section(current):
+            return
+        collected = items or _prose_fallback(current, paragraphs)
+        good = [(t, s) for t, s in collected if not _is_placeholder(t)]
+        if good:
+            result[current] = good
 
     for raw in body.splitlines():
         cleaned = raw.rstrip()
         indent = len(cleaned) - len(cleaned.lstrip())
         line = cleaned.strip()
+
+        # Fenced code blocks are never release-note content
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
 
         # Match # or ## (and ###) level headings
         heading = re.match(r"^#{1,3}\s+(.+)$", line)
@@ -285,9 +331,10 @@ def parse_pr_body(
             _flush()
             current = heading.group(1).strip()
             items = []
+            paragraphs = []
             continue
 
-        if current is not None and _should_skip_section(current):
+        if current is None or _should_skip_section(current):
             continue
 
         # Skip checklist-style bullets regardless of which section they appear in
@@ -295,7 +342,7 @@ def parse_pr_body(
             continue
 
         bullet = re.match(r"^[-*]\s+(.+)$", line)
-        if bullet and current is not None:
+        if bullet:
             text = bullet.group(1).strip()
             if not text:
                 continue
@@ -304,9 +351,47 @@ def parse_pr_body(
             elif items:
                 # Attach as a sub-bullet of the most recent top-level item
                 items[-1][1].append(text)
+            continue
+
+        # Un-bulleted prose: buffer it in case this section has no bullets
+        # at all, in which case _flush() promotes each paragraph to a note.
+        if not line:
+            if paragraphs and paragraphs[-1]:
+                paragraphs.append([])
+        else:
+            if not paragraphs:
+                paragraphs.append([])
+            paragraphs[-1].append(line)
 
     _flush()
     return result
+
+
+def _prose_fallback(section: str, paragraphs: list[list[str]]) -> list[list]:
+    """
+    Turn buffered prose paragraphs into ``[text, sub_items]`` note entries.
+
+    Only the template's own categories are eligible.  PR authors routinely
+    invent narrative headings ("Setup", "Testing", "Comparison figures", …)
+    and write paragraphs, screenshots and tables under them; those keep the
+    strict bullets-only behaviour so none of it is ever scraped.
+
+    Within an eligible section, lines that are standalone HTML (``<img …>``)
+    or Markdown table rows are dropped, as are paragraphs left with no
+    alphanumeric content (horizontal rules such as ``---`` or ``***``).
+
+    Args:
+        section: Heading the paragraphs were collected under.
+        paragraphs: Blank-line-separated groups of stripped prose lines.
+    """
+    if section.lower() not in _RELEASE_NOTE_SECTIONS:
+        return []
+    items: list[list] = []
+    for para in paragraphs:
+        text = " ".join(p for p in para if not _NON_PROSE_LINE_RE.match(p)).strip()
+        if text and re.search(r"[A-Za-z0-9]", text):
+            items.append([text, []])
+    return items
 
 
 # ---------------------------------------------------------------------------

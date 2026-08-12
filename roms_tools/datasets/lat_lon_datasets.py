@@ -2479,6 +2479,56 @@ class EMODDataset(LatLonDataset):
         self.ds["mask"] = mask
 
 
+@dataclass(kw_only=True)
+class ETOPO2022Dataset(LatLonDataset):
+    """Represents topography data on the original grid from the ETOPO2022 dataset."""
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "z",
+        }
+    )
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+        }
+    )
+    needs_lateral_fill: bool = False
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure lon/lat are proper coordinates and drop any auxiliary variables.
+
+        ETOPO 2022 tiles sometimes carry extra variables (e.g., ``crs``,
+        ``lon``, ``lat`` as data variables instead of coordinates). This method
+        normalises the dataset so that ``lon`` and ``lat`` are 1-D coordinates.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The raw dataset loaded from the ETOPO 2022 tile file(s).
+
+        Returns
+        -------
+        xr.Dataset
+            The cleaned-up dataset.
+        """
+        # If lon/lat exist as data variables rather than coordinates, promote them
+        if "lon" in ds.data_vars and "lon" not in ds.coords:
+            ds = ds.set_coords("lon")
+        if "lat" in ds.data_vars and "lat" not in ds.coords:
+            ds = ds.set_coords("lat")
+
+        # Drop non-essential variables that may be present in ETOPO 2022 files
+        drop_vars = [v for v in ds.data_vars if v not in ("z",)]
+        if drop_vars:
+            ds = ds.drop_vars(drop_vars)
+
+        return ds
+
+    
 @dataclass
 class TPXOManager:
     """Manages multiple TPXODataset instances and selects and processes tidal

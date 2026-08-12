@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 4.1.0
 
 ### Breaking Changes
 
@@ -25,14 +25,6 @@
 * Notebooks and dataset pages point at `BGCdataset_v2_1.nc`. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
 
 ## 4.0.1
-
-### Breaking Changes
-
-### New Features
-
-### Bug Fixes
-
-### Improvements
 
 ### Miscellaneous
 

@@ -1,14 +1,30 @@
 # Release notes
 
-## 4.0.1
+## 4.1.0
 
 ### Breaking Changes
+
+* The unified BGC dataset is now expected to be **v2.1 or later** (`BGCdataset_v2_1.nc`), which names its dimensions `longitude`/`latitude`/`depth` and stores `month` as an integer index 1-12. Earlier files are still read, but log a warning pointing to the [datasets documentation](https://roms-tools.readthedocs.io/en/latest/datasets.html#Downloading-the-Unified-BGC-Dataset). Because v2.1 no longer carries day-of-year values, `ROMS-Tools` places the twelve monthly records at the mid-month days already used for other monthly climatologies. Compared with output built from a pre-v2.1 file, this moves the source time axis by at most half a day, with three consequences: the `*_time` coordinates shift correspondingly; the seasonal dust deposition field, which is interpolated from the seasonal axis onto those monthly targets, shifts by up to ~0.4%; and anything interpolated *in time* from the climatology — `InitialConditions` at a given `ini_time`, for instance — picks up the slightly different interpolation weights. The twelve climatology records themselves are unchanged, so `BoundaryForcing` and `SurfaceForcing` tracer values are identical apart from their time labels. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+* Note for users still on the oldest `BGCdataset.nc`: it predates the `temp_WOA`/`salt_WOA` fields, so it cannot be used for salinity restoring (`SurfaceForcing` with `type="restoring"`) or for `bgc_interpolation_method="density"`/`"density_mld"`. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
 
 ### New Features
 
 ### Bug Fixes
 
+* The unified BGC dataset now actually receives the lateral dask chunking it asks for. The chunk sizes were keyed by the pre-v2.1 dimension names, and xarray silently ignores chunk keys that are not dimensions of the file, so a v2.1 file was read as a single lateral chunk. This is a correctness fix rather than a speed-up: a regional read is unaffected either way (the netCDF backend pushes the spatial selection down to the file, so the oversized chunk never materializes), but peak memory for operations that touch the full global field is roughly halved. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+
 ### Improvements
+
+* `UnifiedDataset` reads both unified BGC file generations: dimensions are renamed only where a pre-v2.1 file still uses `lon`/`lat`/`dep`, and `month` is recognised as either a day-of-year or an integer month index. New `roms_tools.setup.utils.climatology_mid_month_days` helper gives monthly climatologies a single mid-month day convention, shared by `assign_dates_to_climatology` and the unified BGC dataset. A pre-v2.1 file's dimensions are swapped onto their coordinate variables rather than renamed, so `depth`/`latitude`/`longitude` come out indexed for either file generation (this also silences an xarray `UserWarning` on every legacy load). ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+
+### Miscellaneous
+
+* Update release notes finalizer to remove sections with nothing in them ([#652](https://github.com/CWorthy-ocean/roms-tools/pull/652))
+* Update release notes updater to handle unbulleted content ([#652](https://github.com/CWorthy-ocean/roms-tools/pull/652))
+* Test data: `coarsened_UNIFIED_bgc_dataset_v2_1.nc` is added and used by the unified BGC fixtures; the pre-v2.1 coarse file stays registered so both layouts remain covered by the tests. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+* Notebooks and dataset pages point at `BGCdataset_v2_1.nc`. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+
+## 4.0.1
 
 ### Miscellaneous
 

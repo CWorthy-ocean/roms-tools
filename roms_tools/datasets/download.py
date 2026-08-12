@@ -1,4 +1,60 @@
+import logging
+import time
+
 import pooch
+
+#: Number of times a download is attempted before the error is raised.
+MAX_DOWNLOAD_ATTEMPTS = 3
+
+#: Seconds to wait before the first retry; doubled for each further attempt.
+RETRY_BACKOFF_SECONDS = 2.0
+
+
+def _fetch(manager: pooch.Pooch, filename: str) -> str:
+    """Fetch a registered file, retrying transient network failures.
+
+    Pooch has no retry logic of its own, so a single dropped connection or a
+    read timeout (30 s by default) against the data repository aborts the whole
+    call. Retries use exponential backoff. Files already in the local cache are
+    never re-downloaded, so a retry only refetches what actually failed.
+
+    The caught type is ``OSError``, which covers every network failure raised
+    here (``requests.exceptions.RequestException`` subclasses it) without
+    importing ``requests``. Local I/O errors are therefore retried too, which
+    only delays an unavoidable failure. A checksum mismatch raises
+    ``ValueError`` and is deliberately not retried, so a bad registry entry
+    fails immediately.
+
+    Parameters
+    ----------
+    manager : pooch.Pooch
+        The Pooch instance the file is registered with.
+    filename : str
+        The name of the file to fetch.
+
+    Returns
+    -------
+    str
+        The path to the file in the local cache.
+    """
+    for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS):
+        try:
+            return manager.fetch(filename)
+        except OSError as error:
+            delay = RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1)
+            logging.warning(
+                "Download of %s failed (attempt %d of %d): %s. Retrying in %.1f s.",
+                filename,
+                attempt,
+                MAX_DOWNLOAD_ATTEMPTS,
+                error,
+                delay,
+            )
+            time.sleep(delay)
+
+    # Final attempt: let the error propagate if this one fails too.
+    return manager.fetch(filename)
+
 
 # Create a Pooch object to manage the global topography data
 topo_data = pooch.create(
@@ -126,7 +182,7 @@ def download_topo(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = topo_data.fetch(filename)
+    fname = _fetch(topo_data, filename)
 
     return fname
 
@@ -147,7 +203,7 @@ def download_river_data(filename: str) -> str:
         The path to the downloaded file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = river_data.fetch(filename)
+    fname = _fetch(river_data, filename)
 
     return fname
 
@@ -167,7 +223,7 @@ def download_river_tracer_defaults(filename: str = "river_tracer_defaults.nc") -
     str
         The path to the downloaded file.
     """
-    fname = river_data.fetch(filename)
+    fname = _fetch(river_data, filename)
 
     return fname
 
@@ -187,7 +243,7 @@ def download_correction_data(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = correction_data.fetch(filename)
+    fname = _fetch(correction_data, filename)
 
     return fname
 
@@ -207,7 +263,7 @@ def download_sal_data(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = sal_data.fetch(filename)
+    fname = _fetch(sal_data, filename)
 
     return fname
 
@@ -244,6 +300,6 @@ def download_test_data(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = pup_test_data.fetch(filename)
+    fname = _fetch(pup_test_data, filename)
 
     return fname

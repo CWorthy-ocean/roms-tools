@@ -177,6 +177,84 @@ def test_select_times(data_fixture, expected_time_values, request, tmp_path, use
 
 
 @pytest.mark.parametrize(
+    "start_time_pad, end_time_pad, expected_time_values",
+    [
+        (
+            True,
+            True,
+            [
+                np.datetime64("2022-01-01T00:00:00"),
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+                np.datetime64("2022-01-04T00:00:00"),
+            ],
+        ),
+        (
+            False,
+            True,
+            [
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+                np.datetime64("2022-01-04T00:00:00"),
+            ],
+        ),
+        (
+            True,
+            False,
+            [
+                np.datetime64("2022-01-01T00:00:00"),
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+            ],
+        ),
+        (
+            False,
+            False,
+            [
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+            ],
+        ),
+    ],
+)
+def test_select_times_start_end_pad_independently_control_boundaries(
+    global_dataset,
+    start_time_pad,
+    end_time_pad,
+    expected_time_values,
+    tmp_path,
+    use_dask,
+):
+    """`start_time_pad` and `end_time_pad` each independently control whether the
+    nearest out-of-range record is retained at their respective boundary.
+
+    Uses ``global_dataset`` (daily records 2022-01-01 through 2022-01-04) with
+    ``start_time=2022-01-02`` and ``end_time=2022-01-03``, so the record before
+    `start_time` (01-01) and the record after `end_time` (01-04) are each
+    genuinely available to be padded in or excluded.
+    """
+    start_time = datetime(2022, 1, 2)
+    end_time = datetime(2022, 1, 3)
+
+    filepath = tmp_path / "test.nc"
+    global_dataset.to_netcdf(filepath)
+    dataset = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        start_time=start_time,
+        end_time=end_time,
+        start_time_pad=start_time_pad,
+        end_time_pad=end_time_pad,
+        use_dask=use_dask,
+    )
+
+    assert dataset.ds is not None
+    assert len(dataset.ds.time) == len(expected_time_values)
+    for expected_time in expected_time_values:
+        assert expected_time in dataset.ds.time.values
+
+
+@pytest.mark.parametrize(
     "data_fixture, expected_time_values",
     [
         ("global_dataset", [np.datetime64("2022-01-02T00:00:00")]),

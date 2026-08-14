@@ -15,6 +15,7 @@
 * Fix test flakiness (exit code 143) from MPI-flavored esmf installations ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
 * Use a github cache for pooch data to speed up CI and avoid network errors ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
 * Exclude test files from packaged wheel to increase build speed and reduce package size ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
+* Documentation and log messages now refer to the newer namelist conventions in the CWorthy fork of ucla-roms. ([#661](https://github.com/CWorthy-ocean/roms-tools/pull/661))
 
 ## 4.1.0
 

@@ -151,5 +151,3 @@ docs/OUTPUT/
 docs/gml.noaa.gov/
 
 .claude
-build_bohai_3d_tide_inputs.py
-zyjprecode.py

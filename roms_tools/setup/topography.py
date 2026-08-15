@@ -128,7 +128,7 @@ def _get_topography_data(source):
         data = ETOPO2022Dataset(**kwargs)  
     else:
         raise ValueError(
-            'Only "ETOPO5" and "SRTM15" and "EMOD" and "ETOPO2022" are valid options for topography_source["name"].'
+            'Only "ETOPO5" and "SRTM15" and "EMOD"  are valid options for topography_source["name"].'
         )
 
     return data

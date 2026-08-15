@@ -302,6 +302,14 @@ class BoundaryForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    start_time_pad: bool = True
+    """If True (default), include one dataset record before start_time so ROMS can
+    interpolate at the exact simulation start boundary. If False, select only records
+    at or after start_time."""
+    end_time_pad: bool = True
+    """If True (default), include one dataset record after end_time so ROMS can
+    interpolate at the exact simulation end boundary. If False, select only records
+    at or before end_time."""
     bgc_interpolation_method: str = "depth"
     """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
     ``"density_mld"``."""
@@ -866,6 +874,8 @@ class BoundaryForcing:
             use_dask=self.use_dask,
             chunks=self.chunks,
             initial_slice_bounds=self.initial_slice_bounds,
+            start_time_pad=self.start_time_pad,
+            end_time_pad=self.end_time_pad,
         )
 
     def _set_variable_info(self, data):

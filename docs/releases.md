@@ -6,6 +6,8 @@
 
 ### New Features
 
+* KWARGs "start_time_pad" and "end_time_pad" were added to time-resolving roms-tools classes, defaulting to True. These KWARGs allows a user to switch off the existing behavior of adding time increments of data beyond designated start/end times, and to avoid potentially overwriting existing forcing files. ([#656](https://github.com/CWorthy-ocean/roms-tools/pull/656))
+
 ### Bug Fixes
 
 ### Improvements

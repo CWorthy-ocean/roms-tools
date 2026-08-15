@@ -1,16 +1,51 @@
 # Release notes
 
-## v4.0.0 (unreleased)
+## 4.1.0
 
 ### Breaking Changes
 
-* The underlying data allowing self attration and loading (SAL) correction to tidal forcing has been updated for accuracy, and was derived from the TPXO10v2a datasets. This is not a functional breaking change, but will change (improve) output from `TidalForcing` based on TPXO data compared to previos versions of ROMS-Tools. See ([#617](https://github.com/CWorthy-ocean/roms-tools/pull/617))
+* The unified BGC dataset is now expected to be **v2.1 or later** (`BGCdataset_v2_1.nc`), which names its dimensions `longitude`/`latitude`/`depth` and stores `month` as an integer index 1-12. Earlier files are still read, but log a warning pointing to the [datasets documentation](https://roms-tools.readthedocs.io/en/latest/datasets.html#Downloading-the-Unified-BGC-Dataset). Because v2.1 no longer carries day-of-year values, `ROMS-Tools` places the twelve monthly records at the mid-month days already used for other monthly climatologies. Compared with output built from a pre-v2.1 file, this moves the source time axis by at most half a day, with three consequences: the `*_time` coordinates shift correspondingly; the seasonal dust deposition field, which is interpolated from the seasonal axis onto those monthly targets, shifts by up to ~0.4%; and anything interpolated *in time* from the climatology — `InitialConditions` at a given `ini_time`, for instance — picks up the slightly different interpolation weights. The twelve climatology records themselves are unchanged, so `BoundaryForcing` and `SurfaceForcing` tracer values are identical apart from their time labels. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+* Note for users still on the oldest `BGCdataset.nc`: it predates the `temp_WOA`/`salt_WOA` fields, so it cannot be used for salinity restoring (`SurfaceForcing` with `type="restoring"`) or for `bgc_interpolation_method="density"`/`"density_mld"`. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+
+### New Features
+
+### Bug Fixes
+
+* The unified BGC dataset now actually receives the lateral dask chunking it asks for. The chunk sizes were keyed by the pre-v2.1 dimension names, and xarray silently ignores chunk keys that are not dimensions of the file, so a v2.1 file was read as a single lateral chunk. This is a correctness fix rather than a speed-up: a regional read is unaffected either way (the netCDF backend pushes the spatial selection down to the file, so the oversized chunk never materializes), but peak memory for operations that touch the full global field is roughly halved. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+
+### Improvements
+
+* `UnifiedDataset` reads both unified BGC file generations: dimensions are renamed only where a pre-v2.1 file still uses `lon`/`lat`/`dep`, and `month` is recognised as either a day-of-year or an integer month index. New `roms_tools.setup.utils.climatology_mid_month_days` helper gives monthly climatologies a single mid-month day convention, shared by `assign_dates_to_climatology` and the unified BGC dataset. A pre-v2.1 file's dimensions are swapped onto their coordinate variables rather than renamed, so `depth`/`latitude`/`longitude` come out indexed for either file generation (this also silences an xarray `UserWarning` on every legacy load). ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+
+### Miscellaneous
+
+* Update release notes finalizer to remove sections with nothing in them ([#652](https://github.com/CWorthy-ocean/roms-tools/pull/652))
+* Update release notes updater to handle unbulleted content ([#652](https://github.com/CWorthy-ocean/roms-tools/pull/652))
+* Test data: `coarsened_UNIFIED_bgc_dataset_v2_1.nc` is added and used by the unified BGC fixtures; the pre-v2.1 coarse file stays registered so both layouts remain covered by the tests. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+* Notebooks and dataset pages point at `BGCdataset_v2_1.nc`. ([#655](https://github.com/CWorthy-ocean/roms-tools/pull/655))
+
+## 4.0.1
+
+### Miscellaneous
+
+* Simplified installation instructions: prefer conda for most end users, only use pip for Windows (no xesmf), only install from github if contributing or you need bleeding-edge updates. ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Removed xesmf/no-xesmf and dask/no-dask installation permutations for non-Windows users. Dask and xesmf are part of the core requirements to simplify the packaging matrix. You can still opt out of _using_ either one using per-method flags, but both are recommended for performance reasons. ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Added an explicit Windows CI job; got rid of -no-xesmf jobs (which get tested through the Windows job) ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Added explicit [dev] and [docs] pip extras ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Changed default conda env name from `romstools-test` to `roms-tools-env` for standardization across the stack ([#648](https://github.com/CWorthy-ocean/roms-tools/pull/648))
+* Add tool to finalize release notes prior to a release ([#649](https://github.com/CWorthy-ocean/roms-tools/pull/649))
+
+## v4.0.0
+
+### Breaking Changes
+
+* The underlying data allowing self attraction and loading (SAL) correction to tidal forcing has been updated for accuracy, and was derived from the TPXO10v2a datasets. This is not a functional breaking change, but will change (improve) output from `TidalForcing` based on TPXO data compared to previos versions of ROMS-Tools. See ([#617](https://github.com/CWorthy-ocean/roms-tools/pull/617))
 * ERA5 data correction in `SurfaceForcing` now includes longwave radiation, and the shortwave radiation correction multipliers are updated ([#614](https://github.com/CWorthy-ocean/roms-tools/pull/614)).  This is a breaking change only in the sense that input radiation fields generated by ROMS-Tools using ERA5 forcing data will be slightly different (but more correct) compared to previous ROMS-Tools versions. Correction factors for previous versions of ROMS-Tools remain functional and available.
 * pco2 is no longer read in during `SurfaceForcing` `type='bgc'` ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608)).
 * `BoundaryForcing`'s `apply_2d_horizontal_fill` argument is **deprecated** in favor of the new `prefill` argument (`apply_2d_horizontal_fill=True` → `prefill="2d_lateral_fill"`, `False` → `prefill=None`); it still works but emits a `DeprecationWarning`. Note that `prefill="2d_lateral_fill"` now regrids with the default `"auto"` engine (xESMF when installed), so its output differs slightly from the pre-v4 AMG+scipy path; pass `regrid_method="scipy"` to reproduce the legacy output byte-for-byte. ([#616](https://github.com/CWorthy-ocean/roms-tools/pull/616)).
 * `SurfaceForcing` now regrids horizontally with the same NaN-aware approach as `BoundaryForcing` by default (all types — `physics`, `bgc`, `restoring`): masked xESMF bilinear regridding plus inverse-distance-weighted extrapolation (nearest-neighbor pre-fill + scipy linear interpolation fallback when xESMF is unavailable), replacing the AMG Poisson 2D fill + scipy interpolation. Output shifts slightly for users on the defaults; pass `prefill="2d_lateral_fill", regrid_method="scipy"` to reproduce the legacy output. On the default extrapolating path, a ROMS grid that extends beyond the source data coverage now raises a clear coverage error rather than being silently extrapolated. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
-* `from_file` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
-* The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).
+* `InitialConditions` now regrids horizontally with the same NaN-aware approach as `BoundaryForcing` by default (masked xESMF bilinear regridding plus inverse-distance-weighted extrapolation; nearest-neighbor pre-fill + scipy linear interpolation fallback when xESMF is unavailable), replacing the always-on AMG Poisson 2D fill + scipy interpolation. Output shifts slightly for users on the defaults; pass `prefill="2d_lateral_fill", regrid_method="scipy"` to reproduce the legacy output. These options apply to lat/lon sources only and are ignored (with a log note) for a ROMS restart source. ([#635](https://github.com/CWorthy-ocean/roms-tools/pull/635))
+* `TidalForcing` now regrids horizontally with the same NaN-aware approach as `BoundaryForcing` by default (masked xESMF bilinear regridding plus inverse-distance-weighted extrapolation; nearest-neighbor pre-fill + scipy linear interpolation fallback when xESMF is unavailable), replacing the always-on AMG Poisson 2D fill + scipy interpolation. Tidal output shifts slightly for users on the defaults; pass `prefill="2d_lateral_fill", regrid_method="scipy"` to reproduce the legacy output. ([#636](https://github.com/CWorthy-ocean/roms-tools/pull/636))
 * Default river/CDR tracer concentrations are now read from `river_tracer_defaults.nc` and differ from the previous hardcoded values (e.g. DIC, NO3, ALK, temperature) ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
 * CDR metrics on `ds_cdr` rename efficiency fields: `cdr_efficiency` to `cdr_efficiency_from_flux`, and `cdr_efficiency_from_delta_diff` to `cdr_efficiency_from_DIC_difference`. Saved datasets, ensemble inputs, or downstream code using the old names need updating. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * CDR ensemble statistics on `Ensemble.ds` rename efficiency fields: `ensemble_mean` to `ensemble_efficiency_mean` and `ensemble_std` to `ensemble_efficiency_std` ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591)).
@@ -22,6 +57,62 @@
 * `SurfaceForcing` with `type='bgc'` has new data source option of 'MBL_co2' for time-varying co2; climatology no longer acceptd for xco2. ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608))
 * Density-space vertical interpolation for BGC tracers in `InitialConditions` and `BoundaryForcing` via the new `bgc_interpolation_method="density"` option. The source density coordinate is built from the BGC dataset's own temperature/salinity (the unified dataset provides `temp_WOA`/`salt_WOA`). The target density uses the model's temperature/salinity: for `InitialConditions` this is the physics already in the same object, while for `BoundaryForcing` the physics `BoundaryForcing` must be passed as `physics_forcing=`. When a BGC source lacks temperature/salinity (e.g. CESM), interpolation falls back to depth space. A density `BoundaryForcing`'s `physics_forcing` companion is now embedded in and restored from its YAML, so `to_yaml`/`from_yaml` round-trips preserve density-space interpolation instead of silently falling back to depth ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620)).
 * BGC tracer vertical interpolation is now selected via a `bgc_interpolation_method` string parameter on `InitialConditions` and `BoundaryForcing`, accepting `"depth"` (default), `"density"`, or `"density_mld"`. The new `"density_mld"` method identifies the mixed layer depth (MLD) in the source and target density fields (potential density exceeding the surface value by 0.03 kg/m³, the xroms `mld` convention); the source mixed layer is scaled so its MLD matches the target's, and below the MLD the tracer is interpolated 1:1 in depth. This keeps the source and target mixed layers aligned while preserving the absolute depth of sub-mixed-layer features, and avoids the surface degeneracy of pure density-space interpolation. For `BoundaryForcing`, the physics temperature/salinity that define the target density coordinate are sampled at the nearest time to each BGC record (sufficient given the climatological output cadence and ROMS' linear-in-time boundary interpolation), which avoids loading the full physics time series into memory. ([#626](https://github.com/CWorthy-ocean/roms-tools/pull/626))
+* `BoundaryForcing` now regrids horizontally with a NaN-aware approach by default, removing the need for the slow and memory-hungry 2D Poisson horizontal fill on large multi-year domains. When xESMF is available, masked bilinear regridding (weights renormalized over valid ocean cells) plus inverse-distance-weighted extrapolation (configurable via the `extrap_method` / `extrap_kwargs` arguments) produces NaN-free boundaries directly. When xESMF is unavailable (e.g. Windows/pip installs), a nearest-neighbor pre-fill of the source followed by scipy linear interpolation provides an equivalent NaN-free fallback. **Note:** boundary values shift slightly compared to previous releases for users on the default settings.  ([#616](https://github.com/CWorthy-ocean/roms-tools/pull/616))
+* `BoundaryForcing` gains a unified `prefill` argument (with `prefill_kwargs`) to optionally fill the *source* before regridding: `None` (default, no prefill), `"2d_lateral_fill"` (legacy AMG Poisson fill), `"inverse_dist"` / `"nearest_s2d"` (xESMF source-on-source fills), or `"nearest_neighbor"` (cheap scipy distance-transform fill; also the automatic fallback when xESMF is unavailable). The horizontal regrid engine is now selected independently via `regrid_method` (`"auto"` (default; xESMF if installed else scipy), `"xesmf"`, or `"scipy"`).  ([#616](https://github.com/CWorthy-ocean/roms-tools/pull/616))
+* `InitialConditions` gains the same regrid/prefill controls as `BoundaryForcing` for lat/lon sources: `regrid_method` (`"auto"` (default; xESMF if installed else scipy), `"xesmf"`, `"scipy"`), `prefill` (with `prefill_kwargs`; `None` default = no source fill, or `"2d_lateral_fill"`/`"nearest_neighbor"`/`"inverse_dist"`/`"nearest_s2d"`/`"creep_fill"`), and `extrap_method` (with `extrap_kwargs`) for the default no-prefill path. On the default extrapolating path, a grid that extends beyond the source data coverage now raises a clear coverage error rather than silently extrapolating. These settings are recorded in the saved dataset metadata and round-trip through `to_yaml`/`from_yaml`. ([#635](https://github.com/CWorthy-ocean/roms-tools/pull/635))
+* `TidalForcing` gains the same regrid/prefill controls as `BoundaryForcing`: `regrid_method` (`"auto"` (default; xESMF if installed else scipy), `"xesmf"`, `"scipy"`), `prefill` (with `prefill_kwargs`; `None` default = no source fill, or `"2d_lateral_fill"`/`"nearest_neighbor"`/`"inverse_dist"`/`"nearest_s2d"`/`"creep_fill"`), and `extrap_method` (with `extrap_kwargs`) for the default no-prefill path. On the default extrapolating path, a grid that extends beyond the source data coverage now raises a clear coverage error rather than silently extrapolating. These settings are recorded in the saved dataset metadata and round-trip through `to_yaml`/`from_yaml`. ([#636](https://github.com/CWorthy-ocean/roms-tools/pull/636))
+* New `type` is added to SurfaceForcing. `restoring` creates restoring forces files for ROMS ('sss' is the only option) ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
+* `CDRForcing` has an option `time_interpolation` to choose step-like or interpolated releases ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
+* `RiverForcing` supports time-varying river BGC from the RIVR2O export product via `bgc_source={"name": "RIVR2O", "path": ...}`; MARBL tracers not supplied dynamically are filled from `bgc_source["fill"]` (default: recommended constants from `river_tracer_defaults.nc`) ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
+* RIVR2O concentrations vary by calendar year and are discharge-partitioned when rivers share a grid cell; missing annual files are linearly interpolated on the year axis ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
+* CDR metrics report CO2 uptake as mass in tonnes of CO2 for both the air-sea flux-difference and DIC-difference constructions (using CO2 molar mass and native flux or inventory units when available). ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
+* The CDR metrics figure from `ROMSOutput.cdr_metrics()` uses twin y-axes: CDR efficiency (dimensionless) and CO2 uptake (tonnes CO2), with title "CO2 uptake and CDR efficiency". ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
+* `SurfaceForcing` with `type='restoring'` now allows for making DIC and ALK restoring forces files ([#619](https://github.com/CWorthy-ocean/roms-tools/pull/619))
+* `SurfaceForcing` gains the same regrid/prefill controls as `BoundaryForcing` (all types): `regrid_method` (`"auto"` (default; xESMF if installed else scipy), `"xesmf"`, `"scipy"`), `prefill` (with `prefill_kwargs`; `None` default = no source fill, or `"2d_lateral_fill"`/`"nearest_neighbor"`/`"inverse_dist"`/`"nearest_s2d"`/`"creep_fill"`), and `extrap_method` (with `extrap_kwargs`) for the default no-prefill path. These are recorded in the saved dataset metadata and round-trip through `to_yaml`/`from_yaml`. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
+* `SurfaceForcing` with `correct_radiation=True` now scales to long (multi-year) records: the ERA5 radiation-correction climatology is interpolated onto the forcing time axis in chunks, so the correction no longer materializes the full `(time, y, x)` field at once. This also keeps per-timestep access (e.g. validation) cheap. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
+* New "Downloading ERA5 data" section in the datasets documentation shows how to pre-save ERA5 surface forcing (one file per day, NetCDF or Zarr) from the analysis-ready ARCO cloud store for offline/local use. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
+* Added support for the GloFAS v4.0 global river discharge dataset as an alternative to Dai & Trenberth, along with performance improvements and bug fixes to the river forcing pipeline. ([#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
+* A `format` flag can be now passed to `.save()` functions to specify a different netcdf data type. Defaults to netcdf4.
+* `RiverForcing` gains a `surface_forcing_source` parameter (an ERA5 source dict, e.g. `{"name": "ERA5", "path": ...}`) to derive river temperature from air temperature sampled at each river's mouth, smoothed over time (`river_temp_smoothing_window_days`, default 30 days) and floored at 0°C. When omitted, river temperature keeps its existing constant default. ([#639](https://github.com/CWorthy-ocean/roms-tools/pull/639))
+
+### Internal Changes
+
+* Extracted shared lateral-regrid helpers (`build_lateral_regridder`, `select_source_mask` in `regrid.py`; `check_source_coverage`, `apply_source_prefill`, `apply_scipy_fallback_fill` in `setup/utils.py`); `BoundaryForcing`, `InitialConditions`, and `SurfaceForcing` now share this machinery (no user-facing change for `BoundaryForcing` or `SurfaceForcing`). ([#635](https://github.com/CWorthy-ocean/roms-tools/pull/635)) `TidalForcing` also uses these helpers. ([#636](https://github.com/CWorthy-ocean/roms-tools/pull/636))
+* The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
+* 2 checks added for a point source when plotting `CDRForcing.plot_distribution()`. Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
+* River BGC refactored behind a `RiverBGCDataset` protocol; `RiverForcing` merges dynamic and fill tracers via `fill_river_bgc_concentrations`([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
+* `Rivr2oRiverBGCDataset` handles yearly file loading, spatial sampling, export-to-concentration conversion, and MARBL tracer mapping ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
+* Monthly discharge climatology is expanded to calendar mid-month dates when combined with year-indexed RIVR2O BGC (`expand_monthly_climatology_time_axis`) ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
+* CDR analysis tests cover tonnes-CO2 uptake and renamed efficiency fields; `compute_cdr_metrics` requires `DIC_source` in the input dataset alongside other CDR variables. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
+* Nesting operations (align_grids and make_nesting_info) now use more efficient gridding techniques
+* Update xgcm API calls to enable support for xgcm>0.10
+
+### Documentation
+
+* The boundary forcing notebook is updated to describe the new NaN-aware horizontal regridding (masked bilinear with inverse-distance extrapolation), replacing the previous "1D versus 2D horizontal fill" discussion, and adds a section comparing the `prefill` source-fill methods (`2d_lateral_fill`, `inverse_dist`, `nearest_s2d`, `nearest_neighbor`) with a strategy table and side-by-side plots of the pre-filled source.
+* Both the surface forcing and datasets notebooks are updated to reflect `restoring` function and WOA data ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
+* The cdr notebook is updated to reflect interpolation option. Default is same as ROMS, no interpolation ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
+* `river_forcing.ipynb` documents GloFAS discharge forcing, RIVR2O BGC forcing, and climatological discharge with year-varying tracers ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615), [#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
+* Expanded River Forcing methodology in `methods.md` and dataset pages for GloFAS, RIVR2O, and river BGC options ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615), [#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
+* CDR analysis notebook: describe CO2 uptake (tonnes CO2) and CDR efficiency together, consistent with the metrics and figure. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
+* Notebooks updated to document density-space BGC interpolation ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620))
+* Remove example support for CESM data. Boundary, Surface, Initial. ([#633](https://github.com/CWorthy-ocean/roms-tools/pull/633))
+* Added subchunking example code and information on new datasets docs page. ([#627](https://github.com/CWorthy-ocean/roms-tools/pull/627))
+
+### Bugfixes
+
+* Fix for hanging when using the default of streaming from Copernicus for GLORYS output. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
+* Fix for river forcing indexing, sorting and plotting so that river_forcing.plot() and river_forcing.plot_locations() correctly shows top 20 largest rivers when plotting.
+* The CO2 unit "µmol mol⁻¹" was causing a netcdf conversion error so these units have been changed to "umol mol-1". ([#645](https://github.com/CWorthy-ocean/roms-tools/pull/645))
+
+## v3.7.0
+
+### Breaking Changes
+* `from_file` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
+* The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).
+
+### New Features
+
 * `make_edata` changed to `make_nesting_info`
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Nesting now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
@@ -30,19 +121,6 @@
 * Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 * Potential memory savings and speedup for reading of optimally-chunked netcdf source data files in `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` ([#572](https://github.com/CWorthy-ocean/roms-tools/pull/572))
 * Option to automatically close narrow 1-cell water channels during mask generation via `Grid.update_mask(close_narrow_channels=True)` or `Grid(close_narrow_channels=True)`; integrated into the standard mask workflow
-* `BoundaryForcing` now regrids horizontally with a NaN-aware approach by default, removing the need for the slow and memory-hungry 2D Poisson horizontal fill on large multi-year domains. When xESMF is available, masked bilinear regridding (weights renormalized over valid ocean cells) plus inverse-distance-weighted extrapolation (configurable via the `extrap_method` / `extrap_kwargs` arguments) produces NaN-free boundaries directly. When xESMF is unavailable (e.g. Windows/pip installs), a nearest-neighbor pre-fill of the source followed by scipy linear interpolation provides an equivalent NaN-free fallback. **Note:** boundary values shift slightly compared to previous releases for users on the default settings.  ([#616](https://github.com/CWorthy-ocean/roms-tools/pull/616))
-* `BoundaryForcing` gains a unified `prefill` argument (with `prefill_kwargs`) to optionally fill the *source* before regridding: `None` (default, no prefill), `"2d_lateral_fill"` (legacy AMG Poisson fill), `"inverse_dist"` / `"nearest_s2d"` (xESMF source-on-source fills), or `"nearest_neighbor"` (cheap scipy distance-transform fill; also the automatic fallback when xESMF is unavailable). The horizontal regrid engine is now selected independently via `regrid_method` (`"auto"` (default; xESMF if installed else scipy), `"xesmf"`, or `"scipy"`).  ([#616](https://github.com/CWorthy-ocean/roms-tools/pull/616))
-* New `type` is added to SurfaceForcing. `restoring` creates restoring forces files for ROMS ('sss' is the only option) ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
-* `CDRForcing` has an option `time_interpolation` to choose step-like or interpolated releases ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
-* `RiverForcing` supports time-varying river BGC from the RIVR2O export product via `bgc_source={"name": "RIVR2O", "path": ...}`; MARBL tracers not supplied dynamically are filled from `bgc_source["fill"]` (default: recommended constants from `river_tracer_defaults.nc`) ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
-* RIVR2O concentrations vary by calendar year and are discharge-partitioned when rivers share a grid cell; missing annual files are linearly interpolated on the year axis ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
-* CDR metrics report CO2 uptake as mass in tonnes of CO2 for both the air-sea flux-difference and DIC-difference constructions (using CO2 molar mass and native flux or inventory units when available). ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
-* The CDR metrics figure from `ROMSOutput.cdr_metrics()` uses twin y-axes: CDR efficiency (dimensionless) and CO2 uptake (tonnes CO2), with title "CO2 uptake and CDR efficiency". ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
-* `SurfaceForcing` with `type='restoring'` now allows for making DIC and ALK restoring forces files ([#619](https://github.com/CWorthy-ocean/roms-tools/pull/619))
-* `SurfaceForcing` gains the same regrid/prefill controls as `BoundaryForcing` (all types): `regrid_method` (`"auto"` (default; xESMF if installed else scipy), `"xesmf"`, `"scipy"`), `prefill` (with `prefill_kwargs`; `None` default = no source fill, or `"2d_lateral_fill"`/`"nearest_neighbor"`/`"inverse_dist"`/`"nearest_s2d"`/`"creep_fill"`), and `extrap_method` (with `extrap_kwargs`) for the default no-prefill path. These are recorded in the saved dataset metadata and round-trip through `to_yaml`/`from_yaml`. ([#XXX](https://github.com/CWorthy-ocean/roms-tools/pull/XXX))
-* `SurfaceForcing` with `correct_radiation=True` now scales to long (multi-year) records: the ERA5 radiation-correction climatology is interpolated onto the forcing time axis in chunks, so the correction no longer materializes the full `(time, y, x)` field at once. This also keeps per-timestep access (e.g. validation) cheap. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
-* New "Downloading ERA5 data" section in the datasets documentation shows how to pre-save ERA5 surface forcing (one file per day, NetCDF or Zarr) from the analysis-ready ARCO cloud store for offline/local use. ([#629](https://github.com/CWorthy-ocean/roms-tools/pull/629))
-* Added support for the GloFAS v4.0 global river discharge dataset as an alternative to Dai & Trenberth, along with performance improvements and bug fixes to the river forcing pipeline. ([#625](https://github.com/CWorthy-ocean/roms-tools/pull/625))
 * The end-to-end example notebook can now be downloaded as a plain Python script from the docs ([#630](https://github.com/CWorthy-ocean/roms-tools/pull/630))
 
 
@@ -57,37 +135,18 @@
 * Ensure `regionmask>=0.11.0` in `pyproject.toml` ([#565](https://github.com/CWorthy-ocean/roms-tools/pull/565))
 * Integrate narrow-channel closing directly into `Grid.update_mask()` (internal `_close_narrow_channels`), iterating north–south and east–west up to 10 passes
 * short and long wave radiation time is shifted 1/2 a timestep sooner and have a dim of `rad_time` ([#586](https://github.com/CWorthy-ocean/roms-tools/pull/586))
-* The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
-* 2 checks added for a point source when plotting `CDRForcing.plot_distribution()`. Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
-* River BGC refactored behind a `RiverBGCDataset` protocol; `RiverForcing` merges dynamic and fill tracers via `fill_river_bgc_concentrations`([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
-* `Rivr2oRiverBGCDataset` handles yearly file loading, spatial sampling, export-to-concentration conversion, and MARBL tracer mapping ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
-* Monthly discharge climatology is expanded to calendar mid-month dates when combined with year-indexed RIVR2O BGC (`expand_monthly_climatology_time_axis`) ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
-* CDR analysis tests cover tonnes-CO2 uptake and renamed efficiency fields; `compute_cdr_metrics` requires `DIC_source` in the input dataset alongside other CDR variables. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 
 ### Documentation
 
 * Nesting notebook is updated to match refactoring of `ChildGrid` to `Grid` objects. ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Move "overview of ROMS-Tools functionality" section from paper to docs ([#554](https://github.com/CWorthy-ocean/roms-tools/pull/554))
 * Document `close_narrow_channels` option in `Grid` and `update_mask()`; update notebook examples
-* The boundary forcing notebook is updated to describe the new NaN-aware horizontal regridding (masked bilinear with inverse-distance extrapolation), replacing the previous "1D versus 2D horizontal fill" discussion, and adds a section comparing the `prefill` source-fill methods (`2d_lateral_fill`, `inverse_dist`, `nearest_s2d`, `nearest_neighbor`) with a strategy table and side-by-side plots of the pre-filled source.
-* Both the surface forcing and datasets notebooks are updated to reflect `restoring` function and WOA data ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
-* The cdr notebook is updated to reflect interpolation option. Default is same as ROMS, no interpolation ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
-* `river_forcing.ipynb` documents RIVR2O BGC forcing, including climatological discharge with year-varying tracers ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
-* CDR analysis notebook: describe CO2 uptake (tonnes CO2) and CDR efficiency together, consistent with the metrics and figure. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
-* Notebooks updated to document density-space BGC interpolation ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620))
-* Remove example support for CESM data. Boundary, Surface, Initial. ([#633](https://github.com/CWorthy-ocean/roms-tools/pull/633))
-* Added subchunking example code and information on new datasets docs page. ([#627](https://github.com/CWorthy-ocean/roms-tools/pull/627))
 
 ### Bugfixes
 
 * Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))
-
-* Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region.
-
 * Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region. ([#577](https://github.com/CWorthy-ocean/roms-tools/pull/577))
 * Fix timer logging messages during mask generation so durations render correctly when closing narrow channels and filling enclosed basins
-* Fix for hanging when using the default of streaming from Copernicus for GLORYS output. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
-* Fix for river forcing indexing, sorting and plotting so that river_forcing.plot() and river_forcing.plot_locations() correctly shows top 20 largest rivers when plotting.
 
 ## v3.5.0
 

@@ -4,7 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-from scipy.interpolate import griddata, interp1d
+from scipy.interpolate import LinearNDInterpolator, griddata, interp1d
+from scipy.spatial import Delaunay
 
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.topography import clip_depth
@@ -230,15 +231,121 @@ def _interpolate_parent(
     xr.DataArray
         The interpolated data on the child grid, with dimensions ("eta_rho", "xi_rho").
     """
-    points = np.column_stack(
-        (parent_da.lon_rho.values.ravel(), parent_da.lat_rho.values.ravel())
-    )
-    xi = (child_da.lon_rho.values, child_da.lat_rho.values)
-    values = parent_da.values.ravel()
+    lon_parent = parent_da.lon_rho.values
+    lat_parent = parent_da.lat_rho.values
+    lon_child = child_da.lon_rho.values
+    lat_child = child_da.lat_rho.values
+
+    # Restrict the parent points to a neighborhood of the child grid before
+    # triangulating. Linear interpolation is local -- each child point only depends
+    # on the parent triangle enclosing it -- so cropping with a generous margin
+    # leaves the result unchanged while drastically shrinking the triangulation that
+    # `griddata` must build and (more importantly) query.
+    keep = _parent_crop_mask(lon_parent, lat_parent, lon_child, lat_child)
+
+    points = np.column_stack((lon_parent[keep], lat_parent[keep]))
+    values = parent_da.values[keep]
+    xi = (lon_child, lat_child)
 
     parent_interpolated = griddata(points, values, xi, method="linear")
 
     return xr.DataArray(parent_interpolated, dims=("eta_rho", "xi_rho"))
+
+
+def _parent_crop_mask(
+    lon_parent: np.ndarray,
+    lat_parent: np.ndarray,
+    lon_child: np.ndarray,
+    lat_child: np.ndarray,
+    n_cells_margin: int = 5,
+) -> np.ndarray:
+    """Return a boolean mask selecting parent points near the child grid.
+
+    The mask keeps every parent point within a bounding box around the child grid,
+    padded by ``n_cells_margin`` parent grid cells. The margin is expressed in units
+    of the parent cell size (a robust high percentile of adjacent-point spacing), so
+    it adapts to the local resolution of stretched or high-latitude grids.
+
+    Because linear interpolation only uses the parent triangle enclosing each child
+    point, a margin of a few parent cells is sufficient for a triangulation built
+    from the cropped points to yield results identical to the full-grid
+    triangulation (to floating-point precision).
+
+    Parameters
+    ----------
+    lon_parent, lat_parent : np.ndarray
+        2D parent grid longitude/latitude arrays.
+    lon_child, lat_child : np.ndarray
+        Child grid longitude/latitude arrays.
+    n_cells_margin : int, optional
+        Bounding-box padding in units of parent grid cells. Defaults to 5.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean array with the same shape as ``lon_parent`` that is ``True`` for
+        parent points to keep.
+    """
+    # Estimate an (isotropic) parent cell size from adjacent-point spacing. Using a
+    # high percentile makes the margin robust to a few large cells.
+    d_eta = np.hypot(np.diff(lon_parent, axis=0), np.diff(lat_parent, axis=0))
+    d_xi = np.hypot(np.diff(lon_parent, axis=1), np.diff(lat_parent, axis=1))
+    cell = np.percentile(np.concatenate((d_eta.ravel(), d_xi.ravel())), 99)
+    margin = n_cells_margin * cell
+
+    lon_lo, lon_hi = lon_child.min() - margin, lon_child.max() + margin
+    lat_lo, lat_hi = lat_child.min() - margin, lat_child.max() + margin
+
+    return (
+        (lon_parent >= lon_lo)
+        & (lon_parent <= lon_hi)
+        & (lat_parent >= lat_lo)
+        & (lat_parent <= lat_hi)
+    )
+
+
+def _build_parent_index_interpolators(
+    parent_grid_ds: xr.Dataset,
+) -> tuple[LinearNDInterpolator, LinearNDInterpolator]:
+    """Build linear interpolators mapping parent (lon, lat) onto fractional indices.
+
+    Two interpolators are returned, one for the ``i_eta`` index field and one for the
+    ``i_xi`` index field. They share a single Delaunay triangulation of the parent
+    ``lon_rho``/``lat_rho`` points, so the (relatively expensive) triangulation is
+    built once and reused for both fields and across every boundary/grid location,
+    rather than being rebuilt on each ``griddata`` call.
+
+    The results are identical to calling ``scipy.interpolate.griddata`` with
+    ``method="linear"`` separately for each index field, since ``griddata`` builds
+    the same triangulation internally.
+
+    Parameters
+    ----------
+    parent_grid_ds : xr.Dataset
+        Parent grid dataset providing ``lon_rho``/``lat_rho`` and the
+        ``eta_rho``/``xi_rho`` dimensions.
+
+    Returns
+    -------
+    tuple[LinearNDInterpolator, LinearNDInterpolator]
+        Interpolators ``(interp_i_eta, interp_i_xi)`` returning fractional parent
+        ``i_eta`` and ``i_xi`` indices, respectively.
+    """
+    i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
+    i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
+
+    # i_eta varies along eta_rho (rows); i_xi varies along xi_rho (columns).
+    j_parent, i_parent = np.meshgrid(i_xi, i_eta)
+
+    points = np.column_stack(
+        (parent_grid_ds.lon_rho.values.ravel(), parent_grid_ds.lat_rho.values.ravel())
+    )
+
+    tri = Delaunay(points)
+    interp_i_eta = LinearNDInterpolator(tri, i_parent.ravel())
+    interp_i_xi = LinearNDInterpolator(tri, j_parent.ravel())
+
+    return interp_i_eta, interp_i_xi
 
 
 def _check_child_outside_parent(
@@ -266,6 +373,11 @@ def _check_child_outside_parent(
     """
     bdry_coords_dict = get_boundary_coords()
 
+    # Build the parent (lon, lat) -> index interpolator once. The Delaunay
+    # triangulation of the parent grid is identical for every boundary and grid
+    # location, so there is no need to rebuild it inside the loop.
+    interp_i_eta, _ = _build_parent_index_interpolators(parent_grid_ds)
+
     # Check if child wet points lie outside parent boundaries
     for direction in ["south", "east", "north", "west"]:
         if boundaries[direction]:
@@ -287,34 +399,8 @@ def _check_child_outside_parent(
 
                 mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
 
-                i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
-                i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
-
-                parent_grid_ds = parent_grid_ds.assign_coords(
-                    i_eta=("eta_rho", i_eta)
-                ).assign_coords(i_xi=("xi_rho", i_xi))
-
-                lon_parent = parent_grid_ds.lon_rho
-                lat_parent = parent_grid_ds.lat_rho
-                i_parent = parent_grid_ds.i_eta
-                j_parent = parent_grid_ds.i_xi
-
-                # Create meshgrid
-                j_parent, i_parent = np.meshgrid(j_parent.values, i_parent.values)
-
-                # Flatten the input coordinates and indices for griddata
-                points = np.column_stack(
-                    (lon_parent.values.ravel(), lat_parent.values.ravel())
-                )
-                i_parent_flat = i_parent.ravel()
-
                 # Interpolate the i indices (both i,j should return the same)
-                i = griddata(
-                    points,
-                    i_parent_flat,
-                    (lon_child.values, lat_child.values),
-                    method="linear",
-                )
+                i = interp_i_eta(lon_child.values, lat_child.values)
 
                 i = xr.DataArray(i, dims=lon_child.dims)
 
@@ -590,6 +676,7 @@ def interpolate_indices(
     lat: xr.DataArray,
     mask: xr.DataArray,
     direction: str,
+    interpolators: tuple[LinearNDInterpolator, LinearNDInterpolator] | None = None,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Interpolate the parent indices to the child grid boundary.
 
@@ -614,6 +701,11 @@ def interpolate_indices(
     direction : str
         Boundary identifier (``"south"``, ``"north"``, ``"east"``, ``"west"``).
         Used for generating informative warnings or errors.
+    interpolators : tuple[LinearNDInterpolator, LinearNDInterpolator], optional
+        Pre-built ``(i_eta, i_xi)`` index interpolators from
+        :func:`_build_parent_index_interpolators`. Passing them avoids rebuilding
+        the parent triangulation on every call (e.g. once per boundary/grid
+        location). If ``None``, they are built from ``parent_grid_ds``.
     Returns
     -------
     i : xarray.DataArray
@@ -621,29 +713,19 @@ def interpolate_indices(
     j : xarray.DataArray
         Interpolated j-indices for the child grid.
     """
-    i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
-    i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
-
-    parent_grid_ds = parent_grid_ds.assign_coords(
-        i_eta=("eta_rho", i_eta)
-    ).assign_coords(i_xi=("xi_rho", i_xi))
-
     lon_parent = parent_grid_ds.lon_rho
-    lat_parent = parent_grid_ds.lat_rho
-    i_parent = parent_grid_ds.i_eta
-    j_parent = parent_grid_ds.i_xi
 
-    # Create meshgrid
-    j_parent, i_parent = np.meshgrid(j_parent.values, i_parent.values)
-
-    # Flatten the input coordinates and indices for griddata
-    points = np.column_stack((lon_parent.values.ravel(), lat_parent.values.ravel()))
-    i_parent_flat = i_parent.ravel()
-    j_parent_flat = j_parent.ravel()
+    # Build (or reuse) the parent (lon, lat) -> index interpolators. Reusing a
+    # single triangulation across boundaries/grid locations avoids rebuilding it
+    # on every call.
+    if interpolators is None:
+        interp_i_eta, interp_i_xi = _build_parent_index_interpolators(parent_grid_ds)
+    else:
+        interp_i_eta, interp_i_xi = interpolators
 
     # Interpolate the i and j indices
-    i = griddata(points, i_parent_flat, (lon.values, lat.values), method="linear")
-    j = griddata(points, j_parent_flat, (lon.values, lat.values), method="linear")
+    i = interp_i_eta(lon.values, lat.values)
+    j = interp_i_xi(lon.values, lat.values)
 
     i = xr.DataArray(i, dims=lon.dims)
     j = xr.DataArray(j, dims=lon.dims)
@@ -767,6 +849,11 @@ def map_child_boundaries_onto_parent_grid_indices(
     """
     bdry_coords_dict = get_boundary_coords()
 
+    # Build the parent (lon, lat) -> index interpolators once and reuse them for
+    # every boundary and grid location, so the parent triangulation is not rebuilt
+    # on each interpolate_indices call.
+    interpolators = _build_parent_index_interpolators(parent_grid_ds)
+
     # add angles at u- and v-points
 
     child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
@@ -799,7 +886,12 @@ def map_child_boundaries_onto_parent_grid_indices(
                 mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
 
                 i_eta, i_xi = interpolate_indices(
-                    parent_grid_ds, lon_child, lat_child, mask_child, direction
+                    parent_grid_ds,
+                    lon_child,
+                    lat_child,
+                    mask_child,
+                    direction,
+                    interpolators,
                 )
 
                 if update_land_indices and mask_child.sum() > 0:

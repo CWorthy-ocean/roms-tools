@@ -18,11 +18,9 @@ Installation from PyPI (pip)
 
     pip install roms-tools
 
-If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend for parallel and out-of-core computation), you can install ``ROMS-Tools`` along with the additional dependency via::
+``dask`` (recommended for parallel and out-of-core computation) is included by default.
 
-    pip install roms-tools[dask]
-
-If you want to use ``ROMS-Tools`` with ``dask`` and all packages required for streaming source data directly from the cloud, install it with the additional dependencies via::
+If you want to use ``ROMS-Tools`` with all packages required for streaming source data directly from the cloud, install it with the additional dependencies via::
 
     pip install roms-tools[stream]
 
@@ -32,9 +30,15 @@ If you want to use the :meth:`~roms_tools.ROMSOutput.create_movie` functionality
 
 If you already have ``ffmpeg`` installed (e.g. via conda or your system package manager), the ``[movie]`` extra is not needed.
 
-Multiple extras can be combined. For example, to use both ``dask`` and movie creation::
+To work through the example notebooks in a Jupyter session, the ``notebooks`` extra provides ``jupyter``, ``ipykernel``, and ``gdown`` (for downloading example data)::
 
-    pip install roms-tools[dask,movie]
+    pip install roms-tools[notebooks]
+
+(The conda-forge ``roms-tools`` package already includes these.)
+
+Multiple extras can be combined. For example, to use both streaming and movie creation::
+
+    pip install roms-tools[stream,movie]
 
 Note: The PyPI versions of ``ROMS-Tools`` do not include ``xesmf``, so some features will be unavailable.
 
@@ -50,29 +54,32 @@ To obtain the latest development version, first clone
 
 Then, install and activate the following conda environment::
 
-    conda env create -f ci/environment-with-xesmf.yml
-    conda activate romstools-test
+    conda env create -f ci/environment.yml
+    conda activate roms-tools-env
 
-Finally, install ``ROMS-Tools`` in the same environment::
+Finally, install ``ROMS-Tools`` in the same environment, along with the ``dev`` extra
+(test/lint tooling used by the test suite and pre-commit)::
 
-    pip install -e .
+    pip install -e ".[dev]"
 
-If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend), you can
-install ``ROMS-Tools`` along with the additional dependency via::
+``dask`` (recommended for parallel and out-of-core computation) is included in the core
+dependencies by default.
 
-    pip install ".[dask]"
-
-If you want to use ``ROMS-Tools`` together with ``dask`` and all packages required for
+If you want to use ``ROMS-Tools`` with all packages required for
 streaming source data directly from the cloud, you can
 install ``ROMS-Tools`` along with the additional dependencies via::
 
-    pip install ".[stream]"
+    pip install -e ".[dev,stream]"
 
 If you want to use the :meth:`~roms_tools.ROMSOutput.create_movie` functionality and you
 do not have ``ffmpeg`` installed by other means, install with the ``movie`` extra::
 
-    pip install ".[movie]"
+    pip install -e ".[dev,movie]"
 
 Multiple extras can be combined, for example::
 
-    pip install ".[dask,movie]"
+    pip install -e ".[dev,stream,movie]"
+
+If you want to build the documentation locally, install the ``docs`` extra::
+
+    pip install -e ".[docs]"

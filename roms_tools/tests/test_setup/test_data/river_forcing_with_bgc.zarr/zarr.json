@@ -387,8 +387,8 @@
       },
       "river_tracer": {
         "shape": [
-          34,
           12,
+          34,
           7
         ],
         "data_type": "float32",
@@ -396,8 +396,8 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              34,
               12,
+              34,
               7
             ]
           }
@@ -431,8 +431,8 @@
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "ntracers",
           "river_time",
+          "ntracers",
           "nriver"
         ],
         "zarr_format": 3,

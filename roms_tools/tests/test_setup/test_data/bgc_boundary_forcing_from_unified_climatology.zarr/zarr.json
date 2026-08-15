@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS boundary forcing file created by ROMS-Tools",
-    "roms_tools_version": "4.0.0a2.dev10+g01456a412.d20260630",
+    "roms_tools_version": "4.0.0a3.dev13+g0ec9df5b3",
     "start_time": "2021-06-29 00:00:00",
     "end_time": "2021-06-30 00:00:00",
     "source": "UNIFIED",
@@ -57,7 +57,7 @@
         ],
         "attributes": {
           "long_name": "absolute time",
-          "units": "hours since 2000-01-16 12:00:00",
+          "units": "days since 2000-01-16 00:00:00",
           "calendar": "proleptic_gregorian"
         },
         "dimension_names": [

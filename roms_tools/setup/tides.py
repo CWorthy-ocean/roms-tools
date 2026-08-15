@@ -9,8 +9,15 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import TPXOManager
 from roms_tools.plot import plot
-from roms_tools.regrid import LateralRegridToROMS
+from roms_tools.processing_methods import RegridConfig, _xesmf_available
+from roms_tools.regrid import (
+    build_lateral_regridder,
+    select_source_mask,
+)
 from roms_tools.setup.utils import (
+    apply_scipy_fallback_fill,
+    apply_source_prefill,
+    check_source_coverage,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -61,6 +68,60 @@ class TidalForcing:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    prefill : str or None, optional
+        How to fill masked land cells in the *source* tidal data before
+        regridding. (TPXO stores zeros over land; the source mask, not NaNs,
+        marks those cells invalid.) The default (``None``) applies **no** source
+        prefill: with xESMF installed, masked bilinear interpolation plus
+        destination extrapolation (``extrap_method``) produces NaN-free tidal
+        fields directly; without xESMF, the source is automatically pre-filled
+        with a cheap nearest-neighbor fill before scipy interpolation. Set
+        ``prefill`` to fill the whole-domain source first (the regrid is then
+        plain bilinear and ``extrap_method`` is ignored). Options:
+
+          - ``"2d_lateral_fill"`` -- legacy AMG Poisson fill (smoothest, slow;
+            no xESMF required). Together with ``regrid_method="scipy"`` this
+            reproduces the pre-v4 tidal output.
+          - ``"inverse_dist"`` -- xESMF inverse-distance-weighted source fill
+            (tunable via ``prefill_kwargs``; requires xESMF).
+          - ``"nearest_s2d"`` -- xESMF nearest-source fill (requires xESMF).
+          - ``"nearest_neighbor"`` -- cheap distance-transform fill (no xESMF;
+            also the automatic fallback when xESMF is unavailable).
+          - ``"creep_fill"`` -- xESMF truncated Laplace-style diffusion source
+            fill (tunable via ``prefill_kwargs``; requires xESMF). **Not
+            available in current released xESMF** -- provided for use once a
+            supporting xESMF is installed.
+
+        Defaults to ``None``.
+    prefill_kwargs : dict, optional
+        Method-specific options for ``prefill``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``; ``num_levels`` for
+        ``"creep_fill"``. Ignored by the other methods. Defaults to ``None``.
+    regrid_method : str or None, optional
+        Horizontal regrid engine, chosen independently of ``prefill``:
+
+          - ``None`` / ``"auto"`` (default) -- use xESMF if it is installed
+            (lazy, weight-reused, faster on large grids), otherwise scipy.
+          - ``"xesmf"`` -- force the xESMF regridder (raises if xESMF is absent).
+          - ``"scipy"`` -- force scipy ``interp``. Byte-reproducible with pre-v4
+            outputs; when ``prefill`` is ``None`` a nearest-neighbor source
+            pre-fill is applied automatically so scipy cannot propagate NaNs.
+
+        Note that ``inverse_dist`` / ``nearest_s2d`` *prefills* still require
+        xESMF for the fill step regardless of ``regrid_method``. Defaults to
+        ``None``.
+    extrap_method : str or None, optional
+        xESMF *destination* extrapolation used on the default path
+        (``prefill is None``) to fill target points whose source neighbors are
+        all masked land or out of range, guaranteeing NaN-free output.
+        ``"inverse_dist"`` (the effective default) gives an
+        inverse-distance-weighted average of the nearest source points (smoothly
+        varying); ``"nearest_s2d"`` uses the single nearest source point.
+        Ignored when ``prefill`` is set. Defaults to ``None`` (treated as
+        ``"inverse_dist"``).
+    extrap_kwargs : dict, optional
+        Method-specific options for ``extrap_method``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
 
     Examples
     --------
@@ -94,12 +155,34 @@ class TidalForcing:
     """Whether to use dask for processing."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    prefill: str | None = None
+    """Source-side fill applied before lateral regridding. ``None`` (default) applies
+    **no** whole-domain source fill: with xESMF the masked-bilinear regrid plus
+    destination extrapolation (``extrap_method``) produces NaN-free output directly;
+    without xESMF a nearest-neighbor pre-fill is applied automatically before scipy
+    interpolation. Set to ``"2d_lateral_fill"`` (legacy AMG Poisson fill),
+    ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``, or ``"creep_fill"``
+    to fill the whole-domain source first (the last three require xESMF)."""
+    prefill_kwargs: dict | None = None
+    """Method-specific options for ``prefill`` (e.g. ``num_src_pnts`` /
+    ``dist_exponent``)."""
+    regrid_method: str | None = None
+    """Horizontal regrid engine, chosen independently of ``prefill``: ``None``/``"auto"``
+    uses xESMF when installed (else scipy), ``"xesmf"`` forces xESMF, ``"scipy"`` forces
+    scipy."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation used on the default no-prefill path (``None`` is
+    treated as ``"inverse_dist"``) to fill target points whose source neighbors are all
+    masked. Ignored when ``prefill`` is set or on the scipy path."""
+    extrap_kwargs: dict | None = None
+    """Method-specific options for ``extrap_method``."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
 
     def __post_init__(self):
+        self._resolve_prefill_options()
         self._input_checks()
         target_coords = get_target_coords(self.grid)
 
@@ -121,11 +204,30 @@ class TidalForcing:
 
         processed_fields = {}
 
-        # lateral fill and regridding
+        # source fill (or masked-regrid setup) and lateral regridding
         for key, data in tidal_data.datasets.items():
             if key != "omega":
-                data.apply_lateral_fill()
-                lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
+                # On the no-prefill xESMF path, destination extrapolation would
+                # silently fill points outside the source coverage. Guard against
+                # a grid that outruns the data (masked land *within* coverage is
+                # still filled by the masked regrid + extrapolation).
+                if self._regrid.extrap_is_active:
+                    check_source_coverage(data, target_coords, "TPXO")
+                apply_source_prefill(data, self._regrid, self.prefill_kwargs)
+                apply_scipy_fallback_fill(data, self._regrid)
+
+                # Each TPXO sub-dataset carries its own location-correct "mask"
+                # (h/u/v staggered grids), so no tracer/velocity mask split is
+                # needed; the mask only applies on the no-prefill xESMF path.
+                source_mask = select_source_mask(
+                    data.ds,
+                    is_vector=False,
+                    use_xesmf=self._regrid.use_xesmf,
+                    prefill=self._regrid.prefill,
+                )
+                lateral_regrid = build_lateral_regridder(
+                    target_coords, data, self._regrid, source_mask
+                )
 
                 for var_name in var_names:
                     if var_name in data.var_names.keys():
@@ -174,6 +276,27 @@ class TidalForcing:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
+
+    def _resolve_prefill_options(self) -> None:
+        """Build the validated :class:`RegridConfig` from the public options.
+
+        Delegates all prefill/extrap/regrid validation to
+        :meth:`RegridConfig.from_options`, then writes the resolved ``prefill`` back
+        to the public field (as a plain string or ``None``) so the YAML round-trip
+        emits a clean ``prefill``. Derived state (``use_xesmf``,
+        ``extrap_is_active``, ...) is read off ``self._regrid``.
+        """
+        self._regrid = RegridConfig.from_options(
+            prefill=self.prefill,
+            prefill_kwargs=self.prefill_kwargs,
+            regrid_method=self.regrid_method,
+            extrap_method=self.extrap_method,
+            extrap_kwargs=self.extrap_kwargs,
+            xesmf_available=_xesmf_available(),
+        )
+        self.prefill = (
+            None if self._regrid.prefill is None else str(self._regrid.prefill)
+        )
 
     def _input_checks(self):
         if "name" not in self.source.keys():
@@ -293,6 +416,10 @@ class TidalForcing:
 
         ds.attrs["source"] = self.source["name"]
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+
+        ds.attrs["prefill"] = str(self.prefill)
+        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         return ds
 

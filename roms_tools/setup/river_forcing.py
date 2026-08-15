@@ -1,10 +1,10 @@
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
+from roms_tools.datasets.lat_lon_datasets import (
+    ERA5Dataset,
+    resolve_era5_source,
+)
 from roms_tools.datasets.river_datasets import (
     DaiRiverDataset,
     GloFASRiverDataset,
@@ -51,6 +55,7 @@ INCLUDE_ALL_RIVER_NAMES = "all"
 MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
 VALID_CONVERT_TO_CLIMATOLOGY = ("never", "if_any_missing", "always")
+AIR_TEMP_COVERAGE_TOLERANCE_DAYS = 1.0
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
@@ -138,6 +143,197 @@ def _mask_invalid_dynamic_bgc_concentrations(
     return masked
 
 
+def _climatological_river_temp(
+    tair: xr.DataArray,
+    time_dim: str,
+    river_time_coord: xr.DataArray,
+) -> xr.DataArray:
+    """Reduce a real, multi-year air-temperature record to river's
+    climatological time axis.
+
+    Computes a multi-year mean at each day of year before sampling onto the
+    river's climatology days.
+
+    Parameters
+    ----------
+    tair : xr.DataArray
+        Air temperature with a real, multi-year datetime64 time dimension
+        named ``time_dim``.
+    time_dim : str
+        Name of the time dimension in ``tair``.
+    river_time_coord : xr.DataArray
+        River climatology's target time coordinate: ``datetime64`` dates
+        (on a placeholder year), as produced by ``add_time_info_to_ds``.
+
+    Returns
+    -------
+    xr.DataArray
+        The multi-year day-of-year mean of ``tair``, sampled at
+        ``river_time_coord``, with time dimension still named ``time_dim``
+        and coordinate set to ``river_time_coord``.
+    """
+    doy_mean = tair.groupby(f"{time_dim}.dayofyear").mean(time_dim)
+
+    target_doy = river_time_coord.dt.dayofyear.values.astype(float)
+    period = float(doy_mean.sizes["dayofyear"])
+    doy_values = doy_mean["dayofyear"].values.astype(float)
+    diff = np.abs(doy_values[None, :] - target_doy[:, None])
+    nearest = np.minimum(diff, period - diff).argmin(axis=1)
+
+    result = doy_mean.isel(dayofyear=nearest).rename({"dayofyear": time_dim})
+    return result.assign_coords({time_dim: river_time_coord.values})
+
+
+def _smooth_and_floor_air_temp(
+    tair: xr.DataArray,
+    time_dim: str,
+    window_days: float,
+) -> xr.DataArray:
+    """Smooth air temperature in time and floor it at 0 degC.
+
+    A simple, zero-calibration stand-in for river water temperature: air
+    temperature is averaged over a rolling window (default one month) to
+    approximate the thermal inertia that damps a river's response to
+    day-to-day air temperature swings, then floored at 0 degC since flowing
+    water does not track air temperature below freezing.
+
+    The window is a physically motivated choice, not fit to any observed
+    river temperature data, so this is a placeholder for a more physically
+    complete method (e.g. an equilibrium-temperature energy budget) rather
+    than a calibrated model in its own right.
+
+    Parameters
+    ----------
+    tair : xr.DataArray
+        Air temperature, degC, with a datetime64 time dimension named
+        ``time_dim``.
+    time_dim : str
+        Name of the time dimension in ``tair``.
+    window_days : float
+        Length of the rolling-mean window, in days.
+
+    Returns
+    -------
+    xr.DataArray
+        Smoothed, floored air temperature, degC, same shape as ``tair``.
+    """
+    if tair.sizes[time_dim] < 2:
+        # A single time step has nothing to smooth over (and `np.diff` on it
+        # is empty, making `dt_days` NaN below) -- just floor it.
+        return tair.clip(min=0.0)
+
+    dt_days = np.median(np.diff(tair[time_dim].values)) / np.timedelta64(1, "D")
+    window_size = max(round(window_days / dt_days), 1)
+    # Clamp to the available record length: a window wider than the data
+    # (e.g. the default 30-day window against a short forcing period) would
+    # otherwise make dask's rolling `map_overlap` raise an opaque
+    # "overlapping depth ... larger than your array" error instead of just
+    # smoothing over what's available.
+    window_size = min(window_size, tair.sizes[time_dim])
+
+    if tair.chunks is not None:
+        # Rolling reductions need the rolled dimension in a single chunk.
+        tair = tair.chunk({time_dim: -1})
+
+    smoothed = tair.rolling({time_dim: window_size}, center=True, min_periods=1).mean()
+
+    return smoothed.clip(min=0.0)
+
+
+def _bounding_box_with_buffer(
+    lat: np.ndarray, lon: np.ndarray, buffer_deg: float = 1.0
+) -> dict[str, tuple[float, float]]:
+    """Build a lat/lon bounding box around a set of points, with a buffer.
+
+    Used as ``initial_slice_bounds`` for a ``LatLonDataset``, to narrow a
+    read to a small bounding box around a handful of points (e.g. river
+    locations) instead of the full source domain.
+
+    Parameters
+    ----------
+    lat : np.ndarray
+        Latitudes of the points to bound.
+    lon : np.ndarray
+        Longitudes of the points to bound, in the source's native longitude
+        convention.
+    buffer_deg : float, optional
+        Degrees of slack added on each side of the box (e.g. a couple of
+        source grid cells' worth). Defaults to 1.0.
+
+    Returns
+    -------
+    dict[str, tuple[float, float]]
+        ``{"latitude": (min, max), "longitude": (min, max)}``, in degrees.
+    """
+    return {
+        "latitude": (float(lat.min()) - buffer_deg, float(lat.max()) + buffer_deg),
+        "longitude": (float(lon.min()) - buffer_deg, float(lon.max()) + buffer_deg),
+    }
+
+
+def _sample_tair_at_river_mouths(
+    tair: xr.DataArray,
+    lat_name: str,
+    lon_name: str,
+    river_lons: np.ndarray,
+    river_lats: np.ndarray,
+    straddle: bool,
+) -> xr.DataArray:
+    """Nearest-neighbor sample Tair at each river's mouth coordinate.
+
+    Builds a KDTree over ``tair``'s native lat/lon grid (already narrowed to
+    a small bounding box via ``initial_slice_bounds``) and looks up the
+    single nearest source cell for each river in one vectorized query --
+    samples once per river, not once per grid cell, which is what made this
+    fast before.
+
+    Parameters
+    ----------
+    tair : xr.DataArray
+        Raw (unregridded) air temperature, with native latitude/longitude
+        dimensions named ``lat_name``/``lon_name``.
+    lat_name, lon_name : str
+        Names of ``tair``'s latitude/longitude dimensions.
+    river_lons, river_lats : np.ndarray
+        Each river's mean discharge-point longitude/latitude, in river order,
+        already in ``tair``'s native longitude convention.
+    straddle : bool
+        Whether the ROMS grid straddles the dateline (``self.grid.straddle``).
+
+    Returns
+    -------
+    xr.DataArray
+        Per-river Tair, dims ``(time, nriver)``, with a plain 0-based
+        ``nriver`` index already in ``river_lons``/``river_lats`` order.
+    """
+    from roms_tools.setup.utils import build_kdtree_from_latlon, query_kdtree_nearest
+
+    grid_lat = tair[lat_name].values
+    grid_lon = tair[lon_name].values
+    grid_lon = np.where(grid_lon < 0, grid_lon + 360, grid_lon)  # ERA5 is always 0-360
+
+    lon2d, lat2d = np.meshgrid(grid_lon, grid_lat)
+    row2d, col2d = np.meshgrid(
+        np.arange(grid_lat.size), np.arange(grid_lon.size), indexing="ij"
+    )
+
+    tree = build_kdtree_from_latlon(lat2d.ravel(), lon2d.ravel())
+    nearest_row, nearest_col, _ = query_kdtree_nearest(
+        tree,
+        river_lats,
+        river_lons,
+        row2d.ravel(),
+        col2d.ravel(),
+    )
+
+    return tair.isel(
+        {
+            lat_name: xr.DataArray(nearest_row, dims="nriver"),
+            lon_name: xr.DataArray(nearest_col, dims="nriver"),
+        }
+    )
+
+
 @dataclass(kw_only=True)
 class RiverForcing:
     """Represents river forcing input data for ROMS.
@@ -191,6 +387,28 @@ class RiverForcing:
         ``fill_river_bgc_concentrations``.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
+    surface_forcing_source : dict, optional
+        ERA5 source dict (e.g. ``{"name": "ERA5", "path": ...}``) specifying
+        where to sample air temperature from at each river's injection
+        point(s), used to derive river temperature. When not provided,
+        river temperature keeps its flat default from ``get_tracer_defaults()``.
+
+        Always samples real (non-climatological) ERA5 air temperature --
+        like every other river tracer, river temperature is written onto
+        the single ``river_time`` axis shared by the whole ``river_tracer``
+        array, so it has no independent climatology setting of its own.
+        Whether the stored result ends up climatological is decided by the
+        discharge data / ``convert_to_climatology`` when ``include_bgc`` is
+        ``False``, or by the BGC dataset's own time axis requirements
+        (``requires_calendar_discharge_time``) when BGC is included, since
+        that can force a climatological discharge record onto a real
+        calendar-year axis. Not by this parameter.
+    river_temp_smoothing_window_days : float, optional
+        Length (days) of the rolling-mean window applied to air temperature
+        before using it as a river temperature estimate. Defaults to 30 (one month). The
+        result is also floored at 0 degC, since flowing water doesn't track
+        air temperature below freezing. This is a deliberately simple,
+        zero-calibration placeholder, not a physically complete model.
     indices : dict[str, list[tuple[int, int]]], optional
         A dictionary specifying the river indices for each river to be included in the river forcing. This parameter is optional. If not provided,
         the river indices will be automatically determined based on the grid and the source dataset. If provided, it allows for explicit specification
@@ -209,6 +427,17 @@ class RiverForcing:
 
         In the example, the dictionary provides the river names as keys, and the values are lists of tuples, where each tuple represents the
         `(eta_rho, xi_rho)` indices for a river location.
+    coast_snap_buffer_km : float, optional
+        Maximum distance (in km) between a river mouth and the nearest
+        coastal grid cell. River stations farther than this threshold are
+        excluded in mapping. Defaults to ``None``, which uses the dataset's
+        own default (50 km for GloFAS, 200 km for Dai). Can be overridden
+        for domains where the default is inappropriate.
+    domain_edge_buffer : int, optional
+        Number of grid cells to include beyond the domain boundary when
+        searching for relevant rivers. Defaults to 20. For small
+        high-resolution domains, a smaller value (e.g. 5) may be more
+        appropriate.
     """
 
     grid: Grid
@@ -231,6 +460,17 @@ class RiverForcing:
     """
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
+
+    surface_forcing_source: RawDataSource | None = None
+    """ERA5 source dict used to sample air temperature at each river's
+    injection point(s) and derive river temperature. See class docstring for
+    climatology behavior. When ``None``, river temperature keeps its flat
+    default."""
+
+    river_temp_smoothing_window_days: float = 30.0
+    """Length of the rolling-mean window (days) used to smooth air temperature
+    before it's used as a river temperature estimate. Approximates a river's thermal inertia
+    without fitting to any observed river-temperature data."""
 
     indices: dict[str, list[tuple[int, int]]] | None = None
     """A dictionary of river indices.
@@ -338,6 +578,9 @@ class RiverForcing:
         if self.include_bgc and self.bgc_source is not None:
             ds = self._apply_bgc_tracers(ds)
 
+        if self.surface_forcing_source is not None:
+            ds = self._apply_river_temperature(ds)
+
         ds = self._write_indices_into_dataset(ds)
         self._validate(ds)
 
@@ -355,6 +598,7 @@ class RiverForcing:
         self.source = self._normalized_source()
         self.bgc_source = self._normalized_bgc_source()
         self._validate_indices()
+        self.surface_forcing_source = self._normalized_surface_forcing_source()
 
     def _normalized_source(self) -> RawDataSource:
         """Apply defaults to ``source`` and validate its required keys.
@@ -387,6 +631,35 @@ class RiverForcing:
 
         # Set 'climatology' to False if not provided in 'source'
         return {**source, "climatology": source.get("climatology", False)}
+
+    def _normalized_surface_forcing_source(self) -> RawDataSource | None:
+        """Validate ``surface_forcing_source``.
+
+        Returns ``None`` when not provided. Otherwise checks that
+        ``"name"`` is ``"ERA5"`` -- currently the only source supported for
+        sampling river temperature. The ARCO default path is applied later,
+        by ``resolve_era5_source``, so ``"path"`` is left as-is here.
+
+        Raises
+        ------
+        ValueError
+            If ``surface_forcing_source`` has no ``"name"``, or if
+            ``"name"`` is not ``"ERA5"``.
+        """
+        if self.surface_forcing_source is None:
+            return None
+
+        source = self.surface_forcing_source
+        if "name" not in source:
+            raise ValueError("`surface_forcing_source` must include a 'name'.")
+        if source["name"] != "ERA5":
+            raise ValueError(
+                "`surface_forcing_source['name']` must be 'ERA5'; it is "
+                "currently the only source supported for sampling river "
+                "temperature."
+            )
+
+        return dict(source)
 
     def _normalized_bgc_source(self) -> BgcSource | None:
         """Validate ``bgc_source`` into a typed model when BGC is enabled.
@@ -567,13 +840,273 @@ class RiverForcing:
                 cell_lats.append(float(self.grid.ds.lat_rho[eta_rho, xi_rho]))
             lons.append(np.mean(cell_lons))
             lats.append(np.mean(cell_lats))
-        return np.asarray(lons), np.asarray(lats)
+        lons_arr = np.asarray(lons)
+        # Match ERA5 convention: ERA5 uses 0-360, so convert negative longitudes
+        lons_arr = np.where(lons_arr < 0, lons_arr + 360, lons_arr)
+        return lons_arr, np.asarray(lats)
+
+    def _check_surface_forcing_source_coverage(self, tair: xr.DataArray) -> None:
+        """Raise if the air-temperature source's real time range doesn't
+        cover the requested ``start_time``/``end_time`` (within a small
+        tolerance).
+
+        In practice this should always pass, since ``_get_river_surface_temp``
+        requests exactly ``self.start_time``/``self.end_time`` from the
+        source -- this is a defensive check against an unexpectedly narrow
+        result, not a check on user-supplied bounds.
+        """
+        surface_start = tair["time"].min().values
+        surface_end = tair["time"].max().values
+        requested_start = np.datetime64(self.start_time)
+        requested_end = np.datetime64(self.end_time)
+        tolerance = np.timedelta64(int(AIR_TEMP_COVERAGE_TOLERANCE_DAYS * 24), "h")
+        if (
+            surface_start - tolerance > requested_start
+            or surface_end + tolerance < requested_end
+        ):
+            raise ValueError(
+                f"The air-temperature source only covers {surface_start} to "
+                f"{surface_end}, which does not fully cover this river "
+                f"forcing's requested time range ({requested_start} to "
+                f"{requested_end})."
+            )
+
+    def _get_river_surface_temp(
+        self,
+        ds: xr.Dataset,
+        river_names: list[str],
+        smooth_window_days: float | None = None,
+    ) -> xr.DataArray:
+        """Sample air temperature at each river's mouth coordinate.
+
+        Builds a dataset for ``surface_forcing_source`` (see
+        ``_resolve_surface_forcing_source``) narrowed to a bounding box
+        around the river mouths (``initial_slice_bounds``), then
+        nearest-neighbor samples the raw source grid once per river via a
+        KDTree (``_sample_tair_at_river_mouths``) -- not once per grid cell,
+        since that scales both the sampling and the downstream ``.compute()``
+        with the number of grid cells a river occupies rather than the
+        number of rivers, which is much slower for domains with multi-cell
+        rivers.
+
+        If the river forcing is climatological, the multi-year Tair record
+        is first reduced to its own day-of-year climatology
+        (``_climatological_river_temp``) before sampling onto the river's
+        climatology days. Otherwise, Tair is aligned onto ``river_time`` via
+        real-calendar nearest-time selection.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The in-progress river forcing dataset. Must already have
+            ``river_time``/``abs_time`` coordinates assigned (i.e. called
+            after ``_create_river_forcing``).
+        river_names : list[str]
+            River names in ``ds``'s ``nriver`` order (matches
+            ``_get_river_sample_coords``' output order).
+        smooth_window_days : float, optional
+            If given, smooth ``Tair`` in time with ``_smooth_and_floor_air_temp``
+            (rolling mean + 0 degC floor) after sampling. If None, returns
+            the raw sampled ``Tair`` unmodified.
+
+        Returns
+        -------
+        xr.DataArray
+            ``Tair``-derived river temperature, dims ``(river_time, nriver)``, degC.
+        """
+        if self.surface_forcing_source is None:
+            raise RuntimeError("`surface_forcing_source` is not set.")
+
+        river_lons, river_lats = self._get_river_sample_coords(river_names)
+
+        dataset_cls, resolved_path, river_lons, raw_tair_name, is_arco = (
+            self._resolve_surface_forcing_source(river_lons)
+        )
+        # river_lons is only converted (and only narrowed below) when
+        # `is_arco` -- a local file's native convention isn't guessed.
+        logging.info("Opening ERA5 source for river temperatures...")
+
+        data = dataset_cls(
+            filename=resolved_path,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            climatology=False,
+            use_dask=True,
+            initial_slice_bounds=(
+                _bounding_box_with_buffer(river_lats, river_lons) if is_arco else None
+            ),
+            var_names={"Tair": raw_tair_name},
+            needs_lateral_fill=False,
+            apply_post_processing=False,
+        )
+
+        tair = data.ds[data.var_names["Tair"]] - 273.15
+        tair.attrs["units"] = "degrees C"
+        tair = tair.chunk({"time": -1})
+
+        river_tair = _sample_tair_at_river_mouths(
+            tair,
+            data.dim_names["latitude"],
+            data.dim_names["longitude"],
+            river_lons,
+            river_lats,
+            self.grid.straddle,
+        )
+
+        if smooth_window_days is not None:
+            river_tair = _smooth_and_floor_air_temp(
+                river_tair, "time", smooth_window_days
+            )
+
+        logging.info("Loading surface air temperature...")
+        with ProgressBar():
+            river_tair = river_tair.compute()
+
+        if river_tair.isnull().any():
+            nan_rivers = [
+                river_names[i]
+                for i in np.where(river_tair.isnull().any(dim="time").values)[0]
+            ]
+            raise ValueError(
+                "Sampled air temperature contains NaN for river(s): "
+                f"{nan_rivers}. Please check source data."
+            )
+
+        discharge_climatology = (
+            str(ds.attrs.get(DISCHARGE_CLIMATOLOGY_ATTR, "")).lower() == "true"
+        )
+
+        discharge_climatology = (
+            str(ds.attrs.get(DISCHARGE_CLIMATOLOGY_ATTR, "")).lower() == "true"
+        )
+        effective_climatology = self.climatology and not discharge_climatology
+
+        if not effective_climatology:
+            self._check_surface_forcing_source_coverage(river_tair)
+
+        if effective_climatology:
+            river_tair = _climatological_river_temp(river_tair, "time", ds["abs_time"])
+        else:
+            # Both sides are datetime64.
+            river_tair = river_tair.sel(time=ds["abs_time"], method="nearest")
+
+        if "time" in river_tair.dims:
+            river_tair = river_tair.rename({"time": "river_time"})
+        river_tair = river_tair.assign_coords(
+            river_time=ds["river_time"], nriver=ds["nriver"]
+        )
+        if "time" in river_tair.coords:
+            river_tair = river_tair.drop_vars("time")
+        return river_tair
+
+    def _resolve_surface_forcing_source(
+        self, cell_lon: np.ndarray
+    ) -> tuple[type[ERA5Dataset], str, np.ndarray, str, bool]:
+        """Resolve ``surface_forcing_source`` to a dataset class, path, and
+        raw ``Tair`` variable name.
+
+        A thin, explicit dispatch on ``surface_forcing_source["name"]`` --
+        mirrors the dispatch in ``_get_data`` (river source) and
+        ``SurfaceForcing._get_data`` (``source["name"]``). ERA5 is currently
+        the only supported source (as it is for ``SurfaceForcing``'s
+        ``type="physics"``); adding another source means adding a branch
+        here, not restructuring the caller.
+
+        Also converts ``cell_lon`` to the source's native longitude
+        convention, since this varies by source (ERA5 uses 0-360) and has to
+        be known before ``initial_slice_bounds`` can be built correctly.
+
+        Parameters
+        ----------
+        cell_lon : np.ndarray
+            River grid-cell longitudes, in the ROMS grid's own convention.
+
+        Returns
+        -------
+        dataset_cls : type[ERA5Dataset]
+            The ``LatLonDataset`` subclass to instantiate.
+        resolved_path : str
+            The path to use, with the source's own default applied.
+        cell_lon : np.ndarray
+            ``cell_lon`` converted to the source's native longitude convention.
+        raw_tair_name : str
+            The dataset class's own raw name for ``Tair`` (e.g. ``"t2m"`` for
+            local ERA5, ``"2m_temperature"`` for the ARCO archive), read off
+            its ``var_names`` default rather than hardcoded, so the dataset
+            can be told to load only ``Tair``.
+        is_arco : bool
+            Whether ``resolved_path`` points at the ARCO cloud archive.
+        """
+        surface_forcing_source = self.surface_forcing_source
+        if surface_forcing_source is None:
+            raise RuntimeError("`surface_forcing_source` is not set.")
+
+        name = surface_forcing_source["name"]
+        if name == "ERA5":
+            path_value = cast("str | Path | None", surface_forcing_source.get("path"))
+            resolved_path, is_arco, dataset_cls = resolve_era5_source(path_value)
+            if is_arco:
+                # ARCO's native longitude convention is known to be 0-360.
+                # A local ERA5 extract's convention isn't known in advance
+                # (a regional file may already be -180-180), so only
+                # convert -- and only narrow via `initial_slice_bounds` --
+                # for the known-0-360 ARCO case.
+                cell_lon = np.where(cell_lon < 0, cell_lon + 360, cell_lon)
+
+            default_factory = next(
+                f.default_factory for f in fields(dataset_cls) if f.name == "var_names"
+            )
+            if not callable(default_factory):
+                raise RuntimeError(
+                    f"{dataset_cls.__name__}.var_names has no default_factory."
+                )
+            raw_tair_name = default_factory()["Tair"]
+            return dataset_cls, resolved_path, cell_lon, raw_tair_name, is_arco
+
+        raise ValueError(
+            f"`surface_forcing_source['name']` must be 'ERA5'; got {name!r}. "
+            "ERA5 is currently the only source supported for sampling river "
+            "temperature."
+        )
 
     def _set_river_tracer_values(
         self, ds: xr.Dataset, tracer_name: str, values: xr.DataArray
     ) -> None:
         ntracer = int(np.where(ds.tracer_name.values == tracer_name)[0][0])
         ds["river_tracer"].loc[{"ntracers": ntracer}] = values
+
+    def _apply_river_temperature(self, ds: xr.Dataset) -> xr.Dataset:
+        """Overwrite the flat default river temperature with an air-temperature-
+        based estimate.
+
+        Only runs when ``surface_forcing_source`` is set. Otherwise the
+        ``temp`` slice of ``river_tracer`` keeps the flat default written in
+        ``_create_river_forcing`` (from ``get_tracer_defaults()``, or NaN
+        pending BGC fill when ``include_bgc=True``).
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The in-progress river forcing dataset, with ``river_tracer`` and
+            final (post-sort) ``nriver``/``river_name`` coordinates already
+            set.
+
+        Returns
+        -------
+        xr.Dataset
+            ``ds`` with the ``temp`` tracer overwritten in place.
+        """
+        river_names = [str(name) for name in ds.river_name.values]
+        river_temp = self._get_river_surface_temp(
+            ds, river_names, smooth_window_days=self.river_temp_smoothing_window_days
+        )
+
+        logging.info("Computing river temperature from surface air temperature...")
+        with ProgressBar():
+            river_temp = river_temp.compute()
+
+        self._set_river_tracer_values(ds, "temp", river_temp.astype(np.float32))
+        return ds
 
     def _apply_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
         """Apply BGC tracer concentrations from the primary source, with fill."""
@@ -623,6 +1156,7 @@ class RiverForcing:
             xr.concat(tracer_arrays, dim="ntracers")
             .assign_coords(ntracers=ds["river_tracer"].ntracers)
             .astype(np.float32)
+            .transpose("river_time", "ntracers", "nriver")
         )
         return ds
 
@@ -778,8 +1312,8 @@ class RiverForcing:
         n_rivers = river_volume.sizes["nriver"]
 
         ds["river_tracer"] = xr.DataArray(
-            np.zeros((n_tracers, n_river_time, n_rivers), dtype=np.float32),
-            dims=("ntracers", "river_time", "nriver"),
+            np.zeros((n_river_time, n_tracers, n_rivers), dtype=np.float32),
+            dims=("river_time", "ntracers", "nriver"),
         )
         ds["river_tracer"].attrs = {"long_name": "River tracer data"}
 
@@ -823,7 +1357,7 @@ class RiverForcing:
                     discharge_climatology_attr=DISCHARGE_CLIMATOLOGY_ATTR,
                 )
 
-        logging.info("Computing river forcing...")
+        logging.info("Loading river discharge volume and tracer data from source...")
         with ProgressBar():
             ds["river_volume"] = ds["river_volume"].compute(keep_attrs=True)
             ds["river_tracer"] = ds["river_tracer"].compute(keep_attrs=True)
@@ -1315,10 +1849,9 @@ class RiverForcing:
             ax.plot(
                 xticks,
                 field.isel(nriver=nriver),
-                marker="x",
-                markersize=8,
-                markeredgewidth=2,
-                lw=2,
+                marker=".",
+                markersize=4,
+                lw=1.5,
                 label=name,
                 color=colors[name],
             )

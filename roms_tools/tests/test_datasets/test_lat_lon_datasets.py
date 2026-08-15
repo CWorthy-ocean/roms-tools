@@ -10,20 +10,25 @@ import xarray as xr
 
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
+    DEFAULT_ERA5_ARCO_PATH,
     GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
     ERA5ARCODataset,
     ERA5Correction,
+    ERA5Dataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     LatLonDataset,
     TPXODataset,
+    UnifiedBGCDataset,
+    UnifiedBGCSurfaceDataset,
+    UnifiedRestoringSurfaceDataset,
     _concatenate_longitudes,
     choose_subdomain,
     get_glorys_bounds,
+    resolve_era5_source,
 )
-from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
-from roms_tools.setup.utils import get_target_coords
+from roms_tools.setup.utils import climatology_mid_month_days, get_target_coords
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -165,6 +170,84 @@ def test_select_times(data_fixture, expected_time_values, request, tmp_path, use
         var_names={"var": "var"},
         start_time=start_time,
         end_time=end_time,
+        use_dask=use_dask,
+    )
+
+    assert dataset.ds is not None
+    assert len(dataset.ds.time) == len(expected_time_values)
+    for expected_time in expected_time_values:
+        assert expected_time in dataset.ds.time.values
+
+
+@pytest.mark.parametrize(
+    "start_time_pad, end_time_pad, expected_time_values",
+    [
+        (
+            True,
+            True,
+            [
+                np.datetime64("2022-01-01T00:00:00"),
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+                np.datetime64("2022-01-04T00:00:00"),
+            ],
+        ),
+        (
+            False,
+            True,
+            [
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+                np.datetime64("2022-01-04T00:00:00"),
+            ],
+        ),
+        (
+            True,
+            False,
+            [
+                np.datetime64("2022-01-01T00:00:00"),
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+            ],
+        ),
+        (
+            False,
+            False,
+            [
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+            ],
+        ),
+    ],
+)
+def test_select_times_start_end_pad_independently_control_boundaries(
+    global_dataset,
+    start_time_pad,
+    end_time_pad,
+    expected_time_values,
+    tmp_path,
+    use_dask,
+):
+    """`start_time_pad` and `end_time_pad` each independently control whether the
+    nearest out-of-range record is retained at their respective boundary.
+
+    Uses ``global_dataset`` (daily records 2022-01-01 through 2022-01-04) with
+    ``start_time=2022-01-02`` and ``end_time=2022-01-03``, so the record before
+    `start_time` (01-01) and the record after `end_time` (01-04) are each
+    genuinely available to be padded in or excluded.
+    """
+    start_time = datetime(2022, 1, 2)
+    end_time = datetime(2022, 1, 3)
+
+    filepath = tmp_path / "test.nc"
+    global_dataset.to_netcdf(filepath)
+    dataset = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        start_time=start_time,
+        end_time=end_time,
+        start_time_pad=start_time_pad,
+        end_time_pad=end_time_pad,
         use_dask=use_dask,
     )
 
@@ -524,6 +607,38 @@ def test_era5_correction_match_subdomain(use_dask):
     assert (data.ds["longitude"] == lons).all()
 
 
+def test_resolve_era5_source_defaults_to_arco():
+    """No path -> the ARCO cloud default, with the matching dataset class."""
+    resolved_path, is_arco, dataset_cls = resolve_era5_source(None)
+    assert resolved_path == DEFAULT_ERA5_ARCO_PATH
+    assert is_arco is True
+    assert dataset_cls is ERA5ARCODataset
+
+
+@pytest.mark.parametrize("prefix", ["gs://", "gcs://"])
+def test_resolve_era5_source_cloud_path_is_arco(prefix):
+    path = f"{prefix}some-bucket/some-object.zarr"
+    resolved_path, is_arco, dataset_cls = resolve_era5_source(path)
+    assert resolved_path == path
+    assert is_arco is True
+    assert dataset_cls is ERA5ARCODataset
+
+
+def test_resolve_era5_source_local_path_is_not_arco():
+    resolved_path, is_arco, dataset_cls = resolve_era5_source("/local/era5_data.nc")
+    assert resolved_path == "/local/era5_data.nc"
+    assert is_arco is False
+    assert dataset_cls is ERA5Dataset
+
+
+def test_resolve_era5_source_accepts_path_object(tmp_path):
+    local_path = tmp_path / "era5_data.nc"
+    resolved_path, is_arco, dataset_cls = resolve_era5_source(local_path)
+    assert resolved_path == str(local_path)
+    assert is_arco is False
+    assert dataset_cls is ERA5Dataset
+
+
 @pytest.mark.use_gcsfs
 def test_default_era5_dataset_loading_without_dask() -> None:
     """Verify that loading the default ERA5 dataset fails if use_dask is not True."""
@@ -727,6 +842,87 @@ def test_climatology_error(use_dask):
 def test_horizontal_resolution(data_fixture, expected_resolution, request):
     data = request.getfixturevalue(data_fixture)
     assert np.isclose(data.resolution, expected_resolution)
+
+
+class TestUnifiedDatasetFileGenerations:
+    """The unified BGC dataset changed layout in v2.1.
+
+    From v2.1 on, the dimensions are named after their coordinate variables
+    (``longitude``/``latitude``/``depth``) and ``month`` is an integer index 1-12.
+    Earlier files use ``lon``/``lat``/``dep`` and a day-of-year ``month``. Both are
+    read, and both must land on the same standardized dataset.
+    """
+
+    @pytest.fixture(params=["legacy", "v2_1"])
+    def bgc_filename(self, request) -> tuple[str, Path]:
+        name = (
+            "coarsened_UNIFIED_bgc_dataset.nc"
+            if request.param == "legacy"
+            else "coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+        )
+        return request.param, Path(download_test_data(name))
+
+    @pytest.mark.parametrize(
+        "dataset_class",
+        [UnifiedBGCDataset, UnifiedBGCSurfaceDataset, UnifiedRestoringSurfaceDataset],
+    )
+    def test_both_generations_are_standardized(
+        self, dataset_class, bgc_filename, use_dask
+    ) -> None:
+        generation, filename = bgc_filename
+        data = dataset_class(filename=filename, climatology=True, use_dask=use_dask)
+
+        assert data.dim_names["latitude"] == "latitude"
+        assert data.dim_names["longitude"] == "longitude"
+        assert data.dim_names["time"] == "time"
+        assert {"latitude", "longitude", "time"} <= set(data.ds.dims)
+        assert not {"lat", "lon", "dep", "month"} & set(data.ds.dims)
+
+        # A monthly climatology is placed at the center of each month, regardless of
+        # whether the file supplied day-of-year values or a month index.
+        expected = np.array(climatology_mid_month_days(), dtype="timedelta64[D]")
+        if generation == "legacy":
+            # Pre-v2.1 files carry their own (slightly different) day-of-year values.
+            assert data.ds["time"].size == expected.size
+        else:
+            np.testing.assert_array_equal(
+                data.ds["time"].values.astype("timedelta64[D]"), expected
+            )
+
+    def test_legacy_generation_warns(self, caplog, use_dask) -> None:
+        filename = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+        with caplog.at_level(logging.WARNING):
+            UnifiedBGCDataset(filename=filename, climatology=True, use_dask=use_dask)
+
+        assert "predate v2.1" in caplog.text
+
+    def test_current_generation_does_not_warn(self, caplog, use_dask) -> None:
+        filename = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+        with caplog.at_level(logging.WARNING):
+            UnifiedBGCDataset(filename=filename, climatology=True, use_dask=use_dask)
+
+        assert "predate v2.1" not in caplog.text
+
+    def test_generations_agree_on_tracers(self, use_dask) -> None:
+        """The two layouts differ only in metadata, so the tracers must match."""
+        legacy = UnifiedBGCDataset(
+            filename=Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
+            climatology=True,
+            use_dask=use_dask,
+        )
+        current = UnifiedBGCDataset(
+            filename=Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")),
+            climatology=True,
+            use_dask=use_dask,
+        )
+
+        # Time labels differ by up to half a day (see class docstring), so compare the
+        # fields on their shared time index.
+        xr.testing.assert_allclose(
+            legacy.ds.drop_vars("time"), current.ds.drop_vars("time")
+        )
 
 
 class TestTPXODataset:

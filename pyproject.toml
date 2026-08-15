@@ -5,7 +5,12 @@ readme = "README.md"
 authors = [
     {name = "Nora Loose", email = "nora.loose@gmail.com"},
     {name = "Thomas Nicholas", email = "tom@cworthy.org"},
-    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"}
+    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"},
+    {name = "Ben Saenz", email = "ben.saenz@cworthy.org"},
+    {name = "Ulla Heede", email = "ulla@cworthy.org"},
+    {name = "Abigale Wyatt", email = "abigale@cworthy.org"},
+    {name = "Kristen Thyng", email = "kristen.thyng@cworthy.org"},
+    {name = "Chris McBride", email = "christopher.mcbride@cworthy.org"},
 ]
 license = {text = "Apache-2"}
 classifiers = [
@@ -23,7 +28,7 @@ dependencies = [
     "xarray>=2022.6.0,<2025.8.0",
     "numpy>2.0,<2.3",
     "pooch",
-    "matplotlib",
+    "matplotlib<3.11",
     "cartopy",
     "packaging",
     "scipy >= 1.18.0",
@@ -33,21 +38,18 @@ dependencies = [
     "pyamg",
     "bottleneck",
     "regionmask>=0.11.0",
-    "xgcm>=0.9.0,<0.10.0",
+    "xgcm>0.10.0,<0.11",
     "gsw",
     "numba>=0.61.2",
     "pydantic>2,<3",
+    "dask[diagnostics]",
+    "h5netcdf",
 ]
 dynamic = ["version"]
 
 
 [project.optional-dependencies]
-dask = [
-    "dask[diagnostics]",
-    "zarr"
-]
 stream = [
-    "dask[diagnostics]",
     "gcsfs",
     "zarr",
     "copernicusmarine",
@@ -56,14 +58,28 @@ movie = [
     "imageio-ffmpeg",
 ]
 notebooks = [
-    "dask[diagnostics]",
-    "gcsfs",
-    "zarr",
-    "copernicusmarine",
+    "jupyter",
     "gdown",
-    "imageio-ffmpeg",
     "ipykernel",
-    "jupyter"
+]
+dev = [
+    "pytest",
+    "pytest-xdist",
+    "coverage",
+    "pre-commit>=3.8",
+    # test-data/fixture dependencies (not lint/test tooling per se, but required
+    # for the base test suite to collect and pass without conda):
+    "h5py",
+    "zarr",
+]
+docs = [
+    "sphinx",
+    "nbsphinx",
+    "sphinx-book-theme",
+    "sphinx-design",
+    "sphinxcontrib-bibtex",
+    "myst-parser",
+    "ipykernel",
 ]
 
 [project.urls]
@@ -82,10 +98,26 @@ requires = [
 fallback_version = "9999"
 
 [tool.setuptools.packages.find]
-exclude = ["docs", "tests", "tests.*", "docs.*"]
+# roms_tools.tests* is excluded so wheels (and installed packages, including the
+# conda-forge build) don't carry the test suite and its ~4400-file zarr fixture
+# tree. The sdist still contains the full tests directory: setuptools_scm
+# includes every git-tracked file there, so tests remain runnable from a source
+# archive or checkout.
+# ci* keeps the release-notes scripts from installing into site-packages as a
+# top-level `ci` package (namespace discovery picks up __init__-less dirs, and
+# roms_tools/{analysis,datasets,tiling} rely on that, so it can't be disabled).
+exclude = ["docs", "tests", "tests.*", "docs.*", "roms_tools.tests", "roms_tools.tests.*", "ci", "ci.*"]
 
 [tool.setuptools.package-data]
 roms_tools = ["py.typed"]
+
+[tool.setuptools.exclude-package-data]
+# Excluding roms_tools.tests* from packages.find (above) is not sufficient on
+# its own: include_package_data (default true) sweeps every git-tracked file
+# under roms_tools/ into the wheel as data of the parent package. This entry
+# keeps the tests out of the wheel too. Only the wheel is affected — the sdist
+# is driven by setuptools_scm's file list and still ships the full tests tree.
+roms_tools = ["tests/**"]
 
 [tool.ruff]
 fix = true

@@ -10,6 +10,19 @@ import xarray as xr
 from conftest import calculate_file_hash
 from roms_tools import Grid, RiverForcing
 from roms_tools.constants import MAX_DISTINCT_COLORS
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.lat_lon_datasets import (
+    DEFAULT_ERA5_ARCO_PATH,
+    ERA5ARCODataset,
+    ERA5Dataset,
+)
+from roms_tools.setup.river_forcing import (
+    AIR_TEMP_COVERAGE_TOLERANCE_DAYS,
+    _bounding_box_with_buffer,
+    _climatological_river_temp,
+    _sample_tair_at_river_mouths,
+    _smooth_and_floor_air_temp,
+)
 from roms_tools.setup.utils import get_tracer_defaults
 from roms_tools.tests.river_test_utils import write_glofas_file
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
@@ -183,6 +196,98 @@ def river_forcing_with_prescribed_multi_cell_indices(
     )
 
 
+# Coastal (eta_rho, xi_rho) pairs for `iceland_test_grid`, matching the
+# `multi_cell_indices` fixture's `Svarta` entry above (already verified
+# coastal for this exact grid configuration).
+MULTI_CELL_COASTAL_INDICES = [(12, 8), (12, 9), (12, 10)]
+
+
+def _write_synthetic_era5_tair_file(path, lats, lons, times, tair_kelvin):
+    """Write a minimal local-ERA5-format Tair-only NetCDF file for tests.
+
+    Only ``t2m`` (the local ``ERA5Dataset``'s raw ``Tair`` name) is written,
+    since ``_get_river_surface_temp`` requests only ``Tair`` via an
+    overridden ``var_names``.
+    """
+    ds = xr.Dataset(
+        {"t2m": (["time", "latitude", "longitude"], tair_kelvin)},
+        coords={"time": times, "latitude": lats, "longitude": lons},
+    )
+    ds.to_netcdf(path)
+
+
+@pytest.fixture
+def synthetic_era5_tair_file(tmp_path):
+    """A small local ERA5-format Tair file spanning the Iceland domain.
+
+    Covers 1998-01-01 through 1998-01-10 (daily), with a temperature ramp
+    that dips below 0 degC early on and rises above it later, to exercise
+    both the smoothing and the 0 degC floor.
+    """
+    path = tmp_path / "synthetic_era5_tair.nc"
+    lats = np.arange(55.0, 72.0, 0.5, dtype=np.float32)
+    lons = np.arange(320.0, 357.0, 0.5, dtype=np.float32)
+    times = np.arange(np.datetime64("1998-01-01"), np.datetime64("1998-01-11")).astype(
+        "datetime64[ns]"
+    )
+
+    day_index = np.arange(len(times))
+    # degC ramp from -15 to +5, broadcast uniformly over the spatial grid.
+    temp_degc = -15.0 + 20.0 * (day_index / (len(times) - 1))
+    temp_kelvin = (temp_degc + 273.15).astype(np.float64)
+
+    tair_kelvin = np.broadcast_to(
+        temp_kelvin[:, None, None], (len(times), len(lats), len(lons))
+    ).copy()
+
+    _write_synthetic_era5_tair_file(path, lats, lons, times, tair_kelvin)
+    return path
+
+
+@pytest.fixture
+def synthetic_era5_tair_file_with_lon_gradient(tmp_path):
+    """A local ERA5-format Tair file whose value depends only on longitude.
+
+    Constant in time and latitude (``temp_degC = lon - 320.0``, i.e. 0 to
+    37 degC across the fixture's own longitude range) so that sampling at a
+    river's *averaged* mouth coordinate is distinguishable from sampling at
+    any one of its individual grid cells, without smoothing or time-ramp
+    effects muddying the comparison.
+    """
+    path = tmp_path / "synthetic_era5_tair_lon_gradient.nc"
+    lats = np.arange(55.0, 72.0, 0.5, dtype=np.float32)
+    lons = np.arange(320.0, 357.0, 0.5, dtype=np.float32)
+    times = np.arange(np.datetime64("1998-01-01"), np.datetime64("1998-01-11")).astype(
+        "datetime64[ns]"
+    )
+
+    temp_degc = lons - 320.0
+    temp_kelvin = (temp_degc + 273.15).astype(np.float64)
+
+    tair_kelvin = np.broadcast_to(
+        temp_kelvin[None, None, :], (len(times), len(lats), len(lons))
+    ).copy()
+
+    _write_synthetic_era5_tair_file(path, lats, lons, times, tair_kelvin)
+    return path
+
+
+@pytest.fixture
+def synthetic_glofas_single_station_file(tmp_path):
+    """A synthetic single-station GloFAS file spanning 1998-01-01 to 01-10."""
+    path = tmp_path / "glofas_single_station.nc"
+    times = np.arange(np.datetime64("1998-01-01"), np.datetime64("1998-01-11")).astype(
+        "datetime64[ns]"
+    )
+    lats = np.array([65.0], dtype=np.float32)
+    lons = np.array([-20.0], dtype=np.float32)
+    names = ["GloFAS_65.00N_20.00W"]
+    flow = np.full((len(times), 1), 300.0, dtype=np.float32)
+    vol = np.array([300.0], dtype=np.float32)
+    write_glofas_file(path, lats, lons, flow, names, times, vol=vol)
+    return path, names[0]
+
+
 def compare_dictionaries(dict1, dict2):
     assert dict1.keys() == dict2.keys()
 
@@ -200,6 +305,15 @@ class TestRiverForcingGeneral:
         assert "river_volume" in river_forcing.ds
         assert "river_tracer" in river_forcing.ds
         assert "river_time" in river_forcing.ds
+
+    @pytest.mark.parametrize("river_forcing_fixture", TRACER_FIXTURES)
+    def test_river_tracer_dimension_order(self, river_forcing_fixture, request):
+        river_forcing = request.getfixturevalue(river_forcing_fixture)
+        assert river_forcing.ds["river_tracer"].dims == (
+            "river_time",
+            "ntracers",
+            "nriver",
+        )
 
     @pytest.mark.parametrize("river_forcing_fixture", CLIMATOLOGY_FIXTURES)
     def test_climatology_attributes(self, river_forcing_fixture, request):
@@ -752,8 +866,9 @@ class TestRiverForcingWithOverlappingIndices:
         # Check no river's volume increased
         for name in ds["river_name"].values:
             river_idx = np.where(ds["river_name"].values == name)[0].item()
-            assert float(ds_out["river_volume"].isel(nriver=river_idx)) <= float(
-                ds["river_volume"].isel(nriver=river_idx)
+            assert (
+                ds_out["river_volume"].isel(nriver=river_idx).item()
+                <= ds["river_volume"].isel(nriver=river_idx).item()
             )
 
         # Check rivers that contribute to overlapping indices have strictly decreased volume
@@ -763,8 +878,9 @@ class TestRiverForcingWithOverlappingIndices:
                 idx in overlapping for idx in idx_list
             ):
                 river_idx = np.where(ds["river_name"].values == name)[0].item()
-                assert float(ds_out["river_volume"].isel(nriver=river_idx)) < float(
-                    ds["river_volume"].isel(nriver=river_idx)
+                assert (
+                    ds_out["river_volume"].isel(nriver=river_idx).item()
+                    < ds["river_volume"].isel(nriver=river_idx).item()
                 )
 
         # Check that total volume is preserved (within tolerance)
@@ -776,7 +892,7 @@ class TestRiverForcingWithOverlappingIndices:
 
         # Check that the synthetic river volume is positive and tracer is not NaN
         synthetic_idx = ds_out.sizes["nriver"] - 1
-        assert float(ds_out["river_volume"].isel(nriver=synthetic_idx)) > 0
+        assert ds_out["river_volume"].isel(nriver=synthetic_idx).item() > 0
         assert not np.isnan(ds_out["river_tracer"].isel(nriver=synthetic_idx).item())
 
     def test_volume_sort_after_overlap(self, mock_river_dataset_with_simple_overlap):
@@ -1073,3 +1189,469 @@ class TestRiverForcingGloFASClimatology:
         hash1 = calculate_file_hash(filepath1)
         hash2 = calculate_file_hash(filepath2)
         assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+
+class TestRiverTemperaturePureHelpers:
+    """Unit tests for the free-function helpers, using small synthetic data."""
+
+    def test_bounding_box_with_buffer(self):
+        lat = np.array([10.0, 12.0, 11.0])
+        lon = np.array([100.0, 105.0, 102.0])
+        bounds = _bounding_box_with_buffer(lat, lon, buffer_deg=2.0)
+        assert bounds == {
+            "latitude": (8.0, 14.0),
+            "longitude": (98.0, 107.0),
+        }
+
+    def test_bounding_box_default_buffer(self):
+        lat = np.array([0.0, 1.0])
+        lon = np.array([0.0, 1.0])
+        bounds = _bounding_box_with_buffer(lat, lon)
+        assert bounds["latitude"] == (-1.0, 2.0)
+        assert bounds["longitude"] == (-1.0, 2.0)
+
+    @pytest.mark.parametrize("straddle", [False, True])
+    def test_sample_tair_at_river_mouths_picks_nearest_cell(self, straddle):
+        # A 3x3 native grid in 0-360 convention; each cell has a distinct value
+        # so we can confirm exactly which cell was picked.
+        lat = np.array([10.0, 20.0, 30.0])
+        lon = np.array([350.0, 355.0, 0.0])  # wraps past 360 -> 0
+        time = np.array([np.datetime64("2020-01-01"), np.datetime64("2020-01-02")])
+        values = np.arange(2 * 3 * 3, dtype=np.float64).reshape(2, 3, 3)
+        tair = xr.DataArray(
+            values,
+            dims=("time", "latitude", "longitude"),
+            coords={"time": time, "latitude": lat, "longitude": lon},
+        )
+
+        # River sits right at lat=20, and near lon=0 (i.e. 360 in native
+        # convention). In non-straddle (0-360) space that's lon=360=0;
+        # in straddle (-180-180) space that's also lon=0.
+        river_lats = np.array([20.0])
+        river_lons = np.array([0.0])
+
+        result = _sample_tair_at_river_mouths(
+            tair, "latitude", "longitude", river_lons, river_lats, straddle
+        )
+        assert result.dims == ("time", "nriver")
+        # Nearest cell to (lat=20, lon=0/360) is grid index (row=1, col=2).
+        expected = values[:, 1, 2]
+        np.testing.assert_array_equal(result.values[:, 0], expected)
+
+    def test_smooth_and_floor_air_temp_floors_negative_values(self):
+        time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))
+        # Constant -5 degC everywhere: after smoothing it should still be
+        # exactly -5, then floored to 0.
+        values = np.full((len(time), 1), -5.0)
+        tair = xr.DataArray(values, dims=("time", "nriver"), coords={"time": time})
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=3)
+        assert (result.values >= 0.0).all()
+        np.testing.assert_allclose(result.values, 0.0)
+
+    def test_smooth_and_floor_air_temp_smooths_in_time(self):
+        time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))
+        # A single spike on day 5; a wide smoothing window should pull it
+        # most of the way down towards the surrounding baseline of 10.
+        values = np.full((len(time),), 10.0)
+        values[5] = 100.0
+        tair = xr.DataArray(values, dims=("time",), coords={"time": time})
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=10)
+        assert result.values[5] < 100.0
+        assert result.values[5] > 10.0
+
+    def test_smooth_and_floor_air_temp_window_wider_than_record_does_not_crash(self):
+        """Regression test: a smoothing window longer than the available time
+        series (e.g. the default 30-day window against a short forcing period)
+        used to make dask's rolling `map_overlap` raise an opaque
+        "overlapping depth ... larger than your array" error. The window
+        should be clamped to the record length instead.
+        """
+        time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))
+        values = np.full((len(time),), 5.0)
+        tair = xr.DataArray(values, dims=("time",), coords={"time": time}).chunk(
+            {"time": -1}
+        )
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=30)
+        np.testing.assert_allclose(result.compute().values, 5.0)
+
+    def test_smooth_and_floor_air_temp_single_timestep_does_not_crash(self):
+        """Regression test: with a single time step, `np.diff` on the time
+        coordinate is empty, so `np.median` of it is NaN -- `round(NaN)` used
+        to raise `ValueError: cannot convert float NaN to integer`. A single
+        step has nothing to smooth over, so this should just apply the floor.
+        """
+        time = np.array([np.datetime64("2020-01-01")])
+        tair = xr.DataArray([-3.0], dims=("time",), coords={"time": time})
+        result = _smooth_and_floor_air_temp(tair, "time", window_days=30)
+        np.testing.assert_allclose(result.values, [0.0])
+
+    def test_climatological_river_temp_reduces_to_day_of_year(self):
+        # Two years of data, identical seasonal cycle each year, so the
+        # multi-year day-of-year mean should reproduce that cycle exactly.
+        times = np.arange(np.datetime64("1998-01-01"), np.datetime64("2000-01-01"))
+        doy = (
+            (times - times.astype("datetime64[Y]")).astype("timedelta64[D]").astype(int)
+        )
+        values = np.sin(2 * np.pi * doy / 365.0)
+        tair = xr.DataArray(values, dims=("time",), coords={"time": times})
+
+        # Target: a single climatology day, Jan 1 on a placeholder year.
+        river_time_coord = xr.DataArray(
+            [np.datetime64("2000-01-01")], dims=("river_time",)
+        )
+        result = _climatological_river_temp(tair, "time", river_time_coord)
+        assert result.dims == ("time",)
+        # Jan 1 has doy=0 in both years -> sin(0) == 0.
+        np.testing.assert_allclose(result.values, 0.0, atol=1e-8)
+
+    def test_climatological_river_temp_wraps_around_year_end(self):
+        # Source spans a single non-leap year, so its dayofyear bins run
+        # 1..365 (period=365). Mark only dayofyear=1 (Jan 1) with a unique
+        # value; everything else (including dayofyear=365, Dec 31) is 0.
+        times = np.arange(np.datetime64("1999-01-01"), np.datetime64("2000-01-01"))
+        doy = times[0].astype("datetime64[D]")
+        is_jan_1 = times.astype("datetime64[D]") == doy
+        values = np.where(is_jan_1, 42.0, 0.0)
+        tair = xr.DataArray(values, dims=("time",), coords={"time": times})
+
+        # Target: Dec 31 of a *leap* placeholder year -> dayofyear=366. Raw
+        # distance to doy=1 is 365 (huge), but wrapped around a period-365
+        # cycle it's the *nearest* bin (distance 0) -- nearer than the
+        # unmarked doy=365 bin (wrapped distance 1). Confirms wraparound,
+        # not just naive nearest-by-raw-difference.
+        river_time_coord = xr.DataArray(
+            [np.datetime64("2000-12-31")], dims=("river_time",)
+        )
+        result = _climatological_river_temp(tair, "time", river_time_coord)
+        assert result.values[0] == pytest.approx(42.0)
+
+
+class TestCheckSurfaceForcingSourceCoverage:
+    """Unit tests for `RiverForcing._check_surface_forcing_source_coverage`."""
+
+    @staticmethod
+    def _make_dummy(start_time, end_time):
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.start_time = start_time
+        rf.end_time = end_time
+        return rf
+
+    def test_raises_when_source_does_not_cover_requested_range(self):
+        rf = self._make_dummy(datetime(2020, 1, 1), datetime(2020, 1, 10))
+        tair = xr.DataArray(
+            [1.0, 2.0],
+            dims=("time",),
+            coords={
+                "time": [
+                    np.datetime64("2020-01-01"),
+                    np.datetime64("2020-01-02"),
+                ]
+            },
+        )
+        with pytest.raises(ValueError, match="does not fully cover"):
+            rf._check_surface_forcing_source_coverage(tair)
+
+    def test_passes_when_source_covers_requested_range(self):
+        rf = self._make_dummy(datetime(2020, 1, 2), datetime(2020, 1, 9))
+        tair = xr.DataArray(
+            [1.0, 2.0],
+            dims=("time",),
+            coords={
+                "time": [
+                    np.datetime64("2020-01-01"),
+                    np.datetime64("2020-01-10"),
+                ]
+            },
+        )
+        # Should not raise.
+        rf._check_surface_forcing_source_coverage(tair)
+
+    def test_passes_within_tolerance_of_boundary(self):
+        rf = self._make_dummy(datetime(2020, 1, 1), datetime(2020, 1, 10))
+        just_inside_tolerance = AIR_TEMP_COVERAGE_TOLERANCE_DAYS * 24 - 1
+        tair = xr.DataArray(
+            [1.0, 2.0],
+            dims=("time",),
+            coords={
+                "time": [
+                    np.datetime64("2020-01-01")
+                    + np.timedelta64(int(just_inside_tolerance), "h"),
+                    np.datetime64("2020-01-10"),
+                ]
+            },
+        )
+        rf._check_surface_forcing_source_coverage(tair)
+
+
+class TestNormalizedSurfaceForcingSource:
+    """Unit tests for `RiverForcing._normalized_surface_forcing_source`."""
+
+    @staticmethod
+    def _make_dummy(surface_forcing_source):
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.surface_forcing_source = surface_forcing_source
+        return rf
+
+    def test_none_passes_through(self):
+        rf = self._make_dummy(None)
+        assert rf._normalized_surface_forcing_source() is None
+
+    def test_missing_name_raises(self):
+        rf = self._make_dummy({"path": "foo.nc"})
+        with pytest.raises(ValueError, match="must include a 'name'"):
+            rf._normalized_surface_forcing_source()
+
+    def test_wrong_name_raises(self):
+        rf = self._make_dummy({"name": "GLORYS"})
+        with pytest.raises(ValueError, match="must be 'ERA5'"):
+            rf._normalized_surface_forcing_source()
+
+    def test_stray_climatology_key_is_inert(self):
+        """`surface_forcing_source` has no climatology option: a caller-supplied
+        'climatology' key is neither rejected nor honored -- it passes through
+        `_normalized_surface_forcing_source` unchanged, but river temperature
+        always samples real ERA5 data regardless (see `_get_river_surface_temp`,
+        which hardcodes `climatology=False` and never reads this key).
+        """
+        rf = self._make_dummy({"name": "ERA5", "climatology": True})
+        normalized = rf._normalized_surface_forcing_source()
+        assert normalized["name"] == "ERA5"
+        assert normalized["climatology"] is True
+
+
+class TestResolveSurfaceForcingSource:
+    """Unit tests for `RiverForcing._resolve_surface_forcing_source`."""
+
+    @staticmethod
+    def _make_dummy(surface_forcing_source):
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.surface_forcing_source = surface_forcing_source
+        return rf
+
+    def test_local_path_is_not_arco(self):
+        rf = self._make_dummy({"name": "ERA5", "path": "/local/era5_data.nc"})
+        cell_lon = np.array([-30.0, 10.0])
+        dataset_cls, resolved_path, out_lon, raw_tair_name, is_arco = (
+            rf._resolve_surface_forcing_source(cell_lon)
+        )
+        assert dataset_cls is ERA5Dataset
+        assert resolved_path == "/local/era5_data.nc"
+        assert raw_tair_name == "t2m"
+        assert is_arco is False
+        # A local file's longitude convention isn't guessed at -- left as-is.
+        np.testing.assert_array_equal(out_lon, cell_lon)
+
+    def test_missing_path_defaults_to_arco_and_converts_longitude(self):
+        rf = self._make_dummy({"name": "ERA5"})
+        cell_lon = np.array([-30.0, 10.0])
+        dataset_cls, resolved_path, out_lon, raw_tair_name, is_arco = (
+            rf._resolve_surface_forcing_source(cell_lon)
+        )
+        assert dataset_cls is ERA5ARCODataset
+        assert resolved_path == DEFAULT_ERA5_ARCO_PATH
+        assert raw_tair_name == "2m_temperature"
+        assert is_arco is True
+        # ARCO's native convention is 0-360 -- negative longitudes wrap.
+        np.testing.assert_array_equal(out_lon, np.array([330.0, 10.0]))
+
+    def test_gs_path_is_arco_and_converts_longitude(self):
+        rf = self._make_dummy(
+            {"name": "ERA5", "path": "gs://some-bucket/some-object.zarr"}
+        )
+        cell_lon = np.array([-30.0, 10.0])
+        dataset_cls, resolved_path, out_lon, raw_tair_name, is_arco = (
+            rf._resolve_surface_forcing_source(cell_lon)
+        )
+        assert dataset_cls is ERA5ARCODataset
+        assert resolved_path == "gs://some-bucket/some-object.zarr"
+        assert raw_tair_name == "2m_temperature"
+        assert is_arco is True
+        np.testing.assert_array_equal(out_lon, np.array([330.0, 10.0]))
+
+    def test_wrong_name_raises(self):
+        rf = self._make_dummy({"name": "GLORYS"})
+        with pytest.raises(ValueError, match="must be 'ERA5'"):
+            rf._resolve_surface_forcing_source(np.array([0.0]))
+
+
+class TestRiverForcingTemperatureFromERA5:
+    """Integration tests for `RiverForcing(surface_forcing_source=...)`."""
+
+    def test_default_keeps_flat_tracer_default(self, iceland_test_grid):
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        expected = get_tracer_defaults()["temp"]
+        np.testing.assert_allclose(temp.values, expected)
+
+    def test_real_time_temperature_differs_from_default_and_is_floored(
+        self,
+        iceland_test_grid,
+        synthetic_glofas_single_station_file,
+        synthetic_era5_tair_file,
+    ):
+        glofas_path, _station_name = synthetic_glofas_single_station_file
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 1, 10),
+            source={"name": "GLOFAS", "path": glofas_path},
+            convert_to_climatology="never",
+            surface_forcing_source={"name": "ERA5", "path": synthetic_era5_tair_file},
+        )
+        assert not rf.climatology
+
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        default = get_tracer_defaults()["temp"]
+        assert not np.allclose(temp.values, default)
+        assert (temp.values >= 0.0).all()
+        # Ramp spans -15 to +5 degC; smoothed/floored result should stay
+        # within a physically sane band, not blow up.
+        assert (temp.values <= 10.0).all()
+
+    def test_multi_cell_river_uses_averaged_sample_point(
+        self,
+        iceland_test_grid,
+        synthetic_glofas_single_station_file,
+        synthetic_era5_tair_file_with_lon_gradient,
+    ):
+        """The multi-cell river's temperature must come from one sample at
+        the *mean* of its cells' coordinates, not e.g. an average of
+        per-cell samples or a single cell's own value.
+
+        `MULTI_CELL_COASTAL_INDICES`' real longitudes on `iceland_test_grid`
+        are 339.80, 340.70, 341.62 (mean 340.71). Against the lon-gradient
+        fixture's 0.5-degree grid (`temp_degC = lon - 320.0`), the nearest
+        grid longitude to each of those differs from the nearest grid
+        longitude to their mean:
+
+        - cell 1 (339.80) -> nearest grid lon 340.0 -> 20.0 degC
+        - cell 2 (340.70) -> nearest grid lon 340.5 -> 20.5 degC
+        - cell 3 (341.62) -> nearest grid lon 341.5 -> 21.5 degC
+        - naive average of the three per-cell samples -> 20.667 degC
+        - mean coordinate (340.71) -> nearest grid lon 340.5 -> 20.5 degC
+
+        Only the last of these matches the code's documented "one sample at
+        the averaged coordinate" behavior; the others would still pass a
+        weaker "is finite and non-negative" check.
+        """
+        glofas_path, station_name = synthetic_glofas_single_station_file
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 1, 10),
+            source={"name": "GLOFAS", "path": glofas_path},
+            convert_to_climatology="never",
+            indices={station_name: list(MULTI_CELL_COASTAL_INDICES)},
+            surface_forcing_source={
+                "name": "ERA5",
+                "path": synthetic_era5_tair_file_with_lon_gradient,
+            },
+        )
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        np.testing.assert_allclose(temp.values, 20.5, atol=1e-3)
+
+    def test_climatological_path_uses_downloaded_era5_file(self, iceland_test_grid):
+        fname = download_test_data("ERA5_regional_test_data.nc")
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            convert_to_climatology="always",
+            surface_forcing_source={"name": "ERA5", "path": fname},
+        )
+        assert rf.climatology
+        temp = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+        )
+        default = get_tracer_defaults()["temp"]
+        assert not np.allclose(temp.values, default)
+        assert (temp.values >= 0.0).all()
+
+    def test_insufficient_coverage_raises(
+        self, iceland_test_grid, synthetic_glofas_single_station_file
+    ):
+        glofas_path, _station_name = synthetic_glofas_single_station_file
+        fname = download_test_data("ERA5_regional_test_data.nc")
+        with pytest.raises(ValueError, match="does not fully cover"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 1, 10),
+                source={"name": "GLOFAS", "path": glofas_path},
+                convert_to_climatology="never",
+                surface_forcing_source={"name": "ERA5", "path": fname},
+            )
+
+    def test_yaml_roundtrip_with_surface_forcing_source(
+        self,
+        iceland_test_grid,
+        synthetic_glofas_single_station_file,
+        synthetic_era5_tair_file,
+        tmp_path,
+        caplog,
+    ):
+        glofas_path, _station_name = synthetic_glofas_single_station_file
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 1, 10),
+            source={"name": "GLOFAS", "path": glofas_path},
+            convert_to_climatology="never",
+            surface_forcing_source={"name": "ERA5", "path": synthetic_era5_tair_file},
+        )
+
+        filepath = tmp_path / "test_yaml_river_temp"
+        rf.to_yaml(filepath)
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            rf_from_file = RiverForcing.from_yaml(filepath)
+
+        assert "Use provided river indices." in caplog.text
+        assert rf == rf_from_file
+        # `RiverForcing`'s dataclass-generated `==` is a weaker check than it
+        # looks: `xr.Dataset.__bool__` returns `bool(self.data_vars)` (just
+        # "is it non-empty"), not an element-wise reduction, so `==` above
+        # would report equal even if `ds`'s actual contents diverged.
+        # `assert_equal` catches that (same pattern as `test_grid.py`'s
+        # `xr.testing.assert_equal(grid.ds, grid_from_file.ds)`).
+        xr.testing.assert_equal(rf.ds, rf_from_file.ds)
+        filepath.unlink()
+
+
+@pytest.mark.skip("Temporary skip until memory consumption issue is addressed. # TODO")
+@pytest.mark.stream
+@pytest.mark.use_dask
+@pytest.mark.use_gcsfs
+def test_river_temperature_from_real_arco_era5(iceland_test_grid):
+    """One integration test against the real cloud ARCO ERA5 archive.
+
+    Mirrors `test_default_era5_dataset_loading` in test_surface_forcing.py
+    (same markers, same temporary skip pending that memory investigation --
+    this path shares `resolve_era5_source`/`ERA5ARCODataset` with
+    `SurfaceForcing`, so it's expected to have the same characteristics).
+    """
+    rf = RiverForcing(
+        grid=iceland_test_grid,
+        start_time=datetime(1998, 1, 1),
+        end_time=datetime(1998, 3, 1),
+        convert_to_climatology="always",
+        surface_forcing_source={"name": "ERA5"},
+    )
+
+    temp = rf.ds["river_tracer"].isel(
+        ntracers=rf.ds.tracer_name.values.tolist().index("temp")
+    )
+    default = get_tracer_defaults()["temp"]
+    assert not np.allclose(temp.values, default)
+    assert (temp.values >= 0.0).all()

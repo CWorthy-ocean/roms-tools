@@ -1,0 +1,70 @@
+name: Finalize Release Notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to finalize (e.g. 4.1.0)"
+        required: true
+        type: string
+
+jobs:
+  finalize-release-notes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history needed so we can switch branches and push
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Checkout or create next_release_notes branch
+        run: |
+          if git ls-remote --exit-code --heads origin next_release_notes; then
+            git checkout -b next_release_notes origin/next_release_notes
+          else
+            git checkout -b next_release_notes
+          fi
+
+      - name: Run finalize release notes script
+        run: python ci/finalize_release_notes.py "${{ inputs.tag }}"
+
+      - name: Commit and push if there are changes
+        run: |
+          git add docs/releases.md
+          if git diff --staged --quiet; then
+            echo "No release note changes — nothing to commit."
+          else
+            git commit -m "Finalize release notes for ${{ inputs.tag }}"
+            git push origin next_release_notes
+          fi
+
+      - name: Open pull request to main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Note: PRs opened with the default GITHUB_TOKEN do not trigger
+          # other workflows (e.g. docs build, tests) on the PR itself.
+          if gh pr list --base main --head next_release_notes --state open --json number --jq '.[0]' | grep -q .; then
+            echo "PR from next_release_notes to main already open — skipping creation."
+          else
+            gh pr create \
+              --base main \
+              --head next_release_notes \
+              --title "Finalize release notes for ${{ inputs.tag }}" \
+              --body "Automated finalization of release notes for \`${{ inputs.tag }}\`."
+          fi

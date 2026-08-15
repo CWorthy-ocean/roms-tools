@@ -10,25 +10,27 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCSurfaceForcingDataset,
-    ERA5ARCODataset,
     ERA5Correction,
-    ERA5Dataset,
     LatLonDataset,
     MBLco2Dataset,
     SODARestoringSurfaceDataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
+    resolve_era5_source,
 )
 from roms_tools.plot import plot
 from roms_tools.processing_methods import (
     RegridConfig,
     _xesmf_available,
 )
-from roms_tools.regrid import LateralRegridToROMS
+from roms_tools.regrid import build_lateral_regridder, select_source_mask
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
+    apply_scipy_fallback_fill,
+    apply_source_prefill,
+    check_source_coverage,
     compute_missing_surface_bgc_variables,
     from_yaml,
     get_target_coords,
@@ -47,10 +49,6 @@ from roms_tools.utils import (
     rotate_velocities,
     save_datasets,
     transpose_dimensions,
-)
-
-DEFAULT_ERA5_ARCO_PATH = (
-    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
 
 # Number of forcing time steps per block when interpolating the radiation-correction
@@ -179,6 +177,14 @@ class SurfaceForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    start_time_pad: bool = True
+    """If True (default), include one dataset record before start_time so ROMS can
+    interpolate at the exact simulation start boundary. If False, select only records
+    at or after start_time."""
+    end_time_pad: bool = True
+    """If True (default), include one dataset record after end_time so ROMS can
+    interpolate at the exact simulation end boundary. If False, select only records
+    at or before end_time."""
     regrid_method: str = "auto"
     """Horizontal regrid engine: ``"auto"`` (xESMF if installed, else scipy),
     ``"xesmf"``, or ``"scipy"``."""
@@ -231,10 +237,7 @@ class SurfaceForcing:
             use_coarse_grid = self._determine_coarse_grid_usage(data)
         self.use_coarse_grid = use_coarse_grid
 
-        if self.type == "physics":
-            opt_file = "bulk_frc.opt"
-        elif self.type == "bgc":
-            opt_file = "bgc.opt"
+        if self.type == "bgc":
             if self.source["name"] == "MBL_co2":
                 cppdefs_flags = set()
                 cppdefs_flags.add("PCO2AIR_FORCING")
@@ -251,15 +254,20 @@ class SurfaceForcing:
                     cppdefs_flags.add("CFLX_CORR")
 
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
-        interp_flag = 1 if use_coarse_grid else 0
 
         if self.type in ["physics", "bgc"]:
+            if self.type == "physics":
+                nml_key, nml_group = "interp_bulk_frc", "SURF_FRC_SETTINGS"
+            else:
+                nml_key, nml_group = "interp_bgc_frc", "BGC_SETTINGS"
+            nml_value = ".true." if use_coarse_grid else ".false."
             logging.info(
-                "Data will be interpolated onto the %s. "
-                "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
+                "Data will be interpolated onto the %s. Remember to set "
+                "`%s = %s` in the `&%s` group of your ROMS `namelist.nml` file.",
                 grid_desc,
-                interp_flag,
-                opt_file,
+                nml_key,
+                nml_value,
+                nml_group,
             )
             if self.source["name"] == "MBL_co2":
                 logging.info(
@@ -294,22 +302,14 @@ class SurfaceForcing:
         # On the no-prefill xESMF path, destination extrapolation would silently fill
         # points outside the source coverage. Guard against a grid that outruns the
         # data (coastal gaps *within* coverage are still filled by the masked regrid).
-        if self._regrid.extrap_is_active:
-            self._check_source_coverage(data, target_coords)
-
         regrid = self._regrid
-        use_xesmf = regrid.use_xesmf
-        if regrid.prefill is not None:
-            # Whole-domain source fill; the subsequent regrid is plain bilinear.
-            data.apply_prefill(
-                str(regrid.prefill),
-                prefill_kwargs=self.prefill_kwargs,
-                prefill_was_user_set=True,
-            )
-        elif not use_xesmf:
-            # xESMF unavailable + no prefill: nearest-neighbor pre-fill the source so
-            # the subsequent scipy interpolation cannot propagate NaNs.
-            data.apply_nearest_neighbor_fill()
+        if regrid.extrap_is_active:
+            check_source_coverage(data, target_coords, self.source["name"])
+
+        # Whole-domain source prefill when requested, else a nearest-neighbor
+        # pre-fill on the scipy path so interpolation cannot propagate NaNs.
+        apply_source_prefill(data, regrid, self.prefill_kwargs)
+        apply_scipy_fallback_fill(data, regrid)
 
         self._set_variable_info(data)
         var_names = {
@@ -322,21 +322,13 @@ class SurfaceForcing:
         # On the default (no-prefill) xESMF path, use the source "mask" for masked
         # bilinear regridding; a set prefill / the scipy path leaves the source
         # already NaN-free, so no mask is needed (plain bilinear / scipy interp).
-        source_mask = (
-            data.ds["mask"]
-            if use_xesmf and regrid.prefill is None and "mask" in data.ds.data_vars
-            else None
+        source_mask = select_source_mask(
+            data.ds, is_vector=False, use_xesmf=regrid.use_xesmf, prefill=regrid.prefill
         )
         processed_fields = {}
         # lateral regridding
-        lateral_regrid = LateralRegridToROMS(
-            target_coords,
-            data.dim_names,
-            source_ds=data.ds,
-            use_xesmf=use_xesmf,
-            source_mask=source_mask,
-            extrap_method=regrid.regrid_extrap_method,
-            extrap_kwargs=regrid.regrid_extrap_kwargs,
+        lateral_regrid = build_lateral_regridder(
+            target_coords, data, regrid, source_mask
         )
         for var_name in var_names:
             processed_fields[var_name] = lateral_regrid.apply(
@@ -393,47 +385,6 @@ class SurfaceForcing:
 
         self.ds = ds
 
-    def _check_source_coverage(self, data, target_coords) -> None:
-        """Raise if the ROMS grid extends beyond the source data's coverage.
-
-        Used only on the default no-prefill xESMF path, where destination
-        extrapolation would otherwise silently fill points that lie outside the
-        source coverage. (On the scipy / prefill path such points become NaN and are
-        caught by the standard NaN validation instead.) Coastal gaps *within* the
-        source coverage are still filled by the masked regrid + extrapolation; this
-        only guards against a grid that outruns the source data.
-        """
-        lat = data.ds[data.dim_names["latitude"]]
-        lon = data.ds[data.dim_names["longitude"]]
-        extents = {
-            "latitude": (
-                float(target_coords["lat"].min()),
-                float(target_coords["lat"].max()),
-                float(lat.min()),
-                float(lat.max()),
-            ),
-            "longitude": (
-                float(target_coords["lon"].min()),
-                float(target_coords["lon"].max()),
-                float(lon.min()),
-                float(lon.max()),
-            ),
-        }
-        tol = 1e-6
-        outside = [
-            name
-            for name, (tmin, tmax, smin, smax) in extents.items()
-            if tmin < smin - tol or tmax > smax + tol
-        ]
-        if outside:
-            raise ValueError(
-                f"The ROMS grid (including the interpolation margin) extends beyond "
-                f"the {self.source['name']} source data coverage in "
-                f"{', '.join(outside)}. The default masked-bilinear regrid would "
-                f"extrapolate these points. Provide source data that covers the full "
-                f"domain plus a margin."
-            )
-
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is
         if (self.start_time is None) != (self.end_time is None):
@@ -456,10 +407,9 @@ class SurfaceForcing:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
             if self.source["name"] == "ERA5":
-                logging.info(
-                    "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
-                )
-                self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+                # ERA5's default path (the ARCO cloud archive) is applied
+                # later, by `resolve_era5_source` in `_get_data`.
+                self.source["path"] = None
             elif self.source["name"] == "MBL_co2":
                 logging.info(
                     "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
@@ -570,6 +520,8 @@ class SurfaceForcing:
             "use_dask": self.use_dask,
             "chunks": self.chunks,
             "initial_slice_bounds": self.initial_slice_bounds,
+            "start_time_pad": self.start_time_pad,
+            "end_time_pad": self.end_time_pad,
         }
 
         if self.type == "physics":
@@ -577,16 +529,24 @@ class SurfaceForcing:
                 # Add 1 hr since radiation time will shift by 1 hr
                 if data_dict["end_time"] is not None:
                     data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
-                if str(self.source["path"]).startswith("gs://") or str(
+                resolved_path, is_arco, dataset_cls = resolve_era5_source(
                     self.source["path"]
-                ).startswith("gcs://"):
-                    if not self.use_dask:
-                        raise ValueError(
-                            "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
-                        )
-                    data = ERA5ARCODataset(**data_dict)
-                else:
-                    data = ERA5Dataset(**data_dict)
+                )
+                if not self.source["path"]:
+                    # Only rewrite when defaulting -- an explicitly provided
+                    # path (str or Path) is left exactly as given, so
+                    # `self.source` round-trips (e.g. through `to_yaml`)
+                    # without silently changing its type.
+                    logging.info(
+                        "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
+                    )
+                    self.source["path"] = resolved_path
+                    data_dict["filename"] = resolved_path
+                if is_arco and not self.use_dask:
+                    raise ValueError(
+                        "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
+                    )
+                data = dataset_cls(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -756,35 +716,21 @@ class SurfaceForcing:
         # Use the same regrid engine / source-fill choice as the main data so the
         # correction climatology is treated consistently.
         regrid = self._regrid
-        use_xesmf = regrid.use_xesmf
-        if regrid.prefill is not None:
-            correction_data.apply_prefill(
-                str(regrid.prefill),
-                prefill_kwargs=self.prefill_kwargs,
-                prefill_was_user_set=True,
-            )
-        elif not use_xesmf:
-            correction_data.apply_nearest_neighbor_fill()
+        apply_source_prefill(correction_data, regrid, self.prefill_kwargs)
+        apply_scipy_fallback_fill(correction_data, regrid)
 
-        source_mask = (
-            correction_data.ds["mask"]
-            if use_xesmf
-            and regrid.prefill is None
-            and "mask" in correction_data.ds.data_vars
-            else None
+        source_mask = select_source_mask(
+            correction_data.ds,
+            is_vector=False,
+            use_xesmf=regrid.use_xesmf,
+            prefill=regrid.prefill,
         )
 
         # Spatial regrid first: only 12 interpolations per variable regardless of
         # the length of the forcing time series. lateral_regrid.apply() forces eager
         # compute on the 12-step climatology, which is acceptable (~MB of data).
-        lateral_regrid = LateralRegridToROMS(
-            self.target_coords,
-            correction_data.dim_names,
-            source_ds=correction_data.ds,
-            use_xesmf=use_xesmf,
-            source_mask=source_mask,
-            extrap_method=regrid.regrid_extrap_method,
-            extrap_kwargs=regrid.regrid_extrap_kwargs,
+        lateral_regrid = build_lateral_regridder(
+            self.target_coords, correction_data, regrid, source_mask
         )
         time_dim = correction_data.dim_names["time"]
 

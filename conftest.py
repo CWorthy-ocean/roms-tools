@@ -1,10 +1,12 @@
 import enum
 import hashlib
+import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import h5py
+import matplotlib
 import pytest
 
 from roms_tools import (
@@ -27,6 +29,18 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.setup.nesting import align_grids, make_nesting_info
 from roms_tools.tests.river_test_utils import write_glofas_file
+
+# Guarantee a non-interactive matplotlib backend for the test suite unless the
+# caller has explicitly requested one (e.g. via the MPLBACKEND env var). This
+# must run before any test module does `import matplotlib.pyplot`, which is
+# why it lives at the top of the root conftest (loaded before test collection).
+# Without this, matplotlib's default backend selection can pick a GUI backend
+# (e.g. TkAgg) whose runtime is broken on some CI runners even though the
+# Python bindings import cleanly (e.g. Windows runners missing init.tcl),
+# causing plotting tests to crash with _tkinter.TclError instead of a clean,
+# deterministic Agg render.
+if not os.environ.get("MPLBACKEND"):
+    matplotlib.use("Agg")
 
 
 class SkippableOptions(enum.StrEnum):
@@ -352,6 +366,8 @@ def tidal_forcing(use_dask: bool) -> TidalForcing:
         grid=grid,
         source={"name": "TPXO", "path": fname_dict},  # type: ignore[dict-item]
         ntides=1,
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -379,6 +395,8 @@ def initial_conditions(use_dask: bool) -> InitialConditions:
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -392,6 +410,8 @@ def initial_conditions_on_large_grid(large_grid, use_dask):
         grid=large_grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -421,6 +441,8 @@ def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -454,6 +476,8 @@ def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialCondi
             "name": "CESM_REGRIDDED",
             "climatology": True,  # type: ignore[dict-item]
         },
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -477,13 +501,15 @@ def initial_conditions_with_unified_bgc_from_climatology(
     )
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return InitialConditions(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -513,7 +539,7 @@ def initial_conditions_with_unified_bgc_density(
     )
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return InitialConditions(
         grid=grid,
@@ -521,6 +547,8 @@ def initial_conditions_with_unified_bgc_density(
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         bgc_interpolation_method="density",
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -651,7 +679,7 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
         hc=250.0,  # critical depth
     )
 
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return BoundaryForcing(
         grid=grid,
@@ -690,7 +718,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
         hc=250.0,
     )
     fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     physics_bc = BoundaryForcing(
         grid=grid,
@@ -959,7 +987,7 @@ def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForci
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 1)
 
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -1022,7 +1050,7 @@ def restoring_surface_forcing_from_unified_climatology(
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 1)
 
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -1314,7 +1342,7 @@ def cesm_surface_bgc_data(use_dask: bool) -> CESMBGCSurfaceForcingDataset:
 
 @pytest.fixture(scope="session")
 def unified_bgc_data(use_dask: bool) -> UnifiedBGCDataset:
-    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")
 
     data = UnifiedBGCDataset(
         filename=fname,
@@ -1330,7 +1358,7 @@ def unified_bgc_data(use_dask: bool) -> UnifiedBGCDataset:
 
 @pytest.fixture(scope="session")
 def unified_surface_bgc_data(use_dask: bool) -> UnifiedBGCSurfaceDataset:
-    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")
 
     data = UnifiedBGCSurfaceDataset(
         filename=fname,

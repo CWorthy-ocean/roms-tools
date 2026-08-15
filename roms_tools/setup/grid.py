@@ -718,8 +718,15 @@ class Grid:
                 "theta_s, theta_b, hc, and N."
             )
 
-        # Load the dataset from the file
-        ds = xr.open_dataset(filename)
+        # Load the dataset from the file. Grid files are small, so eagerly load
+        # the data and close the underlying file handle immediately, rather than
+        # keeping it open via lazy loading. On Windows, an open file handle
+        # prevents the file from later being overwritten or deleted (e.g. by a
+        # subsequent grid.save() to the same path, or pytest tmp dir cleanup),
+        # raising PermissionError; POSIX systems allow this, which masks the
+        # leak there.
+        with xr.open_dataset(filename) as f:
+            ds = f.load()
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
             ds = add_velocity_masks(ds)

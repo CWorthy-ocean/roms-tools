@@ -64,6 +64,92 @@ BGC_DATASET_NAMES: frozenset[str] = frozenset(
 )
 
 
+def apply_source_prefill(data, regrid_config, prefill_kwargs) -> None:
+    """Apply a whole-domain source prefill when the config requests one.
+
+    No-op when ``regrid_config.prefill is None`` (the default NaN-aware path).
+    Only valid for lat/lon source datasets, which implement ``apply_prefill``.
+
+    Parameters
+    ----------
+    data : LatLonDataset
+        The source dataset object (must implement ``apply_prefill``).
+    regrid_config : RegridConfig
+        The resolved regrid configuration.
+    prefill_kwargs : dict or None
+        Method-specific options forwarded to ``apply_prefill``.
+    """
+    if regrid_config.prefill is not None:
+        data.apply_prefill(
+            str(regrid_config.prefill),
+            prefill_kwargs=prefill_kwargs,
+            prefill_was_user_set=True,
+        )
+
+
+def apply_scipy_fallback_fill(data, regrid_config) -> None:
+    """Nearest-neighbor pre-fill the source on the scipy, no-prefill path.
+
+    When xESMF is unavailable and no explicit prefill was requested, the source
+    is nearest-neighbor filled so the subsequent scipy interpolation cannot
+    propagate NaNs. No-op on the xESMF path or when a prefill is set. Only valid
+    for lat/lon source datasets, which implement ``apply_nearest_neighbor_fill``.
+    """
+    if regrid_config.prefill is None and not regrid_config.use_xesmf:
+        data.apply_nearest_neighbor_fill()
+
+
+def check_source_coverage(data, target_coords, source_name) -> None:
+    """Raise if the ROMS grid extends beyond the source data's coverage.
+
+    Used only on the default no-prefill xESMF path, where destination
+    extrapolation would otherwise silently fill points that lie outside the
+    source coverage. (On the scipy / prefill path such points become NaN and are
+    caught by the standard NaN validation instead.) Coastal gaps *within* the
+    source coverage are still filled by the masked regrid + extrapolation; this
+    only guards against a grid that outruns the source data.
+
+    Parameters
+    ----------
+    data : LatLonDataset
+        The source dataset object; ``data.ds`` and ``data.dim_names`` are used.
+    target_coords : dict
+        Target-grid ``{"lat": ..., "lon": ...}`` DataArrays.
+    source_name : str
+        Name of the source (for the error message), e.g. ``"GLORYS"``.
+    """
+    lat = data.ds[data.dim_names["latitude"]]
+    lon = data.ds[data.dim_names["longitude"]]
+    extents = {
+        "latitude": (
+            float(target_coords["lat"].min()),
+            float(target_coords["lat"].max()),
+            float(lat.min()),
+            float(lat.max()),
+        ),
+        "longitude": (
+            float(target_coords["lon"].min()),
+            float(target_coords["lon"].max()),
+            float(lon.min()),
+            float(lon.max()),
+        ),
+    }
+    tol = 1e-6
+    outside = [
+        name
+        for name, (tmin, tmax, smin, smax) in extents.items()
+        if tmin < smin - tol or tmax > smax + tol
+    ]
+    if outside:
+        raise ValueError(
+            f"The ROMS grid (including the interpolation margin) extends beyond "
+            f"the {source_name} source data coverage in "
+            f"{', '.join(outside)}. The default masked-bilinear regrid would "
+            f"extrapolate these points. Provide source data that covers the full "
+            f"domain plus a margin."
+        )
+
+
 def log_the_separator() -> None:
     """Log a separator line using HEADER_CHAR repeated HEADER_SZ times."""
     logging.info(HEADER_CHAR * HEADER_SZ)
@@ -197,6 +283,26 @@ def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
     return field.fillna(fill_value)
 
 
+def climatology_mid_month_days() -> np.ndarray:
+    """Return the day-of-year of the center of each month of a monthly climatology.
+
+    A monthly climatology carries no calendar dates of its own, so ROMS-Tools places
+    each of the twelve records at the center of its month. These are the day-of-year
+    values used for that placement, and they are the single convention shared by all
+    monthly climatologies (e.g. CESM, and the unified BGC dataset from v2.1 on, which
+    stores ``month`` as an integer index rather than a day-of-year).
+
+    Returns
+    -------
+    numpy.ndarray
+        Twelve day-of-year values, one per month, in ascending order.
+    """
+    # Cumulative days at mid-month, i.e. half of January followed by the remaining
+    # month-to-month strides.
+    increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
+    return np.cumsum(increments)
+
+
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     """Assigns climatology dates to the dataset's time dimension.
 
@@ -216,9 +322,7 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     xr.Dataset
         The updated xarray Dataset with climatological dates assigned to the specified time dimension.
     """
-    # Define the days in each month and convert to timedelta
-    increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
-    days = np.cumsum(increments)
+    days = climatology_mid_month_days()
     timedelta_ns = np.array(days, dtype="timedelta64[D]").astype("timedelta64[ns]")
     time = xr.DataArray(timedelta_ns, dims=[time_dim])
     ds = ds.assign_coords({"time": time})
@@ -633,10 +737,10 @@ def get_variable_metadata():
             "flux_units": "mmol/s",
             "integrated_units": "mmol",
         },
-        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "µmol mol⁻¹"},
+        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "umol mol-1"},
         "xco2_air_alt": {
             "long_name": "CO2, Marine Boundary Layer; alternative CO2",
-            "units": "µmol mol⁻¹",
+            "units": "umol mol-1",
         },
         "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
         "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},
@@ -811,7 +915,7 @@ def compute_mld(
     grid = xgcm.Grid(
         sigma0.to_dataset(name="sigma0"),
         coords={depth_dim: {"center": depth_dim}},
-        periodic=False,
+        padding="fill",
         autoparse_metadata=False,
     )
     with warnings.catch_warnings():
@@ -1701,17 +1805,26 @@ def query_kdtree_nearest(
     distances_km = 2 * 6371.0 * np.arcsin(np.clip(distances / 2, 0, 1))
     eta_out = cand_eta[nearest_idx]
     xi_out = cand_xi[nearest_idx]
+
+    warn_count = 0
     for i in range(len(distances_km)):
         if distances_km[i] > warn_dist_km:
             label = labels[i] if labels is not None else f"point {i}"
-            logging.warning(
-                "River '%s' is %.1f km from nearest coastal cell (%d, %d). "
-                "Check river mouth location.",
-                label,
-                distances_km[i],
-                int(eta_out[i]),
-                int(xi_out[i]),
-            )
+            if warn_count < 20:
+                logging.warning(
+                    "River '%s' is %.1f km from nearest coastal cell (%d, %d). "
+                    "Check river mouth location.",
+                    label,
+                    distances_km[i],
+                    int(eta_out[i]),
+                    int(xi_out[i]),
+                )
+            elif warn_count == 20:
+                logging.warning(
+                    "Further distance warnings suppressed (>20 rivers exceed %.1f km threshold).",
+                    warn_dist_km,
+                )
+            warn_count += 1
     return eta_out, xi_out, distances_km
 
 

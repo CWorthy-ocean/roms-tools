@@ -361,7 +361,7 @@ def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_da
         (
             {
                 "name": "UNIFIED",
-                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "path": "coarsened_UNIFIED_bgc_dataset_v2_1.nc",
                 "climatology": True,
             },
             "bgc",
@@ -375,7 +375,7 @@ def test_physics_prefill_and_regrid_options(grid_that_straddles_dateline, use_da
         (
             {
                 "name": "UNIFIED",
-                "path": "coarsened_UNIFIED_bgc_dataset.nc",
+                "path": "coarsened_UNIFIED_bgc_dataset_v2_1.nc",
                 "climatology": True,
             },
             "restoring",
@@ -510,9 +510,15 @@ def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, cap
             None,
             True,
         ),
-        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", None, True),
+        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset_v2_1.nc", "bgc", None, True),
         ("WOA", "WOA_2018_quarterDeg_coarsened.nc", "restoring", ["sss"], True),
-        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", ["sss"], True),
+        (
+            "UNIFIED",
+            "coarsened_UNIFIED_bgc_dataset_v2_1.nc",
+            "restoring",
+            ["sss"],
+            True,
+        ),
         (
             "SODA",
             "coarsened_OceanSODA_dataset.nc",
@@ -642,7 +648,7 @@ def test_time_attr_climatology_restoring(surface_forcing_fixture, request):
             "bgc_surface_forcing_from_unified_climatology",
             "UNIFIED",
             True,
-            Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
+            Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")),
         ),
         (
             "bgc_surface_forcing_from_mbl_co2",
@@ -702,7 +708,7 @@ def test_surface_forcing_creation(
             "restoring_surface_forcing_from_unified_climatology",
             "UNIFIED",
             True,
-            Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
+            Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc")),
         ),
         (
             "restoring_surface_forcing_from_soda",
@@ -1300,3 +1306,30 @@ def test_default_era5_dataset_loading(small_grid: Grid) -> None:
 
     expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
     assert set(sf.ds.data_vars).issuperset(expected_vars)
+
+
+def test_era5_default_path_requires_dask(small_grid: Grid, caplog) -> None:
+    """Omitting a path for ERA5 defaults to the ARCO cloud path (resolved via
+    `resolve_era5_source` in `_get_data`) and requires `use_dask=True`.
+
+    Regression test for the dedup of `SurfaceForcing`'s ERA5 default-path
+    logic into the shared `resolve_era5_source` helper: this doesn't touch
+    the network, since the `use_dask` check fires before any streaming.
+    """
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(
+            ValueError, match="Cloud-based ERA5 access requires `use_dask=True`"
+        ):
+            SurfaceForcing(
+                grid=small_grid,
+                source={"name": "ERA5"},
+                type="physics",
+                start_time=start_time,
+                end_time=end_time,
+                use_dask=False,
+            )
+
+    assert "defaulting to ARCO ERA5 dataset on Google Cloud" in caplog.text

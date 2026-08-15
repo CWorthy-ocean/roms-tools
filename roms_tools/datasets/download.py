@@ -1,4 +1,60 @@
+import logging
+import time
+
 import pooch
+
+#: Number of times a download is attempted before the error is raised.
+MAX_DOWNLOAD_ATTEMPTS = 3
+
+#: Seconds to wait before the first retry; doubled for each further attempt.
+RETRY_BACKOFF_SECONDS = 2.0
+
+
+def _fetch(manager: pooch.Pooch, filename: str) -> str:
+    """Fetch a registered file, retrying transient network failures.
+
+    Pooch has no retry logic of its own, so a single dropped connection or a
+    read timeout (30 s by default) against the data repository aborts the whole
+    call. Retries use exponential backoff. Files already in the local cache are
+    never re-downloaded, so a retry only refetches what actually failed.
+
+    The caught type is ``OSError``, which covers every network failure raised
+    here (``requests.exceptions.RequestException`` subclasses it) without
+    importing ``requests``. Local I/O errors are therefore retried too, which
+    only delays an unavoidable failure. A checksum mismatch raises
+    ``ValueError`` and is deliberately not retried, so a bad registry entry
+    fails immediately.
+
+    Parameters
+    ----------
+    manager : pooch.Pooch
+        The Pooch instance the file is registered with.
+    filename : str
+        The name of the file to fetch.
+
+    Returns
+    -------
+    str
+        The path to the file in the local cache.
+    """
+    for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS):
+        try:
+            return manager.fetch(filename)
+        except OSError as error:
+            delay = RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1)
+            logging.warning(
+                "Download of %s failed (attempt %d of %d): %s. Retrying in %.1f s.",
+                filename,
+                attempt,
+                MAX_DOWNLOAD_ATTEMPTS,
+                error,
+                delay,
+            )
+            time.sleep(delay)
+
+    # Final attempt: let the error propagate if this one fails too.
+    return manager.fetch(filename)
+
 
 # Create a Pooch object to manage the global topography data
 topo_data = pooch.create(
@@ -80,7 +136,10 @@ pup_test_data = pooch.create(
         "CESM_BGC_SURFACE_2012.nc": "3c4d156adca97909d0fac36bf50b99583ab37d8020d7a3e8511e92abf2331b38",
         "CESM_surface_global_test_data_climatology.nc": "a072757110c6f7b716a98f867688ef4195a5966741d2f368201ac24617254e35",
         "CESM_surface_global_test_data.nc": "874106ffbc8b1b220db09df1551bbb89d22439d795b4d1e5a24ee775e9a7bf6e",
+        # Pre-v2.1 layout ('lat'/'lon'/'dep' dimensions, day-of-year 'month'); kept
+        # registered so the legacy path stays covered by the tests.
         "coarsened_UNIFIED_bgc_dataset.nc": "sha256:269d5bcd8e6e64d3400362ae0a65afe049810ce06c536ccf31cca7c00f321bc1",
+        "coarsened_UNIFIED_bgc_dataset_v2_1.nc": "sha256:732af496416cbfe181a87d056012363d5456dd268023de53646cd9ebf54cf712",
         "WOA_2018_quarterDeg_coarsened.nc": "sha256:673ce3c3a98bb386ccd899dbc23eeedf7d9a665b68ea52c96fd69829a4b929a7",
         "mbl_co2_bgc_dataset.nc": "sha256:797a9ef48f3c83a6920e44c0b441feb00fb35553db09dea9ed4ff36dcd68d968",
         "coarsened_OceanSODA_dataset.nc": "sha256:b4a284303c9c1a8904a6ea3fa338ff05ac042c0b024fb4e1ad4bbb1d9fedff38",
@@ -123,7 +182,7 @@ def download_topo(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = topo_data.fetch(filename)
+    fname = _fetch(topo_data, filename)
 
     return fname
 
@@ -144,7 +203,7 @@ def download_river_data(filename: str) -> str:
         The path to the downloaded file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = river_data.fetch(filename)
+    fname = _fetch(river_data, filename)
 
     return fname
 
@@ -164,7 +223,7 @@ def download_river_tracer_defaults(filename: str = "river_tracer_defaults.nc") -
     str
         The path to the downloaded file.
     """
-    fname = river_data.fetch(filename)
+    fname = _fetch(river_data, filename)
 
     return fname
 
@@ -184,7 +243,7 @@ def download_correction_data(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = correction_data.fetch(filename)
+    fname = _fetch(correction_data, filename)
 
     return fname
 
@@ -204,7 +263,7 @@ def download_sal_data(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = sal_data.fetch(filename)
+    fname = _fetch(sal_data, filename)
 
     return fname
 
@@ -241,6 +300,6 @@ def download_test_data(filename: str) -> str:
         The path to the downloaded test data file.
     """
     # Fetch the file using Pooch, downloading if necessary
-    fname = pup_test_data.fetch(filename)
+    fname = _fetch(pup_test_data, filename)
 
     return fname

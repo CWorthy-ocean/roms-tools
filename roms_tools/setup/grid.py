@@ -227,7 +227,7 @@ class Grid:
                 "`topography_source` must include a 'name' key specifying the data source."
             )
 
-        if self.topography_source["name"] != "ETOPO5":
+        if self.topography_source["name"] not in ["ETOPO5", "ETOPO2022"]:
             if "path" not in self.topography_source:
                 raise ValueError(
                     "`topography_source` must include a 'path' key when the 'name' is not 'ETOPO5'."
@@ -1077,10 +1077,33 @@ class Grid:
 
             ds = self._create_grid_ds(coords)
 
+            ds = self._add_grid_bounds(ds)
+
             ds = self._add_global_metadata(ds)
 
             self.ds = ds
 
+    def _add_grid_bounds(self,ds: xr.Dataset) -> xr.Dataset:
+        """Add geographic bounds of the grid to dataset attributes."""
+
+        lon_min = ds["lon_rho"].min().item()
+        lon_max = ds["lon_rho"].max().item()
+        lat_min = ds["lat_rho"].min().item()
+        lat_max = ds["lat_rho"].max().item()
+
+        # Handle grids crossing the 0/360-degree meridian.
+        if lon_max - lon_min > 180:
+            lon = np.where(lon > 180, lon - 360, lon)
+
+            lon_min = float(np.nanmin(lon))
+            lon_max = float(np.nanmax(lon))
+
+        ds.attrs["lon_min"] = lon_min
+        ds.attrs["lon_max"] = lon_max
+        ds.attrs["lat_min"] = lat_min
+        ds.attrs["lat_max"] = lat_max
+
+        return ds
     def _add_global_metadata(self, ds):
         """Add global metadata and attributes to the dataset.
 

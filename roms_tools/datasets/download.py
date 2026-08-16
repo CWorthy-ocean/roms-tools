@@ -1,4 +1,18 @@
 import pooch
+from pathlib import Path
+import numpy as np
+import xarray as xr
+
+ETOPO2022_BASE_URL = (
+    "https://www.ngdc.noaa.gov/thredds/fileServer/global/ETOPO2022/15s/"
+    "15s_surface_elev_netcdf"
+)
+
+# Each ETOPO2022 tile covers 15 x 15 degrees.
+ETOPO2022_TILE_SIZE = 15
+
+# Store downloaded tiles and mosaics in the ROMS-Tools cache.
+ETOPO2022_CACHE_DIR = Path(pooch.os_cache("roms-tools")) / "etopo2022"
 
 # Create a Pooch object to manage the global topography data
 topo_data = pooch.create(
@@ -106,6 +120,189 @@ RIVR2O_TEST_DATA_FILES = (
     "rivr2o_riverinputs_2001.nc",
     "rivr2o_riverinputs_2002.nc",
 )
+
+
+
+def _format_etopo2022_lat(north_edge: int) -> str:
+    """Convert a latitude tile edge to the ETOPO2022 filename format."""
+    hemisphere = "N" if north_edge >= 0 else "S"
+    return f"{hemisphere}{abs(north_edge):02d}"
+
+
+def _format_etopo2022_lon(west_edge: int) -> str:
+    """Convert a longitude tile edge to the ETOPO2022 filename format."""
+    # Convert arbitrary longitude to [-180, 180).
+    wrapped = int(((west_edge + 180) % 360) - 180)
+
+    hemisphere = "E" if wrapped >= 0 else "W"
+
+    return f"{hemisphere}{abs(wrapped):03d}"
+
+
+def _get_etopo2022_tile_names(extent: tuple[float, float, float, float]) -> list[str]:
+    """Determine which ETOPO2022 tiles intersect an extent.
+
+    Parameters
+    ----------
+    extent : tuple Geographic bounds in the order``(lon_min, lon_max, lat_min, lat_max)``.
+
+    Returns
+    -------
+    list of str
+        ETOPO2022 tile filenames required to cover the extent.
+    """
+    lon_min, lon_max, lat_min, lat_max = extent
+
+    # ---------------------------------------------------------
+    # Longitude
+    #
+    # Example:
+    #
+    # extent = 117E ... 123E
+    #
+    # required tiles:
+    #     E105 -> 105 ... 120
+    #     E120 -> 120 ... 135
+    # ---------------------------------------------------------
+    lon_start = (np.floor(lon_min / ETOPO2022_TILE_SIZE)* ETOPO2022_TILE_SIZE)
+
+    lon_stop = (np.floor(lon_max / ETOPO2022_TILE_SIZE)* ETOPO2022_TILE_SIZE)
+
+    west_edges = range(int(lon_start),int(lon_stop) + ETOPO2022_TILE_SIZE,ETOPO2022_TILE_SIZE,)
+
+    # ---------------------------------------------------------
+    # Latitude
+    #
+    # ETOPO filenames use the NORTH edge of each tile.
+    #
+    # For example:
+    #
+    # N45 covers approximately:
+    #     30N ... 45N
+    # ---------------------------------------------------------
+    north_edges = [north_edge for north_edge in range(-75,91,ETOPO2022_TILE_SIZE,)
+                    if (lat_min < north_edge and lat_max > north_edge - ETOPO2022_TILE_SIZE)]
+
+    filenames = []
+
+    for north_edge in north_edges:
+        lat_tag =f"{'N' if north_edge >= 0 else 'S'}{abs(north_edge):02d}"
+
+        for west_edge in west_edges:
+            lon_tag = f"{'E' if (wrapped := int(((west_edge + 180) % 360) - 180)) >= 0 else 'W'}{abs(wrapped):03d}"
+          
+            filenames.append(
+                f"ETOPO_2022_v1_15s_"
+                f"{lat_tag}{lon_tag}_surface.nc"
+            )
+
+    if not filenames:
+        raise ValueError(
+            f"No ETOPO2022 tiles found for extent {extent}."
+        )
+
+    return filenames
+
+
+def _download_etopo2022_tile(filename: str) -> Path:
+    """Download one ETOPO2022 tile.
+
+    Existing cached files are reused automatically.
+
+    Parameters
+    ----------
+    filename : str
+        ETOPO2022 tile filename.
+
+    Returns
+    -------
+    Path
+        Local path of the downloaded tile.
+    """
+    ETOPO2022_CACHE_DIR.mkdir(parents=True,exist_ok=True,)
+
+    output_path = ETOPO2022_CACHE_DIR / filename
+
+    # Do not download the same tile twice.
+    if output_path.is_file():
+        return output_path
+
+    downloaded = pooch.retrieve(
+        url=f"{ETOPO2022_BASE_URL}/{filename}",
+        known_hash=None,
+        fname=filename,
+        path=ETOPO2022_CACHE_DIR,
+        progressbar=True,
+    )
+
+    return Path(downloaded)
+
+
+def mosaic_etopo2022(files: list[str | Path])-> Path:
+    """Mosaic multiple ETOPO2022 tiles into one NetCDF file.
+
+    Parameters
+    ----------
+    files : list of str or Path
+        ETOPO2022 NetCDF files to mosaic.
+
+        If only one file is provided, that file is returned directly
+        without any additional processing.
+
+    extent : tuple or list of float, optional
+        Geographic bounds in the order
+        ``(lon_min, lon_max, lat_min, lat_max)``.
+
+        If provided, the generated mosaic is cropped to this extent.
+
+    Returns
+    -------
+    Path
+        Path to the original file when only one file is supplied,
+        otherwise path to the generated mosaic NetCDF file.
+    """
+    files = [Path(file) for file in files]
+
+    if len(files) == 1:
+        return files[0]
+    
+    datasets = [xr.open_dataset(file)for file in files]
+
+    try:
+        ds = xr.combine_by_coords(datasets,combine_attrs="override",)
+        output_path = (files[0].parent/ "ETOPO_2022_v1_15s_mosaic.nc")
+
+        ds.to_netcdf(output_path)
+
+    finally:
+        for dataset in datasets:
+            dataset.close()
+
+    return output_path
+
+def download_etopo2022(extent: tuple[float,float,float,float]) -> Path:
+    """Download and mosaic ETOPO2022 tiles for a geographic extent.
+
+    Parameters
+    ----------
+    extent : tuple or list of float
+        Geographic bounds in the order
+        ``(lon_min, lon_max, lat_min, lat_max)``.
+
+        The extent should already contain any interpolation
+        margin required by the caller.
+
+    Returns
+    -------
+    Path
+        Path to the downloaded ETOPO2022 file or generated
+        regional mosaic.
+    """
+    filenames = _get_etopo2022_tile_names(extent)
+
+    paths = [_download_etopo2022_tile(filename) for filename in filenames]
+
+    return mosaic_etopo2022(paths)
 
 
 def download_topo(filename: str) -> str:

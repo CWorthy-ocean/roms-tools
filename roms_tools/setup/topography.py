@@ -2,6 +2,7 @@ import logging
 import time
 import warnings
 from itertools import count
+from pathlib import Path
 
 import gcm_filters
 import numpy as np
@@ -15,6 +16,9 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import handle_boundaries
+from roms_tools.datasets.download import (download_etopo2022,
+                                          mosaic_etopo2022,
+)   
 
 
 def add_topography(
@@ -59,7 +63,7 @@ def add_topography(
     """
     if verbose:
         start_time = time.time()
-    data = _get_topography_data(topography_source)
+    data = _get_topography_data(topography_source,ds)
     if verbose:
         logging.info(
             f"Reading the topography data: {time.time() - start_time:.3f} seconds"
@@ -98,7 +102,7 @@ def add_topography(
     return ds
 
 
-def _get_topography_data(source):
+def _get_topography_data(source,ds):
     """Load topography data based on the specified source.
 
     Parameters
@@ -123,8 +127,27 @@ def _get_topography_data(source):
     elif source["name"] == "EMOD":
         kwargs["filename"] = source["path"]
         data = EMODDataset(**kwargs)
-    elif source["name"] == "ETOPO2022":
-        kwargs["filename"] = source["path"]
+    elif source["name"] == "ETOPO2022":         
+        if "path" in source.keys():
+            paths = source["path"]
+            if isinstance(paths, (str, Path)):
+                kwargs["filename"] = paths
+            elif isinstance(paths, list):
+                if len(paths) == 1:
+                    kwargs["filename"] = paths[0]
+                else:
+                    kwargs["filename"] = mosaic_etopo2022(paths)       
+        else:
+            margin = source.get("margin", 0.25)
+
+            extent = [
+            ds.attrs["lon_min"] - margin,
+            ds.attrs["lon_max"] + margin,
+            ds.attrs["lat_min"] - margin,
+            ds.attrs["lat_max"] + margin,]
+
+            kwargs["filename"] = download_etopo2022(extent)
+
         data = ETOPO2022Dataset(**kwargs)  
     else:
         raise ValueError(

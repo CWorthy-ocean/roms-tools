@@ -122,23 +122,6 @@ RIVR2O_TEST_DATA_FILES = (
 )
 
 
-
-def _format_etopo2022_lat(north_edge: int) -> str:
-    """Convert a latitude tile edge to the ETOPO2022 filename format."""
-    hemisphere = "N" if north_edge >= 0 else "S"
-    return f"{hemisphere}{abs(north_edge):02d}"
-
-
-def _format_etopo2022_lon(west_edge: int) -> str:
-    """Convert a longitude tile edge to the ETOPO2022 filename format."""
-    # Convert arbitrary longitude to [-180, 180).
-    wrapped = int(((west_edge + 180) % 360) - 180)
-
-    hemisphere = "E" if wrapped >= 0 else "W"
-
-    return f"{hemisphere}{abs(wrapped):03d}"
-
-
 def _get_etopo2022_tile_names(extent: tuple[float, float, float, float]) -> list[str]:
     """Determine which ETOPO2022 tiles intersect an extent.
 

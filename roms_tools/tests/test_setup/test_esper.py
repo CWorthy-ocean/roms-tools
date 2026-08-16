@@ -51,8 +51,17 @@ needs_pyesper = pytest.mark.skipif(
 
 def _small_grid() -> Grid:
     return Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55,
-        rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0,
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
     )
 
 
@@ -107,30 +116,37 @@ def test_estimate_bgc_fields_units_and_laziness(method):
 
     ny, nz = 4, 3
     rng = np.random.default_rng(0)
-    temp = xr.DataArray(
-        rng.uniform(2, 20, (nz, ny)), dims=("s", "y")
-    ).chunk({"y": 2})
+    temp = xr.DataArray(rng.uniform(2, 20, (nz, ny)), dims=("s", "y")).chunk({"y": 2})
     salt = xr.DataArray(rng.uniform(34, 36, (nz, ny)), dims=("s", "y")).chunk({"y": 2})
     lon = xr.DataArray(rng.uniform(-40, 0, ny), dims=("y",))
     lat = xr.DataArray(rng.uniform(40, 60, ny), dims=("y",))
     depth = xr.DataArray(np.linspace(0, 1000, nz), dims=("s",))
 
     out = estimate_bgc_fields(
-        temp, salt, lon, lat, depth,
+        temp,
+        salt,
+        lon,
+        lat,
+        depth,
         source={"name": "ESPER", "path": _PYESPER_PATH, "method": method},
-        roms_variables=["NO3", "ALK", "DIC"],
+        roms_variables=["NO3", "ALK", "DIC", "O2"],
         est_dates=2020.0,
     )
-    assert set(out) == {"NO3", "ALK", "DIC"}
+    assert set(out) == {"NO3", "ALK", "DIC", "O2"}
     # lazy until computed
     assert hasattr(out["NO3"].data, "dask")
     with dask.config.set(scheduler="synchronous"):
         no3 = out["NO3"].compute()
         alk = out["ALK"].compute()
-    # mmol/m^3 magnitudes; non-negative; ALK ~ 2000-2600
+        o2 = out["O2"].compute()
+    # mmol/m^3 magnitudes; non-negative; ALK ~ 2000-2600; O2 ~ 0-400 (OMZ to supersaturated)
     assert float(no3.min()) >= 0.0
     assert 1500.0 < float(alk.mean()) < 3000.0
+    assert float(o2.min()) >= 0.0
+    assert 0.0 < float(o2.mean()) < 400.0
     assert no3.dims == ("s", "y")
+    assert o2.attrs.get("long_name") == "dissolved oxygen"
+    assert o2.attrs.get("units") == "mmol/m^3"
 
 
 @needs_pyesper

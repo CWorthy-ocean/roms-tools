@@ -35,6 +35,7 @@ ROMS_TO_ESPER = {
     "SiO3": "silicate",
     "ALK": "TA",
     "DIC": "DIC",
+    "O2": "oxygen",
 }
 ESPER_TO_ROMS = {v: k for k, v in ROMS_TO_ESPER.items()}
 

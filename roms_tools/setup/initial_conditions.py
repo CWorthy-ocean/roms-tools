@@ -1,6 +1,7 @@
 import importlib.metadata
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,7 @@ from roms_tools.setup.utils import (
     build_bgc_vertical_coords,
     check_source_coverage,
     compute_barotropic_velocity,
+    deserialize_forcing_data,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -73,7 +75,7 @@ class InitialConditions:
     ini_time : datetime
         The date and time at which the initial conditions are set.
         If no exact match is found, the closest time entry to `ini_time` within the time range [ini_time, ini_time + 24 hours] is selected.
-    source : RawDataSource
+    source : RawDataSource, optional
 
         Dictionary specifying the source of the physical initial condition data. Keys include:
 
@@ -87,6 +89,9 @@ class InitialConditions:
             Note: streaming is currently not recommended due to performance limitations.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
+        Required unless ``physics_forcing`` is provided, in which case it must be
+        omitted (see ``physics_forcing`` below).
+
     bgc_source : RawDataSource, optional
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data. Keys include:
 
@@ -98,6 +103,25 @@ class InitialConditions:
             - A list of strings or Path objects containing multiple files.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
+    physics_forcing : InitialConditions, optional
+        An already-built, physics-only ``InitialConditions`` object (``bgc_source=None``)
+        supplying temperature/salinity for this object's BGC processing. When provided:
+
+          - ``source`` must be omitted -- this object's own physics regridding (u, v,
+            zeta, w, barotropic velocities, temp, salt, ...) is skipped entirely, so
+            multiple BGC sources for one initial-condition snapshot no longer each pay
+            for a redundant full-physics regrid.
+          - ``bgc_source`` is required (there would otherwise be nothing to process).
+          - ``ESPER`` derivation and ``"density"``/``"density_mld"`` vertical
+            interpolation read ``physics_forcing.ds["temp"]``/``["salt"]`` and
+            ``physics_forcing.ds_depth_coords`` directly, lazily (no ``.load()``/
+            ``.compute()``), instead of this object's own (nonexistent) physics pass.
+          - The resulting ``ds`` carries only this object's own BGC tracers -- combine
+            it with ``physics_forcing.ds`` (e.g. via ``xr.merge``) to get a complete
+            initial-conditions dataset.
+
+        Mirrors :class:`~roms_tools.setup.boundary_forcing.BoundaryForcing`'s
+        ``physics_forcing`` pattern.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
@@ -230,11 +254,16 @@ class InitialConditions:
     """Object representing the grid information."""
     ini_time: datetime
     """The date and time at which the initial conditions are set."""
-    source: RawDataSource
-    """Dictionary specifying the source of the physical initial condition data."""
+    source: RawDataSource | None = None
+    """Dictionary specifying the source of the physical initial condition data.
+    Required unless ``physics_forcing`` is provided."""
     bgc_source: RawDataSource | None = None
     """Dictionary specifying the source of the biogeochemical (BGC) initial condition
     data."""
+    physics_forcing: "InitialConditions | None" = None
+    """Physics InitialConditions object supplying temperature/salinity for BGC-only
+    construction, so this object's own physics regridding is skipped entirely. See the
+    class docstring for the full contract."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """The reference date for the model."""
     allow_flex_time: bool = False
@@ -295,17 +324,56 @@ class InitialConditions:
         self._input_checks()
 
         processed_fields = {}
-        processed_fields = self._process_data(processed_fields, type="physics")
+        if self.physics_forcing is not None:
+            # BGC-only construction: reuse an externally supplied physics
+            # InitialConditions' T/S and depth coordinates instead of redundantly
+            # regridding the full physics variable set (u, v, zeta, w, barotropic
+            # velocities, ...) again for this object. Both DataArrays are taken as-is
+            # from ``physics_forcing.ds``/``ds_depth_coords`` -- still dask-backed and
+            # unevaluated if ``physics_forcing`` is -- so nothing is materialized here.
+            self.adjust_depth_for_sea_surface_height = (
+                self.physics_forcing.adjust_depth_for_sea_surface_height
+            )
+            self.ds_depth_coords = self.physics_forcing.ds_depth_coords
+            temp = self.physics_forcing.ds["temp"]
+            salt = self.physics_forcing.ds["salt"]
+            # physics_forcing.ds carries "ocean_time" as its time dim, with "abs_time"
+            # as a datetime64 companion coord (set by its own _add_global_metadata).
+            # Swap back to the datetime view named "time" so the ESPER estimator and
+            # this object's own _add_global_metadata can rebuild a fresh
+            # ocean_time/abs_time pair from it -- mirrors BoundaryForcing's handling
+            # of its physics_forcing's "bry_time"/"abs_time" pair.
+            if "abs_time" in temp.coords:
+                temp = temp.swap_dims({"ocean_time": "abs_time"}).rename(
+                    {"abs_time": "time"}
+                )
+                salt = salt.swap_dims({"ocean_time": "abs_time"}).rename(
+                    {"abs_time": "time"}
+                )
+            processed_fields["temp"] = temp
+            processed_fields["salt"] = salt
+            # No physics variables of our own to NaN-check in _validate().
+            object.__setattr__(self, "variable_info_physics", {})
+        else:
+            processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
             # BGC processing appends the source's own (raw) tracers to the shared
-            # ``processed_fields`` dict (physics T/S are already present and are used as
-            # the target for density/MLD vertical interpolation). MARBL tracer
-            # derivation/fill is intentionally NOT done here — call
-            # ``BGCMarbl().process_bgc_fields()`` on the finished object for that.
+            # ``processed_fields`` dict (physics T/S -- either just computed above or
+            # borrowed from ``physics_forcing`` -- are used as the target for
+            # density/MLD vertical interpolation). MARBL tracer derivation/fill is
+            # intentionally NOT done here — call ``BGCMarbl().process_bgc_fields()``
+            # on the finished object for that.
             phys_keys = set(processed_fields)
             processed_fields = self._process_data(processed_fields, type="bgc")
             self._apply_use_vars(processed_fields, phys_keys)
+            if self.physics_forcing is not None:
+                # This object contributes only its own BGC tracers -- the borrowed
+                # physics fields belong to ``physics_forcing`` and are written to
+                # output there, not here (the caller merges the two together, e.g.
+                # via ``xr.merge``).
+                for k in phys_keys:
+                    processed_fields.pop(k, None)
 
         for var_name in processed_fields:
             processed_fields[var_name] = transpose_dimensions(
@@ -398,12 +466,13 @@ class InitialConditions:
             depth = self.ds_depth_coords["layer_depth_rho"]
             lon = self.grid.ds["lon_rho"]
             lat = self.grid.ds["lat_rho"]
-            year = (
-                self.ini_time.year
-                + (self.ini_time.timetuple().tm_yday - 1) / 365.25
-            )
+            year = self.ini_time.year + (self.ini_time.timetuple().tm_yday - 1) / 365.25
             fields = estimate_bgc_fields(
-                temp, salt, lon, lat, depth,
+                temp,
+                salt,
+                lon,
+                lat,
+                depth,
                 source=self.bgc_source,
                 roms_variables=ESPER_SUPPORTED_VARS,
                 est_dates=year,
@@ -537,6 +606,13 @@ class InitialConditions:
         for k in bgc_keys:
             if k not in requested:
                 del processed_fields[k]
+                # Keep variable_info_bgc in sync with processed_fields: _validate()
+                # iterates variable_info_bgc directly and does ds[var_name] for every
+                # entry, so a stale entry for a variable use_vars just excluded (still
+                # present because _set_variable_info populated it from the source's
+                # full available-variable catalog, before this down-select ran) would
+                # raise KeyError there instead of writing a clean use_vars-only dataset.
+                self.variable_info_bgc.pop(k, None)
 
     def _regrid_laterally(
         self,
@@ -774,19 +850,42 @@ class InitialConditions:
         return processed_fields
 
     def _input_checks(self):
-        if "name" not in self.source.keys():
-            raise ValueError("`source` must include a 'name'.")
-        if "path" not in self.source.keys():
-            if self.source["name"] != "GLORYS":
-                raise ValueError("`source` must include a 'path'.")
+        # -------------------------------------------------------
+        # source / physics_forcing mutual-exclusivity checks
+        # -------------------------------------------------------
+        if self.physics_forcing is not None:
+            if self.source is not None:
+                raise ValueError(
+                    "`source` must not be provided when `physics_forcing` is set -- "
+                    "`physics_forcing` already supplies the physics fields this "
+                    "object needs (temp/salt for ESPER derivation or density-space "
+                    "interpolation); a second `source` would be redundant and is "
+                    "never regridded."
+                )
+            if self.bgc_source is None:
+                raise ValueError(
+                    "`physics_forcing` requires `bgc_source` -- without one there "
+                    "is no data for this object to process."
+                )
+        elif self.source is None:
+            raise ValueError(
+                "`source` is required unless `physics_forcing` is provided."
+            )
 
-            self.source["path"] = GLORYSDefaultDataset.dataset_name
+        if self.source is not None:
+            if "name" not in self.source.keys():
+                raise ValueError("`source` must include a 'name'.")
+            if "path" not in self.source.keys():
+                if self.source["name"] != "GLORYS":
+                    raise ValueError("`source` must include a 'path'.")
 
-        # set self.source["climatology"] to False if not provided
-        self.source = {
-            **self.source,
-            "climatology": self.source.get("climatology", False),
-        }
+                self.source["path"] = GLORYSDefaultDataset.dataset_name
+
+            # set self.source["climatology"] to False if not provided
+            self.source = {
+                **self.source,
+                "climatology": self.source.get("climatology", False),
+            }
         if self.bgc_source is not None:
             if not isinstance(self.bgc_source, dict) or "name" not in self.bgc_source:
                 raise ValueError("`bgc_source` must be a dict including a 'name'.")
@@ -801,6 +900,10 @@ class InitialConditions:
                 from roms_tools.setup.esper import validate_esper_source
 
                 validate_esper_source(self.bgc_source)
+                # No physics_forcing requirement here (unlike BoundaryForcing's
+                # type="bgc" objects, which have no other route to T/S): an IC
+                # object without physics_forcing computes its own temp/salt via its
+                # own `source`, already enforced as required above.
             elif name not in BGC_DATASET_NAMES:
                 raise ValueError(
                     f"Unknown BGC source name '{name}'. Valid options: "
@@ -1073,14 +1176,20 @@ class InitialConditions:
                 ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
                 ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
-        # initialize vertical velocity to zero
-        ds["w"] = xr.zeros_like(
-            (self.grid.ds["Cs_w"] * self.grid.ds["h"]).expand_dims(
-                time=processed_fields["u"].time
-            )
-        ).astype(np.float32)
-        ds["w"].attrs["long_name"] = d_meta["w"]["long_name"]
-        ds["w"].attrs["units"] = d_meta["w"]["units"]
+        if self.physics_forcing is None:
+            # Initialize vertical velocity to zero. A BGC-only object built with
+            # physics_forcing skips this: "w" is a physics prognostic variable that
+            # belongs to physics_forcing's own dataset, and processed_fields has
+            # neither "u" (this method's original time template) nor "temp"/"salt"
+            # left in it by this point (borrowed only transiently, then stripped so
+            # they aren't double-written -- see __post_init__).
+            ds["w"] = xr.zeros_like(
+                (self.grid.ds["Cs_w"] * self.grid.ds["h"]).expand_dims(
+                    time=processed_fields["u"].time
+                )
+            ).astype(np.float32)
+            ds["w"].attrs["long_name"] = d_meta["w"]["long_name"]
+            ds["w"].attrs["units"] = d_meta["w"]["units"]
 
         variables_to_drop = [
             "s_rho",
@@ -1179,7 +1288,15 @@ class InitialConditions:
         ds.attrs["adjust_depth_for_sea_surface_height"] = str(
             self.adjust_depth_for_sea_surface_height
         )
-        ds.attrs["source"] = self.source["name"]
+        # A BGC-only object (physics_forcing given, source omitted) reports the
+        # borrowed physics object's source name here -- it describes the physical
+        # data that produced this object's T/S, even though this object never
+        # regridded it itself.
+        ds.attrs["source"] = (
+            self.source["name"]
+            if self.source is not None
+            else self.physics_forcing.source["name"]
+        )
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
 
@@ -1298,9 +1415,13 @@ class InitialConditions:
             with ProgressBar():
                 self.ds[var_name].load()
 
-        if self.adjust_depth_for_sea_surface_height:
+        if self.adjust_depth_for_sea_surface_height and "zeta" in self.ds:
             zeta = self.ds.zeta.squeeze().load()
         else:
+            # A BGC-only object built with `physics_forcing` carries no "zeta" of its
+            # own (it belongs to `physics_forcing`) even when
+            # adjust_depth_for_sea_surface_height is inherited as True; plot the
+            # companion `physics_forcing` object directly to see SSH-adjusted depths.
             zeta = 0
 
         field = self.ds[var_name].squeeze()
@@ -1364,6 +1485,122 @@ class InitialConditions:
 
         return saved_filenames
 
+    @classmethod
+    def merge(
+        cls,
+        physics: "InitialConditions",
+        bgc: "InitialConditions | Sequence[InitialConditions]",
+        filepath: str | Path | None = None,
+        format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+    ) -> xr.Dataset | list[Path]:
+        """Merge a physics object with one or more bgc-only objects into a single
+        ROMS-ready initial-conditions dataset.
+
+        ROMS's ``inifile`` namelist parameter is a single scalar path -- unlike
+        boundary/surface forcing's file list (``frcfiles``), which supports a true
+        per-variable union across multiple files -- so a multi-bgc-source initial
+        condition has to be assembled into ONE dataset before writing, rather than
+        written out as separate files the way boundary BGC sources can be.
+
+        This exists so ``physics_forcing``-based, multi-bgc-source initial
+        conditions (one physics object + N bgc-only objects, each built with
+        ``physics_forcing=physics``) have one shared, tested way to combine back
+        into a single dataset, instead of every caller (Forge included)
+        re-deriving the same ``xr.merge`` incantation.
+
+        Fully dask-lazy: this is a plain ``xr.merge`` with no ``.load()``/
+        ``.compute()``; nothing is materialized unless ``filepath`` is given (in
+        which case :func:`~roms_tools.utils.save_datasets` triggers the write) or
+        the caller computes the returned dataset itself.
+
+        Parameters
+        ----------
+        physics : InitialConditions
+            The physics-only object (``bgc_source=None``) that was passed as
+            ``physics_forcing=`` to every object in ``bgc``. Its global
+            attrs/coords are authoritative in the merge.
+        bgc : InitialConditions or sequence of InitialConditions
+            One or more bgc-only objects, each built with
+            ``physics_forcing=physics``. Only contribute their own
+            (non-overlapping, by convention of ``use_vars``) BGC variables.
+        filepath : str or Path, optional
+            If given, the merged dataset is saved via
+            :func:`~roms_tools.utils.save_datasets` and the saved path(s) are
+            returned instead of the dataset itself.
+        format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
+            NetCDF file format, passed through to ``save_datasets`` when
+            ``filepath`` is given. Defaults to ``"NETCDF4"``.
+
+        Returns
+        -------
+        xr.Dataset or list[Path]
+            The merged dataset (when ``filepath`` is omitted), or the saved file
+            path(s) (when ``filepath`` is given).
+
+        Raises
+        ------
+        ValueError
+            If ``bgc`` is empty, or any object in it was not built with
+            ``physics_forcing=physics``.
+
+        Examples
+        --------
+        >>> ic_physics = InitialConditions(
+        ...     grid=grid, ini_time=t, source={"name": "GLORYS", "path": "..."}
+        ... )
+        >>> ic_esper = InitialConditions(
+        ...     grid=grid,
+        ...     ini_time=t,
+        ...     physics_forcing=ic_physics,
+        ...     bgc_source={"name": "ESPER", "path": "..."},
+        ... )
+        >>> ic_unified = InitialConditions(
+        ...     grid=grid,
+        ...     ini_time=t,
+        ...     physics_forcing=ic_physics,
+        ...     bgc_source={"name": "UNIFIED", "path": "...", "climatology": True},
+        ...     use_vars=["Fe", "CHL"],
+        ... )
+        >>> BGCMarbl().process_bgc_fields([ic_esper, ic_unified])
+        >>> merged = InitialConditions.merge(ic_physics, [ic_esper, ic_unified])
+        """
+        bgc_list = [bgc] if isinstance(bgc, InitialConditions) else list(bgc)
+        if not bgc_list:
+            raise ValueError(
+                "`bgc` must contain at least one InitialConditions object."
+            )
+        for i, b in enumerate(bgc_list):
+            if b.physics_forcing is not physics:
+                raise ValueError(
+                    f"bgc[{i}].physics_forcing is not `physics` -- "
+                    "InitialConditions.merge() requires every object in `bgc` to "
+                    "have been built with `physics_forcing=<the same physics "
+                    "object passed here>`."
+                )
+
+        # The physics object's global attrs/coords are authoritative; the bgc
+        # objects only contribute their own (non-overlapping, by convention of
+        # use_vars) BGC variables.
+        merged_ds = xr.merge(
+            [physics.ds] + [b.ds for b in bgc_list],
+            compat="override",
+            combine_attrs="override",
+        )
+
+        if filepath is None:
+            return merged_ds
+
+        filepath = Path(filepath)
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
+
+        return save_datasets(
+            [merged_ds],
+            [str(filepath)],
+            use_dask=physics.use_dask,
+            format=format,
+        )
+
     def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
@@ -1379,8 +1616,27 @@ class InitialConditions:
                 "ds_depth_coords",
                 "adjust_depth_for_sea_surface_height",
                 "use_dask",
+                "physics_forcing",
             ],
         )
+        # Embed the companion physics InitialConditions (supplying T/S for this
+        # object's BGC processing) as an optional sub-item of the BGC block,
+        # mirroring how Grids are embedded and BoundaryForcing's own
+        # ``physics_forcing``. The shared "Grid" is dropped since the physics
+        # forcing reuses the same grid on reconstruction.
+        if self.physics_forcing is not None:
+            physics_dict = to_dict(
+                self.physics_forcing,
+                exclude=[
+                    "ds_depth_coords",
+                    "adjust_depth_for_sea_surface_height",
+                    "use_dask",
+                    "physics_forcing",
+                ],
+            )
+            forcing_dict["InitialConditions"]["physics_forcing"] = physics_dict[
+                "InitialConditions"
+            ]
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
@@ -1408,6 +1664,19 @@ class InitialConditions:
         grid = Grid.from_yaml(filepath)
         initial_conditions_params = from_yaml(cls, filepath)
 
+        # Reconstruct an optional embedded physics InitialConditions, reusing the
+        # shared grid. The generic `from_yaml` only deserializes the top-level block,
+        # so the nested block's datetimes/paths/source are restored here.
+        physics_data = initial_conditions_params.pop("physics_forcing", None)
+        physics_forcing = None
+        if physics_data is not None:
+            physics_data = deserialize_forcing_data(physics_data)
+            for name in ["source", "bgc_source"]:
+                src_dict = physics_data.get(name)
+                if src_dict and src_dict.get("grid") is not None:
+                    src_dict["grid"] = Grid(**pop_grid_data(src_dict["grid"]))
+            physics_forcing = cls(grid=grid, **physics_data, use_dask=use_dask)
+
         # Deserialize nested grids inside 'source' and 'bgc_source'
         for name in ["source", "bgc_source"]:
             src_dict = initial_conditions_params.get(name)
@@ -1418,6 +1687,7 @@ class InitialConditions:
         return cls(
             grid=grid,
             **initial_conditions_params,
+            physics_forcing=physics_forcing,
             use_dask=use_dask,
         )
 

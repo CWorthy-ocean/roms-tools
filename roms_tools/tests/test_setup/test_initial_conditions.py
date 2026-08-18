@@ -852,6 +852,97 @@ def test_ic_density_vs_depth_interpolation(use_dask):
         )
 
 
+def test_ic_density_mld_with_physics_forcing_matches_combined(use_dask):
+    """A `physics_forcing`-driven, BGC-only IC object using density_mld interpolation
+    must match the old combined (redundant-regrid) path to float32 precision, and
+    must carry none of the physics variables in its own dataset.
+
+    This is the motivating case: combining multiple BGC sources (e.g. ESPER +
+    UNIFIED) for one initial-condition snapshot without each source paying for its
+    own full physics regrid (u, v, zeta, w, barotropic velocities, ...).
+    """
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+    combined = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_interpolation_method="density_mld",
+        use_dask=use_dask,
+    )
+
+    phys = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+    split = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_interpolation_method="density_mld",
+        physics_forcing=phys,
+        use_dask=use_dask,
+    )
+
+    for var in ("u", "v", "zeta", "w", "ubar", "vbar", "temp", "salt"):
+        assert var not in split.ds
+        assert var in phys.ds
+    # The BGC source's own auxiliary T/S (used for the source density coordinate)
+    # must never leak into the output either.
+    assert not any(str(v).startswith(("temp_", "salt_")) for v in split.ds.data_vars)
+
+    for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+        if var in combined.ds and var in split.ds:
+            xr.testing.assert_allclose(
+                split.ds[var], combined.ds[var], rtol=1e-3, atol=1e-3
+            )
+
+
+def test_ic_bgc_use_vars_subset_does_not_leak_into_validate(use_dask):
+    """Regression: down-selecting a BGC source's variables via ``use_vars`` used to
+    crash in ``_validate`` with e.g. ``KeyError: 'ALK'``.
+
+    ``_apply_use_vars`` correctly pruned ``processed_fields`` (and thus the written
+    ``ds``) down to the requested subset, but never pruned ``self.variable_info_bgc``
+    -- populated earlier by ``_set_variable_info`` from the source's *full* available
+    -variable catalog -- to match. ``_validate`` iterates ``variable_info_bgc``
+    directly and does ``ds[var_name]`` for every entry, so a variable ``use_vars``
+    excluded (still present only in the stale ``variable_info_bgc``) raised ``KeyError``
+    instead of the dataset simply not including it.
+
+    ``BoundaryForcing`` already gets this right (rebuilds ``variable_info`` from the
+    variables actually present *after* ``_apply_use_vars``, see
+    ``_present_bgc_bare_names``) -- this pins ``InitialConditions`` to the same
+    contract.
+    """
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+    # NO3/DIC is a strict subset of what the UNIFIED source actually provides
+    # (ALK, PO4, O2, ... among others) -- must not raise.
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        use_vars=["NO3", "DIC"],
+        use_dask=use_dask,
+    )
+    assert "NO3" in ic.ds and "DIC" in ic.ds
+    # The whole point of use_vars: excluded BGC variables are genuinely absent from
+    # the written dataset, not just hidden -- and variable_info_bgc (validation's own
+    # source of truth) must agree, or a future validate() call would KeyError again.
+    for excluded in ("ALK", "PO4", "O2"):
+        assert excluded not in ic.ds
+        assert excluded not in ic.variable_info_bgc
+
+
 def test_ic_invalid_interpolation_method_raises(use_dask):
     """An unknown ``bgc_interpolation_method`` is rejected."""
     grid = _ic_grid()

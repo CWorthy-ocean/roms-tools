@@ -177,6 +177,14 @@ class SurfaceForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    start_time_pad: bool = True
+    """If True (default), include one dataset record before start_time so ROMS can
+    interpolate at the exact simulation start boundary. If False, select only records
+    at or after start_time."""
+    end_time_pad: bool = True
+    """If True (default), include one dataset record after end_time so ROMS can
+    interpolate at the exact simulation end boundary. If False, select only records
+    at or before end_time."""
     regrid_method: str = "auto"
     """Horizontal regrid engine: ``"auto"`` (xESMF if installed, else scipy),
     ``"xesmf"``, or ``"scipy"``."""
@@ -229,10 +237,7 @@ class SurfaceForcing:
             use_coarse_grid = self._determine_coarse_grid_usage(data)
         self.use_coarse_grid = use_coarse_grid
 
-        if self.type == "physics":
-            opt_file = "bulk_frc.opt"
-        elif self.type == "bgc":
-            opt_file = "bgc.opt"
+        if self.type == "bgc":
             if self.source["name"] == "MBL_co2":
                 cppdefs_flags = set()
                 cppdefs_flags.add("PCO2AIR_FORCING")
@@ -249,15 +254,20 @@ class SurfaceForcing:
                     cppdefs_flags.add("CFLX_CORR")
 
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
-        interp_flag = 1 if use_coarse_grid else 0
 
         if self.type in ["physics", "bgc"]:
+            if self.type == "physics":
+                nml_key, nml_group = "interp_bulk_frc", "SURF_FRC_SETTINGS"
+            else:
+                nml_key, nml_group = "interp_bgc_frc", "BGC_SETTINGS"
+            nml_value = ".true." if use_coarse_grid else ".false."
             logging.info(
-                "Data will be interpolated onto the %s. "
-                "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
+                "Data will be interpolated onto the %s. Remember to set "
+                "`%s = %s` in the `&%s` group of your ROMS `namelist.nml` file.",
                 grid_desc,
-                interp_flag,
-                opt_file,
+                nml_key,
+                nml_value,
+                nml_group,
             )
             if self.source["name"] == "MBL_co2":
                 logging.info(
@@ -510,6 +520,8 @@ class SurfaceForcing:
             "use_dask": self.use_dask,
             "chunks": self.chunks,
             "initial_slice_bounds": self.initial_slice_bounds,
+            "start_time_pad": self.start_time_pad,
+            "end_time_pad": self.end_time_pad,
         }
 
         if self.type == "physics":

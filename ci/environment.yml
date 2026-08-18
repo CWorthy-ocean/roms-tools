@@ -5,4 +5,11 @@ channels:
 dependencies:
   - python>=3.12
   - xesmf  # conda-only (esmpy); the only dependency pip cannot provide
+  # Force the serial (mpiuni) ESMF build. Without this pin conda-forge resolves
+  # esmf to an `mpi_mpich` variant, which drags in MPICH plus MPI-linked
+  # hdf5/libnetcdf. The first xESMF Regridder built in a process then runs
+  # MPI_Init, which on GitHub runners intermittently gets the process killed
+  # (SIGTERM -> "exit code 143"), and the MPI hdf5 also collides with the
+  # serial hdf5 bundled in the pip-installed netcdf4/h5py wheels.
+  - esmf=*=nompi*
   - pip

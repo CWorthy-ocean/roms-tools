@@ -13,10 +13,26 @@ jobs:
     name: ${{ matrix.python-version }}-build (use_dask=False)
     runs-on: ubuntu-latest
     strategy:
+      # Keep the other Python version running when one fails; otherwise the
+      # surviving job is cancelled and its log shows a misleading exit code 143.
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+
+      # A cold pooch cache means ~1.6 GB of timeout-prone downloads from GitHub.
+      # Every job restores; only the full-suite jobs save (so a job running a
+      # subset cannot replace the cache with an incomplete snapshot). The key
+      # tracks the registries in download.py, and restore-keys still reuses the
+      # previous cache, leaving only newly added files to download.
+      - name: Restore pooch data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/roms-tools
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}
+          restore-keys: |
+            pooch-${{ runner.os }}-
 
       - name: Create conda environment
         uses: mamba-org/setup-micromamba@v2
@@ -27,10 +43,20 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          # The env-file hash must be in the key, or edits to ci/environment.yml
+          # are silently ignored whenever a cached environment is restored.
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
       - name: Conda info
         run: conda info
+
+      # All conda jobs build from ci/environment.yml, so verifying here is
+      # enough to prove the serial-ESMF pin took effect. Expect a `nompi_*`
+      # esmf build and no mpich at all.
+      - name: Verify serial (nompi) ESMF build
+        shell: micromamba-shell {0}
+        if: always()
+        run: micromamba list | grep -E "esmf|mpich|hdf5" || true
 
       - name: Install roms-tools
         shell: micromamba-shell {0}
@@ -43,6 +69,15 @@ jobs:
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/*
+
+      # This job runs the whole suite, so it is the one with a complete set of
+      # data files worth caching. One Python version is enough.
+      - name: Save pooch data cache
+        if: always() && matrix.python-version == '3.13'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/roms-tools
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}
 
       - name: Get coverage report
         shell: bash -l {0}
@@ -70,6 +105,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A cold pooch cache means ~1.6 GB of timeout-prone downloads from GitHub.
+      # Every job restores; only the full-suite jobs save (so a job running a
+      # subset cannot replace the cache with an incomplete snapshot). The key
+      # tracks the registries in download.py, and restore-keys still reuses the
+      # previous cache, leaving only newly added files to download.
+      - name: Restore pooch data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/roms-tools
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}
+          restore-keys: |
+            pooch-${{ runner.os }}-
+
       - name: Create conda environment
         uses: mamba-org/setup-micromamba@v2
         with:
@@ -79,7 +127,9 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          # The env-file hash must be in the key, or edits to ci/environment.yml
+          # are silently ignored whenever a cached environment is restored.
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
       - name: Conda info
         run: conda info
@@ -126,6 +176,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A cold pooch cache means ~1.6 GB of timeout-prone downloads from GitHub.
+      # Every job restores; only the full-suite jobs save (so a job running a
+      # subset cannot replace the cache with an incomplete snapshot). The key
+      # tracks the registries in download.py, and restore-keys still reuses the
+      # previous cache, leaving only newly added files to download.
+      - name: Restore pooch data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/roms-tools
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}
+          restore-keys: |
+            pooch-${{ runner.os }}-
+
       - name: Create conda environment
         uses: mamba-org/setup-micromamba@v2
         with:
@@ -135,7 +198,9 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          # The env-file hash must be in the key, or edits to ci/environment.yml
+          # are silently ignored whenever a cached environment is restored.
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
       - name: Conda info
         run: conda info
@@ -178,6 +243,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A cold pooch cache means ~1.6 GB of timeout-prone downloads from GitHub.
+      # Every job restores; only the full-suite jobs save (so a job running a
+      # subset cannot replace the cache with an incomplete snapshot). The key
+      # tracks the registries in download.py, and restore-keys still reuses the
+      # previous cache, leaving only newly added files to download.
+      - name: Restore pooch data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/roms-tools
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}
+          restore-keys: |
+            pooch-${{ runner.os }}-
+
       - name: Create conda environment
         uses: mamba-org/setup-micromamba@v2
         with:
@@ -187,7 +265,9 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          # The env-file hash must be in the key, or edits to ci/environment.yml
+          # are silently ignored whenever a cached environment is restored.
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
       - name: Conda info
         run: conda info
@@ -231,6 +311,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A cold pooch cache means ~1.6 GB of timeout-prone downloads from GitHub.
+      # Every job restores; only the full-suite jobs save (so a job running a
+      # subset cannot replace the cache with an incomplete snapshot). The key
+      # tracks the registries in download.py, and restore-keys still reuses the
+      # previous cache, leaving only newly added files to download.
+      - name: Restore pooch data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/roms-tools
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}
+          restore-keys: |
+            pooch-${{ runner.os }}-
+
       - name: Create conda environment
         uses: mamba-org/setup-micromamba@v2
         with:
@@ -240,7 +333,9 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          # The env-file hash must be in the key, or edits to ci/environment.yml
+          # are silently ignored whenever a cached environment is restored.
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
       - name: Conda info
         run: conda info
@@ -289,6 +384,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A cold pooch cache means ~1.6 GB of timeout-prone downloads from GitHub.
+      # Every job restores; only the full-suite jobs save (so a job running a
+      # subset cannot replace the cache with an incomplete snapshot). The key
+      # tracks the registries in download.py, and restore-keys still reuses the
+      # previous cache, leaving only newly added files to download.
+      - name: Restore pooch data cache
+        uses: actions/cache/restore@v4
+        with:
+          # pooch.os_cache("roms-tools") -> %LOCALAPPDATA%\roms-tools\roms-tools\Cache
+          # (platformdirs repeats the name because appauthor defaults to appname).
+          path: ~/AppData/Local/roms-tools/roms-tools/Cache
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}
+          restore-keys: |
+            pooch-${{ runner.os }}-
+
       - uses: actions/setup-python@v4
         with:
           python-version: "3.12"
@@ -299,8 +409,24 @@ jobs:
            python -V
            python -m pip install -e ".[dev]"
 
+      # The Windows cache path above is hardcoded and cannot be resolved off
+      # Windows; print the real one so a mismatch shows up in the log instead
+      # of silently disabling the cache.
+      - name: Show pooch cache location
+        if: always()
+        shell: bash
+        run: python -c "import pooch; print(pooch.os_cache('roms-tools'))"
+
       - name: Running Tests
         shell: bash
         run: |
            python -V
            pytest --verbose roms_tools/tests
+
+      # The only Windows job, and it runs the whole suite.
+      - name: Save pooch data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/AppData/Local/roms-tools/roms-tools/Cache
+          key: pooch-${{ runner.os }}-${{ hashFiles('roms_tools/datasets/download.py') }}

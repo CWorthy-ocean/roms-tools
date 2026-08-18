@@ -98,10 +98,26 @@ requires = [
 fallback_version = "9999"
 
 [tool.setuptools.packages.find]
-exclude = ["docs", "tests", "tests.*", "docs.*"]
+# roms_tools.tests* is excluded so wheels (and installed packages, including the
+# conda-forge build) don't carry the test suite and its ~4400-file zarr fixture
+# tree. The sdist still contains the full tests directory: setuptools_scm
+# includes every git-tracked file there, so tests remain runnable from a source
+# archive or checkout.
+# ci* keeps the release-notes scripts from installing into site-packages as a
+# top-level `ci` package (namespace discovery picks up __init__-less dirs, and
+# roms_tools/{analysis,datasets,tiling} rely on that, so it can't be disabled).
+exclude = ["docs", "tests", "tests.*", "docs.*", "roms_tools.tests", "roms_tools.tests.*", "ci", "ci.*"]
 
 [tool.setuptools.package-data]
 roms_tools = ["py.typed"]
+
+[tool.setuptools.exclude-package-data]
+# Excluding roms_tools.tests* from packages.find (above) is not sufficient on
+# its own: include_package_data (default true) sweeps every git-tracked file
+# under roms_tools/ into the wheel as data of the parent package. This entry
+# keeps the tests out of the wheel too. Only the wheel is affected — the sdist
+# is driven by setuptools_scm's file list and still ships the full tests tree.
+roms_tools = ["tests/**"]
 
 [tool.ruff]
 fix = true

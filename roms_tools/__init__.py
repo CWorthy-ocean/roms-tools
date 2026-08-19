@@ -12,10 +12,16 @@ from roms_tools.setup.grid import Grid  # noqa: I001, F401
 from roms_tools.analysis.roms_output import ROMSOutput  # noqa: F401
 from roms_tools.analysis.cdr_ensemble import Ensemble  # noqa: F401
 from roms_tools.setup.bgc_model import BGCModel, BGCMarbl  # noqa: F401
-from roms_tools.setup.boundary_forcing import BoundaryForcing  # noqa: F401
+from roms_tools.setup.boundary_forcing import (  # noqa: F401
+    BoundaryForcing,
+    BoundaryForcingSource,
+)
 from roms_tools.setup.cdr_forcing import CDRForcing  # noqa: F401
 from roms_tools.setup.cdr_release import TracerPerturbation, VolumeRelease  # noqa: F401
-from roms_tools.setup.initial_conditions import InitialConditions  # noqa: F401
+from roms_tools.setup.initial_conditions import (  # noqa: F401
+    InitialConditions,
+    InitialConditionsSource,
+)
 from roms_tools.setup.nesting import align_grids, make_nesting_info  # noqa: F401
 from roms_tools.plot import plot_nesting  # noqa: F401
 from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401

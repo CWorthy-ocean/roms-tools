@@ -16,10 +16,18 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools import BGCMarbl, BoundaryForcing, Grid, InitialConditions
+from roms_tools import (
+    BGCMarbl,
+    BoundaryForcingSource,
+    Grid,
+    InitialConditions,
+    InitialConditionsSource,
+)
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.esper import (
     ESPER_SUPPORTED_VARS,
+    _MAX_POINTS_PER_CHUNK,
+    _pyesper_chunk_plan,
     estimate_bgc_fields,
     validate_esper_source,
 )
@@ -84,20 +92,79 @@ def test_validate_esper_source_bad_equation():
         validate_esper_source({"name": "ESPER", "path": "/x", "equation": 1})
 
 
+def test_pyesper_chunk_plan_caps_chunk_count_at_production_grid_scale():
+    """Regression: PyESPER's *_xr methods reload a neural-network/regression
+    model on EVERY dask block, a multi-second fixed cost per call regardless of
+    block size. Without a chunk-count cap, whatever fine-grained chunking the
+    upstream regrid pipeline left `temp`/`salt` with turns into that many
+    redundant reloads -- at production grid scale (e.g. a 4km/100-level domain,
+    ~90M points) this ran for over an hour at 2% progress (a many-hour
+    projected total) before this fix. `_pyesper_chunk_plan` must collapse a
+    heavily over-chunked input down to a small, bounded chunk count.
+    """
+    import dask.array as da
+
+    # Mirrors a real 4km CCS-scale IC volume (672 x 1344 x 100) arriving with a
+    # naive, fine-grained chunking from an upstream regrid pipeline.
+    arr = da.random.random((100, 1344, 672), chunks=(1, 50, 50))
+    temp = xr.DataArray(arr, dims=("s_rho", "eta_rho", "xi_rho"))
+
+    original_chunk_count = 1
+    for c in temp.data.chunks:
+        original_chunk_count *= len(c)
+    assert original_chunk_count > 1000, (
+        "fixture should start heavily over-chunked, to exercise the cap"
+    )
+
+    plan = _pyesper_chunk_plan(temp)
+    rechunked = temp.chunk(plan)
+    new_chunk_count = 1
+    for c in rechunked.data.chunks:
+        new_chunk_count *= len(c)
+
+    # Bounded, low-tens chunk count -- not hundreds/thousands -- regardless of
+    # how finely the input arrived chunked.
+    assert new_chunk_count <= 32
+    assert new_chunk_count < original_chunk_count
+    # No data lost/reshaped -- chunking is purely a dask block-boundary change.
+    assert rechunked.shape == temp.shape
+
+    # Each resulting chunk stays in the right ballpark of the point-count
+    # target (some slack is expected/fine since whole dims are collapsed).
+    max_chunk_points = max(
+        s0 * s1 * s2
+        for s0 in rechunked.data.chunks[0]
+        for s1 in rechunked.data.chunks[1]
+        for s2 in rechunked.data.chunks[2]
+    )
+    assert max_chunk_points <= _MAX_POINTS_PER_CHUNK * 2  # generous slack
+
+
+def test_pyesper_chunk_plan_noop_for_small_array():
+    """An array already under the cap round-trips to a single chunk per dim
+    (not needlessly split), and a plain in-memory (non-dask) array is handled
+    the same way by `.chunk()` when the caller applies the plan unconditionally.
+    """
+    small = xr.DataArray(np.zeros((3, 4, 5)), dims=("s_rho", "eta_rho", "xi_rho"))
+    plan = _pyesper_chunk_plan(small.chunk())
+    assert plan == {"s_rho": -1, "eta_rho": -1, "xi_rho": -1}
+
+
 def test_ic_esper_missing_path_raises():
     with pytest.raises(ValueError, match="requires a 'path'"):
-        InitialConditions(
+        InitialConditionsSource(
             grid=_small_grid(),
             ini_time=datetime(2021, 6, 29),
-            source={"name": "GLORYS", "path": "physics.nc"},
-            bgc_source={"name": "ESPER"},
+            type="bgc",
+            source={"name": "ESPER"},
+            physics_forcing=_small_physics_ic(),
             use_dask=False,
         )
 
 
 def test_bf_esper_requires_physics_forcing():
     with pytest.raises(ValueError, match="requires `physics_forcing`"):
-        BoundaryForcing(
+        BoundaryForcingSource(
             grid=_small_grid(),
             start_time=datetime(2021, 6, 29),
             end_time=datetime(2021, 6, 30),
@@ -109,17 +176,18 @@ def test_bf_esper_requires_physics_forcing():
 
 def test_ic_source_required_without_physics_forcing():
     with pytest.raises(ValueError, match="`source` is required"):
-        InitialConditions(
+        InitialConditionsSource(
             grid=_small_grid(),
             ini_time=datetime(2021, 6, 29),
-            bgc_source={"name": "ESPER", "path": _PYESPER_PATH},
+            type="bgc",
+            physics_forcing=_small_physics_ic(),
             use_dask=False,
         )
 
 
-def _small_physics_ic(use_dask: bool = False) -> InitialConditions:
+def _small_physics_ic(use_dask: bool = False) -> InitialConditionsSource:
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    return InitialConditions(
+    return InitialConditionsSource(
         grid=_small_grid(),
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
@@ -127,25 +195,25 @@ def _small_physics_ic(use_dask: bool = False) -> InitialConditions:
     )
 
 
-def test_ic_physics_forcing_and_source_are_mutually_exclusive():
+def test_ic_physics_forcing_only_applies_to_bgc_type():
     phys = _small_physics_ic()
-    with pytest.raises(ValueError, match="must not be provided"):
-        InitialConditions(
+    with pytest.raises(ValueError, match="only applies when `type='bgc'`"):
+        InitialConditionsSource(
             grid=_small_grid(),
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": "physics.nc"},
-            bgc_source={"name": "ESPER", "path": _PYESPER_PATH},
             physics_forcing=phys,
             use_dask=False,
         )
 
 
-def test_ic_physics_forcing_requires_bgc_source():
+def test_ic_physics_forcing_requires_source():
     phys = _small_physics_ic()
-    with pytest.raises(ValueError, match="requires `bgc_source`"):
-        InitialConditions(
+    with pytest.raises(ValueError, match="`source` is required"):
+        InitialConditionsSource(
             grid=_small_grid(),
             ini_time=datetime(2021, 6, 29),
+            type="bgc",
             physics_forcing=phys,
             use_dask=False,
         )
@@ -195,6 +263,84 @@ def test_estimate_bgc_fields_units_and_laziness(method):
 
 
 @needs_pyesper
+def test_estimate_bgc_fields_call_count_independent_of_variable_count(monkeypatch):
+    """Regression test: `est`'s per-variable DataArrays all share ONE underlying
+    per-chunk `nn()` call (`apply_ufunc` is called once, with N output_core_dims).
+    Materialising them with N *separate* `.compute()` calls (one per variable)
+    instead of one combined `dask.compute()` does NOT share that upstream task --
+    verified empirically (see `estimate_bgc_fields`'s inline comments) to silently
+    multiply every chunk's real PyESPER invocation count by the number of requested
+    variables. Rather than pin down an exact expected chunk count (which depends on
+    two layers of rechunking -- roms-tools' own plan, then PyESPER's own further
+    "auto" rechunk downstream of it -- and is liable to shift for reasons unrelated
+    to this bug), this checks the one property that actually matters: real `nn()`
+    call count for the same array must be the same whether 1 or 4 variables are
+    requested. A regression multiplies it by variable count instead.
+    """
+    import sys
+
+    import PyESPER.nn  # noqa: F401 -- ensures the submodule is in sys.modules
+
+    # `PyESPER/__init__.py` does `from .nn import nn`, which rebinds the
+    # *package*-level `PyESPER.nn` attribute to the function -- shadowing the
+    # submodule there. `xr_methods._method_fn`'s own `from PyESPER.nn import nn`
+    # reads straight off the submodule object in `sys.modules`, bypassing that
+    # shadowing, so the patch target must be the same: `sys.modules`, not
+    # `PyESPER.nn` attribute access (which would silently patch the function
+    # object itself, not the module's `nn` attribute the real code looks up).
+    pyesper_nn_module = sys.modules["PyESPER.nn"]
+    real_nn = pyesper_nn_module.nn
+
+    def _run(roms_variables) -> int:
+        call_count = {"n": 0}
+
+        def counting_nn(*args, **kwargs):
+            call_count["n"] += 1
+            return real_nn(*args, **kwargs)
+
+        monkeypatch.setattr(pyesper_nn_module, "nn", counting_nn)
+
+        ny, nz = 4, 3
+        rng = np.random.default_rng(0)
+        temp = xr.DataArray(rng.uniform(2, 20, (nz, ny)), dims=("s", "y")).chunk(
+            {"y": 2}
+        )
+        salt = xr.DataArray(rng.uniform(34, 36, (nz, ny)), dims=("s", "y")).chunk(
+            {"y": 2}
+        )
+        lon = xr.DataArray(rng.uniform(-40, 0, ny), dims=("y",))
+        lat = xr.DataArray(rng.uniform(40, 60, ny), dims=("y",))
+        depth = xr.DataArray(np.linspace(0, 1000, nz), dims=("s",))
+
+        estimate_bgc_fields(
+            temp,
+            salt,
+            lon,
+            lat,
+            depth,
+            source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            roms_variables=roms_variables,
+            est_dates=2020.0,
+        )
+        return call_count["n"]
+
+    # (Two variables, not one: a single-`DesiredVariables` request hits an
+    # unrelated pre-existing shape issue elsewhere in PyESPER, orthogonal to
+    # what this test checks.)
+    calls_for_two_vars = _run(["NO3", "ALK"])
+    calls_for_four_vars = _run(["NO3", "ALK", "DIC", "O2"])
+    assert calls_for_two_vars > 0
+    assert calls_for_four_vars == calls_for_two_vars, (
+        f"real nn() call count must not depend on how many variables are "
+        f"requested (one chunk -> one call, regardless of output count): got "
+        f"{calls_for_two_vars} call(s) for 2 variables vs "
+        f"{calls_for_four_vars} call(s) for 4 -- the latter being ~2x the "
+        "former would mean the per-variable-separate-.compute() bug has "
+        "regressed."
+    )
+
+
+@needs_pyesper
 def test_initial_conditions_esper(use_dask):
     grid = _small_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
@@ -204,6 +350,7 @@ def test_initial_conditions_esper(use_dask):
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            bgc_model=BGCMarbl,
             use_dask=use_dask,
         )
         known = BGCMarbl().known_vars()
@@ -224,14 +371,29 @@ def test_initial_conditions_esper(use_dask):
 
 @needs_pyesper
 def test_initial_conditions_esper_use_vars(use_dask):
+    """use_vars down-selection holds on a raw (not auto-completed) bgc object.
+
+    Built directly at the ``InitialConditionsSource`` level: the
+    ``InitialConditions`` wrapper's ``bgc_model`` auto-completion would
+    legitimately re-fill an excluded "required" tracer like NO3/PO4 from a
+    default, which is unrelated to what's under test here (down-selection
+    itself).
+    """
     grid = _small_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with dask.config.set(scheduler="synchronous"):
-        ic = InitialConditions(
+        phys = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
-            bgc_source={"name": "ESPER", "path": _PYESPER_PATH, "method": "lir"},
+            use_dask=use_dask,
+        )
+        ic = InitialConditionsSource(
+            grid=grid,
+            ini_time=datetime(2021, 6, 29),
+            type="bgc",
+            source={"name": "ESPER", "path": _PYESPER_PATH, "method": "lir"},
+            physics_forcing=phys,
             use_vars=["ALK", "DIC"],
             use_dask=use_dask,
         )
@@ -258,19 +420,24 @@ def test_initial_conditions_esper_with_physics_forcing_matches_combined(use_dask
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            bgc_model=BGCMarbl,
             use_dask=use_dask,
         )
 
-        phys = InitialConditions(
+        # `physics_forcing` is a `InitialConditionsSource`-only mechanism (the
+        # `InitialConditions` wrapper always builds its own physics companion
+        # internally), so `phys`/`split` are built directly at that level here.
+        phys = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             use_dask=use_dask,
         )
-        split = InitialConditions(
+        split = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
-            bgc_source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            type="bgc",
+            source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
             physics_forcing=phys,
             use_dask=use_dask,
         )
@@ -297,26 +464,27 @@ def test_initial_conditions_physics_forcing_yaml_roundtrip(tmp_path, use_dask):
     grid = _small_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with dask.config.set(scheduler="synchronous"):
-        phys = InitialConditions(
+        phys = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             use_dask=use_dask,
         )
-        split = InitialConditions(
+        split = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
-            bgc_source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            type="bgc",
+            source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
             physics_forcing=phys,
             use_dask=use_dask,
         )
 
         filepath = tmp_path / "esper_ic.yaml"
         split.to_yaml(filepath)
-        reloaded = InitialConditions.from_yaml(filepath, use_dask=use_dask)
+        reloaded = InitialConditionsSource.from_yaml(filepath, use_dask=use_dask)
 
         assert reloaded.physics_forcing is not None
-        assert reloaded.source is None
+        assert reloaded.source["name"] == "ESPER"
         assert reloaded.physics_forcing.grid is reloaded.grid
 
         for var in ESPER_SUPPORTED_VARS:
@@ -325,34 +493,35 @@ def test_initial_conditions_physics_forcing_yaml_roundtrip(tmp_path, use_dask):
 
 @needs_pyesper
 def test_initial_conditions_merge_combines_physics_and_bgc(use_dask):
-    """`InitialConditions.merge()` combines a physics object with N bgc-only
+    """`InitialConditionsSource.merge()` combines a physics object with N bgc-only
     objects into one dataset, matching a manual `xr.merge` of the same pieces.
     """
     grid = _small_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with dask.config.set(scheduler="synchronous"):
-        phys = InitialConditions(
+        phys = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             use_dask=use_dask,
         )
-        esper = InitialConditions(
+        esper = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
-            bgc_source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            type="bgc",
+            source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
             physics_forcing=phys,
             use_dask=use_dask,
         )
 
-        merged = InitialConditions.merge(phys, esper)
+        merged = InitialConditionsSource.merge(phys, esper)
         expected = xr.merge(
             [phys.ds, esper.ds], compat="override", combine_attrs="override"
         )
         xr.testing.assert_identical(merged, expected)
 
         # Accepts a bare object, not just a list.
-        merged_from_list = InitialConditions.merge(phys, [esper])
+        merged_from_list = InitialConditionsSource.merge(phys, [esper])
         xr.testing.assert_identical(merged, merged_from_list)
 
         for var in ("u", "v", "zeta", "temp", "salt"):
@@ -364,21 +533,22 @@ def test_initial_conditions_merge_combines_physics_and_bgc(use_dask):
 def test_initial_conditions_merge_rejects_empty_bgc_list():
     phys = _small_physics_ic()
     with pytest.raises(ValueError, match="at least one"):
-        InitialConditions.merge(phys, [])
+        InitialConditionsSource.merge(phys, [])
 
 
 def test_initial_conditions_merge_rejects_mismatched_physics_forcing():
     phys = _small_physics_ic()
     other_phys = _small_physics_ic()
-    bgc = InitialConditions(
+    bgc = InitialConditionsSource(
         grid=_small_grid(),
         ini_time=datetime(2021, 6, 29),
-        bgc_source={"name": "constants", "constants": {"ALK": 2350.0}},
+        type="bgc",
+        source={"name": "constants", "constants": {"ALK": 2350.0}},
         physics_forcing=other_phys,
         use_dask=False,
     )
     with pytest.raises(ValueError, match="physics_forcing.*is not `physics`"):
-        InitialConditions.merge(phys, bgc)
+        InitialConditionsSource.merge(phys, bgc)
 
 
 @needs_pyesper
@@ -386,21 +556,24 @@ def test_initial_conditions_merge_with_filepath_saves(tmp_path, use_dask):
     grid = _small_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with dask.config.set(scheduler="synchronous"):
-        phys = InitialConditions(
+        phys = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             use_dask=use_dask,
         )
-        esper = InitialConditions(
+        esper = InitialConditionsSource(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
-            bgc_source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            type="bgc",
+            source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
             physics_forcing=phys,
             use_dask=use_dask,
         )
 
-        saved = InitialConditions.merge(phys, esper, filepath=tmp_path / "merged_ic.nc")
+        saved = InitialConditionsSource.merge(
+            phys, esper, filepath=tmp_path / "merged_ic.nc"
+        )
         assert len(saved) == 1
         reopened = xr.open_dataset(saved[0])
         for var in ("u", "v", "zeta", "temp", "salt", *ESPER_SUPPORTED_VARS):
@@ -412,7 +585,7 @@ def test_boundary_forcing_esper(use_dask):
     grid = _small_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with dask.config.set(scheduler="synchronous"):
-        phys = BoundaryForcing(
+        phys = BoundaryForcingSource(
             grid=grid,
             start_time=datetime(2021, 6, 29),
             end_time=datetime(2021, 6, 30),
@@ -420,7 +593,7 @@ def test_boundary_forcing_esper(use_dask):
             source={"name": "GLORYS", "path": fname},
             use_dask=use_dask,
         )
-        bf = BoundaryForcing(
+        bf = BoundaryForcingSource(
             grid=grid,
             start_time=datetime(2021, 6, 29),
             end_time=datetime(2021, 6, 30),

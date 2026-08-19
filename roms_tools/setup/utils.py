@@ -1984,6 +1984,60 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
+def get_roms_tools_version_info() -> dict[str, str | None]:
+    """Return the roms-tools package version, plus (when available) the exact git
+    commit of the checkout that produced it.
+
+    ``importlib.metadata.version("roms-tools")`` reflects whatever was captured at
+    the last ``pip install``/build -- for an editable install under active
+    development, a plain source edit does **not** refresh that metadata, so the
+    reported version can silently go stale relative to the code that actually ran.
+    Querying git directly at call time catches that: ``roms_tools_git_commit``
+    reflects the *actual* checked-out commit right now (with a ``-dirty`` suffix if
+    the working tree has uncommitted changes), independent of install-time
+    metadata. Returns ``None`` for the commit when not in a git checkout (e.g. a
+    real pip/conda install with no ``.git`` directory) or ``git`` is unavailable --
+    this is a best-effort traceability aid, not a hard requirement.
+
+    Returns
+    -------
+    dict[str, str | None]
+        ``{"roms_tools_version": ..., "roms_tools_git_commit": ... | None}``.
+    """
+    try:
+        roms_tools_version = importlib.metadata.version("roms-tools")
+    except importlib.metadata.PackageNotFoundError:
+        roms_tools_version = "unknown"
+
+    git_commit = None
+    try:
+        import subprocess
+
+        repo_dir = Path(__file__).resolve().parent
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if commit.returncode == 0:
+            git_commit = commit.stdout.strip()
+            dirty = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if dirty.returncode == 0 and dirty.stdout.strip():
+                git_commit += "-dirty"
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    return {"roms_tools_version": roms_tools_version, "roms_tools_git_commit": git_commit}
+
+
 def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
@@ -2007,12 +2061,11 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     filepath = Path(filepath)
 
     # Create YAML header with version information
-    try:
-        roms_tools_version = importlib.metadata.version("roms-tools")
-    except importlib.metadata.PackageNotFoundError:
-        roms_tools_version = "unknown"
-
-    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+    version_info = get_roms_tools_version_info()
+    header = (
+        f"---\nroms_tools_version: {version_info['roms_tools_version']}\n"
+        f"roms_tools_git_commit: {version_info['roms_tools_git_commit']}\n---\n"
+    )
 
     # Write to YAML file
     with filepath.open("w") as file:
@@ -2164,6 +2217,111 @@ def deserialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None
     return src
 
 
+def serialize_bgc_sources(
+    bgc_sources: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """Serialize a ``bgc_sources`` list (the ``BoundaryForcing``/``InitialConditions``
+    wrappers' multi-bgc-source field) for YAML output.
+
+    Each item is ``{"source": RawDataSource, "use_vars": ..., "bgc_interpolation_method": ...}``
+    -- only ``"source"`` needs the ``serialize_source_dict`` treatment (paths, a
+    nested ``Grid`` for a "ROMS" bgc source). Plain ``serialize_paths``/
+    ``serialize_datetime`` (already applied to every other field generically in
+    :func:`to_dict`) do not know about ``Grid`` objects, so without this a
+    ROMS-restart bgc source nested inside ``bgc_sources`` would reach ``yaml.dump()``
+    unconverted and fail (a `Grid` carries a non-YAML-safe `xr.Dataset` attribute).
+    """
+    if bgc_sources is None:
+        return None
+    return [
+        {**item, "source": serialize_source_dict(item.get("source"))}
+        for item in bgc_sources
+    ]
+
+
+def deserialize_bgc_sources(
+    bgc_sources: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """Inverse of :func:`serialize_bgc_sources` -- restores each item's ``"source"``
+    paths (nested ``Grid`` reconstruction, which needs the shared top-level ``Grid``
+    object, is handled by the caller, mirroring how the top-level ``source``/
+    ``bgc_source`` fields already do this in each class's own ``from_yaml``).
+    """
+    if bgc_sources is None:
+        return None
+    return [
+        {**item, "source": deserialize_source_dict(item.get("source"))}
+        for item in bgc_sources
+    ]
+
+
+def build_bgc_companions(
+    source_cls: type,
+    grid: Any,
+    physics_obj: Any,
+    bgc_sources: list[dict[str, Any]],
+    shared_kwargs: dict[str, Any],
+    *,
+    type_: str | None = "bgc",
+) -> list[Any]:
+    """Build one ``source_cls`` instance per ``bgc_sources`` item, each wired to
+    reuse ``physics_obj``'s temp/salt via ``physics_forcing=``.
+
+    Shared construction helper for the ``BoundaryForcing``/``InitialConditions``
+    wrapper classes' ``__post_init__`` -- both build one physics object, then N bgc
+    objects this same way; only what happens *after* (save each bgc object
+    separately vs. merge them into one dataset) differs between the two, so only
+    this common piece is factored out (see the wrapper classes themselves for that
+    divergent final step). A plain function here rather than a shared base class:
+    forcing a base class over two contracts that genuinely diverge (N-separate-files
+    vs. merge-to-one-file) would either leave everything abstract or smuggle
+    IC-only concepts like ``merge()`` into boundary's contract.
+
+    Parameters
+    ----------
+    source_cls : type
+        The ``*Source`` class to instantiate (``BoundaryForcingSource`` or
+        ``InitialConditionsSource``) -- passed in, not imported here, so this stays
+        free of any import-order dependency on either concrete class.
+    grid : Grid
+        Passed through to every constructed object.
+    physics_obj : source_cls
+        The already-built physics companion, passed as ``physics_forcing=`` to
+        every constructed bgc object.
+    bgc_sources : list[dict]
+        One dict per bgc source: ``{"source": RawDataSource, "use_vars": ... |
+        None, "bgc_interpolation_method": ... | None}``. A per-item
+        ``bgc_interpolation_method`` overrides ``shared_kwargs``'s.
+    shared_kwargs : dict
+        The wrapper's own shared kwargs to forward to every constructed object
+        (e.g. ``ini_time``/``start_time``+``end_time``, ``model_reference_date``,
+        ``use_dask``, ``chunks``, ``bgc_interpolation_method`` default, ``prefill``,
+        etc.) -- anything ``source_cls`` accepts that isn't ``source``/``type``/
+        ``physics_forcing``/``use_vars``, which this function sets itself.
+    type_ : str, optional
+        Forced onto each constructed object's ``type`` field when not ``None``
+        (``BoundaryForcingSource``/post-refactor ``InitialConditionsSource`` both
+        have one). Defaults to ``"bgc"``.
+
+    Returns
+    -------
+    list[source_cls]
+        One instance per ``bgc_sources`` item, in order.
+    """
+    companions = []
+    for item in bgc_sources:
+        kwargs = {**shared_kwargs, "grid": grid, "physics_forcing": physics_obj}
+        if type_ is not None:
+            kwargs["type"] = type_
+        kwargs["source"] = item["source"]
+        if item.get("use_vars"):
+            kwargs["use_vars"] = item["use_vars"]
+        if item.get("bgc_interpolation_method"):
+            kwargs["bgc_interpolation_method"] = item["bgc_interpolation_method"]
+        companions.append(source_cls(**kwargs))
+    return companions
+
+
 def serialize_grid(grid_obj: Any) -> dict[str, Any]:
     """Serialize a Grid object to a dictionary, excluding non-serializable attributes."""
     return pop_grid_data(asdict(grid_obj))
@@ -2247,6 +2405,9 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
         if name in {"source", "bgc_source"}:
             forcing_data[name] = serialize_source_dict(value)
             continue
+        if name == "bgc_sources":
+            forcing_data[name] = serialize_bgc_sources(value)
+            continue
 
         value = serialize_datetime(value)
         value = serialize_paths(value)
@@ -2326,6 +2487,8 @@ def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
     for key in ["source", "bgc_source"]:
         if key in forcing_data:
             forcing_data[key] = deserialize_source_dict(forcing_data[key])
+    if "bgc_sources" in forcing_data:
+        forcing_data["bgc_sources"] = deserialize_bgc_sources(forcing_data["bgc_sources"])
 
     return forcing_data
 

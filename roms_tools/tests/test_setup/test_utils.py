@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools import BoundaryForcing, Grid
+from roms_tools import BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
     _compute_density_coord,
@@ -120,7 +120,7 @@ class TestGetTargetCoords:
 # Test yaml roundtrip with multiple source files
 @pytest.fixture()
 def boundary_forcing_from_multiple_source_files(request, use_dask):
-    """Fixture for creating a BoundaryForcing object."""
+    """Fixture for creating a BoundaryForcingSource object."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -135,7 +135,7 @@ def boundary_forcing_from_multiple_source_files(request, use_dask):
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
-    return BoundaryForcing(
+    return BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2011, 1, 1),
         end_time=datetime(2013, 1, 1),
@@ -147,7 +147,7 @@ def boundary_forcing_from_multiple_source_files(request, use_dask):
 def test_roundtrip_yaml(
     boundary_forcing_from_multiple_source_files, request, tmp_path, use_dask
 ):
-    """Test that creating a BoundaryForcing object, saving its parameters to yaml file,
+    """Test that creating a BoundaryForcingSource object, saving its parameters to yaml file,
     and re-opening yaml file creates the same object.
     """
     # Create a temporary filepath using the tmp_path fixture
@@ -158,7 +158,7 @@ def test_roundtrip_yaml(
     ]:  # test for Path object and str
         boundary_forcing_from_multiple_source_files.to_yaml(filepath)
 
-        bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
+        bdry_forcing_from_file = BoundaryForcingSource.from_yaml(filepath, use_dask=use_dask)
 
         assert boundary_forcing_from_multiple_source_files == bdry_forcing_from_file
 
@@ -385,7 +385,7 @@ def test_density_space_interpolation_returns_correct_values():
     interpolated onto a target density coordinate (built from target T/S) must equal
     a direct 1-D linear interpolation of the tracer in density space. This pins the
     full density-interpolation composition (``_compute_density_coord`` feeding
-    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing.
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcingSource.
     """
     from roms_tools.regrid import VerticalRegrid
 
@@ -617,7 +617,7 @@ def test_density_mld_interpolation_returns_correct_values():
     column. The regridded tracer must equal a direct 1-D linear interpolation of the
     tracer against the warped source depth coordinate, evaluated at the (real) target
     depths. This pins the full composition (``_compute_mld_warp`` feeding
-    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing, and also
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcingSource, and also
     checks the values explicitly against hand-computed anchors.
     """
     from roms_tools.regrid import VerticalRegrid

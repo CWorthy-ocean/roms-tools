@@ -9,7 +9,7 @@ import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
-from roms_tools import BGCMarbl, Grid, InitialConditions
+from roms_tools import BGCMarbl, Grid, InitialConditions, InitialConditionsSource
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
@@ -178,11 +178,13 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
     ],
 )
 def test_initial_condition_creation_with_bgc(ic_fixture, request):
-    """The IC object contains only the source's own BGC variables (raw).
+    """The IC object's BGC variables are recognised MARBL names and the core
+    nutrients are present.
 
-    MARBL derivation/fill is performed separately by
-    :meth:`BGCMarbl.process_bgc_fields`; here we only assert the source vars are
-    recognised MARBL names and the core nutrients are present.
+    The ``InitialConditions`` wrapper auto-completes its bgc companion via
+    :meth:`BGCMarbl.process_bgc_fields` internally, so this may see more than the
+    source's own raw variables (e.g. derived tracers); either way, everything
+    present must be a known MARBL name.
     """
     ic = request.getfixturevalue(ic_fixture)
     known = BGCMarbl().known_vars()
@@ -200,19 +202,31 @@ def test_initial_condition_creation_with_bgc(ic_fixture, request):
     ],
 )
 def test_process_bgc_fields_completes_initial_conditions(ic_fixture, request):
-    """BGCMarbl.process_bgc_fields() fills the full MARBL tracer set and drops CHL."""
+    """BGCMarbl.process_bgc_fields() fills the full MARBL tracer set and drops CHL.
+
+    The ``InitialConditions`` wrapper already auto-completes its own ``.bgc``
+    objects in ``__post_init__``, so the fixture's own bgc object is not a useful
+    "before" state here. Build a fresh, not-yet-completed
+    ``InitialConditionsSource`` bgc object from the same physics/source that the
+    fixture used, mirroring what the wrapper does internally minus the
+    ``process_bgc_fields()`` call, to exercise completion as a standalone step.
+    """
     ic = request.getfixturevalue(ic_fixture)
+    raw_bgc = InitialConditionsSource(
+        grid=ic.physics.grid,
+        ini_time=ic.physics.ini_time,
+        type="bgc",
+        source=copy.deepcopy(ic.bgc[0].source),
+        physics_forcing=ic.physics,
+        use_dask=ic.physics.use_dask,
+    )
 
-    # Work on a copy so the session-scoped fixture is not mutated.
-    ic_copy = copy.copy(ic)
-    ic_copy.ds = ic.ds.copy(deep=True)
-
-    result = BGCMarbl().process_bgc_fields(ic_copy)
-    assert result is ic_copy
+    result = BGCMarbl().process_bgc_fields(raw_bgc)
+    assert result is raw_bgc
 
     for var in BGCMarbl().tracer_vars():
-        assert var in ic_copy.ds, f"{var} missing"
-    assert "CHL" not in ic_copy.ds
+        assert var in raw_bgc.ds, f"{var} missing"
+    assert "CHL" not in raw_bgc.ds
 
 
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -244,6 +258,7 @@ def test_initial_conditions_raises_on_regridded_nans(use_dask):
                 "grid": parent_grid,
                 "path": restart_file,
             },
+            bgc_model=BGCMarbl,
         )
 
 
@@ -311,14 +326,13 @@ def test_initial_conditions_missing_physics_name(example_grid, use_dask):
 # Test initialization with a bgc_source dict missing its 'name'
 def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    with pytest.raises(
-        ValueError, match="`bgc_source` must be a dict including a 'name'"
-    ):
+    with pytest.raises(ValueError, match="`source` must include a 'name'"):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"path": "bgc_data.nc"},
+            bgc_model=BGCMarbl,
             use_dask=use_dask,
         )
 
@@ -332,6 +346,7 @@ def test_initial_conditions_invalid_bgc_name(example_grid, use_dask):
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "INVALID_SOURCE", "path": "bgc_data.nc"},
+            bgc_model=BGCMarbl,
             use_dask=use_dask,
         )
 
@@ -362,7 +377,7 @@ def test_initial_conditions_default_climatology(example_grid, use_dask):
         use_dask=use_dask,
     )
 
-    assert initial_conditions.source["climatology"] is False
+    assert initial_conditions.physics.source["climatology"] is False
     assert initial_conditions.bgc_source is None
 
 
@@ -375,10 +390,11 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
         bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
+        bgc_model=BGCMarbl,
         use_dask=use_dask,
     )
 
-    assert initial_conditions.bgc_source["climatology"] is False
+    assert initial_conditions.bgc[0].source["climatology"] is False
 
 
 @pytest.mark.parametrize(
@@ -390,7 +406,9 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
     ],
 )
 def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use_dask):
-    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
+    # Depth-coordinate computation is purely a physics-grid concern (independent of
+    # any bgc companion), so this exercises it on the wrapper's physics object.
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture).physics
 
     # compute interface depth at rho-points and write it into .ds_depth_coords
     initial_conditions._get_depth_coordinates(0, location="rho", depth_type="interface")
@@ -799,6 +817,7 @@ def test_ic_density_vs_depth_interpolation(use_dask):
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_model=BGCMarbl,
         use_dask=use_dask,
     )
 
@@ -871,19 +890,24 @@ def test_ic_density_mld_with_physics_forcing_matches_combined(use_dask):
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
         bgc_interpolation_method="density_mld",
+        bgc_model=BGCMarbl,
         use_dask=use_dask,
     )
 
-    phys = InitialConditions(
+    # `physics_forcing` is a `InitialConditionsSource`-only mechanism (the
+    # `InitialConditions` wrapper always builds its own physics companion
+    # internally), so `phys`/`split` are built directly at that level here.
+    phys = InitialConditionsSource(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         use_dask=use_dask,
     )
-    split = InitialConditions(
+    split = InitialConditionsSource(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
-        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
         bgc_interpolation_method="density_mld",
         physics_forcing=phys,
         use_dask=use_dask,
@@ -919,18 +943,32 @@ def test_ic_bgc_use_vars_subset_does_not_leak_into_validate(use_dask):
     variables actually present *after* ``_apply_use_vars``, see
     ``_present_bgc_bare_names``) -- this pins ``InitialConditions`` to the same
     contract.
+
+    Built directly at the ``InitialConditionsSource`` level (bypassing the
+    ``InitialConditions`` wrapper's ``bgc_model``): the wrapper's own
+    ``process_bgc_fields()`` auto-completion would legitimately re-fill an
+    excluded "required" tracer like ``ALK`` from a default, which is a separate
+    (and correct) concern from what's under test here -- whether ``use_vars``
+    down-selection and ``_validate`` agree on a raw, not-yet-completed object.
     """
     grid = _ic_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
-    # NO3/DIC is a strict subset of what the UNIFIED source actually provides
-    # (ALK, PO4, O2, ... among others) -- must not raise.
-    ic = InitialConditions(
+    phys = InitialConditionsSource(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
-        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        use_dask=use_dask,
+    )
+    # NO3/DIC is a strict subset of what the UNIFIED source actually provides
+    # (ALK, PO4, O2, ... among others) -- must not raise.
+    ic = InitialConditionsSource(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        type="bgc",
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        physics_forcing=phys,
         use_vars=["NO3", "DIC"],
         use_dask=use_dask,
     )
@@ -964,7 +1002,7 @@ def test_ic_default_regrid_path(use_dask):
     """
     grid = _ic_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    ic = InitialConditions(
+    ic = InitialConditionsSource(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
@@ -983,7 +1021,7 @@ def test_ic_legacy_path(use_dask):
     """The legacy AMG-fill + scipy regrid path remains available via explicit options."""
     grid = _ic_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    ic = InitialConditions(
+    ic = InitialConditionsSource(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},

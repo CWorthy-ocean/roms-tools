@@ -955,9 +955,24 @@ def save_datasets(
         )
 
     if use_dask:
+        import dask
         from dask.diagnostics import ProgressBar
 
-        with ProgressBar():
+        # `save_mfdataset` both finishes computing whatever's still lazy in
+        # `dataset_list` (e.g. any not-yet-materialised source regrid) AND writes
+        # the result to `output_filenames`, in one `.store(compute=True)` call --
+        # meaning, under the ambient threaded scheduler, several worker threads can
+        # be mid-*read* from a source NetCDF file (finishing the lazy graph) at the
+        # exact same time others are mid-*write* to the destination file. Observed
+        # in practice as a real hang: worker threads stuck indefinitely in
+        # `xarray.backends.locks` (its netCDF4 lock's `__enter__`), some coming from
+        # a read (`netCDF4_.py`'s `_getitem`) and some from a write (`_setitem`) --
+        # confirmed via `faulthandler.dump_traceback(all_threads=True)`, since every
+        # thread was idle (0% CPU) yet none had progressed. Forcing this specific
+        # call (not the rest of the pipeline) onto the synchronous scheduler makes
+        # every read/write happen one at a time in this one thread -- no concurrent
+        # netCDF4 lock acquisitions at all, so there's nothing left to deadlock.
+        with dask.config.set(scheduler="synchronous"), ProgressBar():
             xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
         xr.save_mfdataset(dataset_list, output_filenames, format=format)

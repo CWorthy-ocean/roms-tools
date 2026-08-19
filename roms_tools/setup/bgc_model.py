@@ -15,8 +15,10 @@ The design intentionally separates two concerns:
   defaults used to fill the remainder.
 
 The public entry point is :meth:`BGCMarbl.process_bgc_fields`, which operates on
-one or more *already-built* ``type="bgc"`` :class:`~roms_tools.setup.boundary_forcing.BoundaryForcing`
-or :class:`~roms_tools.setup.initial_conditions.InitialConditions` objects.  It makes
+one or more *already-built* ``type="bgc"`` :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource`
+or :class:`~roms_tools.setup.initial_conditions.InitialConditionsSource` objects
+(the ``BoundaryForcing``/``InitialConditions`` wrapper classes call this
+internally on their own ``.bgc`` list). It makes
 **no prioritization decisions**: the caller is responsible for arranging (via each
 object's ``use_vars``) that variables do not overlap across files.  It only (1) derives
 tracers from the key fields present in each object (``CHL``/``Fe``/``DIC``/``ALK``),
@@ -282,6 +284,40 @@ class BGCMarbl(BGCModel):
         return objs[0] if single else objs
 
 
+# Name -> class registry for the ``BoundaryForcing``/``InitialConditions`` wrapper
+# classes' ``bgc_model=`` field: a `BGCModel` subclass has to round-trip through
+# YAML as a plain string (``to_dict``'s generic serialization would otherwise pass
+# a raw Python class straight to ``yaml.dump()``, which isn't safe to read back with
+# ``yaml.safe_load_all``). Add an entry here for every new `BGCModel` subclass.
+_BGC_MODEL_REGISTRY: dict[str, type[BGCModel]] = {"BGCMarbl": BGCMarbl}
+
+
+def bgc_model_to_name(cls: type[BGCModel] | None) -> str | None:
+    """Return the registry name for a ``BGCModel`` subclass, for YAML output."""
+    if cls is None:
+        return None
+    for name, registered in _BGC_MODEL_REGISTRY.items():
+        if registered is cls:
+            return name
+    raise ValueError(
+        f"{cls!r} is not in the BGC model registry ({sorted(_BGC_MODEL_REGISTRY)}) "
+        "-- add it to `_BGC_MODEL_REGISTRY` in bgc_model.py so it can round-trip "
+        "through YAML."
+    )
+
+
+def bgc_model_from_name(name: str | None) -> type[BGCModel] | None:
+    """Look up a ``BGCModel`` subclass by its registry name, for YAML input."""
+    if name is None:
+        return None
+    try:
+        return _BGC_MODEL_REGISTRY[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown bgc_model {name!r}; valid options: {sorted(_BGC_MODEL_REGISTRY)}."
+        ) from None
+
+
 def _is_forcing(x) -> bool:
     """A forcing object is anything exposing an xarray ``ds`` attribute."""
     return hasattr(x, "ds")
@@ -290,11 +326,11 @@ def _is_forcing(x) -> bool:
 class _ForcingBGCAdapter:
     """Hide the per-object dataset layout from :class:`BGCMarbl`.
 
-    :class:`~roms_tools.setup.boundary_forcing.BoundaryForcing` stores BGC tracers
-    suffixed by boundary direction (``PO4_south`` ...), whereas
-    :class:`~roms_tools.setup.initial_conditions.InitialConditions` stores them with
-    bare names (``PO4``).  This adapter presents a uniform bare-name interface for
-    reading, deriving, constant-filling, and dropping tracers.
+    :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource` stores BGC
+    tracers suffixed by boundary direction (``PO4_south`` ...), whereas
+    :class:`~roms_tools.setup.initial_conditions.InitialConditionsSource` stores
+    them with bare names (``PO4``).  This adapter presents a uniform bare-name
+    interface for reading, deriving, constant-filling, and dropping tracers.
     """
 
     def __init__(self, obj, model: BGCModel):
@@ -302,7 +338,8 @@ class _ForcingBGCAdapter:
         self.model = model
         self._meta = get_variable_metadata()
         self._known = model.known_vars()
-        # BoundaryForcing exposes a `boundaries` dict; InitialConditions does not.
+        # BoundaryForcingSource exposes a `boundaries` dict; InitialConditionsSource
+        # does not.
         self.is_boundary = hasattr(obj, "boundaries") and isinstance(
             getattr(obj, "boundaries"), dict
         )

@@ -887,6 +887,7 @@ def save_datasets(
     use_dask=False,
     verbose=True,
     format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+    serialize_dask: bool = True,
 ):
     """Save the list of datasets to NetCDF files.
 
@@ -903,6 +904,34 @@ def save_datasets(
         Defaults to True.
     format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
         NetCDF file format passed to ``xarray.save_mfdataset``. Defaults to ``"NETCDF4"``.
+    serialize_dask : bool, optional
+        Only meaningful when ``use_dask=True``. Controls how any dataset in
+        ``dataset_list`` that's still lazy gets computed/written:
+
+        - ``True`` (default): force the actual ``xarray.save_mfdataset`` call onto
+          dask's ``"synchronous"`` scheduler -- every remaining lazy read and every
+          write happens one task at a time, in this one thread -- while boosting
+          BLAS/numba to every visible core for the same call, so that one-at-a-time
+          execution still uses the whole machine rather than one core. Safe
+          regardless of how memory-hungry a single chunk's own computation is
+          (e.g. an ML-backed BGC source like ESPER, whose ``run_nets`` costs
+          roughly 10 KB *per point* -- tens of GB for one chunk at production grid
+          scale; see ``roms_tools.setup.esper``): peak memory is bounded by ONE
+          chunk's own footprint, never multiplied by however many dask workers the
+          ambient config allows, and there is no possibility of concurrent
+          netCDF4/HDF5 library calls racing each other either.
+        - ``False``: no intervention at all -- ``xarray.save_mfdataset`` runs under
+          whatever the ambient dask scheduler/thread configuration already is
+          (typically several concurrent workers). Faster when every lazy source in
+          ``dataset_list`` has an ordinary (not ML-backed) per-chunk memory cost --
+          this is how plain regrid-only forcing has always been saved. Do not use
+          this when an ML-backed high-memory source (see
+          ``InitialConditionsSource.HIGH_MEMORY_METHOD`` /
+          ``BoundaryForcingSource.HIGH_MEMORY_METHOD``) is involved: running that
+          source's chunks concurrently across several dask workers multiplies its
+          already-large per-chunk memory cost by the worker count, which has been
+          observed in practice to exhaust all memory on a 251 GB machine (confirmed
+          via a kernel OOM-kill log) rather than merely running slowly.
 
     Returns
     -------
@@ -955,25 +984,61 @@ def save_datasets(
         )
 
     if use_dask:
-        import dask
         from dask.diagnostics import ProgressBar
 
         # `save_mfdataset` both finishes computing whatever's still lazy in
         # `dataset_list` (e.g. any not-yet-materialised source regrid) AND writes
-        # the result to `output_filenames`, in one `.store(compute=True)` call --
-        # meaning, under the ambient threaded scheduler, several worker threads can
-        # be mid-*read* from a source NetCDF file (finishing the lazy graph) at the
-        # exact same time others are mid-*write* to the destination file. Observed
-        # in practice as a real hang: worker threads stuck indefinitely in
-        # `xarray.backends.locks` (its netCDF4 lock's `__enter__`), some coming from
-        # a read (`netCDF4_.py`'s `_getitem`) and some from a write (`_setitem`) --
-        # confirmed via `faulthandler.dump_traceback(all_threads=True)`, since every
-        # thread was idle (0% CPU) yet none had progressed. Forcing this specific
-        # call (not the rest of the pipeline) onto the synchronous scheduler makes
-        # every read/write happen one at a time in this one thread -- no concurrent
-        # netCDF4 lock acquisitions at all, so there's nothing left to deadlock.
-        with dask.config.set(scheduler="synchronous"), ProgressBar():
-            xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        # the result to `output_filenames`, in one `.store(compute=True)` call.
+        # Under the ambient threaded scheduler, that means several dask workers
+        # run concurrently -- fine for an ordinary (regrid-only) per-chunk memory
+        # cost, but multiplies an ML-backed high-memory source's already-large
+        # per-chunk cost (see this function's docstring) by however many workers
+        # are configured, which has been confirmed (via a kernel OOM-kill log) to
+        # exhaust all memory on a 251 GB machine. A real, separate hang was also
+        # observed and confirmed via a full thread-stack dump: worker threads
+        # stuck indefinitely in `xarray.backends.locks`'s netCDF4 lock, some
+        # coming from a read and some from a write, every thread at 0% CPU --
+        # consistent with (though not conclusively proven to be) the same
+        # memory-pressure cause, since a thread holding that lock while itself
+        # thrashing under memory pressure would make every other thread waiting
+        # on it look identically "stuck".
+        if serialize_dask:
+            # Force every remaining read AND the write itself onto the
+            # synchronous scheduler -- one task at a time, in this one thread --
+            # so peak memory is bounded by ONE chunk's own cost, never multiplied
+            # by a worker count, and there is no concurrent netCDF4/HDF5 call at
+            # all. Compensate for losing cross-chunk parallelism by boosting
+            # BLAS/numba to every visible core for this one call (nothing else is
+            # concurrently competing for them, since dask itself now only ever
+            # has one task in flight) -- restored to whatever they were
+            # immediately after, regardless of success or failure.
+            import os
+
+            import dask
+            import numba
+            import threadpoolctl
+
+            cpu_count = os.cpu_count() or 1
+            prev_numba_threads = numba.get_num_threads()
+            numba.set_num_threads(cpu_count)
+            try:
+                with (
+                    threadpoolctl.threadpool_limits(
+                        limits=cpu_count, user_api="blas"
+                    ),
+                    dask.config.set(scheduler="synchronous"),
+                    ProgressBar(),
+                ):
+                    xr.save_mfdataset(dataset_list, output_filenames, format=format)
+            finally:
+                numba.set_num_threads(prev_numba_threads)
+        else:
+            # No intervention: run under whatever the ambient dask
+            # scheduler/thread configuration already is. Safe/fast for ordinary
+            # (non-high-memory) sources -- this is how forcing has always been
+            # saved before any high-memory (ML-backed) source existed.
+            with ProgressBar():
+                xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
         xr.save_mfdataset(dataset_list, output_filenames, format=format)
 

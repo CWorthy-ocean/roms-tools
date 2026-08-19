@@ -268,14 +268,18 @@ def test_estimate_bgc_fields_call_count_independent_of_variable_count(monkeypatc
     per-chunk `nn()` call (`apply_ufunc` is called once, with N output_core_dims).
     Materialising them with N *separate* `.compute()` calls (one per variable)
     instead of one combined `dask.compute()` does NOT share that upstream task --
-    verified empirically (see `estimate_bgc_fields`'s inline comments) to silently
-    multiply every chunk's real PyESPER invocation count by the number of requested
-    variables. Rather than pin down an exact expected chunk count (which depends on
-    two layers of rechunking -- roms-tools' own plan, then PyESPER's own further
-    "auto" rechunk downstream of it -- and is liable to shift for reasons unrelated
-    to this bug), this checks the one property that actually matters: real `nn()`
-    call count for the same array must be the same whether 1 or 4 variables are
-    requested. A regression multiplies it by variable count instead.
+    verified empirically to silently multiply every chunk's real PyESPER
+    invocation count by the number of requested variables. `estimate_bgc_fields`
+    itself stays lazy (see its docstring), so this test does the materialising a
+    real caller would eventually do -- one combined `dask.compute()` over every
+    requested variable together -- and checks the one property that actually
+    matters: real `nn()` call count for the same array must be the same whether 2
+    or 4 variables are requested. A regression (materialising separately) would
+    multiply it by variable count instead. Rather than pin down an exact expected
+    chunk count (which depends on two layers of rechunking -- roms-tools' own
+    plan, then PyESPER's own further "auto" rechunk downstream of it -- and is
+    liable to shift for reasons unrelated to this bug), only the ratio between
+    the two variable counts is checked.
     """
     import sys
 
@@ -312,7 +316,7 @@ def test_estimate_bgc_fields_call_count_independent_of_variable_count(monkeypatc
         lat = xr.DataArray(rng.uniform(40, 60, ny), dims=("y",))
         depth = xr.DataArray(np.linspace(0, 1000, nz), dims=("s",))
 
-        estimate_bgc_fields(
+        out = estimate_bgc_fields(
             temp,
             salt,
             lon,
@@ -322,6 +326,10 @@ def test_estimate_bgc_fields_call_count_independent_of_variable_count(monkeypatc
             roms_variables=roms_variables,
             est_dates=2020.0,
         )
+        # `estimate_bgc_fields` itself is lazy -- materialise every requested
+        # variable together in one combined call, the way a real caller
+        # eventually does at write time (see the module docstring).
+        dask.compute(*out.values(), scheduler="synchronous")
         return call_count["n"]
 
     # (Two variables, not one: a single-`DesiredVariables` request hits an

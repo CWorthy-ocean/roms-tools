@@ -26,7 +26,7 @@ class _FakeBoundaryForcing:
         self.boundaries = boundaries
         self.saved_to = None
 
-    def save(self, filepath):
+    def save(self, filepath, serialize_dask=None):
         self.saved_to = filepath
 
 
@@ -37,7 +37,7 @@ class _FakeInitialConditions:
         self.ds = ds
         self.saved_to = None
 
-    def save(self, filepath):
+    def save(self, filepath, serialize_dask=None):
         self.saved_to = filepath
 
 

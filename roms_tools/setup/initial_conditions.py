@@ -1445,10 +1445,36 @@ class InitialConditionsSource:
             cmap_name=cmap_name,
         )
 
+    @property
+    def HIGH_MEMORY_METHOD(self) -> bool:
+        """Whether this source's own computation has an unusually large
+        per-dask-chunk memory footprint, making concurrent multi-worker
+        execution risky rather than merely slow.
+
+        ``True`` for the ``ESPER`` bgc source: it derives tracers via PyESPER's
+        ML-backed ``run_nets``, which costs roughly 10 KB *per point* (see
+        ``roms_tools.setup.esper``'s module docstring) -- tens of GB for a single
+        chunk at production grid scale. Running several such chunks concurrently
+        (dask's default) multiplies that by the worker count; confirmed via a
+        kernel OOM-kill log to exhaust all memory on a 251 GB machine. ``False``
+        for every other source (plain regrid/interpolation, negligible per-chunk
+        cost by comparison).
+
+        Used by :meth:`save` (and, for the multi-bgc-source wrapper classes, an
+        OR across every constituent source) to decide whether ``serialize_dask``
+        should default to on or off when not given explicitly.
+        """
+        return (
+            self.type == "bgc"
+            and self.source is not None
+            and self.source.get("name") == "ESPER"
+        )
+
     def save(
         self,
         filepath: str | Path,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+        serialize_dask: bool | None = None,
     ) -> None:
         """Save the initial conditions information to one NetCDF file.
 
@@ -1458,6 +1484,11 @@ class InitialConditionsSource:
             The base path or filename where the dataset should be saved.
         format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
             NetCDF file format. Defaults to ``"NETCDF4"``.
+        serialize_dask : bool, optional
+            See :func:`roms_tools.utils.save_datasets`. Defaults to ``None``,
+            which resolves to :attr:`HIGH_MEMORY_METHOD` -- i.e. automatically
+            on for an ``ESPER`` bgc source, off otherwise. Pass ``True``/``False``
+            explicitly to override that auto-detection either way.
 
         Returns
         -------
@@ -1474,11 +1505,15 @@ class InitialConditionsSource:
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
+        if serialize_dask is None:
+            serialize_dask = self.HIGH_MEMORY_METHOD
+
         saved_filenames = save_datasets(
             dataset_list,
             output_filenames,
             use_dask=self.use_dask,
             format=format,
+            serialize_dask=serialize_dask,
         )
 
         return saved_filenames
@@ -1490,6 +1525,7 @@ class InitialConditionsSource:
         bgc: "InitialConditionsSource | Sequence[InitialConditionsSource]",
         filepath: str | Path | None = None,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+        serialize_dask: bool | None = None,
     ) -> xr.Dataset | list[Path]:
         """Merge a physics object with one or more bgc-only objects into a single
         ROMS-ready initial-conditions dataset.
@@ -1528,6 +1564,12 @@ class InitialConditionsSource:
         format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
             NetCDF file format, passed through to ``save_datasets`` when
             ``filepath`` is given. Defaults to ``"NETCDF4"``.
+        serialize_dask : bool, optional
+            See :func:`roms_tools.utils.save_datasets`; only relevant when
+            ``filepath`` is given. Defaults to ``None``, which resolves to an OR
+            across ``physics.HIGH_MEMORY_METHOD`` and every ``bgc[i]``'s -- i.e.
+            automatically on if any constituent (e.g. an ``ESPER`` bgc source) is
+            high-memory, off otherwise.
 
         Returns
         -------
@@ -1594,11 +1636,17 @@ class InitialConditionsSource:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
+        if serialize_dask is None:
+            serialize_dask = physics.HIGH_MEMORY_METHOD or any(
+                b.HIGH_MEMORY_METHOD for b in bgc_list
+            )
+
         return save_datasets(
             [merged_ds],
             [str(filepath)],
             use_dask=physics.use_dask,
             format=format,
+            serialize_dask=serialize_dask,
         )
 
     def to_yaml(self, filepath: str | Path) -> None:
@@ -1967,10 +2015,25 @@ class InitialConditions:
             cmap_name=cmap_name,
         )
 
+    @property
+    def HIGH_MEMORY_METHOD(self) -> bool:
+        """Whether any constituent source (the physics object, or any bgc
+        source) is high-memory -- see
+        :attr:`InitialConditionsSource.HIGH_MEMORY_METHOD`. An OR across all of
+        them, since :attr:`ds` merges every constituent into one dataset that
+        :meth:`save` writes in a single call -- there is only one decision point
+        for the whole write, unlike :class:`BoundaryForcing`, which saves each
+        constituent separately and so lets each one decide independently.
+        """
+        return self.physics.HIGH_MEMORY_METHOD or any(
+            b.HIGH_MEMORY_METHOD for b in self.bgc
+        )
+
     def save(
         self,
         filepath: str | Path,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+        serialize_dask: bool | None = None,
     ) -> list[Path]:
         """Save the complete initial conditions to one NetCDF file.
 
@@ -1980,6 +2043,12 @@ class InitialConditions:
             The base path or filename where the dataset should be saved.
         format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
             NetCDF file format. Defaults to ``"NETCDF4"``.
+        serialize_dask : bool, optional
+            See :func:`roms_tools.utils.save_datasets`. Defaults to ``None``,
+            which resolves to :attr:`HIGH_MEMORY_METHOD` -- i.e. automatically on
+            if any constituent source (e.g. an ``ESPER`` bgc source) is
+            high-memory, off otherwise. Pass ``True``/``False`` explicitly to
+            override that auto-detection either way.
 
         Returns
         -------
@@ -1989,8 +2058,14 @@ class InitialConditions:
         filepath = Path(filepath)
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
+        if serialize_dask is None:
+            serialize_dask = self.HIGH_MEMORY_METHOD
         return save_datasets(
-            [self.ds], [str(filepath)], use_dask=self.use_dask, format=format
+            [self.ds],
+            [str(filepath)],
+            use_dask=self.use_dask,
+            format=format,
+            serialize_dask=serialize_dask,
         )
 
     def to_yaml(self, filepath: str | Path) -> None:

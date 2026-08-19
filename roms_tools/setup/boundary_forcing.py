@@ -1580,11 +1580,32 @@ class BoundaryForcingSource:
         else:
             line_plot(field.where(mask), title=title, ax=ax)
 
+    @property
+    def HIGH_MEMORY_METHOD(self) -> bool:
+        """Whether this source's own computation has an unusually large
+        per-dask-chunk memory footprint, making concurrent multi-worker
+        execution risky rather than merely slow.
+
+        ``True`` for the ``ESPER`` bgc source: it derives tracers via PyESPER's
+        ML-backed ``run_nets``, which costs roughly 10 KB *per point* (see
+        ``roms_tools.setup.esper``'s module docstring) -- tens of GB for a single
+        chunk at production grid scale. Running several such chunks concurrently
+        (dask's default) multiplies that by the worker count; confirmed via a
+        kernel OOM-kill log to exhaust all memory on a 251 GB machine. ``False``
+        for every other source (plain regrid/interpolation, negligible per-chunk
+        cost by comparison).
+
+        Used by :meth:`save` to decide whether ``serialize_dask`` should default
+        to on or off when not given explicitly.
+        """
+        return self.type == "bgc" and self.source.get("name") == "ESPER"
+
     def save(
         self,
         filepath: str | Path,
         group: bool = True,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+        serialize_dask: bool | None = None,
     ) -> None:
         """Save the boundary forcing fields to one or more NetCDF files.
 
@@ -1601,6 +1622,11 @@ class BoundaryForcingSource:
             Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `True`.
         format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
             NetCDF file format. Defaults to ``"NETCDF4"``.
+        serialize_dask : bool, optional
+            See :func:`roms_tools.utils.save_datasets`. Defaults to ``None``,
+            which resolves to :attr:`HIGH_MEMORY_METHOD` -- i.e. automatically on
+            for an ``ESPER`` source, off otherwise. Pass ``True``/``False``
+            explicitly to override that auto-detection either way.
 
         Returns
         -------
@@ -1620,11 +1646,15 @@ class BoundaryForcingSource:
             dataset_list = [self.ds]
             output_filenames = [str(filepath)]
 
+        if serialize_dask is None:
+            serialize_dask = self.HIGH_MEMORY_METHOD
+
         saved_filenames = save_datasets(
             dataset_list,
             output_filenames,
             use_dask=self.use_dask,
             format=format,
+            serialize_dask=serialize_dask,
         )
 
         return saved_filenames
@@ -1911,12 +1941,31 @@ class BoundaryForcing:
         else:
             self.bgc = []
 
+    @property
+    def HIGH_MEMORY_METHOD(self) -> bool:
+        """Whether any constituent source (the physics object, or any bgc
+        source) is high-memory -- see
+        :attr:`BoundaryForcingSource.HIGH_MEMORY_METHOD`. An OR across all of
+        them, exposed for introspection/parity with :class:`InitialConditions`,
+        but :meth:`save` does NOT use it to make one blanket decision the way
+        ``InitialConditions.save`` does: physics and every bgc source here are
+        each written by their own separate call (unlike IC's single merged
+        write), so each one auto-detects from its *own*
+        ``HIGH_MEMORY_METHOD`` instead -- finer-grained than an OR would be
+        (e.g. a UNIFIED bgc source's save stays fast even when a sibling ESPER
+        bgc source's save auto-serializes).
+        """
+        return self.physics.HIGH_MEMORY_METHOD or any(
+            b.HIGH_MEMORY_METHOD for b in self.bgc
+        )
+
     def save(
         self,
         physics_filepath: str | Path,
         bgc_filepaths: list[str | Path] | None = None,
         group: bool = True,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+        serialize_dask: bool | None = None,
     ) -> tuple[list[Path], list[str | Path]]:
         """Save the physics object and every BGC source to its own file.
 
@@ -1934,6 +1983,14 @@ class BoundaryForcing:
             Defaults to `True`.
         format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
             NetCDF file format. Defaults to ``"NETCDF4"``.
+        serialize_dask : bool, optional
+            See :func:`roms_tools.utils.save_datasets`. Defaults to ``None`` on
+            every constituent's own save -- i.e. each of the physics save and
+            every bgc source's save independently resolves its own
+            ``HIGH_MEMORY_METHOD`` (see :attr:`BoundaryForcingSource.HIGH_MEMORY_METHOD`)
+            rather than one blanket decision for all of them. Pass ``True``/
+            ``False`` explicitly here to force that same choice onto every one
+            of them instead.
 
         Returns
         -------
@@ -1947,7 +2004,12 @@ class BoundaryForcing:
             multiple files, discover the real files on disk the same way you would
             for any grouped roms-tools save.
         """
-        physics_paths = self.physics.save(physics_filepath, group=group, format=format)
+        physics_paths = self.physics.save(
+            physics_filepath,
+            group=group,
+            format=format,
+            serialize_dask=serialize_dask,
+        )
 
         bgc_paths: list[str | Path] = list(bgc_filepaths) if bgc_filepaths else []
         if self.bgc:
@@ -1957,7 +2019,9 @@ class BoundaryForcing:
                     f"(got {len(bgc_paths)} path(s) for {len(self.bgc)} source(s))."
                 )
             self.bgc_model().process_bgc_fields(
-                self.bgc, filepath=[str(p) for p in bgc_paths]
+                self.bgc,
+                filepath=[str(p) for p in bgc_paths],
+                serialize_dask=serialize_dask,
             )
         elif bgc_paths:
             raise ValueError(

@@ -113,7 +113,7 @@ class BGCModel:
                 ", ".join(missing),
             )
 
-    def process_bgc_fields(self, forcings, filepath=None):
+    def process_bgc_fields(self, forcings, filepath=None, serialize_dask=None):
         """Complete the BGC tracer set across one or more forcing objects.
 
         Abstract — implemented by concrete model subclasses such as
@@ -204,7 +204,7 @@ class BGCMarbl(BGCModel):
     # ------------------------------------------------------------------
     # Object-level completion across one or more forcing objects.
     # ------------------------------------------------------------------
-    def process_bgc_fields(self, forcings, filepath=None):
+    def process_bgc_fields(self, forcings, filepath=None, serialize_dask=None):
         """Complete the MARBL tracer set across one or more forcing objects.
 
         Makes **no prioritization decisions** — the caller is responsible (via each
@@ -230,6 +230,12 @@ class BGCMarbl(BGCModel):
             If given, each (modified) object is saved.  Pass a single path when
             ``forcings`` is a single object, or a list of paths matching the
             objects (one per object, in order).
+        serialize_dask : bool, optional
+            See :func:`roms_tools.utils.save_datasets`; only relevant when
+            ``filepath`` is given. Defaults to ``None``, which lets each object's
+            own :meth:`save` resolve its own ``HIGH_MEMORY_METHOD``
+            independently -- pass ``True``/``False`` to force the same choice
+            onto every object instead.
 
         Returns
         -------
@@ -279,7 +285,7 @@ class BGCMarbl(BGCModel):
                     f"(got {len(paths)} path(s) for {len(objs)} object(s))."
                 )
             for obj, p in zip(objs, paths):
-                obj.save(p)
+                obj.save(p, serialize_dask=serialize_dask)
 
         return objs[0] if single else objs
 

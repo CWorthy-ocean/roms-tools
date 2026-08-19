@@ -15,22 +15,26 @@ The heavy lifting -- dask-lazy, chunked, uncertainty-free estimation -- lives in
 * converts ESPER's µmol/kg output to MARBL's mmol/m³ using potential density;
 * clamps physically non-negative tracers at 0.
 
-The PyESPER estimate itself is forced eager (via a serialised ``dask.compute()``) here
-when the inputs are dask-backed, rather than left lazy for some later, unrelated,
-concurrency-unaware ``.compute()`` to materialise -- PyESPER's neural-net path is only
-safe processed one dask chunk at a time (see ``estimate_bgc_fields``'s inline comments).
-The cheap unit-conversion step after it may re-wrap the result in a lazy dask graph
-again, which is fine -- see ``estimate_bgc_fields``'s Returns section.
+The returned DataArrays are lazy (dask) when the inputs are, same as any other
+lazy result in a forcing dataset -- callers materialise them (along with
+everything else in the dataset) at write time. PyESPER's neural-net path
+(``nn_xr``/``mixed_xr``, via a numba ``@njit(parallel=True)`` kernel -- see
+``PyESPER/run_nets.py``'s own docstring) has a real per-chunk memory cost (~10
+KB/point, tens of GB for one chunk at production grid scale) that multiplies by
+however many dask workers run its chunks concurrently -- confirmed via a kernel
+OOM-kill log to exhaust all memory on a 251 GB machine when left fully
+concurrent at write time. The mitigation lives in the caller that eventually
+materialises this module's lazy results -- see
+``InitialConditionsSource.HIGH_MEMORY_METHOD`` /
+``BoundaryForcingSource.HIGH_MEMORY_METHOD`` and
+:func:`roms_tools.utils.save_datasets`'s ``serialize_dask`` -- not here.
 """
 
 from __future__ import annotations
 
-import os
 import sys
 
-import dask
 import numpy as np
-import threadpoolctl
 import xarray as xr
 
 from roms_tools.setup.utils import compute_potential_density, get_variable_metadata
@@ -158,7 +162,7 @@ def estimate_bgc_fields(
     ----------
     temp, salt : xarray.DataArray
         In-situ temperature (°C) and practical salinity on the ROMS grid (may be
-        dask-backed -- see Returns for what that does and doesn't mean for laziness).
+        dask-backed; results are then lazy -- see Returns).
     lon, lat : xarray.DataArray
         Longitude (°E) and latitude (°N) of the same points (broadcastable to ``temp``).
     depth : xarray.DataArray
@@ -175,14 +179,10 @@ def estimate_bgc_fields(
     -------
     dict[str, xarray.DataArray]
         ``{roms_name: DataArray}`` in mmol/m³, dims/coords matching the broadcast
-        inputs. The actual PyESPER estimate is forced eager (serialised) internally
-        regardless of the inputs' own laziness -- see the inline comments below for
-        why -- but the µmol/kg -> mmol/m³ conversion applied afterwards is plain
-        elementwise arithmetic against the (still possibly dask-backed) density, so
-        the returned arrays may still come back lazy if the inputs were. That
-        remaining lazy step is ordinary numpy-vectorisable math, not PyESPER/numba,
-        so it's safe for the caller to materialise however (including under a
-        threaded scheduler) it normally would.
+        inputs, lazy when the inputs are -- not materialised here. See this
+        module's own docstring for the oversubscription hazard this implies for
+        callers computing several chunks concurrently, and how it's mitigated
+        (at the caller level, not inside this function).
     """
     validate_esper_source(source)
     method = str(source.get("method", "nn")).lower()
@@ -230,60 +230,22 @@ def estimate_bgc_fields(
         est_dates=est_dates,
     )
 
-    # Force this call's own chunks to materialise now, one at a time, under
-    # dask's "synchronous" scheduler -- never returned lazily for some later,
-    # unrelated `.compute()` to parallelise across dask's normal thread-pool
-    # workers. PyESPER's neural-net path (`nn_xr`/`mixed_xr`, via numba
-    # `@njit(parallel=True)` kernels -- see PyESPER/run_nets.py's own
-    # docstring) is only documented-safe run one chunk at a time: several
-    # chunks entering it concurrently (i.e. from more than one dask worker
-    # thread at once) was observed to reliably deadlock the whole process --
-    # every thread parked in futex_wait, 0% CPU, stuck at a fixed task count.
-    # Restricting the *outer* dask scheduler to run this call's chunks
-    # serially -- not just capping inner thread counts -- is the one
-    # mitigation that actually removes concurrent entry entirely.
-    #
-    # All of `est`'s DataArrays share ONE underlying per-chunk `nn()`/`lir()`
-    # call (`apply_ufunc` above was called once, with N output_core_dims, so
-    # one `_estimate_block` invocation produces every requested variable's
-    # chunk together) -- they must be materialised TOGETHER in a single
-    # `dask.compute()` call, not one at a time. Computing them one at a time
-    # (each via its own separate `.compute()`) does NOT share that upstream
-    # task across the separate calls -- verified empirically: 3 outputs x 2
-    # chunks computed separately triggered 6 upstream calls, one per
-    # (output, chunk) pair, vs. 2 (one per chunk) when computed together --
-    # silently multiplying every chunk's cost by the number of requested
-    # variables (up to 6x here, for ALK/DIC/NO3/PO4/SiO3/O2 together).
-    #
-    # Meanwhile the *inner* parallelism (`_tansig`'s own numba threads, and
-    # BLAS/OpenMP inside `batched_forward`'s matmuls) should run at full
-    # strength during this one serialised call: nothing else is competing for
-    # cores while dask itself processes only one chunk at a time, so there is
-    # no oversubscription risk here -- unlike the ambient
-    # `dask_num_workers`-many-concurrent-chunks case cstar-forge's BLAS pin
-    # (`threadpool_limits(limits=1)`, active for the whole input-generation
-    # run) guards against elsewhere. Locally lifting that pin for just this
-    # call recovers the multi-core speed the ambient 1-thread pin would
-    # otherwise leave on the table.
-    #
-    # Only meaningful (and only possible) when the inputs are actually
-    # dask-backed; the eager (non-dask) path never had concurrent chunks to
-    # begin with.
-    if hasattr(temp.data, "chunks"):
-        # `limits=None` is a threadpoolctl no-op (it means "don't change
-        # anything", not "remove limits") -- verified empirically that it
-        # leaves an ambient outer `threadpool_limits(limits=1)` (e.g.
-        # cstar-forge's BLAS pin around its whole input-generation run)
-        # untouched. An explicit thread count is required to actually
-        # override it for this call.
-        with threadpoolctl.threadpool_limits(
-            limits=os.cpu_count(), user_api="blas"
-        ):
-            names = list(est)
-            computed = dask.compute(
-                *(est[name] for name in names), scheduler="synchronous"
-            )
-            est = dict(zip(names, computed, strict=True))
+    # `est`'s DataArrays are left lazy here, same as any other dask-backed
+    # result -- deliberately NOT forced to materialise eagerly. An earlier
+    # version of this function did force eager materialisation (one
+    # `dask.compute()` per call, covering every requested variable together),
+    # to work around PyESPER's neural-net path needing dask chunks run one at a
+    # time rather than concurrently (see PyESPER/run_nets.py's own docstring
+    # for the mechanism). That mitigation is no longer applied here: splitting
+    # available cores between dask's own worker count and each worker's
+    # internal BLAS/numba thread count (see cstar-forge's `input_data.py`)
+    # avoids the same oversubscription hazard while keeping cross-chunk
+    # parallelism, so ESPER's results can go back to being computed the same
+    # way as every other lazy result -- together with the rest of the forcing
+    # dataset, in whatever single `dask.compute()`/`.store()` call the caller
+    # eventually does at write time (naturally sharing this call's own shared
+    # per-chunk upstream work across every requested variable, since they're
+    # all part of the same graph passed to that one call).
 
     # µmol/kg -> mmol/m³ via potential density (sigma0 + 1000), matching the GLODAP
     # adapter's convention; then clamp physically non-negative tracers at 0.

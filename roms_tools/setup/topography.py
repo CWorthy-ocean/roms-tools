@@ -10,8 +10,8 @@ import xarray as xr
 from roms_tools.datasets.lat_lon_datasets import (
     EMODDataset,
     ETOPO5Dataset,
-    SRTM15Dataset,
     ETOPO2022Dataset,
+    SRTM15Dataset,
 )
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import handle_boundaries

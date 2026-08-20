@@ -275,6 +275,61 @@ def nan_check_batch(items, serialize_dask: bool = False) -> None:
             raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
 
 
+def materialize_before_check(ds, var_names, serialize_dask: bool) -> None:
+    """Realize each of ``var_names`` in ``ds`` via one combined ``dask.compute()`` call
+    and write the results back into ``ds`` in place, *before* any NaN-check view is
+    built from them.
+
+    Only meaningful (and only does anything) when ``serialize_dask`` is True -- a
+    HIGH_MEMORY_METHOD source (e.g. ESPER). :func:`nan_check_batch`'s own compute of a
+    narrower check view (e.g. ``ds[v].squeeze()``/``ds[v].isel(bry_time=0)``) already
+    forces the same expensive upstream computation to run, but discards the realized
+    values -- so a later ``.save()`` on this same ``ds`` recomputes them from scratch.
+
+    ``var_names`` should be EVERY variable sharing the source's expensive computation
+    (e.g. an ESPER source's full ``use_vars`` list), not just the subset
+    ``nan_check_batch`` actually validates -- :func:`roms_tools.setup.bgc_model.bgc_variable_info`
+    flags only ``ALK`` as ``validate=True``, but ALK/DIC/NO3/PO4/SiO3/O2 all come from
+    one shared per-chunk PyESPER call. Caching only the validated variable(s) would
+    leave the rest lazy and still force a second real compute of them at save time --
+    reproducing the bug for everything except the one checked variable.
+
+    For a HIGH_MEMORY_METHOD source, materializing costs no more than the existing
+    narrower check already pays for typical run configurations (PyESPER's own chunk
+    plan, :func:`roms_tools.setup.esper._pyesper_chunk_plan`, collapses every dimension
+    but the largest into one chunk -- so a same-size-or-larger portion of that chunk
+    was already being computed and discarded). This does NOT hold universally: a
+    boundary run with a very long ``bry_time`` series could push a direction's point
+    count past the chunk plan's single-chunk threshold, splitting along time instead
+    of collapsing -- at that point materializing the full time series here costs more
+    (extra compute + memory) than today's narrower time-slice check does. Not a
+    concern for typical run durations; a real limit for very long ones.
+
+    A no-op when ``serialize_dask`` is False, or ``var_names`` is empty.
+
+    Notes
+    -----
+    dask (at least the version pinned here) does not reliably share/dedupe
+    computation across a single ``dask.compute()`` call between a collection and a
+    derived view of that same collection -- verified empirically (a monkeypatched,
+    call-counting ``map_blocks`` function was invoked twice, not once, when its full
+    array and a slice of it were requested together in one ``dask.compute()`` call
+    under the synchronous scheduler). This is why materialization must happen in its
+    own call, strictly *before* any NaN-check view is built from ``ds``: a check view
+    built before this call still points at the old, now-stale lazy graph and would
+    force a second real compute if used afterward.
+    """
+    if not serialize_dask or not var_names:
+        return
+    names = [v for v in var_names if v in ds]
+    if not names:
+        return
+    with serialize_dask_and_boost_threads(True):
+        realized = dask.compute(*(ds[v] for v in names))
+    for v, value in zip(names, realized):
+        ds[v] = value
+
+
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
     """Replace NaN values in the field with a specified fill value.
 

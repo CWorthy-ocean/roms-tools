@@ -22,6 +22,7 @@ from roms_tools.setup.utils import (
     gc_dist,
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
+    materialize_before_check,
     month_to_time_index,
     nan_check,
     nan_check_batch,
@@ -886,6 +887,55 @@ def test_nan_check_batch():
                 (dirty.chunk(), mask, "boom"),
             ]
         )
+
+
+def test_materialize_before_check_realizes_and_preserves_metadata():
+    """`materialize_before_check` computes each named variable via one combined
+    `dask.compute()` call and writes the realized (non-dask-backed) result back
+    into `ds` in place, preserving attrs/encoding -- so a later real compute
+    (e.g. `.save()`) doesn't need to redo the (potentially expensive) work."""
+    import dask.array as da
+
+    calls = {"n": 0}
+
+    def expensive(x):
+        calls["n"] += 1
+        return x * 2
+
+    arr = da.from_array(np.arange(10).astype("float64"), chunks=5).map_blocks(
+        expensive, dtype="float64"
+    )
+    da_var = xr.DataArray(arr, dims=["x"], name="foo", attrs={"units": "m"})
+    da_var.encoding["_FillValue"] = -999.0
+    ds = xr.Dataset({"foo": da_var, "bar": ("x", np.arange(10, 20))})
+
+    # `map_blocks` itself does some eager meta-inference work at construction
+    # time (calls `expensive` at least once before any real compute) -- reset
+    # the counter after building `ds` so the assertions below only measure
+    # what `materialize_before_check` itself does.
+    calls["n"] = 0
+
+    # serialize_dask=False is a no-op: the variable stays dask-backed, nothing
+    # computed.
+    materialize_before_check(ds, ["foo"], serialize_dask=False)
+    assert ds["foo"].chunks is not None
+    assert calls["n"] == 0
+
+    materialize_before_check(ds, ["foo"], serialize_dask=True)
+    assert ds["foo"].chunks is None, "foo should be realized (no longer dask-backed)"
+    assert calls["n"] == 2, "expensive() should run once per chunk, not be skipped"
+    assert ds["foo"].attrs == {"units": "m"}
+    assert ds["foo"].encoding["_FillValue"] == -999.0
+    np.testing.assert_array_equal(ds["foo"].values, np.arange(10) * 2)
+
+    # A second call with the now-realized variable must not recompute it.
+    materialize_before_check(ds, ["foo"], serialize_dask=True)
+    assert calls["n"] == 2, "materializing an already-concrete variable should be a no-op"
+
+    # An empty/unknown var_names list is also a safe no-op.
+    materialize_before_check(ds, [], serialize_dask=True)
+    materialize_before_check(ds, ["not_a_real_var"], serialize_dask=True)
+    assert calls["n"] == 2
 
 
 class TestMonthlyClimatologyExpansion:

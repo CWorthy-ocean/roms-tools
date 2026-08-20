@@ -50,6 +50,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     group_dataset,
+    materialize_before_check,
     nan_check_batch,
     pop_grid_data,
     substitute_nans_by_fillvalue,
@@ -1399,6 +1400,26 @@ class BoundaryForcingSource:
         Validation is performed on the initial boundary time step (`bry_time=0`) for each
         variable in the dataset.
         """
+        # Materialize every variable (every direction) sharing this source's expensive
+        # computation -- not just ALK, which is all bgc_variable_info() actually flags
+        # for the NaN check below -- so a later .save() on this same `ds` reuses these
+        # values instead of recomputing them. Must happen before any check view (e.g.
+        # `.isel(bry_time=0)`) is built from `ds`; see materialize_before_check's
+        # docstring for why, and for a caveat on very-long-`bry_time` boundary runs
+        # (this fix's cost profile changes if a direction's ESPER chunk plan splits
+        # along time instead of collapsing to one chunk -- not a concern for typical
+        # run durations, verified against this project's actual production grid).
+        materialize_before_check(
+            ds,
+            [
+                f"{var_name}_{direction}"
+                for var_name in self.variable_info
+                for direction, is_enabled in self.boundaries.items()
+                if is_enabled
+            ],
+            serialize_dask=self.HIGH_MEMORY_METHOD,
+        )
+
         # Build the NaN checks lazily and evaluate them in a single computation so a
         # lazy subgraph shared across variables (e.g. the density/MLD interpolation
         # coordinate reused across BGC tracers) is computed once, not once per variable.
@@ -1437,7 +1458,11 @@ class BoundaryForcingSource:
                             )
                         )
 
-        nan_check_batch(checks, serialize_dask=self.HIGH_MEMORY_METHOD)
+        # serialize_dask=False here: materialize_before_check has already realized
+        # everything HIGH_MEMORY_METHOD needs to protect, so nothing lazy remains to
+        # serialize -- for non-HIGH_MEMORY_METHOD sources this is unchanged behavior
+        # (self.HIGH_MEMORY_METHOD is already False there).
+        nan_check_batch(checks, serialize_dask=False)
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.

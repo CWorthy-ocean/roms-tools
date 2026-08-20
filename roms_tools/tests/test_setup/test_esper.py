@@ -684,3 +684,78 @@ def test_esper_construction_triggers_serialize_dask_via_validate(monkeypatch):
         "nan_check_batch call -- if this is empty or only contains False, the "
         "construction-time compute is running unprotected again."
     )
+
+
+@needs_pyesper
+def test_esper_validate_does_not_recompute_at_save_time(monkeypatch, tmp_path):
+    """Regression test for a real production double-compute: construction-time
+    `_validate()` and the later `.save()` each independently forced PyESPER's
+    expensive per-chunk neural-net evaluation (`nn()`), because `_validate()`'s
+    `nan_check_batch` computed-and-discarded the checked field instead of
+    caching it -- confirmed via a production log showing ~16 "PyESPER_NN
+    took..." lines before "Writing the following NetCDF files:" and ~16 more
+    after, roughly doubling wall-clock time. Fixed via
+    `materialize_before_check` (`roms_tools/setup/utils.py`), called from
+    `_validate()` before any NaN-check view is built.
+
+    This test checks BOTH of the two ways a narrower fix could still be wrong:
+    1. Total real `nn()` call count must not increase between construction
+       (validate has run) and `.save()` -- proves `.save()` reused validate's
+       realized values rather than recomputing.
+    2. EVERY one of the source's `use_vars` (not just `ALK`, the only variable
+       `bgc_variable_info()` actually flags `validate=True` for) must already
+       be concrete (non-dask-backed) in `.ds` right after construction --
+       proves the fix caches every variable sharing ALK's underlying PyESPER
+       call, not just ALK itself. A fix that only cached the validated
+       variable would still pass check 1 by accident in some cases while
+       silently failing to help DIC/NO3/PO4/SiO3/O2 at all.
+    """
+    import sys
+
+    import PyESPER.nn  # noqa: F401 -- ensures the submodule is in sys.modules
+
+    # See test_estimate_bgc_fields_call_count_independent_of_variable_count's
+    # comment above for why this must patch `sys.modules["PyESPER.nn"].nn`,
+    # not `PyESPER.nn` attribute access (shadowed by `PyESPER/__init__.py`).
+    pyesper_nn_module = sys.modules["PyESPER.nn"]
+    real_nn = pyesper_nn_module.nn
+    call_count = {"n": 0}
+
+    def counting_nn(*args, **kwargs):
+        call_count["n"] += 1
+        return real_nn(*args, **kwargs)
+
+    monkeypatch.setattr(pyesper_nn_module, "nn", counting_nn)
+
+    with dask.config.set(scheduler="synchronous"):
+        phys = _small_physics_ic(use_dask=True)
+        esper = InitialConditionsSource(
+            grid=_small_grid(),
+            ini_time=datetime(2021, 6, 29),
+            type="bgc",
+            source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+            use_vars=list(ESPER_SUPPORTED_VARS),
+            physics_forcing=phys,
+            use_dask=True,
+        )
+
+        assert call_count["n"] > 0, (
+            "construction (_validate()) should have already triggered at "
+            "least one real PyESPER nn() call"
+        )
+        calls_after_construction = call_count["n"]
+
+        for var in ESPER_SUPPORTED_VARS:
+            assert esper.ds[var].chunks is None, (
+                f"{var} is still dask-backed right after construction -- "
+                "materialize_before_check should have realized every "
+                "use_var sharing ALK's PyESPER call, not just ALK itself"
+            )
+
+        esper.save(tmp_path / "esper_ic.nc")
+
+        assert call_count["n"] == calls_after_construction, (
+            f"PyESPER nn() was called {call_count['n'] - calls_after_construction} "
+            "more time(s) during .save() -- validate-time results were not "
+            "reused, reproducing the original double-compute bug"
+        )

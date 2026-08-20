@@ -49,6 +49,7 @@ from roms_tools.setup.utils import (
     get_roms_tools_version_info,
     get_target_coords,
     get_variable_metadata,
+    materialize_before_check,
     nan_check_batch,
     pop_grid_data,
     substitute_nans_by_fillvalue,
@@ -1258,6 +1259,16 @@ class InitialConditionsSource:
         else:
             variable_info = self.variable_info_physics
 
+        # Materialize every variable sharing this source's expensive computation (not
+        # just the ones actually NaN-checked below -- bgc_variable_info() flags only
+        # ALK as validate=True, but all of an ESPER source's use_vars come from one
+        # shared per-chunk PyESPER call) so a later .save() on this same `ds` reuses
+        # these values instead of recomputing them. Must happen before any check view
+        # is built from `ds` -- see materialize_before_check's docstring for why.
+        materialize_before_check(
+            ds, list(variable_info), serialize_dask=self.HIGH_MEMORY_METHOD
+        )
+
         # Build the NaN checks lazily and evaluate them in a single computation so a
         # lazy subgraph shared across variables (e.g. the density/MLD interpolation
         # coordinate reused across BGC tracers) is computed once, not once per variable.
@@ -1272,7 +1283,11 @@ class InitialConditionsSource:
                     mask = self.grid.ds.mask_v
                 checks.append((ds[var_name].squeeze(), mask, None))
 
-        nan_check_batch(checks, serialize_dask=self.HIGH_MEMORY_METHOD)
+        # serialize_dask=False here: materialize_before_check has already realized
+        # everything HIGH_MEMORY_METHOD needs to protect, so nothing lazy remains to
+        # serialize -- for non-HIGH_MEMORY_METHOD sources this is unchanged behavior
+        # (self.HIGH_MEMORY_METHOD is already False there).
+        nan_check_batch(checks, serialize_dask=False)
 
     def _add_global_metadata(self, ds):
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"

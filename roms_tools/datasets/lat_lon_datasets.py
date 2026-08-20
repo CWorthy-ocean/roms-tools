@@ -2588,12 +2588,11 @@ class ETOPO2022Dataset(LatLonDataset):
     )
 
     dim_names: dict[str, str] = field(
-        default_factory=lambda: {"longitude": "lon","latitude": "lat"}
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
-    
     needs_lateral_fill: bool = False
 
-    
+
 @dataclass
 class TPXOManager:
     """Manages multiple TPXODataset instances and selects and processes tidal

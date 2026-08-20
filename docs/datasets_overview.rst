@@ -23,6 +23,10 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - Grid (Topography, high-resolution)
      - Yes
      - `EMODnet <https://doi.org/10.12770/ff3aff8a-cff1-44a3-a2c8-1910bf109f85>`_
+   * - ETOPO2022
+     - Grid (Topography, high-resolution)
+     - Yes
+     - `NOAA <https://www.ncei.noaa.gov/products/etopo-global-relief-model>`_
    * - Natural Earth
      - Grid (Land-Sea Mask)
      - No (auto-downloaded)
@@ -127,6 +131,30 @@ European high-resolution bathymetry dataset. An alternative to SRTM15, particula
         - Longitude (degrees east)
       * - ``elevation``
         - Bathymetry/topography (m)
+
+
+ETOPO2022
+~~~~~~~~~
+
+High-resolution global relief model at up to 15 arc-second resolution, the successor to ETOPO5. An alternative to SRTM15 and EMODnet, providing combined topography and bathymetry worldwide. Unlike ETOPO5, ROMS-Tools does not download ETOPO2022 automatically.
+
+:Required for: Grid (Topography)
+:Available at: `NOAA ETOPO 2022 Global Relief Model <https://www.ncei.noaa.gov/products/etopo-global-relief-model>`_
+
+.. dropdown:: Required fields
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Field
+        - Description
+      * - ``lat``
+        - Latitude (degrees north)
+      * - ``lon``
+        - Longitude (degrees east)
+      * - ``z``
+        - Topography (m)
 
 
 GSHHG

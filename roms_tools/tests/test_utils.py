@@ -708,3 +708,69 @@ def test_save_datasets_netcdf_format(tmp_path, netcdf_format: NetCDFFormat):
 
     with xr.open_dataset(output_path.with_suffix(".nc")) as loaded:
         xr.testing.assert_equal(ds, loaded)
+
+
+@pytest.mark.parametrize(
+    "serialize_dask,expect_progressbar",
+    [
+        (True, False),
+        (False, True),
+    ],
+)
+def test_save_datasets_progressbar_skipped_when_serialize_dask(
+    tmp_path, monkeypatch, serialize_dask, expect_progressbar
+):
+    """A dask ``ProgressBar`` is only meaningful/accurate for the ordinary
+    ambient-scheduler write (many small chunks). When ``serialize_dask`` forces
+    the synchronous scheduler (e.g. a HIGH_MEMORY_METHOD source like ESPER), a
+    handful of large, uneven-duration chunks make the percentage barely move
+    for minutes then jump, and its background redraw garbles the per-chunk
+    print()s those sources emit -- looking broken rather than informative. It
+    must be skipped whenever ``serialize_dask`` is True, and still shown
+    otherwise."""
+    import dask.diagnostics
+
+    entered = []
+
+    class _SpyProgressBar:
+        def __enter__(self):
+            entered.append(True)
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(dask.diagnostics, "ProgressBar", _SpyProgressBar)
+
+    ds = xr.Dataset({"a": ("x", np.arange(10))}).chunk({"x": 5})
+    output_path = tmp_path / "test_output"
+
+    save_datasets(
+        [ds],
+        [str(output_path)],
+        use_dask=True,
+        serialize_dask=serialize_dask,
+    )
+
+    assert bool(entered) is expect_progressbar
+
+
+def test_save_datasets_serialize_dask_logs_plain_start_done_messages(
+    tmp_path, caplog
+):
+    """With no ProgressBar, the serialize_dask=True write must still log a
+    plain start/done message pair so it doesn't look silent/stalled."""
+    ds = xr.Dataset({"a": ("x", np.arange(10))}).chunk({"x": 5})
+    output_path = tmp_path / "test_output"
+
+    with caplog.at_level("INFO"):
+        save_datasets(
+            [ds],
+            [str(output_path)],
+            use_dask=True,
+            serialize_dask=True,
+        )
+
+    messages = [r.message for r in caplog.records]
+    assert any("Writing NetCDF file(s)..." in m for m in messages)
+    assert any(m.startswith("Finished writing NetCDF file(s) in") for m in messages)

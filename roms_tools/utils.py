@@ -3,6 +3,7 @@ import glob
 import logging
 import re
 import textwrap
+import time
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -933,6 +934,14 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Format a duration as e.g. ``"17m 46.2s"`` or ``"8.1s"`` (no minutes)."""
+    minutes, secs = divmod(seconds, 60)
+    if minutes:
+        return f"{int(minutes)}m {secs:.1f}s"
+    return f"{secs:.1f}s"
+
+
 def save_datasets(
     dataset_list,
     output_filenames,
@@ -951,6 +960,8 @@ def save_datasets(
         List of filenames for the output files.
     use_dask : bool, optional
         Whether to use Dask diagnostics (e.g., progress bars) when saving the datasets, by default False.
+        The progress bar itself is only shown when ``serialize_dask`` resolves to ``False``; see that
+        parameter below for why it's skipped otherwise.
     verbose : bool, optional
         Whether to log information about the files being written. If True, logs the output filenames.
         Defaults to True.
@@ -1036,8 +1047,6 @@ def save_datasets(
         )
 
     if use_dask:
-        from dask.diagnostics import ProgressBar
-
         # `save_mfdataset` both finishes computing whatever's still lazy in
         # `dataset_list` (e.g. any not-yet-materialised source regrid) AND writes
         # the result to `output_filenames`, in one `.store(compute=True)` call.
@@ -1047,8 +1056,35 @@ def save_datasets(
         # `serialize_dask_and_boost_threads`'s docstring for the full mechanism
         # and the confirmed real-world failures (a kernel OOM-kill, and a
         # separate netCDF4-lock hang) this guards against.
-        with serialize_dask_and_boost_threads(serialize_dask), ProgressBar():
-            xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        #
+        # A dask `ProgressBar` is skipped whenever `serialize_dask` is forcing
+        # the synchronous scheduler: with only a handful of large, uneven-
+        # duration chunks (e.g. one PyESPER call per chunk, tens of seconds
+        # each), the percentage barely moves for minutes at a time then jumps --
+        # and the bar's background redraw interleaves with each chunk's own
+        # print()s on the same terminal line, garbling both. It looks broken
+        # rather than informative, so it's replaced with a plain start/done
+        # message pair (the per-chunk progress is already visible via
+        # whatever prints the high-memory source itself emits, e.g. PyESPER's
+        # "PyESPER_NN took ... to run" per chunk). Kept for the ordinary
+        # (non-serialized) write, where many small chunks make the dask bar an
+        # accurate, useful signal.
+        if serialize_dask:
+            if verbose:
+                logging.info("Writing NetCDF file(s)...")
+            _start = time.perf_counter()
+            with serialize_dask_and_boost_threads(serialize_dask):
+                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+            if verbose:
+                logging.info(
+                    "Finished writing NetCDF file(s) in %s",
+                    _format_elapsed(time.perf_counter() - _start),
+                )
+        else:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
         xr.save_mfdataset(dataset_list, output_filenames, format=format)
 

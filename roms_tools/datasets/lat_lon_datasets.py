@@ -37,7 +37,6 @@ from roms_tools.regrid import _xesmf_extrap_kwargs
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
-    climatology_mid_month_days,
     compute_potential_density,
     get_target_coords,
 )
@@ -127,16 +126,6 @@ class LatLonDataset:
           time entry within that window. Raises a ValueError if none are found.
 
         Only used when `end_time` is None. Has no effect otherwise.
-    start_time_pad : bool, optional
-        If True (default), time selection includes one record before `start_time` so that
-        ROMS can interpolate forcing at the exact simulation start boundary. If False, the
-        lower selection bound is `start_time` itself. Has no effect when `end_time` is None
-        or `climatology` is True.
-    end_time_pad : bool, optional
-        If True (default), time selection includes one record after `end_time` so that
-        ROMS can interpolate forcing at the exact simulation end boundary. If False, the
-        upper selection bound is `end_time` itself. Has no effect when `end_time` is None
-        or `climatology` is True.
     apply_post_processing: bool
         Indicates whether to post-process the dataset for futher use. Defaults to True.
 
@@ -177,8 +166,6 @@ class LatLonDataset:
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     read_zarr: bool = False
     allow_flex_time: bool = False
-    start_time_pad: bool = True
-    end_time_pad: bool = True
     apply_post_processing: bool = True
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
     _default_lateral_dask_chunk: ClassVar[int | None] = None
@@ -381,8 +368,6 @@ class LatLonDataset:
             end_time=self.end_time,
             climatology=self.climatology,
             allow_flex_time=self.allow_flex_time,
-            start_time_pad=self.start_time_pad,
-            end_time_pad=self.end_time_pad,
         )
 
         return ds
@@ -1715,98 +1700,27 @@ class UnifiedDataset(LatLonDataset):
 
     Notes
     -----
-    The dataset is filled across land (and below the seafloor) during preprocessing,
-    so it is NaN-free at every depth level. Since it carries no mask and needs no
-    lateral filling, the `needs_lateral_fill` attribute is set to `False`.
-
-    Two file generations are supported. From v2.1 on, the horizontal and vertical
-    dimensions are named ``longitude``/``latitude``/``depth`` and ``month`` is an
-    integer index 1-12. Earlier files name those dimensions ``lon``/``lat``/``dep``
-    and store ``month`` as a day-of-year; they are still read, with a warning.
+    Pierre has already addressed lateral filling during preprocessing,
+    and since the dataset does not contain a mask, the `needs_lateral_fill`
+    attribute is set to `False`.
     """
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
-    #: Pre-v2.1 names of the dimensions, keyed by their current name.
-    _legacy_dim_names: ClassVar[dict[str, str]] = {
-        "longitude": "lon",
-        "latitude": "lat",
-        "depth": "dep",
-    }
-
     needs_lateral_fill: bool = False
-
-    # overwrite load_data method from parent class
-    def load_data(self) -> xr.Dataset:
-        """Load the dataset, chunking either file generation's lateral dimensions.
-
-        The chunk sizes are keyed by on-disk dimension name, which differs between
-        file generations. xarray silently ignores chunk keys that are not dimensions
-        of the file, so listing both generations' names keeps lateral chunking
-        effective either way.
-
-        Returns
-        -------
-        ds : xr.Dataset
-            The loaded xarray Dataset containing the forcing data.
-        """
-        original_chunks = self.chunks
-        if original_chunks:
-            chunks = dict(original_chunks)
-            for canonical, legacy in self._legacy_dim_names.items():
-                current = self.dim_names.get(canonical)
-                if current in chunks:
-                    chunks.setdefault(legacy, chunks[current])
-            self.chunks = chunks
-        try:
-            return super().load_data()
-        finally:
-            self.chunks = original_chunks
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """Ensure the dataset's dimensions and time dimension are standardized.
+        """Ensure the dataset's time dimension is correctly defined and standardized.
 
-        Dimensions are renamed to ``longitude``/``latitude``/``depth`` where a pre-v2.1
-        file still uses ``lon``/``lat``/``dep``. This method then verifies that the time
-        dimension exists in the dataset and assigns it appropriately. If the "time"
-        dimension is missing, the method attempts to assign an existing "time" or "month"
-        dimension. If neither exists, it expands the dataset to include a "time"
-        dimension with a size of one.
+        This method verifies that the time dimension exists in the dataset and assigns it appropriately. If the "time" dimension is missing, the method attempts to assign an existing "time" or "month" dimension. If neither exists, it expands the dataset to include a "time" dimension with a size of one.
 
         Returns
         -------
         ds : xr.Dataset
             The xarray Dataset with the correct time dimension assigned or added.
         """
-        renames = {
-            legacy: canonical
-            for canonical, legacy in self._legacy_dim_names.items()
-            if legacy in ds.dims or legacy in ds.variables
-        }
-        month_is_day_of_year = "month" in ds.coords and float(ds["month"].max()) > 12
-        if renames or month_is_day_of_year:
-            logging.warning(
-                "The unified BGC file appears to predate v2.1 (dimensions named "
-                f"{sorted(renames)} and/or a day-of-year 'month' coordinate). It is "
-                "still supported, but consider updating to the latest version; see "
-                "https://roms-tools.readthedocs.io/en/latest/datasets.html#Downloading-the-Unified-BGC-Dataset"
-            )
-        if renames:
-            # A pre-v2.1 file carries e.g. a `depth(dep)` coordinate variable, so swap
-            # the dimension onto that variable where possible; renaming the dimension
-            # instead would leave the coordinate unindexed. Fall back to a plain rename
-            # for any dimension whose coordinate variable is missing.
-            swaps = {
-                legacy: canonical
-                for legacy, canonical in renames.items()
-                if ds.get(canonical) is not None and ds[canonical].dims == (legacy,)
-            }
-            if swaps:
-                ds = ds.swap_dims(swaps)
-            leftover = {k: v for k, v in renames.items() if k not in swaps}
-            if leftover:
-                ds = ds.rename(leftover)
+        ds = ds.rename({"lon": "longitude", "lat": "latitude", "dep": "depth"})
         ds = ds.assign_coords(
             {
                 "latitude": ds["latitude"],
@@ -1827,16 +1741,6 @@ class UnifiedDataset(LatLonDataset):
                 time_dim = "month" if "month" in ds.dims else "season"
 
                 if time_dim == "month":
-                    if not month_is_day_of_year:
-                        # From v2.1 on, 'month' is an integer index 1-12 ("take at
-                        # center of month"), so place each record at its month center.
-                        ds = ds.assign_coords(
-                            month=xr.DataArray(
-                                climatology_mid_month_days().astype("float64"),
-                                dims="month",
-                            )
-                        )
-
                     # Interpolate season to month so all variables have the same time dimension
                     for var_name in list(self.var_names.values()) + list(
                         self.opt_var_names.values()
@@ -1870,9 +1774,9 @@ class UnifiedDataset(LatLonDataset):
 class UnifiedBGCDataset(UnifiedDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {
-            "longitude": "longitude",
-            "latitude": "latitude",
-            "depth": "depth",
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "dep",
         }
     )
     var_names: dict[str, str] = field(
@@ -1934,8 +1838,8 @@ class UnifiedBGCDataset(UnifiedDataset):
 class UnifiedBGCSurfaceDataset(UnifiedDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {
-            "longitude": "longitude",
-            "latitude": "latitude",
+            "longitude": "lon",
+            "latitude": "lat",
         }
     )
     var_names: dict[str, str] = field(
@@ -1955,8 +1859,8 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
 class UnifiedRestoringSurfaceDataset(UnifiedDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {
-            "longitude": "longitude",
-            "latitude": "latitude",
+            "longitude": "lon",
+            "latitude": "lat",
         }
     )
     var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt_WOA"})
@@ -1970,11 +1874,9 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
 
     def post_process(self) -> None:
         """
-        Processes the unified dataset's WOA salinity as follows:
+        Processes WOA2018 data values as follows:
         - Reduce 3D field to surface values.
-
-        No mask is derived: the unified dataset is filled across land, so the surface
-        salinity is NaN-free.
+        - Apply a mask to the dataset based on locations of NaN values.
         """
         if "depth" in self.dim_names:
             self.ds = self.ds.sel(depth=0)
@@ -2577,6 +2479,22 @@ class EMODDataset(LatLonDataset):
         self.ds["mask"] = mask
 
 
+@dataclass(kw_only=True)
+class ETOPO2022Dataset(LatLonDataset):
+    """Represents topography data on the original grid from the ETOPO2022 dataset."""
+
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "z",
+        }
+    )
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon","latitude": "lat"}
+    )
+    
+    needs_lateral_fill: bool = False
+    
 @dataclass
 class TPXOManager:
     """Manages multiple TPXODataset instances and selects and processes tidal

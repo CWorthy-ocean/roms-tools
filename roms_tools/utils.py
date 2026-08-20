@@ -1,3 +1,4 @@
+import contextlib
 import glob
 import logging
 import re
@@ -15,6 +16,57 @@ import pandas as pd
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
+
+
+@contextlib.contextmanager
+def serialize_dask_and_boost_threads(serialize: bool):
+    """If ``serialize``, force dask onto its ``"synchronous"`` scheduler (one
+    task at a time, in this thread) for the duration of the block, while
+    boosting BLAS/numba to every visible core for that same one-task-at-a-time
+    execution -- restored to whatever they were on exit, regardless of success
+    or failure. If not ``serialize``, this is a no-op: the ambient dask/BLAS/
+    numba configuration (typically several concurrent dask workers) applies
+    unchanged.
+
+    Concurrent execution multiplies a high-memory, ML-backed source's
+    already-large per-chunk memory cost (see :mod:`roms_tools.setup.esper`'s
+    module docstring: PyESPER's ``run_nets`` costs ~10 KB/point, tens of GB for
+    one chunk at production grid scale) by however many dask workers run its
+    chunks concurrently -- confirmed via a kernel OOM-kill log to exhaust all
+    memory on a 251 GB machine. Serializing bounds peak memory to ONE chunk's
+    own cost regardless of the ambient worker count; the thread boost
+    compensates for the lost cross-chunk parallelism (nothing else is
+    concurrently competing for cores while dask itself only ever has one task
+    in flight).
+
+    Shared by :func:`save_datasets` (the actual netCDF4 write) and
+    ``roms_tools.setup.utils.nan_check_batch`` -- whose own ``dask.compute()``
+    can run during a high-memory source's object *construction* (via that
+    source's own ``_validate()``), well before ``.save()`` is ever called, and
+    needs exactly the same protection: a real production crash was traced via a
+    full thread-stack dump to `_validate()`'s NaN check, not the write, running
+    unprotected under the ambient concurrent scheduler.
+    """
+    if not serialize:
+        yield
+        return
+    import os
+
+    import dask
+    import numba
+    import threadpoolctl
+
+    cpu_count = os.cpu_count() or 1
+    prev_numba_threads = numba.get_num_threads()
+    numba.set_num_threads(cpu_count)
+    try:
+        with (
+            threadpoolctl.threadpool_limits(limits=cpu_count, user_api="blas"),
+            dask.config.set(scheduler="synchronous"),
+        ):
+            yield
+    finally:
+        numba.set_num_threads(prev_numba_threads)
 
 FilePaths: TypeAlias = str | Path | list[Path | str]
 
@@ -991,54 +1043,12 @@ def save_datasets(
         # the result to `output_filenames`, in one `.store(compute=True)` call.
         # Under the ambient threaded scheduler, that means several dask workers
         # run concurrently -- fine for an ordinary (regrid-only) per-chunk memory
-        # cost, but multiplies an ML-backed high-memory source's already-large
-        # per-chunk cost (see this function's docstring) by however many workers
-        # are configured, which has been confirmed (via a kernel OOM-kill log) to
-        # exhaust all memory on a 251 GB machine. A real, separate hang was also
-        # observed and confirmed via a full thread-stack dump: worker threads
-        # stuck indefinitely in `xarray.backends.locks`'s netCDF4 lock, some
-        # coming from a read and some from a write, every thread at 0% CPU --
-        # consistent with (though not conclusively proven to be) the same
-        # memory-pressure cause, since a thread holding that lock while itself
-        # thrashing under memory pressure would make every other thread waiting
-        # on it look identically "stuck".
-        if serialize_dask:
-            # Force every remaining read AND the write itself onto the
-            # synchronous scheduler -- one task at a time, in this one thread --
-            # so peak memory is bounded by ONE chunk's own cost, never multiplied
-            # by a worker count, and there is no concurrent netCDF4/HDF5 call at
-            # all. Compensate for losing cross-chunk parallelism by boosting
-            # BLAS/numba to every visible core for this one call (nothing else is
-            # concurrently competing for them, since dask itself now only ever
-            # has one task in flight) -- restored to whatever they were
-            # immediately after, regardless of success or failure.
-            import os
-
-            import dask
-            import numba
-            import threadpoolctl
-
-            cpu_count = os.cpu_count() or 1
-            prev_numba_threads = numba.get_num_threads()
-            numba.set_num_threads(cpu_count)
-            try:
-                with (
-                    threadpoolctl.threadpool_limits(
-                        limits=cpu_count, user_api="blas"
-                    ),
-                    dask.config.set(scheduler="synchronous"),
-                    ProgressBar(),
-                ):
-                    xr.save_mfdataset(dataset_list, output_filenames, format=format)
-            finally:
-                numba.set_num_threads(prev_numba_threads)
-        else:
-            # No intervention: run under whatever the ambient dask
-            # scheduler/thread configuration already is. Safe/fast for ordinary
-            # (non-high-memory) sources -- this is how forcing has always been
-            # saved before any high-memory (ML-backed) source existed.
-            with ProgressBar():
-                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        # cost, but dangerous for a high-memory source; see
+        # `serialize_dask_and_boost_threads`'s docstring for the full mechanism
+        # and the confirmed real-world failures (a kernel OOM-kill, and a
+        # separate netCDF4-lock hang) this guards against.
+        with serialize_dask_and_boost_threads(serialize_dask), ProgressBar():
+            xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
         xr.save_mfdataset(dataset_list, output_filenames, format=format)
 

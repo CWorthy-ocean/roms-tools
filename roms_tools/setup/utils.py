@@ -40,7 +40,7 @@ from roms_tools.processing_methods import (  # noqa: F401
     validate_extrap,
     validate_prefill,
 )
-from roms_tools.utils import transpose_dimensions
+from roms_tools.utils import serialize_dask_and_boost_threads, transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -233,7 +233,7 @@ def nan_check(field, mask, error_message=None) -> None:
         raise ValueError(error_message)
 
 
-def nan_check_batch(items) -> None:
+def nan_check_batch(items, serialize_dask: bool = False) -> None:
     """Validate several fields for NaNs at wet points in a single computation.
 
     Parameters
@@ -241,6 +241,17 @@ def nan_check_batch(items) -> None:
     items : iterable of (field, mask, error_message)
         One tuple per field to check. ``error_message`` may be ``None`` to use the
         default message.
+    serialize_dask : bool, optional
+        See :func:`roms_tools.utils.serialize_dask_and_boost_threads`. Defaults
+        to ``False`` (this function is called from many contexts that never
+        involve a high-memory source, so it does not auto-detect the way
+        ``.save()`` does -- callers whose fields may include one, e.g.
+        ``InitialConditionsSource._validate``, pass their own
+        ``self.HIGH_MEMORY_METHOD`` explicitly). This call happens during
+        object *construction* (via ``_validate()``), not at ``.save()`` time --
+        a real production crash was traced via a full thread-stack dump to
+        exactly this ``dask.compute()`` running unprotected, under the ambient
+        concurrent scheduler, well before any write was ever reached.
 
     Notes
     -----
@@ -257,7 +268,8 @@ def nan_check_batch(items) -> None:
     if not items:
         return
     flags = [nan_flag(field, mask) for field, mask, _ in items]
-    results = dask.compute(*flags)
+    with serialize_dask_and_boost_threads(serialize_dask):
+        results = dask.compute(*flags)
     for (_field, _mask, error_message), result in zip(items, results):
         if bool(np.asarray(result)):
             raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)

@@ -628,3 +628,59 @@ def test_boundary_forcing_esper(use_dask):
         for d in active:
             for var in BGCMarbl().tracer_vars():
                 assert f"{var}_{d}" in bf2.ds, f"{var}_{d} missing"
+
+
+@needs_pyesper
+def test_esper_construction_triggers_serialize_dask_via_validate(monkeypatch):
+    """Regression test for a real production crash (confirmed via a full
+    thread-stack dump): an ESPER source's own ``_validate()`` -- called from
+    ``__post_init__``, i.e. at OBJECT CONSTRUCTION time, well before any
+    ``.save()`` -- runs ``nan_check_batch``, which does a real
+    ``dask.compute()``. That ``dask.compute()`` was NOT covered by
+    ``HIGH_MEMORY_METHOD``-based serialization at all (only ``.save()`` was),
+    so it ran under whatever the ambient (often fully concurrent, several
+    dask workers) scheduler happened to be -- multiplying ESPER's own
+    already-large per-chunk memory cost by however many workers ran
+    concurrently. Confirmed via a kernel OOM-kill log to exhaust all memory on
+    a 251 GB machine. Fixed by threading ``serialize_dask=self.HIGH_MEMORY_METHOD``
+    into ``nan_check_batch`` from both ``InitialConditionsSource._validate``
+    and ``BoundaryForcingSource._validate``. This test checks that
+    construction of an ESPER-backed source actually invokes
+    ``serialize_dask_and_boost_threads(True)`` -- not just that
+    ``HIGH_MEMORY_METHOD`` is ``True`` in isolation, which would not have
+    caught this bug (the property existed and was correct; it just wasn't
+    being *consulted* at construction time).
+    """
+    import roms_tools.setup.utils as setup_utils_mod
+    import roms_tools.utils as utils_mod
+
+    calls = []
+    real = utils_mod.serialize_dask_and_boost_threads
+
+    def spy(serialize):
+        calls.append(serialize)
+        return real(serialize)
+
+    # Patch both the defining module and the name `setup/utils.py` imported,
+    # since the latter is what `nan_check_batch` actually calls.
+    monkeypatch.setattr(utils_mod, "serialize_dask_and_boost_threads", spy)
+    monkeypatch.setattr(setup_utils_mod, "serialize_dask_and_boost_threads", spy)
+
+    phys = _small_physics_ic()
+    calls.clear()  # ignore whatever physics's own (non-ESPER) construction triggered
+
+    esper = InitialConditionsSource(
+        grid=_small_grid(),
+        ini_time=datetime(2021, 6, 29),
+        type="bgc",
+        source={"name": "ESPER", "path": _PYESPER_PATH},
+        physics_forcing=phys,
+        use_dask=False,
+    )
+    assert esper.HIGH_MEMORY_METHOD is True
+    assert True in calls, (
+        "constructing an ESPER-backed InitialConditionsSource must trigger "
+        "serialize_dask_and_boost_threads(True) via _validate()'s "
+        "nan_check_batch call -- if this is empty or only contains False, the "
+        "construction-time compute is running unprotected again."
+    )

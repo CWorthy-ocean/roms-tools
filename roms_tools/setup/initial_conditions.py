@@ -1272,7 +1272,7 @@ class InitialConditionsSource:
                     mask = self.grid.ds.mask_v
                 checks.append((ds[var_name].squeeze(), mask, None))
 
-        nan_check_batch(checks)
+        nan_check_batch(checks, serialize_dask=self.HIGH_MEMORY_METHOD)
 
     def _add_global_metadata(self, ds):
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"

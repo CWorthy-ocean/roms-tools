@@ -1437,7 +1437,7 @@ class BoundaryForcingSource:
                             )
                         )
 
-        nan_check_batch(checks)
+        nan_check_batch(checks, serialize_dask=self.HIGH_MEMORY_METHOD)
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.

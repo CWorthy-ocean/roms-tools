@@ -2577,6 +2577,22 @@ class EMODDataset(LatLonDataset):
         self.ds["mask"] = mask
 
 
+@dataclass(kw_only=True)
+class ETOPO2022Dataset(LatLonDataset):
+    """Represents topography data on the original grid from the ETOPO2022 dataset."""
+
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "z",
+        }
+    )
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    needs_lateral_fill: bool = False
+
+
 @dataclass
 class TPXOManager:
     """Manages multiple TPXODataset instances and selects and processes tidal

@@ -11,6 +11,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     EMODDataset,
     ETOPO5Dataset,
     SRTM15Dataset,
+    ETOPO2022Dataset，
 )
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import handle_boundaries
@@ -122,10 +123,13 @@ def _get_topography_data(source):
     elif source["name"] == "EMOD":
         kwargs["filename"] = source["path"]
         data = EMODDataset(**kwargs)
+    elif source["name"] == "ETOPO2022":
+        kwargs["filename"] = source["path"]
+        data = ETOPO2022Dataset(**kwargs)
     else:
         raise ValueError(
-            'Only "ETOPO5", "SRTM15" and "EMOD" are valid options for topography_source["name"].'
-        )
+            'Only "ETOPO5" and "SRTM15" and "EMOD" and "ETOPO2022" are valid options for topography_source["name"].'
+        )    
 
     return data
 

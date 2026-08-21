@@ -3,7 +3,7 @@ import logging
 import time
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -54,6 +54,40 @@ HEADER_SZ = 96
 HEADER_CHAR = "="
 
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
+
+# BGC sources that fetch their own data when the source dict carries no "path",
+# so the usual "`source` must include a 'path'" check does not apply to them.
+_SELF_DOWNLOADING_BGC: frozenset[str] = frozenset({"WOA"})
+
+# BGC sources that only ever exist as a 12-month climatology. Their "climatology"
+# flag defaults to True instead of False, since the alternative reliably fails
+# later with a confusing message about integer time values.
+_CLIMATOLOGY_ONLY_BGC: frozenset[str] = frozenset({"WOA"})
+
+# Extra source-dict keys forwarded to the dataset constructor, per source name.
+# Keys the caller omitted are not passed, so the dataclass defaults apply.
+_BGC_SOURCE_EXTRA_KWARGS: dict[str, tuple[str, ...]] = {
+    "WOA": ("deep_fill", "deep_blend_halfwidth", "ts_decade"),
+}
+
+
+def bgc_source_extra_kwargs(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Collect the per-source dataset options carried by a BGC source dict.
+
+    Parameters
+    ----------
+    source : Mapping
+        A ``source`` / ``bgc_source`` dictionary.
+
+    Returns
+    -------
+    dict
+        The subset of the options registered for this source name that the caller
+        actually supplied. Empty for sources that take no extra options.
+    """
+    allowed = _BGC_SOURCE_EXTRA_KWARGS.get(str(source.get("name")), ())
+    return {key: source[key] for key in allowed if key in source}
+
 
 def apply_source_prefill(data, regrid_config, prefill_kwargs) -> None:
     """Apply a whole-domain source prefill when the config requests one.

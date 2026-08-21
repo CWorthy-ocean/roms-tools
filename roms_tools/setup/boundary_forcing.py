@@ -15,6 +15,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     GLORYSDataset,
     GLORYSDefaultDataset,
     UnifiedBGCDataset,
+    WOABGCDataset,
 )
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.processing_methods import (
@@ -36,8 +37,11 @@ from roms_tools.setup.bgc_model import (
     bgc_variable_info,
 )
 from roms_tools.setup.utils import (
+    _CLIMATOLOGY_ONLY_BGC,
+    _SELF_DOWNLOADING_BGC,
     RawDataSource,
     add_time_info_to_ds,
+    bgc_source_extra_kwargs,
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
@@ -142,6 +146,7 @@ _DATASET_MAP: dict[str, dict[str, dict[str, type]]] = {
         "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
         "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
         "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
+        "WOA": defaultdict(lambda: WOABGCDataset),
     },
 }
 
@@ -1057,7 +1062,7 @@ class BoundaryForcingSource:
                     "parent ROMS run is the nesting workflow, not a BGC source; see "
                     "roms_tools.setup.nesting.)"
                 )
-            elif "path" not in self.source:
+            elif "path" not in self.source and name not in _SELF_DOWNLOADING_BGC:
                 raise ValueError("`source` must include a 'path'.")
         else:
             if "path" not in self.source:
@@ -1065,8 +1070,12 @@ class BoundaryForcingSource:
                     raise ValueError("`source` must include a 'path'.")
                 self.source["path"] = GLORYSDefaultDataset.dataset_name
 
-        # Assign default value
-        self.source["climatology"] = self.source.get("climatology", False)
+        # Assign default value. Sources that only ever exist as a 12-month
+        # climatology default to True, since False fails later with a confusing
+        # message about integer time values.
+        self.source["climatology"] = self.source.get(
+            "climatology", name in _CLIMATOLOGY_ONLY_BGC
+        )
 
         # -------------------------------------------------------
         # Boundary selection defaults and validation
@@ -1113,11 +1122,13 @@ class BoundaryForcingSource:
 
         data_type = dataset_map[self.type][source_name][variant]
 
-        if isinstance(self.source["path"], bool):
+        if isinstance(self.source.get("path"), bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
         return data_type(
-            filename=self.source["path"],
+            # A self-downloading source (see _SELF_DOWNLOADING_BGC) may carry no
+            # "path"; it fetches its own data when handed a falsy filename.
+            filename=self.source.get("path", ""),
             start_time=self.start_time,
             end_time=self.end_time,
             climatology=self.source["climatology"],  # type: ignore[arg-type]
@@ -1126,6 +1137,7 @@ class BoundaryForcingSource:
             initial_slice_bounds=self.initial_slice_bounds,
             start_time_pad=self.start_time_pad,
             end_time_pad=self.end_time_pad,
+            **bgc_source_extra_kwargs(self.source),
         )
 
     def _set_variable_info(self, data):

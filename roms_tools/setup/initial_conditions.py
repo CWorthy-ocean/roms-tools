@@ -18,6 +18,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     GLORYSDefaultDataset,
     LatLonDataset,
     UnifiedBGCDataset,
+    WOABGCDataset,
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
 from roms_tools.plot import plot
@@ -35,10 +36,13 @@ from roms_tools.setup.bgc_model import (
     bgc_variable_info,
 )
 from roms_tools.setup.utils import (
+    _CLIMATOLOGY_ONLY_BGC,
+    _SELF_DOWNLOADING_BGC,
     BGC_INTERPOLATION_METHODS,
     RawDataSource,
     apply_scipy_fallback_fill,
     apply_source_prefill,
+    bgc_source_extra_kwargs,
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_source_coverage,
@@ -68,7 +72,6 @@ from roms_tools.vertical_coordinate import (
     compute_depth,
 )
 
-
 #: Which dataset class implements each ``source["name"]``, per forcing type. Single
 #: source of truth for *which source names InitialConditions supports*: both
 #: ``_input_checks`` (at construction) and ``_get_data`` (at load) read it, so the two
@@ -88,6 +91,7 @@ _DATASET_MAP: dict[str, dict[str, dict[str, type[LatLonDataset | ROMSDataset]]]]
         "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
         "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
         "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
+        "WOA": defaultdict(lambda: WOABGCDataset),
         "ROMS": defaultdict(lambda: ROMSDataset),
     },
 }
@@ -934,12 +938,16 @@ class InitialConditionsSource:
                     f"Unknown BGC source name '{name}'. Valid options: "
                     f"{sorted(_BGC_SOURCE_NAMES)}."
                 )
-            elif "path" not in self.source:
+            elif "path" not in self.source and name not in _SELF_DOWNLOADING_BGC:
                 raise ValueError("`source` must include a 'path'.")
-            # set self.source["climatology"] to False if not provided
+            # Default the climatology flag. Sources that only ever exist as a
+            # 12-month climatology default to True, since False fails later with a
+            # confusing message about integer time values.
             self.source = {
                 **self.source,
-                "climatology": self.source.get("climatology", False),
+                "climatology": self.source.get(
+                    "climatology", name in _CLIMATOLOGY_ONLY_BGC
+                ),
             }
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
@@ -991,7 +999,7 @@ class InitialConditionsSource:
 
         data_type = dataset_map[forcing_type][source_name][variant]
 
-        if isinstance(source_dict["path"], bool):
+        if isinstance(source_dict.get("path"), bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
         if source_dict["name"] == "ROMS":
@@ -1013,13 +1021,16 @@ class InitialConditionsSource:
             self.adjust_depth_for_sea_surface_height = False
 
             data = data_type(
-                filename=source_dict["path"],  # type: ignore
+                # A self-downloading source (see _SELF_DOWNLOADING_BGC) may carry no
+                # "path"; it fetches its own data when handed a falsy filename.
+                filename=source_dict.get("path", ""),  # type: ignore
                 start_time=self.ini_time,
                 climatology=source_dict["climatology"],  # type: ignore
                 allow_flex_time=self.allow_flex_time,
                 use_dask=self.use_dask,
                 chunks=self.chunks,
                 initial_slice_bounds=self.initial_slice_bounds,
+                **bgc_source_extra_kwargs(source_dict),
             )
 
         return data

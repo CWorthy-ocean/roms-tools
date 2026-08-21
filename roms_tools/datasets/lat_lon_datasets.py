@@ -1416,6 +1416,322 @@ class WOADataset(LatLonDataset):
 
 
 @dataclass(kw_only=True)
+class WOABGCDataset(WOADataset):
+    """World Ocean Atlas 2023 nutrients and oxygen as a gridded BGC source.
+
+    Reads a directory of per-variable, per-month WOA23 netCDF files and merges them
+    into one twelve-month climatology carrying the four BGC tracers WOA measures
+    (``NO3``, ``PO4``, ``SiO3``, ``O2``) plus the temperature and salinity used to
+    convert units and to build the density coordinate for ``"density"`` /
+    ``"density_mld"`` vertical interpolation.
+
+    WOA has no DIC, alkalinity or iron, so this source cannot satisfy MARBL on its
+    own; combine it with GLODAP, ESPER or a constants source via ``bgc_sources``.
+
+    Notes
+    -----
+    **Resolution.** WOA23 publishes nutrients and oxygen on the 1 degree grid only
+    (0.25 degree exists for T/S alone), so everything here is 1 degree.
+
+    **Month pairing.** In the NCEI layout the ``decav``/``all`` token is the
+    averaging period *over years*, not the period within a year; the month is the
+    two-digit filename suffix. Each variable is read from its files in ``01``-``12``
+    order, so index ``k`` is month ``k+1`` for every variable, and monthly tracers are
+    paired with the matching monthly T/S. The raw ``time`` values are dropped before
+    merging because they differ between variable families (January temperature is
+    396.5 "months since 1965-01-01" while January nitrate is 336.5, reflecting the
+    different start years); merging on them would yield a 24-step union axis. The
+    inherited :meth:`WOADataset.clean_up` then installs the shared mid-month axis.
+
+    **Depth.** Monthly WOA fields are shallow: 800 m (43 levels) for the nutrients
+    and 1500 m (57 levels) for oxygen and T/S. Only the annual field is full-depth
+    (5500 m, 102 levels). Since the shallow axes are exact leading slices of the
+    annual axis, each variable is extended to the full 102-level grid according to
+    ``deep_fill``.
+    """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
+    #: Internal key -> (NCEI directory, decade token, one-letter code, netCDF variable).
+    _woa_files: ClassVar[dict[str, tuple[str, str, str, str]]] = {
+        "NO3": ("nitrate", "all", "n", "n_an"),
+        "PO4": ("phosphate", "all", "p", "p_an"),
+        "SiO3": ("silicate", "all", "i", "i_an"),
+        "O2": ("oxygen", "all", "o", "o_an"),
+        "temp_bgc": ("temperature", "decav", "t", "t_an"),
+        "salt_bgc": ("salinity", "decav", "s", "s_an"),
+    }
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "depth",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "NO3": "n_an",
+            "PO4": "p_an",
+            "SiO3": "i_an",
+            "O2": "o_an",
+        }
+    )
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            # Source temperature/salinity, under the stable internal keys the
+            # pipeline looks for via ``bgc_source_ts``. Used for the umol/kg ->
+            # mmol/m3 conversion and as the source density coordinate; dropped
+            # after vertical regridding, never written to ROMS output.
+            "temp_bgc": "t_an",
+            "salt_bgc": "s_an",
+        }
+    )
+    #: The opt_var_names keys that supply the density-coordinate source.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
+
+    climatology: bool = True
+    needs_lateral_fill: bool = True
+    has_encoded_times: bool = False
+
+    #: Over-years averaging token for T/S. The nutrients have only ``"all"``.
+    ts_decade: str = "decav"
+    #: How to extend the shallow monthly fields to full depth: ``"annual_blend"``
+    #: splices the full-depth annual climatology underneath with a linear taper
+    #: across the seam; ``"ffill"`` persists the deepest monthly value downward.
+    deep_fill: str = "annual_blend"
+    #: Half-width, in metres, of the ``"annual_blend"`` taper band, centred on each
+    #: variable's own deepest monthly level. The default gives 700-900 m for the
+    #: nutrients and 1400-1600 m for oxygen and T/S.
+    deep_blend_halfwidth: float = 100.0
+
+    def __post_init__(self) -> None:
+        if self.deep_fill not in ("ffill", "annual_blend"):
+            raise ValueError(
+                f"`deep_fill` must be 'ffill' or 'annual_blend', got "
+                f"{self.deep_fill!r}."
+            )
+        if self.deep_blend_halfwidth <= 0:
+            raise ValueError(
+                f"`deep_blend_halfwidth` must be positive, got "
+                f"{self.deep_blend_halfwidth!r}."
+            )
+        if not self.filename:
+            from roms_tools.datasets.download import download_woa23_bgc
+
+            self.filename = download_woa23_bgc(
+                include_annual=self.deep_fill == "annual_blend",
+                ts_decade=self.ts_decade,
+            )
+        super().__post_init__()
+
+    def _decade_for(self, key: str, decade: str) -> str:
+        """Return the over-years token to use for ``key``.
+
+        Temperature and salinity honour ``ts_decade``; the nutrients and oxygen are
+        published under a single token and ignore it.
+        """
+        return self.ts_decade if key in self.bgc_source_ts else decade
+
+    def load_data(self) -> xr.Dataset:
+        """Open and merge the per-variable, per-month WOA23 files.
+
+        ``self.filename`` is the **directory** holding the files, as with
+        :class:`GLODAPv2Dataset`. Only the objectively-analyzed ``*_an`` field is
+        read from each file; the eight other statistical fields WOA ships alongside
+        it (``*_mn``, ``*_dd``, ``*_sd``, ...) are never touched.
+        """
+        from roms_tools.datasets.download import woa23_filename
+
+        base_dir = Path(self.filename)
+        if not base_dir.is_dir():
+            raise FileNotFoundError(f"WOA directory not found: {base_dir}")
+
+        required = set(self.var_names)
+        wanted = list(self.var_names) + list(self.opt_var_names)
+
+        open_kwargs: dict = {"decode_times": False}
+        if self.use_dask:
+            open_kwargs["chunks"] = self.chunks or {}
+
+        datasets: list[xr.Dataset] = []
+        missing_required: list[str] = []
+        for key in wanted:
+            _subdir, decade, code, file_var = self._woa_files[key]
+            decade = self._decade_for(key, decade)
+
+            monthly_paths = [
+                base_dir / woa23_filename(code, month, decade) for month in range(1, 13)
+            ]
+            absent = [p for p in monthly_paths if not p.exists()]
+            if absent:
+                if key in required:
+                    missing_required.extend(str(p) for p in absent)
+                else:
+                    logging.warning(
+                        "Optional WOA variable %r is incomplete in %s (%d of 12 "
+                        "monthly files missing); density-space BGC interpolation "
+                        "will fall back to depth space.",
+                        key,
+                        base_dir,
+                        len(absent),
+                    )
+                continue
+
+            da = self._open_monthly(monthly_paths, file_var, open_kwargs)
+            da = self._extend_to_full_depth(
+                da, base_dir, code, decade, file_var, open_kwargs
+            )
+            datasets.append(da.to_dataset(name=file_var))
+
+        if missing_required:
+            raise FileNotFoundError(
+                "Required WOA23 files are missing:\n  "
+                + "\n  ".join(sorted(missing_required))
+                + "\nRun roms_tools.datasets.download.download_woa23_bgc() to fetch "
+                "them, or point the source at a directory that already holds them."
+            )
+
+        return xr.merge(datasets)
+
+    def _open_monthly(
+        self, paths: list[Path], file_var: str, open_kwargs: dict
+    ) -> xr.DataArray:
+        """Concatenate one variable's twelve monthly files along a bare time axis.
+
+        The raw ``time`` coordinate is dropped: its values differ between the
+        nutrient and T/S families, so keeping it would make :func:`xarray.merge`
+        build a 24-step union axis instead of aligning the months.
+        """
+        ds = xr.open_mfdataset(
+            paths,
+            concat_dim="time",
+            combine="nested",
+            data_vars="minimal",
+            coords="minimal",
+            compat="override",
+            **open_kwargs,
+        )
+        da = ds[file_var]
+        if da.sizes.get("time") != 12:
+            raise ValueError(
+                f"Expected 12 monthly records for {file_var!r}, got "
+                f"{da.sizes.get('time')}. The WOA directory is incomplete."
+            )
+        return da.drop_vars(
+            [c for c in ("time", "climatology_bounds", "crs") if c in da.coords]
+        )
+
+    def _extend_to_full_depth(
+        self,
+        monthly: xr.DataArray,
+        base_dir: Path,
+        code: str,
+        decade: str,
+        file_var: str,
+        open_kwargs: dict,
+    ) -> xr.DataArray:
+        """Extend a shallow monthly field onto the full-depth annual axis.
+
+        Returns ``monthly`` unchanged when the annual file is unavailable and the
+        mode is ``"ffill"``; otherwise the result spans all 102 standard levels.
+        """
+        from roms_tools.datasets.download import woa23_filename
+
+        annual_path = base_dir / woa23_filename(code, 0, decade)
+        if not annual_path.exists():
+            if self.deep_fill == "annual_blend":
+                logging.warning(
+                    "Annual WOA file %s not found; falling back to 'ffill' for %r. "
+                    "Values below %.0f m will be the deepest monthly value rather "
+                    "than the annual climatology.",
+                    annual_path.name,
+                    file_var,
+                    float(monthly["depth"].max()),
+                )
+            return monthly
+
+        annual = xr.open_dataset(annual_path, **open_kwargs)[file_var]
+        annual = annual.isel(time=0, drop=True)
+
+        seam = float(monthly["depth"].max())
+        # The shallow axis is an exact leading slice of the annual axis, so a plain
+        # reindex places the monthly values on the full grid without interpolating.
+        extended = monthly.reindex(depth=annual["depth"]).ffill("depth")
+
+        if self.deep_fill == "ffill":
+            return extended
+
+        depth = annual["depth"]
+        low = seam - self.deep_blend_halfwidth
+        high = seam + self.deep_blend_halfwidth
+        # 1 above the band (pure monthly), 0 below it (pure annual), linear between.
+        weight = ((high - depth) / (high - low)).clip(0.0, 1.0)
+        return extended * weight + annual * (1.0 - weight)
+
+    def post_process(self) -> None:
+        """Convert the tracers to mmol/m3 and build the land/ocean mask.
+
+        WOA reports nutrients and oxygen in umol/kg, while ROMS expects mmol/m3.
+        The conversion uses TEOS-10 sigma-0 density from the loaded T/S, matching
+        :meth:`GLODAPv2BGCDataset.post_process`. T/S stay in ``self.ds`` so the
+        pipeline can use them as the source density coordinate; it drops them after
+        vertical regridding via ``bgc_source_ts``.
+        """
+        temp_var = self.opt_var_names.get("temp_bgc")
+        salt_var = self.opt_var_names.get("salt_bgc")
+
+        if temp_var in self.ds.data_vars and salt_var in self.ds.data_vars:
+            sigma0 = compute_potential_density(self.ds[temp_var], self.ds[salt_var])
+            density = sigma0 + 1000.0  # kg m-3
+        else:
+            logging.warning(
+                "WOA temperature/salinity unavailable; using a uniform 1025 kg m-3 "
+                "for the umol/kg -> mmol/m3 conversion."
+            )
+            density = 1025.0
+
+        conversion_factor = density / 1000.0
+        for file_var in self.var_names.values():
+            if file_var in self.ds.data_vars:
+                self.ds[file_var] = self.ds[file_var] * conversion_factor
+
+        # apply_lateral_fill() expects self.ds["mask"]. Build it from the NaN
+        # pattern of the first tracer at the surface; extrapolate_deepest_to_bottom()
+        # rebuilds it after the vertical fill pass.
+        first = next(iter(self.var_names.values()))
+        if first in self.ds.data_vars:
+            surface = self.ds[first].isel(
+                {self.dim_names["depth"]: 0, self.dim_names["time"]: 0}, drop=True
+            )
+            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+
+    def extrapolate_deepest_to_bottom(self) -> None:
+        """Fill vertical NaN gaps downward and upward, then rebuild the mask.
+
+        A plain forward fill is not enough: WOA can be NaN at the surface where
+        deeper data exist, and coverage differs between variables, so the mask
+        built from the first tracer can mark a cell as ocean where another tracer
+        is NaN. This mirrors :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
+        """
+        if "depth" not in self.dim_names:
+            return
+        dim = self.dim_names["depth"]
+        for var_name in self.ds.data_vars:
+            if var_name.startswith("mask") or dim not in self.ds[var_name].dims:
+                continue
+            self.ds[var_name] = self.ds[var_name].ffill(dim=dim).bfill(dim=dim)
+
+        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = self.ds[data_vars[0]].isel({dim: 0}, drop=True)
+            if self.dim_names.get("time") in surface.dims:
+                surface = surface.isel({self.dim_names["time"]: 0}, drop=True)
+            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+
+
+@dataclass(kw_only=True)
 class MBLDataset(LatLonDataset):
     """Represents Marine Boundary Layer data from NOAA's Global Monitoring Laboratory on original grid.
 

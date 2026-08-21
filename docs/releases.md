@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### New Features
+
+* Added `"WOA"` as a gridded BGC source for `InitialConditions` and `BoundaryForcing`, reading World Ocean Atlas 2023 nutrients and oxygen (`NO3`, `PO4`, `SiO3`, `O2`) directly from NCEI. WOA carries no carbon chemistry or iron, so it is meant to be combined with GLODAP, ESPER or a constants source for `DIC`/`ALK`/`Fe` via the `bgc_sources` list. The source also loads the matching monthly temperature and salinity, which it uses to convert the tracers from µmol kg⁻¹ to mmol m⁻³ and to supply the source density coordinate for `density`/`density_mld` interpolation; neither is written to ROMS output. WOA23 publishes nutrients and oxygen on the 1° grid only, so the source is 1° throughout. Monthly WOA fields stop at 800 m (nutrients) and 1500 m (oxygen, T/S), so each variable is extended onto the full-depth 102-level annual grid according to a new `deep_fill` option: `"annual_blend"` (default) splices the annual climatology underneath with a linear taper centred on each variable's own seam (half-width `deep_blend_halfwidth`, default 100 m, giving 700–900 m for the nutrients), while `"ffill"` persists the deepest monthly value downward. Omitting `path` downloads the files to the `roms-tools` cache via the new `download_woa23_bgc()` helper.
+
 ## 4.1.1
 
 ### New Features

@@ -67,6 +67,10 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - River Forcing (BGC fill values)
      - No (auto-downloaded)
      - roms-tools-data repository
+   * - WOA23 BGC
+     - BGC Initial & Boundary Conditions (nutrients and oxygen)
+     - No (auto-downloaded)
+     - `NCEI <https://www.ncei.noaa.gov/access/world-ocean-atlas-2023/>`_
    * - WOA
      - Surface Restoring Forcing, sea surface salinity (`sss`)
      - Yes
@@ -269,8 +273,78 @@ Use version 2.1 or later (``BGCdataset_v2_1.nc``). Earlier versions are still re
 For download instructions see :doc:`datasets`.
 
 
+WOA23 BGC Dataset
+~~~~~~~~~~~~~~~~~
+
+The World Ocean Atlas 2023 nutrients and oxygen, as a gridded BGC source for initial
+conditions and boundary forcing. Unlike the unified dataset (which repackages WOA among
+other sources into a single file), this reads the WOA23 files directly from NCEI.
+
+**It supplies only** ``NO3``, ``PO4``, ``SiO3`` and ``O2``. WOA measures no carbon
+chemistry or iron, so a MARBL run needs a companion source for ``DIC``, ``ALK`` and
+``Fe`` -- combine them through the ``bgc_sources`` list, e.g. WOA for the nutrients
+alongside GLODAP or ESPER for the carbon system.
+
+Temperature and salinity are read too, but never written to ROMS output. They serve two
+purposes: converting the tracers from µmol kg⁻¹ to mmol m⁻³ via TEOS-10 sigma-0 density,
+and providing the source density coordinate for ``density`` / ``density_mld`` BGC
+interpolation. The monthly T/S fields are paired with the monthly tracer fields.
+
+.. note::
+   In the NCEI path layout, the ``decav`` / ``all`` token is the averaging period *over
+   years* (``decav`` pools 1955-2022 for T/S; ``all`` is the equivalent all-years token
+   for nutrients and oxygen, 1965-2022). The **month** is the two-digit filename suffix:
+   ``01``-``12`` monthly, ``00`` annual. So ``woa23_decav_t01_01.nc`` is the January
+   temperature climatology, not an annual mean.
+
+**Resolution.** WOA23 publishes nutrients and oxygen on the 1° grid only -- the 0.25°
+product covers temperature and salinity alone -- so this source is 1° throughout,
+including its T/S.
+
+**Depth.** Monthly WOA fields are shallow: 800 m (43 levels) for the nutrients and
+1500 m (57 levels) for oxygen and T/S. Only the annual field is full-depth (5500 m,
+102 levels). Because the shallow axes are exact leading slices of the annual axis, each
+variable is extended onto the full grid without vertical interpolation, controlled by
+``deep_fill`` in the source dictionary:
+
+``"annual_blend"`` (default)
+    Splices the full-depth annual climatology underneath the monthly data, with a linear
+    taper across the seam. The band is centred on *each variable's own* deepest monthly
+    level, with a half-width of ``deep_blend_halfwidth`` (default 100 m) -- so 700-900 m
+    for the nutrients and 1400-1600 m for oxygen and T/S. Above the band the field is
+    purely monthly; below it, purely annual.
+
+``"ffill"``
+    Persists the deepest monthly value to the seafloor. Simpler, and it avoids
+    downloading the annual files, but it badly misrepresents the deep ocean -- most
+    obviously for oxygen, whose minimum near 800-1000 m does not persist downward.
+
+Example::
+
+    InitialConditions(
+        grid=grid,
+        ini_time=ini_time,
+        source={"name": "GLORYS", "path": glorys_path},
+        bgc_sources=[
+            {"source": {"name": "WOA"}},                       # auto-downloads
+            {"source": {"name": "GLODAP", "path": glodap_dir},  # DIC / ALK
+             "use_vars": ["DIC", "ALK"]},
+        ],
+        bgc_model=BGCMarbl,
+        bgc_interpolation_method="density_mld",
+    )
+
+Omitting ``path`` downloads the files to the ``roms-tools`` cache on first use. Passing
+a ``path`` points at a directory that already holds them (this is what ``C-Star Forge``
+stages). ``climatology`` defaults to ``True``, since WOA exists only as a twelve-month
+climatology.
+
+:Required for: BGC Initial Conditions, BGC Boundary Forcing
+:Available at: `NCEI <https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA/>`_
+
+
 WOA Salinity Data
-~~~~~~
+~~~~~~~~~~~~~~~~~
 
 A collection of salinity (and other variables) means based on profile data from the World Ocean Database (WOD). The `s_an` variable provided is the 'Objectively analyzed mean fields for sea_water_salinity'.
 

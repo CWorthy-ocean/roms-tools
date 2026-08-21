@@ -1,0 +1,94 @@
+cff-version: "1.2.0"
+authors:
+- family-names: Loose
+  given-names: Nora
+  orcid: "https://orcid.org/0000-0002-3684-9634"
+- family-names: Nicholas
+  given-names: Tom
+  orcid: "https://orcid.org/0000-0002-2176-0530"
+- family-names: Maticka
+  given-names: Sam
+- family-names: Eilerman
+  given-names: Scott
+  orcid: "https://orcid.org/0000-0002-9048-0110"
+- family-names: McBride
+  given-names: Christopher
+- family-names: Stephenson
+  given-names: Dafydd
+- family-names: Heede
+  given-names: Ulla
+- family-names: Saenz
+  given-names: Benjamin
+  orcid: "https://orcid.org/0000-0003-3724-3033"
+- family-names: Thyng
+  given-names: Kristen M.
+  orcid: "https://orcid.org/0000-0002-8746-614X"
+- family-names: Bachman
+  given-names: Scott
+- family-names: Damien
+  given-names: Pierre
+- family-names: Karspeck
+  given-names: Alicia
+- family-names: Long
+  given-names: Matthew C.
+- family-names: Molemaker
+  given-names: M. Jeroen
+- family-names: Wyatt
+  given-names: Abigale
+  orcid: "https://orcid.org/0000-0003-2428-4370"
+doi: 10.5281/zenodo.21527762
+message: If you use this software, please cite our article in the
+  Journal of Open Source Software.
+preferred-citation:
+  authors:
+  - family-names: Loose
+    given-names: Nora
+    orcid: "https://orcid.org/0000-0002-3684-9634"
+  - family-names: Nicholas
+    given-names: Tom
+    orcid: "https://orcid.org/0000-0002-2176-0530"
+  - family-names: Maticka
+    given-names: Sam
+  - family-names: Eilerman
+    given-names: Scott
+    orcid: "https://orcid.org/0000-0002-9048-0110"
+  - family-names: McBride
+    given-names: Christopher
+  - family-names: Stephenson
+    given-names: Dafydd
+  - family-names: Heede
+    given-names: Ulla
+  - family-names: Saenz
+    given-names: Benjamin
+    orcid: "https://orcid.org/0000-0003-3724-3033"
+  - family-names: Thyng
+    given-names: Kristen M.
+    orcid: "https://orcid.org/0000-0002-8746-614X"
+  - family-names: Bachman
+    given-names: Scott
+  - family-names: Damien
+    given-names: Pierre
+  - family-names: Karspeck
+    given-names: Alicia
+  - family-names: Long
+    given-names: Matthew C.
+  - family-names: Molemaker
+    given-names: M. Jeroen
+  - family-names: Wyatt
+    given-names: Abigale
+    orcid: "https://orcid.org/0000-0003-2428-4370"
+  date-published: 2026-08-20
+  doi: 10.21105/joss.10234
+  issn: 2475-9066
+  issue: 124
+  journal: Journal of Open Source Software
+  publisher:
+    name: Open Journals
+  start: 10234
+  title: "ROMS-Tools: Reproducible Preprocessing and Analysis for
+    Regional Ocean Modeling with ROMS"
+  type: article
+  url: "https://joss.theoj.org/papers/10.21105/joss.10234"
+  volume: 11
+title: "ROMS-Tools: Reproducible Preprocessing and Analysis for Regional
+  Ocean Modeling with ROMS"

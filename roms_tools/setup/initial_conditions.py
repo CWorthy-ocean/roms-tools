@@ -1266,7 +1266,10 @@ class InitialConditionsSource:
         # these values instead of recomputing them. Must happen before any check view
         # is built from `ds` -- see materialize_before_check's docstring for why.
         materialize_before_check(
-            ds, list(variable_info), serialize_dask=self.HIGH_MEMORY_METHOD
+            ds,
+            list(variable_info),
+            materialize=self._is_esper_source,
+            serialize_dask=self.HIGH_MEMORY_METHOD,
         )
 
         # Build the NaN checks lazily and evaluate them in a single computation so a
@@ -1461,29 +1464,51 @@ class InitialConditionsSource:
         )
 
     @property
-    def HIGH_MEMORY_METHOD(self) -> bool:
-        """Whether this source's own computation has an unusually large
-        per-dask-chunk memory footprint, making concurrent multi-worker
-        execution risky rather than merely slow.
+    def _is_esper_source(self) -> bool:
+        """True when this source derives its tracers via PyESPER (the ESPER source).
 
-        ``True`` for the ``ESPER`` bgc source: it derives tracers via PyESPER's
-        ML-backed ``run_nets``, which costs roughly 10 KB *per point* (see
-        ``roms_tools.setup.esper``'s module docstring) -- tens of GB for a single
-        chunk at production grid scale. Running several such chunks concurrently
-        (dask's default) multiplies that by the worker count; confirmed via a
-        kernel OOM-kill log to exhaust all memory on a 251 GB machine. ``False``
-        for every other source (plain regrid/interpolation, negligible per-chunk
-        cost by comparison).
-
-        Used by :meth:`save` (and, for the multi-bgc-source wrapper classes, an
-        OR across every constituent source) to decide whether ``serialize_dask``
-        should default to on or off when not given explicitly.
+        All of an ESPER source's ``use_vars`` come out of one shared, expensive lazy
+        computation per chunk, which is why validation materialises them once and
+        caches (see :func:`roms_tools.setup.utils.materialize_before_check`) --
+        independent of whether the stronger :attr:`HIGH_MEMORY_METHOD` treatment is
+        also needed.
         """
         return (
             self.type == "bgc"
             and self.source is not None
             and self.source.get("name") == "ESPER"
         )
+
+    @property
+    def HIGH_MEMORY_METHOD(self) -> bool:
+        """Whether this source needs the caller-side serialized-dask regime,
+        because its own computation cannot protect itself under concurrent
+        multi-worker execution.
+
+        ``True`` only for an ``ESPER`` bgc source running against a *legacy*
+        PyESPER (one without ``PyESPER.concurrency``): that PyESPER's ML-backed
+        ``run_nets`` cost roughly 10 KB *per point* -- tens of GB for a single
+        chunk at production grid scale, multiplied by the dask worker count when
+        run concurrently (confirmed via a kernel OOM-kill log to exhaust all
+        memory on a 251 GB machine), with a numba kernel that could deadlock
+        under concurrent entry.
+
+        Current PyESPER serialises its own kernels, budgets its own chunk
+        memory, and is safe (and faster) under the ordinary concurrent
+        scheduler -- detected via
+        :func:`roms_tools.setup.esper.pyesper_self_serializing`, in which case
+        this returns ``False``. ``False`` for every non-ESPER source (plain
+        regrid/interpolation, negligible per-chunk cost by comparison).
+
+        Used by :meth:`save` (and, for the multi-bgc-source wrapper classes, an
+        OR across every constituent source) to decide whether ``serialize_dask``
+        should default to on or off when not given explicitly.
+        """
+        if not self._is_esper_source:
+            return False
+        from roms_tools.setup.esper import pyesper_self_serializing
+
+        return not pyesper_self_serializing(str(self.source.get("path", "")))
 
     def save(
         self,

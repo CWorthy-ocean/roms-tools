@@ -275,16 +275,28 @@ def nan_check_batch(items, serialize_dask: bool = False) -> None:
             raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
 
 
-def materialize_before_check(ds, var_names, serialize_dask: bool) -> None:
+def materialize_before_check(
+    ds, var_names, materialize: bool, serialize_dask: bool = False
+) -> None:
     """Realize each of ``var_names`` in ``ds`` via one combined ``dask.compute()`` call
     and write the results back into ``ds`` in place, *before* any NaN-check view is
     built from them.
 
-    Only meaningful (and only does anything) when ``serialize_dask`` is True -- a
-    HIGH_MEMORY_METHOD source (e.g. ESPER). :func:`nan_check_batch`'s own compute of a
-    narrower check view (e.g. ``ds[v].squeeze()``/``ds[v].isel(bry_time=0)``) already
-    forces the same expensive upstream computation to run, but discards the realized
-    values -- so a later ``.save()`` on this same ``ds`` recomputes them from scratch.
+    Only does anything when ``materialize`` is True -- a source whose variables all
+    come out of one shared, expensive lazy computation (e.g. ESPER; see
+    ``InitialConditionsSource._is_esper_source``). :func:`nan_check_batch`'s own
+    compute of a narrower check view (e.g. ``ds[v].squeeze()``/
+    ``ds[v].isel(bry_time=0)``) already forces the same expensive upstream
+    computation to run, but discards the realized values -- so a later ``.save()``
+    on this same ``ds`` would recompute them from scratch.
+
+    ``serialize_dask`` additionally wraps the compute in
+    :func:`roms_tools.utils.serialize_dask_and_boost_threads` -- required only for a
+    HIGH_MEMORY_METHOD source (a *legacy* PyESPER that cannot protect itself under
+    concurrent chunk execution). Current PyESPER serialises its own kernels, so the
+    compute here runs under the ambient (typically threaded) scheduler and the two
+    concerns are deliberately independent: materialize-and-cache is about avoiding a
+    double compute; serialization is about surviving a legacy PyESPER.
 
     ``var_names`` should be EVERY variable sharing the source's expensive computation
     (e.g. an ESPER source's full ``use_vars`` list), not just the subset
@@ -305,7 +317,7 @@ def materialize_before_check(ds, var_names, serialize_dask: bool) -> None:
     (extra compute + memory) than today's narrower time-slice check does. Not a
     concern for typical run durations; a real limit for very long ones.
 
-    A no-op when ``serialize_dask`` is False, or ``var_names`` is empty.
+    A no-op when ``materialize`` is False, or ``var_names`` is empty.
 
     Notes
     -----
@@ -319,12 +331,12 @@ def materialize_before_check(ds, var_names, serialize_dask: bool) -> None:
     built before this call still points at the old, now-stale lazy graph and would
     force a second real compute if used afterward.
     """
-    if not serialize_dask or not var_names:
+    if not materialize or not var_names:
         return
     names = [v for v in var_names if v in ds]
     if not names:
         return
-    with serialize_dask_and_boost_threads(True):
+    with serialize_dask_and_boost_threads(serialize_dask):
         realized = dask.compute(*(ds[v] for v in names))
     for v, value in zip(names, realized):
         ds[v] = value

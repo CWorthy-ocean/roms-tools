@@ -29,16 +29,24 @@ def serialize_dask_and_boost_threads(serialize: bool):
     numba configuration (typically several concurrent dask workers) applies
     unchanged.
 
-    Concurrent execution multiplies a high-memory, ML-backed source's
-    already-large per-chunk memory cost (see :mod:`roms_tools.setup.esper`'s
-    module docstring: PyESPER's ``run_nets`` costs ~10 KB/point, tens of GB for
-    one chunk at production grid scale) by however many dask workers run its
-    chunks concurrently -- confirmed via a kernel OOM-kill log to exhaust all
-    memory on a 251 GB machine. Serializing bounds peak memory to ONE chunk's
-    own cost regardless of the ambient worker count; the thread boost
-    compensates for the lost cross-chunk parallelism (nothing else is
-    concurrently competing for cores while dask itself only ever has one task
-    in flight).
+    This is the **legacy-PyESPER** protection path, kept as an escape hatch.
+    A legacy PyESPER (one without ``PyESPER.concurrency``) multiplied its
+    already-large per-chunk memory cost (~10 KB/point, tens of GB per chunk at
+    production grid scale) by however many dask workers ran its chunks
+    concurrently -- confirmed via a kernel OOM-kill log to exhaust all memory
+    on a 251 GB machine -- and could deadlock outright under concurrent kernel
+    entry. Serializing bounds peak memory to ONE chunk's own cost regardless of
+    the ambient worker count; the thread boost compensates for the lost
+    cross-chunk parallelism (nothing else competes for cores while dask has
+    only one task in flight).
+
+    Current PyESPER serialises its own kernels, budgets its own chunk memory,
+    and does not use BLAS on the hot path, so none of this is needed --
+    ``HIGH_MEMORY_METHOD`` detects that (see
+    :func:`roms_tools.setup.esper.pyesper_self_serializing`) and resolves
+    ``serialize`` to False, leaving the ambient concurrent scheduler in charge.
+    Forcing the synchronous scheduler in that situation is purely a loss: it
+    also serialises every physics/regrid/write task sharing the graph.
 
     Shared by :func:`save_datasets` (the actual netCDF4 write) and
     ``roms_tools.setup.utils.nan_check_batch`` -- whose own ``dask.compute()``
@@ -971,30 +979,31 @@ def save_datasets(
         Only meaningful when ``use_dask=True``. Controls how any dataset in
         ``dataset_list`` that's still lazy gets computed/written:
 
-        - ``True`` (default): force the actual ``xarray.save_mfdataset`` call onto
+        - ``True``: force the actual ``xarray.save_mfdataset`` call onto
           dask's ``"synchronous"`` scheduler -- every remaining lazy read and every
           write happens one task at a time, in this one thread -- while boosting
           BLAS/numba to every visible core for the same call, so that one-at-a-time
-          execution still uses the whole machine rather than one core. Safe
-          regardless of how memory-hungry a single chunk's own computation is
-          (e.g. an ML-backed BGC source like ESPER, whose ``run_nets`` costs
-          roughly 10 KB *per point* -- tens of GB for one chunk at production grid
-          scale; see ``roms_tools.setup.esper``): peak memory is bounded by ONE
-          chunk's own footprint, never multiplied by however many dask workers the
-          ambient config allows, and there is no possibility of concurrent
-          netCDF4/HDF5 library calls racing each other either.
+          execution still uses the whole machine rather than one core. This is the
+          **legacy-PyESPER** protection (see
+          :func:`serialize_dask_and_boost_threads`): safe regardless of how
+          memory-hungry a single chunk's own computation is, since peak memory is
+          bounded by ONE chunk's own footprint, never multiplied by the ambient
+          worker count, and no concurrent netCDF4/HDF5 library calls can race each
+          other either. Callers resolve it automatically from
+          ``HIGH_MEMORY_METHOD``, which is False for current (self-serialising)
+          PyESPER -- so in practice this branch runs only against a legacy PyESPER
+          checkout or on explicit request.
         - ``False``: no intervention at all -- ``xarray.save_mfdataset`` runs under
           whatever the ambient dask scheduler/thread configuration already is
-          (typically several concurrent workers). Faster when every lazy source in
-          ``dataset_list`` has an ordinary (not ML-backed) per-chunk memory cost --
-          this is how plain regrid-only forcing has always been saved. Do not use
-          this when an ML-backed high-memory source (see
-          ``InitialConditionsSource.HIGH_MEMORY_METHOD`` /
-          ``BoundaryForcingSource.HIGH_MEMORY_METHOD``) is involved: running that
-          source's chunks concurrently across several dask workers multiplies its
-          already-large per-chunk memory cost by the worker count, which has been
-          observed in practice to exhaust all memory on a 251 GB machine (confirmed
-          via a kernel OOM-kill log) rather than merely running slowly.
+          (typically several concurrent workers). This is the normal path: plain
+          regrid-only forcing has always been saved this way, and an ESPER source
+          backed by current (self-serialising) PyESPER is saved this way too --
+          PyESPER's own kernel lock keeps its chunks one-at-a-time and its memory
+          budgeted while every other task in the graph runs concurrently. Only a
+          *legacy* PyESPER (see ``HIGH_MEMORY_METHOD`` on the source classes) must
+          not be run like this: its chunks' concurrent memory cost was observed to
+          exhaust a 251 GB machine (confirmed via a kernel OOM-kill log) rather
+          than merely running slowly.
 
     Returns
     -------

@@ -17,21 +17,30 @@ The heavy lifting -- dask-lazy, chunked, uncertainty-free estimation -- lives in
 
 The returned DataArrays are lazy (dask) when the inputs are, same as any other
 lazy result in a forcing dataset -- callers materialise them (along with
-everything else in the dataset) at write time. PyESPER's neural-net path
-(``nn_xr``/``mixed_xr``, via a numba ``@njit(parallel=True)`` kernel -- see
-``PyESPER/run_nets.py``'s own docstring) has a real per-chunk memory cost (~10
-KB/point, tens of GB for one chunk at production grid scale) that multiplies by
-however many dask workers run its chunks concurrently -- confirmed via a kernel
-OOM-kill log to exhaust all memory on a 251 GB machine when left fully
-concurrent at write time. The mitigation lives in the caller that eventually
-materialises this module's lazy results -- see
-``InitialConditionsSource.HIGH_MEMORY_METHOD`` /
-``BoundaryForcingSource.HIGH_MEMORY_METHOD`` and
-:func:`roms_tools.utils.save_datasets`'s ``serialize_dask`` -- not here.
+everything else in the dataset) at write time.
+
+Concurrency and memory: this depends on WHICH PyESPER is at ``source['path']``.
+
+* Current PyESPER (the fused-kernel rework) serialises its own kernel entry with a
+  module-level lock (``PyESPER.concurrency.kernel_lock``), budgets its own per-chunk
+  memory internally, and no longer uses BLAS on the hot path -- so its chunks are
+  safe to compute under any ambient dask scheduler, threaded included. Detected via
+  :func:`pyesper_self_serializing`; when detected, ``HIGH_MEMORY_METHOD`` on the
+  source classes reports ``False`` and everything runs under the ordinary
+  concurrent scheduler.
+* Legacy PyESPER (no ``PyESPER.concurrency``) has a ~10 KB/point per-chunk cost
+  that multiplies by the dask worker count (confirmed via a kernel OOM-kill log to
+  exhaust a 251 GB machine) and a numba kernel that deadlocks under concurrent
+  entry. For that case the caller-side mitigation still applies -- see
+  ``InitialConditionsSource.HIGH_MEMORY_METHOD`` /
+  ``BoundaryForcingSource.HIGH_MEMORY_METHOD`` and
+  :func:`roms_tools.utils.save_datasets`'s ``serialize_dask``.
 """
 
 from __future__ import annotations
 
+import functools
+import importlib
 import sys
 
 import numpy as np
@@ -39,23 +48,22 @@ import xarray as xr
 
 from roms_tools.setup.utils import compute_potential_density, get_variable_metadata
 
-# PyESPER's nn_xr/lir_xr/mixed_xr must never have more than one dask chunk in
-# flight at once (see this module's own serialised-`.compute()` call in
-# `estimate_bgc_fields`, and PyESPER/xr_methods.py's module docstring, for why:
-# concurrent chunks reliably deadlock the whole process). With execution
-# strictly one chunk at a time, more/smaller chunks buy nothing -- every chunk
-# pays the same fixed per-chunk overhead (defaults/iterations/polygon lookup)
-# with no compensating cross-chunk parallelism, so at production grid scale
-# (e.g. a 4km, 100-level domain: 672x1344x100 =~ 90M points) many small chunks
-# just means many more sequential fixed-overhead payments -- observed as
-# thousands of chunks each doing a few seconds of real work. This targets a
-# chunk *count* in the low tens instead (one big chunk per some outer
-# dimension), sized against whatever PyESPER's own memory cap allows for a
-# single in-flight chunk (see `PyESPER.xr_methods._MAX_POINTS_PER_CHUNK`, which
-# this should stay roughly matched to -- if this module's chunks are smaller,
-# PyESPER's own "auto" rechunk still fragments every array dimension to hit its
-# byte budget rather than just the one dimension chosen here, multiplying
-# chunk count far more than a naive divide would suggest).
+# Target ESPER chunk size. PyESPER's estimation chunks are effectively serial
+# either way -- current PyESPER holds its own kernel lock so only one chunk is
+# ever inside the kernels (see `pyesper_self_serializing`), and legacy PyESPER is
+# run under a serialized scheduler by the caller -- so many small chunks buy no
+# ESPER-side parallelism, they just repeat the fixed per-chunk overhead
+# (defaults/iterations/polygon lookup); observed pre-fix as thousands of chunks
+# each doing a few seconds of real work on a 90M-point domain. This targets a
+# chunk *count* in the low tens instead (split along one outer dimension only:
+# PyESPER's own "auto" rechunk would fragment every dimension to hit its byte
+# budget, multiplying chunk count far more than a naive divide suggests).
+#
+# Under the ambient threaded scheduler (current PyESPER), low-tens chunks also
+# pipeline well: while one worker holds PyESPER's kernel lock, the others run
+# the physics/regrid/write tasks. Current PyESPER only ever *shrinks* chunks
+# (its internal budget is larger than this), so this constant is the effective
+# ESPER chunk size in practice.
 _MAX_POINTS_PER_CHUNK = 6_000_000
 
 # ROMS/MARBL tracer name -> PyESPER "DesiredVariable" name.
@@ -95,6 +103,33 @@ def _ensure_pyesper(path):
             "directory (containing Mat_fullgrid/ and NeuralNetworks/)."
         ) from exc
     return {"lir": lir_xr, "nn": nn_xr, "mixed": mixed_xr}
+
+
+@functools.lru_cache(maxsize=None)
+def pyesper_self_serializing(path: str) -> bool:
+    """True if the PyESPER at ``path`` serialises its own kernel entry.
+
+    PyESPER's fused-kernel rework ships ``PyESPER.concurrency`` with a module-level
+    ``kernel_lock``: exactly one dask chunk is ever inside its numba kernels no
+    matter which scheduler the caller uses, per-chunk memory is budgeted internally
+    (~0.5-1.2 KB/point instead of the legacy ~10 KB/point), and the hot path no
+    longer calls BLAS. With such a PyESPER, the caller-side serialized regime
+    (``HIGH_MEMORY_METHOD`` -> ``serialize_dask``) is unnecessary -- and harmful,
+    since it also serialises every non-ESPER task sharing the graph.
+
+    Detection is by importing ``PyESPER.concurrency`` from ``path`` (same sys.path
+    mechanism as :func:`_ensure_pyesper`) and checking for ``kernel_lock``. Any
+    failure -> ``False``, i.e. the conservative legacy treatment. Cached per path
+    string: the answer cannot change within a process (imports are sticky).
+    """
+    try:
+        path = str(path)
+        if path and path not in sys.path:
+            sys.path.insert(0, path)
+        concurrency = importlib.import_module("PyESPER.concurrency")
+    except Exception:
+        return False
+    return callable(getattr(concurrency, "kernel_lock", None))
 
 
 def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int]:

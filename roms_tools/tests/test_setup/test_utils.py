@@ -915,13 +915,17 @@ def test_materialize_before_check_realizes_and_preserves_metadata():
     # what `materialize_before_check` itself does.
     calls["n"] = 0
 
-    # serialize_dask=False is a no-op: the variable stays dask-backed, nothing
-    # computed.
-    materialize_before_check(ds, ["foo"], serialize_dask=False)
+    # materialize=False is a no-op: the variable stays dask-backed, nothing
+    # computed. (Materialization is driven by `materialize`, not by
+    # `serialize_dask` -- the two were decoupled when PyESPER became
+    # self-serialising; `serialize_dask` now only picks the scheduler regime
+    # for the compute.)
+    materialize_before_check(ds, ["foo"], materialize=False)
     assert ds["foo"].chunks is not None
     assert calls["n"] == 0
 
-    materialize_before_check(ds, ["foo"], serialize_dask=True)
+    # The common (current-PyESPER) case: materialize under the ambient scheduler.
+    materialize_before_check(ds, ["foo"], materialize=True, serialize_dask=False)
     assert ds["foo"].chunks is None, "foo should be realized (no longer dask-backed)"
     assert calls["n"] == 2, "expensive() should run once per chunk, not be skipped"
     assert ds["foo"].attrs == {"units": "m"}
@@ -929,13 +933,24 @@ def test_materialize_before_check_realizes_and_preserves_metadata():
     np.testing.assert_array_equal(ds["foo"].values, np.arange(10) * 2)
 
     # A second call with the now-realized variable must not recompute it.
-    materialize_before_check(ds, ["foo"], serialize_dask=True)
+    materialize_before_check(ds, ["foo"], materialize=True, serialize_dask=False)
     assert calls["n"] == 2, "materializing an already-concrete variable should be a no-op"
 
     # An empty/unknown var_names list is also a safe no-op.
-    materialize_before_check(ds, [], serialize_dask=True)
-    materialize_before_check(ds, ["not_a_real_var"], serialize_dask=True)
+    materialize_before_check(ds, [], materialize=True)
+    materialize_before_check(ds, ["not_a_real_var"], materialize=True)
     assert calls["n"] == 2
+
+    # The legacy (serialized) regime still materializes identically.
+    arr2 = da.from_array(np.arange(10).astype("float64"), chunks=5).map_blocks(
+        expensive, dtype="float64"
+    )
+    ds["baz"] = xr.DataArray(arr2, dims=["x"])
+    calls["n"] = 0
+    materialize_before_check(ds, ["baz"], materialize=True, serialize_dask=True)
+    assert ds["baz"].chunks is None
+    assert calls["n"] == 2
+    np.testing.assert_array_equal(ds["baz"].values, np.arange(10) * 2)
 
 
 class TestMonthlyClimatologyExpansion:

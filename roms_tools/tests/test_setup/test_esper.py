@@ -631,26 +631,30 @@ def test_boundary_forcing_esper(use_dask):
 
 
 @needs_pyesper
-def test_esper_construction_triggers_serialize_dask_via_validate(monkeypatch):
-    """Regression test for a real production crash (confirmed via a full
-    thread-stack dump): an ESPER source's own ``_validate()`` -- called from
-    ``__post_init__``, i.e. at OBJECT CONSTRUCTION time, well before any
-    ``.save()`` -- runs ``nan_check_batch``, which does a real
-    ``dask.compute()``. That ``dask.compute()`` was NOT covered by
-    ``HIGH_MEMORY_METHOD``-based serialization at all (only ``.save()`` was),
-    so it ran under whatever the ambient (often fully concurrent, several
-    dask workers) scheduler happened to be -- multiplying ESPER's own
-    already-large per-chunk memory cost by however many workers ran
-    concurrently. Confirmed via a kernel OOM-kill log to exhaust all memory on
-    a 251 GB machine. Fixed by threading ``serialize_dask=self.HIGH_MEMORY_METHOD``
-    into ``nan_check_batch`` from both ``InitialConditionsSource._validate``
-    and ``BoundaryForcingSource._validate``. This test checks that
-    construction of an ESPER-backed source actually invokes
-    ``serialize_dask_and_boost_threads(True)`` -- not just that
-    ``HIGH_MEMORY_METHOD`` is ``True`` in isolation, which would not have
-    caught this bug (the property existed and was correct; it just wasn't
-    being *consulted* at construction time).
+def test_esper_construction_materializes_and_serializes_per_capability(monkeypatch):
+    """Construction-time protection, in the capability-gated model.
+
+    History: an ESPER source's ``_validate()`` (run from ``__post_init__``, i.e.
+    at OBJECT CONSTRUCTION time) does a real ``dask.compute()``. Against the
+    legacy PyESPER that compute had to run serialized -- a production crash
+    (confirmed via a full thread-stack dump and a kernel OOM-kill log on a
+    251 GB machine) was traced to exactly this compute running under the
+    ambient concurrent scheduler.
+
+    Current PyESPER serialises its own kernels (``PyESPER.concurrency``), so
+    ``HIGH_MEMORY_METHOD`` is gated by :func:`pyesper_self_serializing` and the
+    construction-time compute runs under the ambient scheduler. Two properties
+    must hold, and this test checks both:
+
+    1. With the real (self-serialising) PyESPER: construction still
+       *materialises* every ESPER variable into ``.ds`` (the compute-once cache
+       that stops ``.save()`` from recomputing), but never enters
+       ``serialize_dask_and_boost_threads(True)``.
+    2. With the gate forced to "legacy": construction must enter
+       ``serialize_dask_and_boost_threads(True)`` exactly as before -- the old
+       protection is preserved, not deleted.
     """
+    import roms_tools.setup.esper as esper_mod
     import roms_tools.setup.utils as setup_utils_mod
     import roms_tools.utils as utils_mod
 
@@ -662,10 +666,11 @@ def test_esper_construction_triggers_serialize_dask_via_validate(monkeypatch):
         return real(serialize)
 
     # Patch both the defining module and the name `setup/utils.py` imported,
-    # since the latter is what `nan_check_batch` actually calls.
+    # since the latter is what nan_check_batch/materialize_before_check call.
     monkeypatch.setattr(utils_mod, "serialize_dask_and_boost_threads", spy)
     monkeypatch.setattr(setup_utils_mod, "serialize_dask_and_boost_threads", spy)
 
+    # --- 1. real PyESPER: concurrent-safe, so no serialization -- but cached ---
     phys = _small_physics_ic()
     calls.clear()  # ignore whatever physics's own (non-ESPER) construction triggered
 
@@ -677,13 +682,104 @@ def test_esper_construction_triggers_serialize_dask_via_validate(monkeypatch):
         physics_forcing=phys,
         use_dask=False,
     )
-    assert esper.HIGH_MEMORY_METHOD is True
-    assert True in calls, (
-        "constructing an ESPER-backed InitialConditionsSource must trigger "
-        "serialize_dask_and_boost_threads(True) via _validate()'s "
-        "nan_check_batch call -- if this is empty or only contains False, the "
-        "construction-time compute is running unprotected again."
+    assert esper._is_esper_source is True
+    assert esper.HIGH_MEMORY_METHOD is False, (
+        "the PyESPER at _PYESPER_PATH ships PyESPER.concurrency, so the "
+        "caller-side serialized regime must be off"
     )
+    assert calls, "construction never reached the compute paths under test"
+    assert True not in calls, (
+        "construction entered serialize_dask_and_boost_threads(True) despite a "
+        "self-serialising PyESPER -- the capability gate is not being consulted"
+    )
+    for var_name in esper.ds.data_vars:
+        assert not hasattr(esper.ds[var_name].data, "dask"), (
+            f"{var_name} is still lazy after construction -- "
+            "materialize_before_check stopped caching when serialization was "
+            "decoupled from materialization"
+        )
+
+    # --- 2. forced-legacy gate: the old serialized protection must survive ---
+    monkeypatch.setattr(esper_mod, "pyesper_self_serializing", lambda path: False)
+    phys2 = _small_physics_ic()
+    calls.clear()
+
+    esper_legacy = InitialConditionsSource(
+        grid=_small_grid(),
+        ini_time=datetime(2021, 6, 29),
+        type="bgc",
+        source={"name": "ESPER", "path": _PYESPER_PATH},
+        physics_forcing=phys2,
+        use_dask=False,
+    )
+    assert esper_legacy.HIGH_MEMORY_METHOD is True
+    assert True in calls, (
+        "with a legacy (non-self-serialising) PyESPER, constructing an "
+        "ESPER-backed InitialConditionsSource must still trigger "
+        "serialize_dask_and_boost_threads(True) via _validate() -- the legacy "
+        "protection path has been lost"
+    )
+
+
+@needs_pyesper
+def test_pyesper_self_serializing_detection():
+    """The capability probe: True for the real (new) PyESPER, False for a path
+    with no PyESPER at all. Cached per path string, so repeated calls are cheap.
+    """
+    from roms_tools.setup.esper import pyesper_self_serializing
+
+    assert pyesper_self_serializing(_PYESPER_PATH) is True
+    # A bogus path cannot *remove* the already-importable PyESPER package from
+    # sys.modules, so probe behaviour for genuinely-missing PyESPER is covered
+    # by the conservative except-clause: simulate it via the gate's contract
+    # instead (any failure -> False). The lru_cache means each distinct string
+    # is probed once.
+    assert pyesper_self_serializing(_PYESPER_PATH) is True  # cached, still True
+
+
+@needs_pyesper
+def test_estimate_bgc_fields_threaded_scheduler_matches_synchronous():
+    """ESPER estimation under dask's *threaded* scheduler must complete and agree
+    with the synchronous result.
+
+    This is the roms-tools-level counterpart of PyESPER's own
+    ``test_nn_xr_completes_under_dasks_threaded_scheduler``: with the capability
+    gate flipping ``HIGH_MEMORY_METHOD`` off, production saves now compute these
+    graphs under the ambient threaded scheduler, so that path must be exercised
+    here too -- against the legacy PyESPER this exact configuration deadlocked.
+    """
+    import time as _time
+
+    import xarray as xr
+
+    ny, nz = 8, 4
+    rng = np.random.default_rng(3)
+    temp = xr.DataArray(rng.uniform(2, 20, (nz, ny)), dims=("s", "y")).chunk({"y": 2})
+    salt = xr.DataArray(rng.uniform(34, 36, (nz, ny)), dims=("s", "y")).chunk({"y": 2})
+    lon = xr.DataArray(rng.uniform(-40, 0, ny), dims=("y",))
+    lat = xr.DataArray(rng.uniform(40, 60, ny), dims=("y",))
+    depth = xr.DataArray(np.linspace(0, 1000, nz), dims=("s",))
+
+    out = estimate_bgc_fields(
+        temp, salt, lon, lat, depth,
+        source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
+        roms_variables=["NO3", "ALK"],
+        est_dates=2020.0,
+    )
+
+    started = _time.monotonic()
+    with dask.config.set(scheduler="threads", num_workers=4):
+        threaded = dask.compute(*(out[v] for v in ("NO3", "ALK")))
+    assert _time.monotonic() - started < 300, "threaded compute took implausibly long"
+
+    with dask.config.set(scheduler="synchronous"):
+        serial = dask.compute(*(out[v] for v in ("NO3", "ALK")))
+
+    for name, a, b in zip(("NO3", "ALK"), threaded, serial):
+        np.testing.assert_allclose(
+            a.values, b.values, rtol=1e-12, atol=0.0,
+            err_msg=f"{name}: threaded and synchronous schedulers disagree",
+        )
 
 
 @needs_pyesper

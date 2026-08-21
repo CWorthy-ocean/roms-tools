@@ -40,13 +40,15 @@ def serialize_dask_and_boost_threads(serialize: bool):
     cross-chunk parallelism (nothing else competes for cores while dask has
     only one task in flight).
 
-    Current PyESPER serialises its own kernels, budgets its own chunk memory,
-    and does not use BLAS on the hot path, so none of this is needed --
-    ``HIGH_MEMORY_METHOD`` detects that (see
-    :func:`roms_tools.setup.esper.pyesper_self_serializing`) and resolves
-    ``serialize`` to False, leaving the ambient concurrent scheduler in charge.
-    Forcing the synchronous scheduler in that situation is purely a loss: it
-    also serialises every physics/regrid/write task sharing the graph.
+    PyESPER now serialises its own kernels, budgets its own chunk memory, and
+    does not use BLAS on the hot path, so none of this is *required* any more
+    and nothing turns it on automatically. It remains available as a manual
+    tool: on a low-memory machine it bounds peak memory to a single task's
+    footprint (a guarantee plain dask's threaded scheduler cannot make), and
+    when troubleshooting it answers "does this still fail with all concurrency
+    removed?". Bear in mind the cost: it also serialises every physics/regrid/
+    write task sharing the graph (measured 1.57x slower end-to-end on a
+    production initial-conditions save).
 
     Shared by :func:`save_datasets` (the actual netCDF4 write) and
     ``roms_tools.setup.utils.nan_check_batch`` -- whose own ``dask.compute()``
@@ -989,21 +991,18 @@ def save_datasets(
           memory-hungry a single chunk's own computation is, since peak memory is
           bounded by ONE chunk's own footprint, never multiplied by the ambient
           worker count, and no concurrent netCDF4/HDF5 library calls can race each
-          other either. Callers resolve it automatically from
-          ``HIGH_MEMORY_METHOD``, which is False for current (self-serialising)
-          PyESPER -- so in practice this branch runs only against a legacy PyESPER
-          checkout or on explicit request.
+          other either. Nothing turns this on automatically any more -- it runs
+          only on explicit request (a manual low-memory / troubleshooting tool).
         - ``False``: no intervention at all -- ``xarray.save_mfdataset`` runs under
           whatever the ambient dask scheduler/thread configuration already is
           (typically several concurrent workers). This is the normal path: plain
-          regrid-only forcing has always been saved this way, and an ESPER source
-          backed by current (self-serialising) PyESPER is saved this way too --
-          PyESPER's own kernel lock keeps its chunks one-at-a-time and its memory
-          budgeted while every other task in the graph runs concurrently. Only a
-          *legacy* PyESPER (see ``HIGH_MEMORY_METHOD`` on the source classes) must
-          not be run like this: its chunks' concurrent memory cost was observed to
-          exhaust a 251 GB machine (confirmed via a kernel OOM-kill log) rather
-          than merely running slowly.
+          regrid-only forcing has always been saved this way, and ESPER sources
+          are saved this way too -- PyESPER's own kernel lock keeps its chunks
+          one-at-a-time and its memory budgeted while every other task in the
+          graph runs concurrently. (Historically a pre-lock PyESPER could not be
+          run like this: its chunks' concurrent memory cost exhausted a 251 GB
+          machine, confirmed via a kernel OOM-kill log -- the reason the
+          serialized option exists.)
 
     Returns
     -------

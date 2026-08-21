@@ -631,30 +631,27 @@ def test_boundary_forcing_esper(use_dask):
 
 
 @needs_pyesper
-def test_esper_construction_materializes_and_serializes_per_capability(monkeypatch):
-    """Construction-time protection, in the capability-gated model.
+def test_esper_construction_materializes_without_serializing(monkeypatch):
+    """Construction-time behaviour after the removal of HIGH_MEMORY_METHOD.
 
     History: an ESPER source's ``_validate()`` (run from ``__post_init__``, i.e.
-    at OBJECT CONSTRUCTION time) does a real ``dask.compute()``. Against the
-    legacy PyESPER that compute had to run serialized -- a production crash
-    (confirmed via a full thread-stack dump and a kernel OOM-kill log on a
-    251 GB machine) was traced to exactly this compute running under the
-    ambient concurrent scheduler.
+    at OBJECT CONSTRUCTION time) does a real ``dask.compute()``. Against a
+    pre-kernel-lock PyESPER that compute had to run serialized -- a production
+    crash (thread-stack dump + kernel OOM-kill log on a 251 GB machine) was
+    traced to exactly this compute running under the ambient concurrent
+    scheduler. PyESPER now serialises its own kernels, so the automatic
+    caller-side protection was removed; ``serialize_dask`` survives only as a
+    manual kwarg.
 
-    Current PyESPER serialises its own kernels (``PyESPER.concurrency``), so
-    ``HIGH_MEMORY_METHOD`` is gated by :func:`pyesper_self_serializing` and the
-    construction-time compute runs under the ambient scheduler. Two properties
-    must hold, and this test checks both:
+    Two properties must hold, and this test checks both:
 
-    1. With the real (self-serialising) PyESPER: construction still
-       *materialises* every ESPER variable into ``.ds`` (the compute-once cache
-       that stops ``.save()`` from recomputing), but never enters
-       ``serialize_dask_and_boost_threads(True)``.
-    2. With the gate forced to "legacy": construction must enter
-       ``serialize_dask_and_boost_threads(True)`` exactly as before -- the old
-       protection is preserved, not deleted.
+    1. Construction never *automatically* enters
+       ``serialize_dask_and_boost_threads(True)`` -- everything runs under the
+       ambient scheduler.
+    2. Construction still *materialises* every ESPER variable into ``.ds`` (the
+       compute-once cache that stops ``.save()`` from recomputing the whole
+       PyESPER graph).
     """
-    import roms_tools.setup.esper as esper_mod
     import roms_tools.setup.utils as setup_utils_mod
     import roms_tools.utils as utils_mod
 
@@ -670,7 +667,6 @@ def test_esper_construction_materializes_and_serializes_per_capability(monkeypat
     monkeypatch.setattr(utils_mod, "serialize_dask_and_boost_threads", spy)
     monkeypatch.setattr(setup_utils_mod, "serialize_dask_and_boost_threads", spy)
 
-    # --- 1. real PyESPER: concurrent-safe, so no serialization -- but cached ---
     phys = _small_physics_ic()
     calls.clear()  # ignore whatever physics's own (non-ESPER) construction triggered
 
@@ -683,58 +679,50 @@ def test_esper_construction_materializes_and_serializes_per_capability(monkeypat
         use_dask=False,
     )
     assert esper._is_esper_source is True
-    assert esper.HIGH_MEMORY_METHOD is False, (
-        "the PyESPER at _PYESPER_PATH ships PyESPER.concurrency, so the "
-        "caller-side serialized regime must be off"
-    )
     assert calls, "construction never reached the compute paths under test"
     assert True not in calls, (
-        "construction entered serialize_dask_and_boost_threads(True) despite a "
-        "self-serialising PyESPER -- the capability gate is not being consulted"
+        "construction entered serialize_dask_and_boost_threads(True) -- nothing "
+        "should turn the serialized regime on automatically any more"
     )
     for var_name in esper.ds.data_vars:
         assert not hasattr(esper.ds[var_name].data, "dask"), (
             f"{var_name} is still lazy after construction -- "
-            "materialize_before_check stopped caching when serialization was "
-            "decoupled from materialization"
+            "materialize_before_check stopped caching"
         )
-
-    # --- 2. forced-legacy gate: the old serialized protection must survive ---
-    monkeypatch.setattr(esper_mod, "pyesper_self_serializing", lambda path: False)
-    phys2 = _small_physics_ic()
-    calls.clear()
-
-    esper_legacy = InitialConditionsSource(
-        grid=_small_grid(),
-        ini_time=datetime(2021, 6, 29),
-        type="bgc",
-        source={"name": "ESPER", "path": _PYESPER_PATH},
-        physics_forcing=phys2,
-        use_dask=False,
-    )
-    assert esper_legacy.HIGH_MEMORY_METHOD is True
-    assert True in calls, (
-        "with a legacy (non-self-serialising) PyESPER, constructing an "
-        "ESPER-backed InitialConditionsSource must still trigger "
-        "serialize_dask_and_boost_threads(True) via _validate() -- the legacy "
-        "protection path has been lost"
-    )
 
 
 @needs_pyesper
-def test_pyesper_self_serializing_detection():
-    """The capability probe: True for the real (new) PyESPER, False for a path
-    with no PyESPER at all. Cached per path string, so repeated calls are cheap.
+def test_serialize_dask_kwarg_still_forces_the_serialized_write(monkeypatch, tmp_path):
+    """The manual escape hatch: ``save(serialize_dask=True)`` must still route
+    the write through ``serialize_dask_and_boost_threads(True)`` -- kept for
+    low-memory machines (it bounds peak memory to one task's footprint, which
+    the plain threaded scheduler cannot guarantee) and for troubleshooting.
     """
-    from roms_tools.setup.esper import pyesper_self_serializing
+    import roms_tools.utils as utils_mod
 
-    assert pyesper_self_serializing(_PYESPER_PATH) is True
-    # A bogus path cannot *remove* the already-importable PyESPER package from
-    # sys.modules, so probe behaviour for genuinely-missing PyESPER is covered
-    # by the conservative except-clause: simulate it via the gate's contract
-    # instead (any failure -> False). The lru_cache means each distinct string
-    # is probed once.
-    assert pyesper_self_serializing(_PYESPER_PATH) is True  # cached, still True
+    calls = []
+    real = utils_mod.serialize_dask_and_boost_threads
+
+    def spy(serialize):
+        calls.append(serialize)
+        return real(serialize)
+
+    monkeypatch.setattr(utils_mod, "serialize_dask_and_boost_threads", spy)
+
+    phys = _small_physics_ic(use_dask=True)
+
+    # Default: concurrent write, the serialized context is never entered as True.
+    calls.clear()
+    phys.save(tmp_path / "default")
+    assert True not in calls
+
+    # Manual request: the serialized context must be entered.
+    calls.clear()
+    phys.save(tmp_path / "serialized", serialize_dask=True)
+    assert True in calls, (
+        "save(serialize_dask=True) no longer reaches "
+        "serialize_dask_and_boost_threads(True) -- the manual escape hatch is broken"
+    )
 
 
 @needs_pyesper

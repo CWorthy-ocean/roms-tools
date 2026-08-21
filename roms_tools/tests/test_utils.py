@@ -722,7 +722,7 @@ def test_save_datasets_progressbar_skipped_when_serialize_dask(
 ):
     """A dask ``ProgressBar`` is only meaningful/accurate for the ordinary
     ambient-scheduler write (many small chunks). When ``serialize_dask`` forces
-    the synchronous scheduler (e.g. a HIGH_MEMORY_METHOD source like ESPER), a
+    the synchronous scheduler (the manual serialize_dask=True write), a
     handful of large, uneven-duration chunks make the percentage barely move
     for minutes then jump, and its background redraw garbles the per-chunk
     print()s those sources emit -- looking broken rather than informative. It

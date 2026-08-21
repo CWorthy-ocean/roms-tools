@@ -232,10 +232,10 @@ class BGCMarbl(BGCModel):
             objects (one per object, in order).
         serialize_dask : bool, optional
             See :func:`roms_tools.utils.save_datasets`; only relevant when
-            ``filepath`` is given. Defaults to ``None``, which lets each object's
-            own :meth:`save` resolve its own ``HIGH_MEMORY_METHOD``
-            independently -- pass ``True``/``False`` to force the same choice
-            onto every object instead.
+            ``filepath`` is given. Defaults to ``None``, which resolves to
+            ``False`` (the ordinary concurrent write) on each object's own
+            :meth:`save` -- pass ``True`` to force the serialized,
+            one-task-at-a-time write onto every object instead.
 
         Returns
         -------

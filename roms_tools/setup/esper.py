@@ -19,28 +19,25 @@ The returned DataArrays are lazy (dask) when the inputs are, same as any other
 lazy result in a forcing dataset -- callers materialise them (along with
 everything else in the dataset) at write time.
 
-Concurrency and memory: this depends on WHICH PyESPER is at ``source['path']``.
+Concurrency and memory: PyESPER (this project's fused-kernel fork -- the only
+PyESPER whose ``*_xr`` methods exist, so the only one that can run here) serialises
+its own kernel entry with a module-level lock (``PyESPER.concurrency.kernel_lock``),
+budgets its own per-chunk memory internally (~0.5-1.2 KB/point), and does not use
+BLAS on the hot path. Its chunks are therefore safe to compute under any ambient
+dask scheduler, threaded included; no caller-side scheduler intervention is needed.
+For genuinely memory-starved machines or scheduler troubleshooting there is still a
+manual one-task-at-a-time write: :func:`roms_tools.utils.save_datasets`'s
+``serialize_dask`` (and the ``serialize_dask`` kwarg on every ``save``).
 
-* Current PyESPER (the fused-kernel rework) serialises its own kernel entry with a
-  module-level lock (``PyESPER.concurrency.kernel_lock``), budgets its own per-chunk
-  memory internally, and no longer uses BLAS on the hot path -- so its chunks are
-  safe to compute under any ambient dask scheduler, threaded included. Detected via
-  :func:`pyesper_self_serializing`; when detected, ``HIGH_MEMORY_METHOD`` on the
-  source classes reports ``False`` and everything runs under the ordinary
-  concurrent scheduler.
-* Legacy PyESPER (no ``PyESPER.concurrency``) has a ~10 KB/point per-chunk cost
-  that multiplies by the dask worker count (confirmed via a kernel OOM-kill log to
-  exhaust a 251 GB machine) and a numba kernel that deadlocks under concurrent
-  entry. For that case the caller-side mitigation still applies -- see
-  ``InitialConditionsSource.HIGH_MEMORY_METHOD`` /
-  ``BoundaryForcingSource.HIGH_MEMORY_METHOD`` and
-  :func:`roms_tools.utils.save_datasets`'s ``serialize_dask``.
+(Historical note: an earlier PyESPER cost ~10 KB/point per chunk -- multiplied by
+the dask worker count this OOM-killed a 251 GB machine, and its numba kernel could
+deadlock under concurrent entry. The automatic caller-side protection built for it,
+``HIGH_MEMORY_METHOD``, was removed once no such PyESPER could be encountered; the
+manual ``serialize_dask`` escape hatch is what remains of it.)
 """
 
 from __future__ import annotations
 
-import functools
-import importlib
 import sys
 
 import numpy as np
@@ -48,10 +45,9 @@ import xarray as xr
 
 from roms_tools.setup.utils import compute_potential_density, get_variable_metadata
 
-# Target ESPER chunk size. PyESPER's estimation chunks are effectively serial
-# either way -- current PyESPER holds its own kernel lock so only one chunk is
-# ever inside the kernels (see `pyesper_self_serializing`), and legacy PyESPER is
-# run under a serialized scheduler by the caller -- so many small chunks buy no
+# Target ESPER chunk size. PyESPER's estimation chunks are effectively serial:
+# it holds its own kernel lock, so only one chunk is ever inside the kernels
+# regardless of the ambient scheduler. Many small chunks therefore buy no
 # ESPER-side parallelism, they just repeat the fixed per-chunk overhead
 # (defaults/iterations/polygon lookup); observed pre-fix as thousands of chunks
 # each doing a few seconds of real work on a 90M-point domain. This targets a
@@ -59,11 +55,11 @@ from roms_tools.setup.utils import compute_potential_density, get_variable_metad
 # PyESPER's own "auto" rechunk would fragment every dimension to hit its byte
 # budget, multiplying chunk count far more than a naive divide suggests).
 #
-# Under the ambient threaded scheduler (current PyESPER), low-tens chunks also
-# pipeline well: while one worker holds PyESPER's kernel lock, the others run
-# the physics/regrid/write tasks. Current PyESPER only ever *shrinks* chunks
-# (its internal budget is larger than this), so this constant is the effective
-# ESPER chunk size in practice.
+# Under the ambient threaded scheduler, low-tens chunks also pipeline well:
+# while one worker holds PyESPER's kernel lock, the others run the
+# physics/regrid/write tasks. PyESPER only ever *shrinks* chunks (its internal
+# budget is larger than this), so this constant is the effective ESPER chunk
+# size in practice.
 _MAX_POINTS_PER_CHUNK = 6_000_000
 
 # ROMS/MARBL tracer name -> PyESPER "DesiredVariable" name.
@@ -103,33 +99,6 @@ def _ensure_pyesper(path):
             "directory (containing Mat_fullgrid/ and NeuralNetworks/)."
         ) from exc
     return {"lir": lir_xr, "nn": nn_xr, "mixed": mixed_xr}
-
-
-@functools.lru_cache(maxsize=None)
-def pyesper_self_serializing(path: str) -> bool:
-    """True if the PyESPER at ``path`` serialises its own kernel entry.
-
-    PyESPER's fused-kernel rework ships ``PyESPER.concurrency`` with a module-level
-    ``kernel_lock``: exactly one dask chunk is ever inside its numba kernels no
-    matter which scheduler the caller uses, per-chunk memory is budgeted internally
-    (~0.5-1.2 KB/point instead of the legacy ~10 KB/point), and the hot path no
-    longer calls BLAS. With such a PyESPER, the caller-side serialized regime
-    (``HIGH_MEMORY_METHOD`` -> ``serialize_dask``) is unnecessary -- and harmful,
-    since it also serialises every non-ESPER task sharing the graph.
-
-    Detection is by importing ``PyESPER.concurrency`` from ``path`` (same sys.path
-    mechanism as :func:`_ensure_pyesper`) and checking for ``kernel_lock``. Any
-    failure -> ``False``, i.e. the conservative legacy treatment. Cached per path
-    string: the answer cannot change within a process (imports are sticky).
-    """
-    try:
-        path = str(path)
-        if path and path not in sys.path:
-            sys.path.insert(0, path)
-        concurrency = importlib.import_module("PyESPER.concurrency")
-    except Exception:
-        return False
-    return callable(getattr(concurrency, "kernel_lock", None))
 
 
 def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int]:

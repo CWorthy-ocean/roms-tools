@@ -243,15 +243,11 @@ def nan_check_batch(items, serialize_dask: bool = False) -> None:
         default message.
     serialize_dask : bool, optional
         See :func:`roms_tools.utils.serialize_dask_and_boost_threads`. Defaults
-        to ``False`` (this function is called from many contexts that never
-        involve a high-memory source, so it does not auto-detect the way
-        ``.save()`` does -- callers whose fields may include one, e.g.
-        ``InitialConditionsSource._validate``, pass their own
-        ``self.HIGH_MEMORY_METHOD`` explicitly). This call happens during
-        object *construction* (via ``_validate()``), not at ``.save()`` time --
-        a real production crash was traced via a full thread-stack dump to
-        exactly this ``dask.compute()`` running unprotected, under the ambient
-        concurrent scheduler, well before any write was ever reached.
+        to ``False`` -- the compute runs under the ambient dask scheduler.
+        ``True`` is a manual low-memory / troubleshooting tool (one task at a
+        time, peak memory bounded by a single chunk). Note this call happens
+        during object *construction* (via ``_validate()``), not at ``.save()``
+        time.
 
     Notes
     -----
@@ -291,12 +287,11 @@ def materialize_before_check(
     on this same ``ds`` would recompute them from scratch.
 
     ``serialize_dask`` additionally wraps the compute in
-    :func:`roms_tools.utils.serialize_dask_and_boost_threads` -- required only for a
-    HIGH_MEMORY_METHOD source (a *legacy* PyESPER that cannot protect itself under
-    concurrent chunk execution). Current PyESPER serialises its own kernels, so the
-    compute here runs under the ambient (typically threaded) scheduler and the two
-    concerns are deliberately independent: materialize-and-cache is about avoiding a
-    double compute; serialization is about surviving a legacy PyESPER.
+    :func:`roms_tools.utils.serialize_dask_and_boost_threads` -- a manual
+    low-memory / troubleshooting tool (PyESPER serialises its own kernels, so it
+    is never *required*). The two concerns are deliberately independent:
+    materialize-and-cache is about avoiding a double compute; serialization is
+    about bounding memory to one task at a time.
 
     ``var_names`` should be EVERY variable sharing the source's expensive computation
     (e.g. an ESPER source's full ``use_vars`` list), not just the subset
@@ -306,7 +301,7 @@ def materialize_before_check(
     leave the rest lazy and still force a second real compute of them at save time --
     reproducing the bug for everything except the one checked variable.
 
-    For a HIGH_MEMORY_METHOD source, materializing costs no more than the existing
+    For an ESPER source, materializing costs no more than the existing
     narrower check already pays for typical run configurations (PyESPER's own chunk
     plan, :func:`roms_tools.setup.esper._pyesper_chunk_plan`, collapses every dimension
     but the largest into one chunk -- so a same-size-or-larger portion of that chunk

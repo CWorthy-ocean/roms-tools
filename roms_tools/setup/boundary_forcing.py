@@ -1418,7 +1418,6 @@ class BoundaryForcingSource:
                 if is_enabled
             ],
             materialize=self._is_esper_source,
-            serialize_dask=self.HIGH_MEMORY_METHOD,
         )
 
         # Build the NaN checks lazily and evaluate them in a single computation so a
@@ -1459,10 +1458,6 @@ class BoundaryForcingSource:
                             )
                         )
 
-        # serialize_dask=False here: materialize_before_check has already realized
-        # everything HIGH_MEMORY_METHOD needs to protect, so nothing lazy remains to
-        # serialize -- for non-HIGH_MEMORY_METHOD sources this is unchanged behavior
-        # (self.HIGH_MEMORY_METHOD is already False there).
         nan_check_batch(checks, serialize_dask=False)
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
@@ -1612,34 +1607,9 @@ class BoundaryForcingSource:
 
         All of an ESPER source's ``use_vars`` come out of one shared, expensive lazy
         computation per chunk, which is why validation materialises them once and
-        caches (see :func:`roms_tools.setup.utils.materialize_before_check`) --
-        independent of whether the stronger :attr:`HIGH_MEMORY_METHOD` treatment is
-        also needed.
+        caches (see :func:`roms_tools.setup.utils.materialize_before_check`).
         """
         return self.type == "bgc" and self.source.get("name") == "ESPER"
-
-    @property
-    def HIGH_MEMORY_METHOD(self) -> bool:
-        """Whether this source needs the caller-side serialized-dask regime,
-        because its own computation cannot protect itself under concurrent
-        multi-worker execution.
-
-        ``True`` only for an ``ESPER`` bgc source running against a *legacy*
-        PyESPER (one without ``PyESPER.concurrency``) -- see
-        ``InitialConditionsSource.HIGH_MEMORY_METHOD`` for the full rationale;
-        the two properties are deliberately identical in meaning. Current
-        PyESPER serialises its own kernels and is safe (and faster) under the
-        ordinary concurrent scheduler, detected via
-        :func:`roms_tools.setup.esper.pyesper_self_serializing`.
-
-        Used by :meth:`save` to decide whether ``serialize_dask`` should default
-        to on or off when not given explicitly.
-        """
-        if not self._is_esper_source:
-            return False
-        from roms_tools.setup.esper import pyesper_self_serializing
-
-        return not pyesper_self_serializing(str(self.source.get("path", "")))
 
     def save(
         self,
@@ -1665,9 +1635,12 @@ class BoundaryForcingSource:
             NetCDF file format. Defaults to ``"NETCDF4"``.
         serialize_dask : bool, optional
             See :func:`roms_tools.utils.save_datasets`. Defaults to ``None``,
-            which resolves to :attr:`HIGH_MEMORY_METHOD` -- i.e. automatically on
-            for an ``ESPER`` source, off otherwise. Pass ``True``/``False``
-            explicitly to override that auto-detection either way.
+            which resolves to ``False`` -- the ordinary concurrent write under
+            the ambient dask scheduler. Pass ``True`` to force the serialized,
+            one-task-at-a-time write instead: a manual tool for low-memory
+            machines (it bounds peak memory to a single chunk's footprint,
+            which plain dask's threaded scheduler cannot guarantee) and for
+            troubleshooting scheduler-dependent failures.
 
         Returns
         -------
@@ -1688,7 +1661,7 @@ class BoundaryForcingSource:
             output_filenames = [str(filepath)]
 
         if serialize_dask is None:
-            serialize_dask = self.HIGH_MEMORY_METHOD
+            serialize_dask = False
 
         saved_filenames = save_datasets(
             dataset_list,
@@ -1982,24 +1955,6 @@ class BoundaryForcing:
         else:
             self.bgc = []
 
-    @property
-    def HIGH_MEMORY_METHOD(self) -> bool:
-        """Whether any constituent source (the physics object, or any bgc
-        source) is high-memory -- see
-        :attr:`BoundaryForcingSource.HIGH_MEMORY_METHOD`. An OR across all of
-        them, exposed for introspection/parity with :class:`InitialConditions`,
-        but :meth:`save` does NOT use it to make one blanket decision the way
-        ``InitialConditions.save`` does: physics and every bgc source here are
-        each written by their own separate call (unlike IC's single merged
-        write), so each one auto-detects from its *own*
-        ``HIGH_MEMORY_METHOD`` instead -- finer-grained than an OR would be
-        (e.g. a UNIFIED bgc source's save stays fast even when a sibling ESPER
-        bgc source's save auto-serializes).
-        """
-        return self.physics.HIGH_MEMORY_METHOD or any(
-            b.HIGH_MEMORY_METHOD for b in self.bgc
-        )
-
     def save(
         self,
         physics_filepath: str | Path,
@@ -2025,13 +1980,11 @@ class BoundaryForcing:
         format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
             NetCDF file format. Defaults to ``"NETCDF4"``.
         serialize_dask : bool, optional
-            See :func:`roms_tools.utils.save_datasets`. Defaults to ``None`` on
-            every constituent's own save -- i.e. each of the physics save and
-            every bgc source's save independently resolves its own
-            ``HIGH_MEMORY_METHOD`` (see :attr:`BoundaryForcingSource.HIGH_MEMORY_METHOD`)
-            rather than one blanket decision for all of them. Pass ``True``/
-            ``False`` explicitly here to force that same choice onto every one
-            of them instead.
+            See :func:`roms_tools.utils.save_datasets`. Defaults to ``None``,
+            which resolves to ``False`` on every constituent's own save (the
+            ordinary concurrent write). Pass ``True`` here to force the
+            serialized, one-task-at-a-time write onto every one of them -- a
+            manual low-memory / troubleshooting tool.
 
         Returns
         -------

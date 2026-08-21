@@ -10,6 +10,7 @@ authors:
   given-names: Sam
 - family-names: Eilerman
   given-names: Scott
+  orcid: "https://orcid.org/0000-0002-9048-0110"
 - family-names: McBride
   given-names: Christopher
 - family-names: Stephenson
@@ -50,6 +51,7 @@ preferred-citation:
     given-names: Sam
   - family-names: Eilerman
     given-names: Scott
+    orcid: "https://orcid.org/0000-0002-9048-0110"
   - family-names: McBride
     given-names: Christopher
   - family-names: Stephenson

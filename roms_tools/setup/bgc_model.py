@@ -2,9 +2,7 @@
 
 This module centralises everything roms-tools needs to know about a biogeochemical
 (BGC) model's tracer vocabulary and how to complete a partially-specified tracer
-set.  Previously this knowledge was scattered across ``utils.py`` (the
-``derive_*``/``fill_*``/``compute_missing_bgc_variables`` helpers) and
-``bgc_source.py`` (the ``_BGC_EXPECTED_OUTPUT`` list and ``BGC_VARIABLE_INFO``).
+set.  This replaces ``compute_missing_bgc_variables`` in ``setup/utils.py``, which hard-coded MARBL's tracer set inline.
 
 The design intentionally separates two concerns:
 

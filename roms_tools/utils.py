@@ -29,8 +29,8 @@ def serialize_dask_and_boost_threads(serialize: bool):
     numba configuration (typically several concurrent dask workers) applies
     unchanged.
 
-    This is the **legacy-PyESPER** protection path, kept as an escape hatch.
-    A legacy PyESPER (one without ``PyESPER.concurrency``) multiplied its
+    This is a **manual** tool -- nothing enables it automatically. It exists
+    because an earlier PyESPER (one without ``PyESPER.concurrency``) multiplied its
     already-large per-chunk memory cost (~10 KB/point, tens of GB per chunk at
     production grid scale) by however many dask workers ran its chunks
     concurrently -- confirmed via a kernel OOM-kill log to exhaust all memory
@@ -50,8 +50,9 @@ def serialize_dask_and_boost_threads(serialize: bool):
     write task sharing the graph (measured 1.57x slower end-to-end on a
     production initial-conditions save).
 
-    Shared by :func:`save_datasets` (the actual netCDF4 write) and
-    ``roms_tools.setup.utils.nan_check_batch`` -- whose own ``dask.compute()``
+    Shared by :func:`save_datasets` (the actual netCDF4 write),
+    ``roms_tools.setup.utils.nan_check_batch`` and
+    ``roms_tools.setup.utils.materialize_before_check`` -- whose own ``dask.compute()``
     can run during a high-memory source's object *construction* (via that
     source's own ``_validate()``), well before ``.save()`` is ever called, and
     needs exactly the same protection: a real production crash was traced via a
@@ -958,7 +959,7 @@ def save_datasets(
     use_dask=False,
     verbose=True,
     format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
-    serialize_dask: bool = True,
+    serialize_dask: bool = False,
 ):
     """Save the list of datasets to NetCDF files.
 
@@ -978,8 +979,9 @@ def save_datasets(
     format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
         NetCDF file format passed to ``xarray.save_mfdataset``. Defaults to ``"NETCDF4"``.
     serialize_dask : bool, optional
-        Only meaningful when ``use_dask=True``. Controls how any dataset in
-        ``dataset_list`` that's still lazy gets computed/written:
+        Only meaningful when ``use_dask=True``. Defaults to ``False`` -- the
+        ordinary concurrent write. Controls how any dataset in ``dataset_list``
+        that's still lazy gets computed/written:
 
         - ``True``: force the actual ``xarray.save_mfdataset`` call onto
           dask's ``"synchronous"`` scheduler -- every remaining lazy read and every

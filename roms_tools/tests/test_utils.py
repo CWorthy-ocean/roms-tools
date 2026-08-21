@@ -774,3 +774,37 @@ def test_save_datasets_serialize_dask_logs_plain_start_done_messages(
     messages = [r.message for r in caplog.records]
     assert any("Writing NetCDF file(s)..." in m for m in messages)
     assert any(m.startswith("Finished writing NetCDF file(s) in") for m in messages)
+
+
+def test_save_datasets_defaults_to_concurrent_write(tmp_path, monkeypatch):
+    """`save_datasets` must not serialize unless explicitly asked.
+
+    Regression: `serialize_dask` was introduced on this branch with a default of
+    True, so every caller that did not pass it -- `SurfaceForcing.save` and
+    `Tides.save` both omit it and forward `use_dask=self.use_dask` -- silently
+    dropped onto dask's synchronous scheduler (and lost its progress bar). On
+    `main`, before the parameter existed, those writes were always concurrent.
+    The serialized path is a manual low-memory/troubleshooting tool; nothing may
+    turn it on by default.
+    """
+    import numpy as np
+    import xarray as xr
+
+    import roms_tools.utils as utils_mod
+
+    calls = []
+    real = utils_mod.serialize_dask_and_boost_threads
+
+    def spy(serialize):
+        calls.append(serialize)
+        return real(serialize)
+
+    monkeypatch.setattr(utils_mod, "serialize_dask_and_boost_threads", spy)
+
+    ds = xr.Dataset({"foo": ("x", np.arange(4, dtype="float64"))}).chunk({"x": 2})
+    utils_mod.save_datasets([ds], [str(tmp_path / "default")], use_dask=True)
+
+    assert True not in calls, (
+        "save_datasets serialized the write without being asked -- the "
+        "serialize_dask default is not False"
+    )

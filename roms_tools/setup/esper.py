@@ -48,20 +48,7 @@ import xarray as xr
 
 from roms_tools.setup.utils import compute_potential_density, get_variable_metadata
 
-# Target ESPER chunk size. PyESPER's estimation chunks are effectively serial:
-# it holds its own kernel lock, so only one chunk is ever inside the kernels
-# regardless of the ambient scheduler. Many small chunks therefore buy no
-# ESPER-side parallelism, they just repeat the fixed per-chunk overhead
-# (defaults/iterations/polygon lookup); observed pre-fix as thousands of chunks
-# each doing a few seconds of real work on a 90M-point domain. This targets a
-# chunk *count* in the low tens instead (split along one outer dimension only:
-# PyESPER's own "auto" rechunk would fragment every dimension to hit its byte
-# budget, multiplying chunk count far more than a naive divide suggests).
-#
-# Under the ambient threaded scheduler, low-tens chunks also pipeline well:
-# while one worker holds PyESPER's kernel lock, the others run the
-# physics/regrid/write tasks. PyESPER only ever *shrinks* chunks (its internal
-# budget is larger than this), so this constant is the effective ESPER chunk
+# PyESPER never *grows* chunks, so this constant is the ceiling on ESPER chunk
 # size in practice.
 _MAX_POINTS_PER_CHUNK = 6_000_000
 
@@ -187,10 +174,8 @@ def estimate_bgc_fields(
     -------
     dict[str, xarray.DataArray]
         ``{roms_name: DataArray}`` in mmol/m³, dims/coords matching the broadcast
-        inputs, lazy when the inputs are -- not materialised here. See this
-        module's own docstring for the oversubscription hazard this implies for
-        callers computing several chunks concurrently, and how it's mitigated
-        (at the caller level, not inside this function).
+        inputs, lazy when the inputs are -- not materialised here. Safe to compute
+        under any dask scheduler; see this module's docstring.
     """
     validate_esper_source(source)
     method = str(source.get("method", "nn")).lower()
@@ -238,22 +223,11 @@ def estimate_bgc_fields(
         est_dates=est_dates,
     )
 
-    # `est`'s DataArrays are left lazy here, same as any other dask-backed
-    # result -- deliberately NOT forced to materialise eagerly. An earlier
-    # version of this function did force eager materialisation (one
-    # `dask.compute()` per call, covering every requested variable together),
-    # to work around PyESPER's neural-net path needing dask chunks run one at a
-    # time rather than concurrently (see PyESPER/run_nets.py's own docstring
-    # for the mechanism). That mitigation is no longer applied here: splitting
-    # available cores between dask's own worker count and each worker's
-    # internal BLAS/numba thread count (see cstar-forge's `input_data.py`)
-    # avoids the same oversubscription hazard while keeping cross-chunk
-    # parallelism, so ESPER's results can go back to being computed the same
-    # way as every other lazy result -- together with the rest of the forcing
-    # dataset, in whatever single `dask.compute()`/`.store()` call the caller
-    # eventually does at write time (naturally sharing this call's own shared
-    # per-chunk upstream work across every requested variable, since they're
-    # all part of the same graph passed to that one call).
+    # Results are deliberately left lazy: PyESPER's own kernel lock keeps its
+    # chunks one-at-a-time internally, so there is no reason to materialise them
+    # here. They join whatever single `dask.compute()`/`.store()` call the caller
+    # eventually makes at write time, which also lets every requested variable
+    # share this call's per-chunk upstream work (they are all one graph).
 
     # µmol/kg -> mmol/m³ via potential density (sigma0 + 1000), matching the GLODAP
     # adapter's convention; then clamp physically non-negative tracers at 0.

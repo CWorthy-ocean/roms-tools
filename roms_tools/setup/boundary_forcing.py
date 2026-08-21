@@ -157,7 +157,7 @@ class BoundaryForcingSource:
     type : str
         Specifies the type of forcing data. Options are:
 
-          - "physics": for physical atmospheric forcing.
+          - "physics": for physical ocean boundary data (T/S/u/v/zeta).
           - "bgc": for biogeochemical forcing.
 
     prefill : str or None, optional
@@ -257,6 +257,9 @@ class BoundaryForcingSource:
         A physics ``BoundaryForcingSource`` object (``type='physics'``) whose T/S fields
         supply the target density coordinate for BGC tracer interpolation. When None and
         a density method is requested, falls back to depth-based interpolation.
+        **Required for an ``ESPER`` bgc source**, where the physics T/S are the
+        estimator's own inputs rather than merely a target coordinate; omitting it
+        there raises ``ValueError``.
 
 
     Examples

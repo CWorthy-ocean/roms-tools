@@ -1252,7 +1252,12 @@ class InitialConditionsSource:
 
         Notes
         -----
-        This check is only applied to the 2D variable SSH to improve performance.
+        Only variables flagged ``validate=True`` are checked, to keep this cheap:
+        ``zeta`` for a physics object, and ``ALK`` for a bgc one (a bgc object sets
+        ``variable_info_physics`` to ``{}``, so it checks no physics variables at
+        all). For a bgc source whose variables share one expensive computation --
+        ESPER -- every variable is materialised first and cached, so the check does
+        not force a second compute; see :func:`~roms_tools.setup.utils.materialize_before_check`.
         """
         if self.type == "bgc":
             variable_info = {**self.variable_info_physics, **self.variable_info_bgc}

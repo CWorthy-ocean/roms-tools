@@ -77,9 +77,11 @@ def _small_grid() -> Grid:
 # --------------------------------------------------------------------------------------
 # Input validation (no PyESPER / data needed)
 # --------------------------------------------------------------------------------------
-def test_validate_esper_source_requires_path():
-    with pytest.raises(ValueError, match="requires a 'path'"):
-        validate_esper_source({"name": "ESPER"})
+def test_validate_esper_source_accepts_missing_path():
+    """`path` is optional: without one, PyESPER must simply be importable from the
+    environment (e.g. pip install -e), and it locates its own data directories.
+    """
+    validate_esper_source({"name": "ESPER"})  # must not raise
 
 
 def test_validate_esper_source_bad_method():
@@ -150,16 +152,28 @@ def test_pyesper_chunk_plan_noop_for_small_array():
     assert plan == {"s_rho": -1, "eta_rho": -1, "xi_rho": -1}
 
 
-def test_ic_esper_missing_path_raises():
-    with pytest.raises(ValueError, match="requires a 'path'"):
-        InitialConditionsSource(
-            grid=_small_grid(),
-            ini_time=datetime(2021, 6, 29),
-            type="bgc",
-            source={"name": "ESPER"},
-            physics_forcing=_small_physics_ic(),
-            use_dask=False,
-        )
+@needs_pyesper
+def test_ic_esper_without_path_uses_the_importable_pyesper():
+    """An ESPER source with no `path` works when PyESPER is importable.
+
+    The test session imports PyESPER off ``_PYESPER_PATH`` (see module top), which
+    mirrors an installed environment: `_ensure_pyesper(None)` finds the already-
+    importable package, and PyESPER's own ``paths.data_root()`` auto-detects the
+    data directories next to it. This is the "pip install -e, no path in the
+    blueprint" configuration.
+    """
+    ic = InitialConditionsSource(
+        grid=_small_grid(),
+        ini_time=datetime(2021, 6, 29),
+        type="bgc",
+        source={"name": "ESPER"},
+        physics_forcing=_small_physics_ic(),
+        use_dask=False,
+    )
+    assert ic._is_esper_source is True
+    for var_name in ("ALK", "DIC", "NO3", "PO4", "SiO3", "O2"):
+        assert var_name in ic.ds
+        assert np.isfinite(np.asarray(ic.ds[var_name].values)).any()
 
 
 def test_bf_esper_requires_physics_forcing():

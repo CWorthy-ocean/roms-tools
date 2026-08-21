@@ -9,8 +9,11 @@ routines (https://github.com/LarissaMDias/PyESPER). It is therefore handled like
 The heavy lifting -- dask-lazy, chunked, uncertainty-free estimation -- lives in PyESPER's
 ``lir_xr``/``nn_xr``/``mixed_xr`` (a fork addition). This module only:
 
-* lazily imports PyESPER (an optional dependency) and puts its directory on ``sys.path`` so
-  the bundled ``NeuralNetworks`` package is importable for the NN methods;
+* lazily imports PyESPER (an optional dependency). When the source dict carries a
+  ``path``, that directory is put on ``sys.path`` first (a repository checkout);
+  without one, PyESPER must simply be importable -- e.g. installed into the
+  environment with ``pip install -e <checkout>``, which also lets PyESPER find its
+  own data directories (see ``PyESPER.paths.data_root``);
 * maps ROMS/MARBL tracer names to/from ESPER names;
 * converts ESPER's µmol/kg output to MARBL's mmol/m³ using potential density;
 * clamps physically non-negative tracers at 0.
@@ -79,14 +82,17 @@ ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 _VALID_METHODS = ("lir", "nn", "mixed")
 
 
-def _ensure_pyesper(path):
-    """Import PyESPER's xarray methods, making ``path`` importable first.
+def _ensure_pyesper(path=None):
+    """Import PyESPER's xarray methods, optionally making ``path`` importable first.
 
-    ``path`` is the PyESPER directory (holding ``Mat_fullgrid/`` and the top-level
-    ``NeuralNetworks/`` package). Adding it to ``sys.path`` makes both ``PyESPER`` and
-    ``NeuralNetworks`` importable regardless of whether PyESPER was pip-installed.
+    ``path``, when given, is a PyESPER repository checkout (holding ``Mat_fullgrid/``
+    and the top-level ``NeuralNetworks/`` package); it is inserted on ``sys.path`` so
+    both packages import from there. When omitted, PyESPER must already be importable
+    from the environment -- the recommended setup is an editable install
+    (``pip install -e <checkout>``), which also lets PyESPER locate its own data
+    directories automatically (``PyESPER.paths.data_root``).
     """
-    path = str(path)
+    path = str(path or "")
     if path and path not in sys.path:
         sys.path.insert(0, path)
     try:
@@ -95,8 +101,9 @@ def _ensure_pyesper(path):
         raise ImportError(
             "The ESPER BGC source requires the PyESPER package (with the dask-native "
             "`*_xr` methods) and its runtime deps (numpy, scipy, pandas, numba, "
-            "PyCO2SYS, seawater). Install PyESPER and point `source['path']` at its "
-            "directory (containing Mat_fullgrid/ and NeuralNetworks/)."
+            "PyCO2SYS, seawater). Either install PyESPER into the environment "
+            "(pip install -e <checkout>) or point `source['path']` at its checkout "
+            "(containing Mat_fullgrid/ and NeuralNetworks/)."
         ) from exc
     return {"lir": lir_xr, "nn": nn_xr, "mixed": mixed_xr}
 
@@ -131,11 +138,6 @@ def _decimal_year(time_da: xr.DataArray) -> xr.DataArray:
 
 def validate_esper_source(source: dict) -> None:
     """Validate an ESPER ``source``/``bgc_source`` dict (raises ``ValueError``)."""
-    if "path" not in source:
-        raise ValueError(
-            "An ESPER BGC source requires a 'path' to the PyESPER directory "
-            "(containing Mat_fullgrid/ and NeuralNetworks/)."
-        )
     method = str(source.get("method", "nn")).lower()
     if method not in _VALID_METHODS:
         raise ValueError(
@@ -172,8 +174,10 @@ def estimate_bgc_fields(
     depth : xarray.DataArray
         Depth of the points (metres); sign-agnostic (absolute value is used).
     source : dict
-        The ESPER source dict; uses ``path`` (required), ``method`` (default ``"nn"``),
-        ``equation`` (default 8).
+        The ESPER source dict; uses ``path`` (optional -- see below), ``method``
+        (default ``"nn"``), ``equation`` (default 8). ``path`` points at a PyESPER
+        repository checkout; omit it when PyESPER is installed in the environment
+        (``pip install -e <checkout>``), in which case PyESPER finds its own data.
     roms_variables : sequence of str
         ROMS/MARBL tracer names to derive (subset of :data:`ESPER_SUPPORTED_VARS`).
     est_dates : float or xarray.DataArray, optional
@@ -191,7 +195,7 @@ def estimate_bgc_fields(
     validate_esper_source(source)
     method = str(source.get("method", "nn")).lower()
     equation = source.get("equation", 8)
-    path = source["path"]
+    path = source.get("path") or ""
 
     unknown = [v for v in roms_variables if v not in ROMS_TO_ESPER]
     if unknown:

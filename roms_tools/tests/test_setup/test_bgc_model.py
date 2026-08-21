@@ -173,3 +173,61 @@ def test_single_object_save(tmp_path):
 def test_empty_input_raises():
     with pytest.raises(ValueError, match="at least one forcing object"):
         BGCMarbl().process_bgc_fields([])
+
+
+class TestDerivationRulesAreTheSingleSourceOfTruth:
+    """The public ``derive_*`` helpers and ``process_bgc_fields`` must agree.
+
+    Regression: both carried independent copies of the same expressions -- the helpers
+    as methods, the pipeline as inline lambdas -- so the two could silently diverge and
+    only the pipeline copy was ever exercised. Both now read ``derivation_rules()``.
+    """
+
+    def test_rules_cover_every_public_helper(self):
+        from roms_tools import BGCMarbl
+
+        rules = BGCMarbl.derivation_rules()
+        targets = {t for t, _s, _fn in rules}
+        assert "Lig" in targets
+        assert {"DIC_ALT_CO2", "ALK_ALT_CO2"} <= targets
+        assert set(BGCMarbl._CHL_FACTORS) <= targets
+        # Every rule is single-source and every source is a real input tracer.
+        assert {s for _t, s, _fn in rules} == {"Fe", "DIC", "ALK", "CHL"}
+        # No rule derives from a derived tracer (order would then matter).
+        assert not ({s for _t, s, _fn in rules} & targets)
+
+    def test_helpers_match_the_rule_table(self):
+        import numpy as np
+        import xarray as xr
+
+        from roms_tools import BGCMarbl
+
+        src = xr.DataArray(np.linspace(0.1, 2.0, 6), dims=("x",))
+        rules = {t: fn for t, _s, fn in BGCMarbl.derivation_rules()}
+
+        xr.testing.assert_identical(
+            BGCMarbl.derive_ligand_from_iron(src), rules["Lig"](src)
+        )
+        alt = BGCMarbl.derive_alt_co2(src, src)
+        xr.testing.assert_identical(alt["DIC_ALT_CO2"], rules["DIC_ALT_CO2"](src))
+        xr.testing.assert_identical(alt["ALK_ALT_CO2"], rules["ALK_ALT_CO2"](src))
+
+        phyto = BGCMarbl.derive_phytoplankton_from_chl(src)
+        assert set(phyto) == set(BGCMarbl._CHL_FACTORS)
+        for var, factor in BGCMarbl._CHL_FACTORS.items():
+            xr.testing.assert_identical(phyto[var], src * factor)
+
+    def test_helpers_reflect_a_subclass_override(self):
+        """A subclass changing a factor must change both paths, not just one."""
+        import numpy as np
+        import xarray as xr
+
+        from roms_tools import BGCMarbl
+
+        class DoubleLigand(BGCMarbl):
+            _FE_TO_LIG = 6.0
+
+        fe = xr.DataArray(np.array([1.0, 2.0]), dims=("x",))
+        xr.testing.assert_identical(DoubleLigand.derive_ligand_from_iron(fe), fe * 6.0)
+        rule = {t: fn for t, _s, fn in DoubleLigand.derivation_rules()}["Lig"]
+        xr.testing.assert_identical(rule(fe), fe * 6.0)

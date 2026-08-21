@@ -171,7 +171,53 @@ class BGCMarbl(BGCModel):
     _FE_TO_LIG = 3.0
 
     # ------------------------------------------------------------------
+    # Derivation rules — the single definition of the tracer math.
+    # ------------------------------------------------------------------
+    @classmethod
+    def derivation_rules(cls) -> tuple[tuple[str, str, Callable], ...]:
+        """Every ``(target, source, transform)`` this model derives, in apply order.
+
+        One definition of the math, read by both the public ``derive_*`` helpers below
+        and by :meth:`process_bgc_fields`. Keeping them in step matters: the two used to
+        carry independent copies of the same expressions, so a change to one silently
+        diverged from the other.
+
+        Each transform takes exactly one ``DataArray`` (the source tracer) and returns
+        one, which is what ``_ForcingBGCAdapter.assign_derived`` applies per boundary
+        suffix. Nothing here reads a *derived* tracer, so the order only fixes which
+        variable appears first in the output.
+
+        Returns
+        -------
+        tuple[tuple[str, str, Callable], ...]
+            ``(target_name, source_name, transform)`` triples.
+        """
+        rules: list[tuple[str, str, Callable]] = [
+            ("Lig", "Fe", lambda fe: fe * cls._FE_TO_LIG),
+            # Alternative-CO2 tracers start as identity copies; ROMS/MARBL evolves them
+            # separately once the run starts. The `* 1` produces a distinct object
+            # rather than aliasing the source.
+            ("DIC_ALT_CO2", "DIC", lambda dic: dic * 1),
+            ("ALK_ALT_CO2", "ALK", lambda alk: alk * 1),
+        ]
+        rules += [
+            (var, "CHL", lambda chl, f=factor: chl * f)
+            for var, factor in cls._CHL_FACTORS.items()
+        ]
+        return tuple(rules)
+
+    @classmethod
+    def _transform_for(cls, target: str) -> Callable:
+        """The single-source transform producing ``target``."""
+        for name, _source, fn in cls.derivation_rules():
+            if name == target:
+                return fn
+        raise KeyError(f"{cls.__name__} derives no tracer named {target!r}")
+
+    # ------------------------------------------------------------------
     # Pure (dict-level) derivation helpers — dask-safe, individually testable.
+    # Thin wrappers over `derivation_rules`, exposed for callers who want one
+    # derivation without going through a forcing object.
     # ------------------------------------------------------------------
     @classmethod
     def derive_phytoplankton_from_chl(cls, chl: xr.DataArray) -> dict[str, xr.DataArray]:
@@ -185,19 +231,26 @@ class BGCMarbl(BGCModel):
         Returns
         -------
         dict[str, xr.DataArray]
-            The 15 derived phytoplankton/zooplankton tracers.
+            The derived phytoplankton/zooplankton tracers.
         """
-        return {var: chl * factor for var, factor in cls._CHL_FACTORS.items()}
+        return {
+            target: fn(chl)
+            for target, source, fn in cls.derivation_rules()
+            if source == "CHL"
+        }
 
     @classmethod
     def derive_ligand_from_iron(cls, fe: xr.DataArray) -> xr.DataArray:
         """Derive ligand from iron: ``Lig = Fe × 3`` (mmol m-3)."""
-        return fe * cls._FE_TO_LIG
+        return cls._transform_for("Lig")(fe)
 
-    @staticmethod
-    def derive_alt_co2(dic: xr.DataArray, alk: xr.DataArray) -> dict[str, xr.DataArray]:
+    @classmethod
+    def derive_alt_co2(cls, dic: xr.DataArray, alk: xr.DataArray) -> dict[str, xr.DataArray]:
         """Derive the alternative-CO2 tracers as identity copies of DIC/ALK."""
-        return {"DIC_ALT_CO2": dic * 1, "ALK_ALT_CO2": alk * 1}
+        return {
+            "DIC_ALT_CO2": cls._transform_for("DIC_ALT_CO2")(dic),
+            "ALK_ALT_CO2": cls._transform_for("ALK_ALT_CO2")(alk),
+        }
 
     # ------------------------------------------------------------------
     # Object-level completion across one or more forcing objects.
@@ -248,18 +301,16 @@ class BGCMarbl(BGCModel):
 
         adapters = [_ForcingBGCAdapter(o, self) for o in objs]
 
-        # 1. Derive tracers from each object's own key fields (no cross-file priority).
+        # 1. Derive tracers from each object's own key fields (no cross-file priority),
+        #    from the same rule table the public derive_* helpers use.
         for a in adapters:
-            if a.has("Fe") and not a.has("Lig"):
-                a.assign_derived("Lig", "Fe", lambda fe: fe * self._FE_TO_LIG)
-            if a.has("DIC") and not a.has("DIC_ALT_CO2"):
-                a.assign_derived("DIC_ALT_CO2", "DIC", lambda x: x * 1)
-            if a.has("ALK") and not a.has("ALK_ALT_CO2"):
-                a.assign_derived("ALK_ALT_CO2", "ALK", lambda x: x * 1)
+            for target, source, fn in self.derivation_rules():
+                if a.has(source) and not a.has(target):
+                    a.assign_derived(target, source, fn)
+            # CHL is an input to the phytoplankton split, not a MARBL tracer itself, so
+            # it goes once its derivatives exist -- including when they were already
+            # present and nothing was derived above.
             if a.has("CHL"):
-                for var, factor in self._CHL_FACTORS.items():
-                    if not a.has(var):
-                        a.assign_derived(var, "CHL", lambda x, f=factor: x * f)
                 a.drop("CHL")
 
         # 2. Fill any tracer still missing across the union with its constant default,

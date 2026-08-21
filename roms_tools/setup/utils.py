@@ -55,15 +55,6 @@ HEADER_CHAR = "="
 
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
-# Registered BGC source names understood by InitialConditions / BoundaryForcing.
-# A ``bgc_source``/``source`` dict whose ``"name"`` is one of these is looked up in
-# the per-class dataset registry; the special ``"constants"`` name is handled
-# separately (broadcast of a user-supplied mapping onto the target grid).
-BGC_DATASET_NAMES: frozenset[str] = frozenset(
-    {"CESM_REGRIDDED", "UNIFIED", "GLODAP", "ROMS"}
-)
-
-
 def apply_source_prefill(data, regrid_config, prefill_kwargs) -> None:
     """Apply a whole-domain source prefill when the config requests one.
 

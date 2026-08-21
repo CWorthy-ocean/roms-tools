@@ -36,7 +36,6 @@ from roms_tools.setup.bgc_model import (
     bgc_variable_info,
 )
 from roms_tools.setup.utils import (
-    BGC_DATASET_NAMES,
     RawDataSource,
     add_time_info_to_ds,
     build_bgc_companions,
@@ -120,6 +119,35 @@ def _interpolate_phys_to_bgc_time(
 
     # Non-climatology: nearest selection in datetime64 space.
     return phys_da.sel({time_dim: bgc_time_coord}, method="nearest")
+
+
+#: Which dataset class implements each ``source["name"]``, per forcing type. This is the
+#: single source of truth for *which source names BoundaryForcing supports*: both
+#: ``_input_checks`` (at construction) and ``_get_data`` (at load) read it, so the two
+#: cannot drift apart and admit a name that later fails to load.
+#:
+#: Note there is no ``"ROMS"`` entry, for either forcing type. Boundary data taken from a
+#: parent ROMS run is the nesting workflow (:mod:`roms_tools.setup.nesting`), not a source
+#: here -- it needs the parent's boundary segments mapped onto the child grid rather than
+#: a lateral regrid. ``InitialConditions`` *does* accept a ``"ROMS"`` source (a restart
+#: file regridded onto the new grid), which is why its own map differs.
+_DATASET_MAP: dict[str, dict[str, dict[str, type]]] = {
+    "physics": {
+        "GLORYS": {
+            "external": GLORYSDataset,
+            "default": GLORYSDefaultDataset,
+        },
+    },
+    "bgc": {
+        "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
+        "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+        "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
+    },
+}
+
+#: BGC source names ``BoundaryForcing`` accepts: the dataset-backed ones above, plus the
+#: two derived pseudo-sources that load no dataset at all.
+_BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {"constants", "ESPER"}
 
 
 @dataclass(kw_only=True)
@@ -1022,10 +1050,12 @@ class BoundaryForcingSource:
                         "An ESPER BGC BoundaryForcingSource requires `physics_forcing` (a "
                         "physics BoundaryForcingSource supplying T/S on the ROMS grid)."
                     )
-            elif name not in BGC_DATASET_NAMES:
+            elif name not in _BGC_SOURCE_NAMES:
                 raise ValueError(
-                    f"Unknown BGC source name '{name}'. Valid options: "
-                    f"'constants' or one of {sorted(BGC_DATASET_NAMES)}."
+                    f"Unknown BGC source name '{name}' for boundary forcing. Valid "
+                    f"options: {sorted(_BGC_SOURCE_NAMES)}. (Boundary data from a "
+                    "parent ROMS run is the nesting workflow, not a BGC source; see "
+                    "roms_tools.setup.nesting.)"
                 )
             elif "path" not in self.source:
                 raise ValueError("`source` must include a 'path'.")
@@ -1067,33 +1097,7 @@ class BoundaryForcingSource:
             The `Dataset` instance
 
         """
-        dataset_map: dict[
-            str,
-            dict[
-                str,
-                dict[
-                    str,
-                    type[
-                        GLORYSDataset
-                        | GLORYSDefaultDataset
-                        | CESMBGCDataset
-                        | UnifiedBGCDataset
-                    ],
-                ],
-            ],
-        ] = {
-            "physics": {
-                "GLORYS": {
-                    "external": GLORYSDataset,
-                    "default": GLORYSDefaultDataset,
-                },
-            },
-            "bgc": {
-                "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
-                "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
-                "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
-            },
-        }
+        dataset_map = _DATASET_MAP
 
         source_name = str(self.source["name"])
         if source_name not in dataset_map[self.type]:

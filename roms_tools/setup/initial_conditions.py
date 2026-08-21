@@ -35,7 +35,6 @@ from roms_tools.setup.bgc_model import (
     bgc_variable_info,
 )
 from roms_tools.setup.utils import (
-    BGC_DATASET_NAMES,
     BGC_INTERPOLATION_METHODS,
     RawDataSource,
     apply_scipy_fallback_fill,
@@ -68,6 +67,34 @@ from roms_tools.utils import (
 from roms_tools.vertical_coordinate import (
     compute_depth,
 )
+
+
+#: Which dataset class implements each ``source["name"]``, per forcing type. Single
+#: source of truth for *which source names InitialConditions supports*: both
+#: ``_input_checks`` (at construction) and ``_get_data`` (at load) read it, so the two
+#: cannot drift apart and admit a name that later fails to load.
+#:
+#: Unlike ``BoundaryForcing``, ``"ROMS"`` is valid here for both forcing types -- a
+#: restart file from another run, regridded onto the new grid.
+_DATASET_MAP: dict[str, dict[str, dict[str, type[LatLonDataset | ROMSDataset]]]] = {
+    "physics": {
+        "GLORYS": {
+            "external": GLORYSDataset,
+            "default": GLORYSDefaultDataset,
+        },
+        "ROMS": defaultdict(lambda: ROMSDataset),
+    },
+    "bgc": {
+        "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
+        "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+        "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
+        "ROMS": defaultdict(lambda: ROMSDataset),
+    },
+}
+
+#: BGC source names ``InitialConditions`` accepts: the dataset-backed ones above, plus
+#: the two derived pseudo-sources that load no dataset at all.
+_BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {"constants", "ESPER"}
 
 
 @dataclass(kw_only=True)
@@ -902,10 +929,10 @@ class InitialConditionsSource:
                 from roms_tools.setup.esper import validate_esper_source
 
                 validate_esper_source(self.source)
-            elif name not in BGC_DATASET_NAMES:
+            elif name not in _BGC_SOURCE_NAMES:
                 raise ValueError(
                     f"Unknown BGC source name '{name}'. Valid options: "
-                    f"'constants' or one of {sorted(BGC_DATASET_NAMES)}."
+                    f"{sorted(_BGC_SOURCE_NAMES)}."
                 )
             elif "path" not in self.source:
                 raise ValueError("`source` must include a 'path'.")
@@ -939,23 +966,7 @@ class InitialConditionsSource:
         Dataset
             The `LatLonDataset` or `ROMSDataset` instance
         """
-        dataset_map: dict[
-            str, dict[str, dict[str, type[LatLonDataset | ROMSDataset]]]
-        ] = {
-            "physics": {
-                "GLORYS": {
-                    "external": GLORYSDataset,
-                    "default": GLORYSDefaultDataset,
-                },
-                "ROMS": defaultdict(lambda: ROMSDataset),
-            },
-            "bgc": {
-                "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
-                "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
-                "GLODAP": defaultdict(lambda: GLODAPv2BGCDataset),
-                "ROMS": defaultdict(lambda: ROMSDataset),
-            },
-        }
+        dataset_map = _DATASET_MAP
 
         # `self.source` is always the source relevant to `type`/`forcing_type` now
         # (contextual on `self.type`).

@@ -1317,3 +1317,45 @@ def test_interpolate_phys_to_bgc_time_nearest_cyclic_wraps():
 
     out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=True)
     np.testing.assert_array_equal(out.values, [3.0])
+
+
+def test_bgc_source_names_match_the_dataset_map():
+    """Construction-time validation and load-time lookup must accept the same names.
+
+    Regression: a shared `BGC_DATASET_NAMES` constant unioned the source names that
+    `InitialConditions` and `BoundaryForcing` support. `_input_checks` validated
+    against that union while `_get_data` looked up a per-class dataset map, so
+    `BoundaryForcing` accepted a `"ROMS"` BGC source at construction and then rejected
+    it later with a *different* list of valid options. Both now read one map, so they
+    cannot disagree.
+    """
+    from roms_tools.setup.boundary_forcing import _BGC_SOURCE_NAMES, _DATASET_MAP
+
+    assert _BGC_SOURCE_NAMES == frozenset(_DATASET_MAP["bgc"]) | {"constants", "ESPER"}
+    # Boundary data from a parent ROMS run is the nesting workflow, not a BGC source.
+    assert "ROMS" not in _BGC_SOURCE_NAMES
+    assert "ROMS" not in _DATASET_MAP["physics"]
+
+
+def test_roms_bgc_source_is_rejected_with_a_useful_message():
+    """The rejection must happen at construction, naming the real alternative."""
+    from datetime import datetime
+
+    import pytest
+
+    from roms_tools import Grid
+    from roms_tools.setup.boundary_forcing import BoundaryForcingSource
+
+    grid = Grid(
+        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55,
+        rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0,
+    )
+    with pytest.raises(ValueError, match="nesting"):
+        BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 1, 1),
+            end_time=datetime(2021, 1, 2),
+            type="bgc",
+            source={"name": "ROMS", "path": "restart.nc", "grid": grid},
+            use_dask=False,
+        )

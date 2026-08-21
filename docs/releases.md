@@ -1,5 +1,18 @@
 # Release notes
 
+## 4.1.1
+
+### New Features
+
+* KWARGs "start_time_pad" and "end_time_pad" were added to time-resolving roms-tools classes, defaulting to True. These KWARGs allows a user to switch off the existing behavior of adding time increments of data beyond designated start/end times, and to avoid potentially overwriting existing forcing files. ([#656](https://github.com/CWorthy-ocean/roms-tools/pull/656))
+
+### Miscellaneous
+
+* Fix test flakiness (exit code 143) from MPI-flavored esmf installations ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
+* Use a github cache for pooch data to speed up CI and avoid network errors ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
+* Exclude test files from packaged wheel to increase build speed and reduce package size ([#659](https://github.com/CWorthy-ocean/roms-tools/pull/659))
+* Documentation and log messages now refer to the newer namelist conventions in the CWorthy fork of ucla-roms. ([#661](https://github.com/CWorthy-ocean/roms-tools/pull/661))
+
 ## 4.1.0
 
 ### Breaking Changes

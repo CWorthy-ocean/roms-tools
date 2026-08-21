@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+### Improvements
+
+* Added code so that ETOPO2022 can be used with ROMS-Tools ([#668](https://github.com/CWorthy-ocean/roms-tools/pull/668))
+
+### Miscellaneous
+
+* Update datasets list to include ETOPO2022 ([#668](https://github.com/CWorthy-ocean/roms-tools/pull/668))
+
 ## 4.1.1
 
 ### New Features

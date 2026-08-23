@@ -41,6 +41,7 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 
 from __future__ import annotations
 
+import itertools
 import sys
 
 import numpy as np
@@ -51,6 +52,10 @@ from roms_tools.setup.utils import compute_potential_density, get_variable_metad
 # PyESPER never *grows* chunks, so this constant is the ceiling on ESPER chunk
 # size in practice.
 _MAX_POINTS_PER_CHUNK = 6_000_000
+
+# Dim names treated as the time axis when no datetime coordinate identifies one
+# (see _time_dim). Ordered by how specific they are to a real time axis.
+_TIME_DIM_NAMES = ("time", "bry_time", "abs_time")
 
 # ROMS/MARBL tracer name -> PyESPER "DesiredVariable" name.
 ROMS_TO_ESPER = {
@@ -95,25 +100,149 @@ def _ensure_pyesper(path=None):
     return {"lir": lir_xr, "nn": nn_xr, "mixed": mixed_xr}
 
 
-def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int]:
-    """Compute a large, ``_MAX_POINTS_PER_CHUNK``-ish chunk plan from ``da``'s own
-    shape, to apply uniformly to every PyESPER input (see that constant's
-    docstring for why) -- one plan, not each input rechunked independently, so
-    they stay consistently blocked with each other (``DataArray.chunk`` ignores
-    any dim in the mapping it doesn't have, so this is safe to apply even to an
-    input with fewer dims, e.g. a 2D ``lon``/``lat`` against 3D ``temp``).
+def _time_dim(da: xr.DataArray) -> str | None:
+    """Name of ``da``'s time dimension, or None when it has no usable one.
+
+    Prefers a dim carrying a datetime64 coordinate -- what the boundary path
+    hands us, since ``BoundaryForcing._process_bgc_esper`` renames ``abs_time``
+    to ``time`` precisely so the datetime view *is* the dim -- and falls back to
+    a conventional name for a bare dim with no coordinate. Initial conditions
+    have no time dim at all (one instant, one level-set), so this returns None
+    there and :func:`_pyesper_chunk_plan` keeps its spatial-split behaviour.
+    """
+    for dim in da.dims:
+        coord = da.coords.get(dim)
+        if coord is not None and np.issubdtype(coord.dtype, np.datetime64):
+            return str(dim)
+    for name in _TIME_DIM_NAMES:
+        if name in da.dims:
+            return name
+    return None
+
+
+def _month_aligned_time_chunks(
+    da: xr.DataArray, time_dim: str, max_steps: int
+) -> tuple[int, ...] | int:
+    """Chunk lengths along ``time_dim``: exactly one block per calendar month, or
+    a uniform ``max_steps`` when the coordinate isn't datetimes (or one month
+    alone would exceed ``max_steps``, e.g. sub-daily forcing on a large grid).
+
+    One block per month -- never several months bundled into one, even when they
+    would fit ``max_steps`` -- because a block is recomputed once per output file
+    it feeds. ``xarray.save_mfdataset(compute=True)`` issues a *separate*
+    ``dask.compute`` per file (``writes = [w.sync(compute=compute) for w in
+    writers]``), so nothing is shared between files: a block spanning N monthly
+    files is computed in full N times. Measured on the 12-month Pacific boundary
+    axis (367 daily steps, 14 monthly files), counting the time steps each file's
+    graph forces:
+
+        one block per month      2.8x the useful work
+        two months per block     4.8x
+        time collapsed to one    14.0x   (every block spans every file)
+
+    Undersized blocks only cost PyESPER's fixed per-call setup (~2.4 s measured),
+    which is cheap next to recomputing whole months; oversized ones cost real
+    duplicated estimation. So this errs small. For data coarse enough that
+    ``group_dataset`` writes yearly rather than monthly files, monthly blocks are
+    finer than the file partition -- a few extra calls, still no recompute, since
+    each block feeds exactly one file.
+    """
+    coord = da.coords.get(time_dim)
+    if coord is None or not np.issubdtype(coord.dtype, np.datetime64):
+        return max_steps
+    index = coord.to_index()
+    # Run lengths of consecutive (year, month). `group_by_month` groups by the
+    # (year, month) *value*; for the monotonic time axes ROMS forcing carries
+    # that is the same partition, and run lengths are what `.chunk()` needs --
+    # dask blocks have to be contiguous.
+    months = [
+        sum(1 for _ in group)
+        for _, group in itertools.groupby(zip(index.year, index.month, strict=True))
+    ]
+    if not months or max(months) > max_steps:
+        return max_steps
+    return tuple(months)
+
+
+def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int | tuple[int, ...]]:
+    """Compute a ``_MAX_POINTS_PER_CHUNK``-ish chunk plan from ``da``'s own shape,
+    to apply uniformly to every PyESPER input (see that constant's docstring for
+    why) -- one plan, not each input rechunked independently, so they stay
+    consistently blocked with each other. Apply it with
+    :func:`_apply_chunk_plan`, which drops the entries a given input can't take.
+
+    Cuts along **time** whenever there is a time axis to cut (see
+    :func:`_time_dim`), leaving the spatial dims whole. That is a memory choice,
+    not a chunk-count one. Cutting a boundary slab spatially leaves every chunk
+    needing the *entire* time range of the upstream regrid behind it, so a
+    year-long run has to hold a year-long GLORYS slab per chunk and nothing can
+    stream -- a 12-month, 100-level Pacific boundary run (367 daily steps,
+    xi_rho 1858) OOM-killed a 251 GB machine that way, while the physics write
+    of the very same boundaries, which keeps its natural per-time chunking,
+    streamed fine in 75 minutes. Cutting along time instead bounds each chunk's
+    upstream to that chunk's own time span.
+
+    Falls back to the original "collapse everything, split the single largest
+    dim" behaviour when there is no time axis -- initial conditions, a single
+    instant, where a spatial split is the only option and implies no upstream
+    time range anyway.
     """
     if da.size <= _MAX_POINTS_PER_CHUNK:
         return {d: -1 for d in da.dims}
-    # Collapse every dim to one chunk, then split the largest dim just enough to
-    # bring each block down to ~_MAX_POINTS_PER_CHUNK points -- one big axis to
-    # chunk along is enough to cap block count without fragmenting every dim.
+
+    plan: dict[str, int | tuple[int, ...]] = {d: -1 for d in da.dims}
+    time_dim = _time_dim(da)
+
+    if time_dim is not None and da.sizes[time_dim] > 1:
+        per_step = max(1, da.size // da.sizes[time_dim])
+        if per_step <= _MAX_POINTS_PER_CHUNK:
+            # The ordinary case: one time step's spatial slab fits the budget, so
+            # time is the only axis that needs cutting.
+            plan[time_dim] = _month_aligned_time_chunks(
+                da, time_dim, max(1, _MAX_POINTS_PER_CHUNK // per_step)
+            )
+            return plan
+        # A single time step already busts the budget (a very large grid): take
+        # time down to one step and split the largest spatial dim for the rest.
+        # Still time-cut, so still one step of upstream per chunk.
+        plan[time_dim] = 1
+        spatial = [d for d in da.dims if d != time_dim]
+        if spatial:
+            chunk_dim = max(spatial, key=lambda d: da.sizes[d])
+            per_slice = max(1, per_step // da.sizes[chunk_dim])
+            plan[chunk_dim] = max(1, _MAX_POINTS_PER_CHUNK // per_slice)
+        return plan
+
+    # No time axis: collapse every dim to one chunk, then split the largest dim
+    # just enough to bring each block down to ~_MAX_POINTS_PER_CHUNK points --
+    # one big axis is enough to cap the block count without fragmenting them all.
     chunk_dim = max(da.dims, key=lambda d: da.sizes[d])
     per_slice = max(1, da.size // da.sizes[chunk_dim])
-    target_len = max(1, _MAX_POINTS_PER_CHUNK // per_slice)
-    chunks = {d: -1 for d in da.dims}
-    chunks[chunk_dim] = target_len
-    return chunks
+    plan[chunk_dim] = max(1, _MAX_POINTS_PER_CHUNK // per_slice)
+    return plan
+
+
+def _apply_chunk_plan(
+    da: xr.DataArray, plan: dict[str, int | tuple[int, ...]]
+) -> xr.DataArray:
+    """Apply as much of ``plan`` as ``da`` can take, and return the result.
+
+    ``DataArray.chunk`` raises on a mapping key that isn't one of the array's own
+    dims, so a plan derived from ``temp`` has to be filtered per input: 2D
+    ``lon``/``lat`` against a 3D ``temp``, and a boundary ``depth`` that need not
+    carry the time dim at all. A tuple entry additionally has to sum to that
+    input's own length along the dim; where it doesn't, fall back to a single
+    chunk for that dim rather than raising -- the inputs are broadcast against
+    each other downstream regardless.
+    """
+    filtered: dict[str, int | tuple[int, ...]] = {}
+    for dim, spec in plan.items():
+        if dim not in da.dims:
+            continue
+        if isinstance(spec, tuple) and sum(spec) != da.sizes[dim]:
+            spec = -1
+        filtered[dim] = spec
+    return da.chunk(filtered) if filtered else da
 
 
 def _decimal_year(time_da: xr.DataArray) -> xr.DataArray:
@@ -198,15 +327,16 @@ def estimate_bgc_fields(
     # Defensive rechunk before the PyESPER call -- see _MAX_POINTS_PER_CHUNK's
     # docstring. temp/salt carry whatever chunking the upstream regrid pipeline
     # left them with (often many small chunks); one plan derived from temp's own
-    # shape is applied to every input so they stay consistently blocked.
+    # shape and time axis is applied to every input so they stay consistently
+    # blocked.
     if hasattr(temp.data, "chunks"):
         chunk_plan = _pyesper_chunk_plan(temp)
-        salt = salt.chunk(chunk_plan)
-        temp = temp.chunk(chunk_plan)
-        lon = lon.chunk(chunk_plan) if hasattr(lon.data, "chunks") else lon
-        lat = lat.chunk(chunk_plan) if hasattr(lat.data, "chunks") else lat
+        salt = _apply_chunk_plan(salt, chunk_plan)
+        temp = _apply_chunk_plan(temp, chunk_plan)
+        lon = _apply_chunk_plan(lon, chunk_plan) if hasattr(lon.data, "chunks") else lon
+        lat = _apply_chunk_plan(lat, chunk_plan) if hasattr(lat.data, "chunks") else lat
         depth_pos = (
-            depth_pos.chunk(chunk_plan)
+            _apply_chunk_plan(depth_pos, chunk_plan)
             if hasattr(depth_pos.data, "chunks")
             else depth_pos
         )

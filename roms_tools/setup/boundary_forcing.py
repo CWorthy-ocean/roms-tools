@@ -1424,10 +1424,10 @@ class BoundaryForcingSource:
         # for the NaN check below -- so a later .save() on this same `ds` reuses these
         # values instead of recomputing them. Must happen before any check view (e.g.
         # `.isel(bry_time=0)`) is built from `ds`; see materialize_before_check's
-        # docstring for why, and for a caveat on very-long-`bry_time` boundary runs
-        # (this fix's cost profile changes if a direction's ESPER chunk plan splits
-        # along time instead of collapsing to one chunk -- not a concern for typical
-        # run durations, verified against this project's actual production grid).
+        # docstring for why, and for how the cost trades off -- the ESPER chunk plan
+        # cuts multi-month boundary runs along time, so on those this buys a single
+        # compute of the full series at the price of holding it resident, rather
+        # than being close to free as it is when a dimension collapses to one chunk.
         materialize_before_check(
             ds,
             [

@@ -326,16 +326,22 @@ def materialize_before_check(
     leave the rest lazy and still force a second real compute of them at save time --
     reproducing the bug for everything except the one checked variable.
 
-    For an ESPER source, materializing costs no more than the existing
-    narrower check already pays for typical run configurations (PyESPER's own chunk
-    plan, :func:`roms_tools.setup.esper._pyesper_chunk_plan`, collapses every dimension
-    but the largest into one chunk -- so a same-size-or-larger portion of that chunk
-    was already being computed and discarded). This does NOT hold universally: a
-    boundary run with a very long ``bry_time`` series could push a direction's point
-    count past the chunk plan's single-chunk threshold, splitting along time instead
-    of collapsing -- at that point materializing the full time series here costs more
-    (extra compute + memory) than today's narrower time-slice check does. Not a
-    concern for typical run durations; a real limit for very long ones.
+    For an ESPER source this always saves total compute -- the narrower check
+    forces the same expensive PyESPER work and discards it, so ``.save()`` would
+    redo every chunk, whereas materializing computes each chunk exactly once.
+    What it spends is peak memory: the realized values for every variable and
+    direction stay resident until ``.save()`` consumes them (order 10 GB for a
+    12-month, 100-level basin-scale boundary -- 6 tracers x ~200M points x 8 B).
+
+    How large that trade is depends on the chunk plan. Where
+    :func:`roms_tools.setup.esper._pyesper_chunk_plan` collapses a dimension into
+    a single chunk, a check view over it (e.g. ``isel(bry_time=0)``) already
+    computes that whole chunk, so materializing is nearly free. That plan now cuts
+    multi-month boundary runs along *time* -- it has to, see its docstring -- so
+    there a single-time-slice check touches only the first block, and
+    materializing the full series is real extra work up front. Still cheaper in
+    total compute; it is peak memory, not throughput, that pays for it. Pass
+    ``serialize_dask`` when that peak is the binding constraint.
 
     A no-op when ``materialize`` is False, or ``var_names`` is empty.
 

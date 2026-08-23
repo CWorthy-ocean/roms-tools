@@ -7,6 +7,7 @@ The pure input-validation tests run everywhere (they don't import PyESPER).
 """
 
 import copy
+import itertools
 import os
 from datetime import datetime
 from pathlib import Path
@@ -24,10 +25,14 @@ from roms_tools import (
     InitialConditionsSource,
 )
 from roms_tools.datasets.download import download_test_data
+from roms_tools.setup import esper as esper_module
 from roms_tools.setup.esper import (
-    ESPER_SUPPORTED_VARS,
     _MAX_POINTS_PER_CHUNK,
+    ESPER_SUPPORTED_VARS,
+    _apply_chunk_plan,
+    _decimal_year,
     _pyesper_chunk_plan,
+    _time_dim,
     estimate_bgc_fields,
     validate_esper_source,
 )
@@ -150,6 +155,273 @@ def test_pyesper_chunk_plan_noop_for_small_array():
     small = xr.DataArray(np.zeros((3, 4, 5)), dims=("s_rho", "eta_rho", "xi_rho"))
     plan = _pyesper_chunk_plan(small.chunk())
     assert plan == {"s_rho": -1, "eta_rho": -1, "xi_rho": -1}
+
+
+def _daily_bry_temp(start, end, spatial_len, spatial_dim="xi_rho", n_levels=100):
+    """A boundary-shaped `temp`: (time, s_rho, <spatial>) on the daily datetime
+    axis -- including the bracketing days -- that BoundaryForcing hands the ESPER
+    path, arriving per-step chunked as the upstream regrid leaves it.
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    times = pd.date_range(
+        pd.Timestamp(start) - pd.Timedelta(days=1),
+        pd.Timestamp(end) + pd.Timedelta(days=1),
+        freq="D",
+    )
+    arr = dsa.zeros(
+        (len(times), n_levels, spatial_len),
+        chunks=(1, n_levels, spatial_len),
+        dtype="f8",
+    )
+    return xr.DataArray(
+        arr, dims=("time", "s_rho", spatial_dim), coords={"time": times}
+    )
+
+
+def test_pyesper_chunk_plan_cuts_time_not_space_for_a_long_boundary_run():
+    """Regression (OOM kill): a multi-month boundary run must be cut along TIME.
+
+    Cutting a boundary slab spatially leaves every chunk needing the *whole* time
+    range of the upstream regrid behind it, so nothing streams and a year-long
+    run holds a year-long GLORYS slab per chunk. That OOM-killed a 251 GB machine
+    on the 12-month, 100-level Pacific 12km domain reproduced here (367 daily
+    steps x 100 levels x xi_rho 1858), while the physics write of the very same
+    boundaries -- which keeps its natural per-time chunking -- streamed fine.
+    """
+    temp = _daily_bry_temp("2010-01-01", "2010-12-31", 1858)
+    plan = _pyesper_chunk_plan(temp)
+
+    # Time is the axis that gets cut; the spatial dims stay whole.
+    assert plan["s_rho"] == -1
+    assert plan["xi_rho"] == -1
+    assert plan["time"] != -1
+
+    rechunked = _apply_chunk_plan(temp, plan)
+    assert rechunked.shape == temp.shape  # pure block-boundary change
+    time_blocks = rechunked.chunks[rechunked.dims.index("time")]
+    assert sum(time_blocks) == temp.sizes["time"]
+    assert max(time_blocks) < temp.sizes["time"], "the time axis must really split"
+
+    # No block exceeds the budget PyESPER's per-chunk memory bound assumes.
+    for block in itertools.product(*rechunked.chunks):
+        assert np.prod(block) <= _MAX_POINTS_PER_CHUNK
+
+
+def test_pyesper_chunk_plan_time_blocks_land_on_month_boundaries():
+    """Every time-block edge is a calendar-month edge -- the same partition
+    `group_by_month` uses to split the saved files -- so a chunk always covers
+    whole output files and dask can retire it once those are written, rather than
+    holding it for a file it only partly feeds.
+    """
+    temp = _daily_bry_temp("2010-01-01", "2010-12-31", 1858)
+    blocks = _pyesper_chunk_plan(temp)["time"]
+    assert isinstance(blocks, tuple)
+
+    index = temp["time"].to_index()
+    month_edges = {0, len(index)}
+    for i in range(1, len(index)):
+        if (index[i].year, index[i].month) != (index[i - 1].year, index[i - 1].month):
+            month_edges.add(i)
+
+    edge = 0
+    for block in blocks:
+        edge += block
+        assert edge in month_edges, (
+            f"block edge at time index {edge} falls mid-month; the chunk would "
+            "straddle a partial output file"
+        )
+
+
+def test_pyesper_chunk_plan_gives_one_block_per_month_never_more():
+    """A block is recomputed once per output file it feeds, because
+    `save_mfdataset(compute=True)` issues a separate `dask.compute` per file. So
+    months must never be bundled, even when two of them would fit the point
+    budget -- a two-month block means every monthly write recomputes both months.
+
+    Measured on this axis (367 daily steps -> 14 monthly files), as multiples of
+    the useful work: one block per month 2.8x, two months per block 4.8x, time
+    collapsed to a single block 14.0x.
+    """
+    index = _daily_bry_temp("2010-01-01", "2010-12-31", 1858)["time"].to_index()
+    expected = tuple(
+        sum(1 for _ in group)
+        for _, group in itertools.groupby(zip(index.year, index.month, strict=True))
+    )
+
+    for spatial_len, spatial_dim in ((1858, "xi_rho"), (962, "eta_rho")):
+        temp = _daily_bry_temp(
+            "2010-01-01", "2010-12-31", spatial_len, spatial_dim=spatial_dim
+        )
+        blocks = _pyesper_chunk_plan(temp)["time"]
+        assert blocks == expected, (
+            f"{spatial_dim}: expected one block per calendar month, got {blocks}"
+        )
+
+    # The east/west slab is small enough that two months would still fit the
+    # budget -- exactly the case that must NOT be bundled.
+    assert 2 * 31 * 100 * 962 < _MAX_POINTS_PER_CHUNK
+
+
+def test_pyesper_chunk_plan_leaves_a_short_run_as_one_chunk():
+    """No regression for the configuration this pipeline was validated on: the
+    CCS 4km / 2-month boundary (62 daily steps x 100 levels x xi_rho 674) is
+    under the point budget, so it stays a single chunk and pays no extra
+    per-chunk PyESPER setup cost.
+    """
+    temp = _daily_bry_temp("2013-01-01", "2013-03-01", 674)
+    assert temp.size <= _MAX_POINTS_PER_CHUNK
+    assert _pyesper_chunk_plan(temp) == {"time": -1, "s_rho": -1, "xi_rho": -1}
+
+
+def test_pyesper_chunk_plan_uniform_time_blocks_without_a_datetime_coord():
+    """With no datetime coordinate there are no months to align to, so the time
+    axis is cut into uniform blocks instead -- still time, still under budget.
+    """
+    import dask.array as dsa
+
+    temp = xr.DataArray(
+        dsa.zeros((367, 100, 1858), chunks=(1, 100, 1858), dtype="f8"),
+        dims=("time", "s_rho", "xi_rho"),
+    )
+    plan = _pyesper_chunk_plan(temp)
+    assert isinstance(plan["time"], int)
+    assert 0 < plan["time"] < temp.sizes["time"]
+    assert plan["s_rho"] == -1 and plan["xi_rho"] == -1
+    assert 100 * 1858 * plan["time"] <= _MAX_POINTS_PER_CHUNK
+
+
+def test_pyesper_chunk_plan_splits_space_only_when_one_step_busts_the_budget():
+    """A single time level over the budget is the one case that still needs a
+    spatial cut -- but time drops to one step first, so a chunk never pulls more
+    than one step of upstream regrid.
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    temp = xr.DataArray(
+        dsa.zeros((40, 100, 80_000), chunks=(1, 100, 80_000), dtype="f8"),
+        dims=("time", "s_rho", "xi_rho"),
+        coords={"time": pd.date_range("2010-01-01", periods=40, freq="D")},
+    )
+    assert 100 * 80_000 > _MAX_POINTS_PER_CHUNK  # one step alone busts it
+    plan = _pyesper_chunk_plan(temp)
+    assert plan["time"] == 1
+    assert plan["xi_rho"] < 80_000
+    assert 100 * plan["xi_rho"] <= _MAX_POINTS_PER_CHUNK
+
+
+def test_pyesper_chunk_plan_ic_volume_unchanged_without_a_time_dim():
+    """Initial conditions are one instant with no time axis, so the plan keeps
+    its original behaviour: collapse every dim, split the single largest one.
+    """
+    import dask.array as dsa
+
+    temp = xr.DataArray(
+        dsa.zeros((100, 1344, 672), chunks=(1, 50, 50), dtype="f8"),
+        dims=("s_rho", "eta_rho", "xi_rho"),
+    )
+    assert _time_dim(temp) is None
+    plan = _pyesper_chunk_plan(temp)
+    assert plan["s_rho"] == -1 and plan["xi_rho"] == -1
+    assert 0 < plan["eta_rho"] < 1344  # the largest dim is the one that splits
+
+
+def test_apply_chunk_plan_filters_entries_the_input_cannot_take():
+    """`DataArray.chunk` raises on a mapping key that isn't one of the array's own
+    dims, so a plan derived from `temp` has to be filtered per input: 2D lon/lat
+    against a 3D temp, and a boundary `depth` carrying no time dim at all.
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    plan = {"time": (3, 3), "s_rho": -1, "xi_rho": -1}
+
+    lon = xr.DataArray(dsa.zeros((8,), chunks=(8,), dtype="f8"), dims=("xi_rho",))
+    assert _apply_chunk_plan(lon, plan).chunks == ((8,),)
+
+    depth = xr.DataArray(
+        dsa.zeros((4, 8), chunks=(4, 8), dtype="f8"), dims=("s_rho", "xi_rho")
+    )
+    assert _apply_chunk_plan(depth, plan).chunks == ((4,), (8,))
+
+    temp = xr.DataArray(
+        dsa.zeros((6, 4, 8), chunks=(1, 4, 8), dtype="f8"),
+        dims=("time", "s_rho", "xi_rho"),
+        coords={"time": pd.date_range("2010-01-01", periods=6, freq="D")},
+    )
+    assert _apply_chunk_plan(temp, plan).chunks == ((3, 3), (4,), (8,))
+
+    # A tuple that doesn't sum to this input's own length along the dim falls
+    # back to a single chunk there rather than raising.
+    assert _apply_chunk_plan(temp.isel(time=slice(0, 5)), plan).chunks == (
+        (5,),
+        (4,),
+        (8,),
+    )
+
+
+@needs_pyesper
+def test_esper_estimates_are_identical_under_time_chunking(monkeypatch):
+    """Cutting the time axis is a pure blocking change: PyESPER's kernel is
+    point-wise, so time-chunked estimates must match the single-chunk result
+    exactly (NaNs in the same places included).
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    n_time, n_lev, n_x = 6, 3, 5
+    shape = (n_time, n_lev, n_x)
+    dims = ("time", "s_rho", "xi_rho")
+    times = pd.date_range("2010-01-31", periods=n_time, freq="ME")
+    rng = np.random.default_rng(0)
+
+    salt_v = 34.0 + rng.random(shape)
+    temp_v = 10.0 + 5.0 * rng.random(shape)
+    lon_v = np.broadcast_to(np.linspace(200.0, 210.0, n_x), shape).copy()
+    lat_v = np.broadcast_to(np.linspace(30.0, 40.0, n_x), shape).copy()
+    depth_v = np.broadcast_to(
+        np.linspace(10.0, 500.0, n_lev)[None, :, None], shape
+    ).copy()
+    source = {"name": "ESPER", "path": _PYESPER_PATH, "method": "nn", "equation": 8}
+
+    def run(cap):
+        # Drive _pyesper_chunk_plan's decision from a stubbed budget: the real
+        # 6M-point cap would leave this 90-point fixture as one chunk either way.
+        monkeypatch.setattr(esper_module, "_MAX_POINTS_PER_CHUNK", cap)
+
+        def wrap(values):
+            return xr.DataArray(
+                dsa.from_array(values, chunks=shape), dims=dims, coords={"time": times}
+            )
+
+        fields = estimate_bgc_fields(
+            wrap(temp_v),
+            wrap(salt_v),
+            wrap(lon_v),
+            wrap(lat_v),
+            wrap(depth_v),
+            source=source,
+            roms_variables=("ALK", "DIC"),
+            est_dates=_decimal_year(xr.DataArray(times, dims=("time",))),
+        )
+        return {k: np.asarray(v.values) for k, v in fields.items()}
+
+    whole = run(10**9)  # comfortably one chunk
+    chunked = run(30)  # forces a cut along time
+
+    # The stubbed budget really did split the time axis.
+    monkeypatch.setattr(esper_module, "_MAX_POINTS_PER_CHUNK", 30)
+    split_plan = _pyesper_chunk_plan(
+        xr.DataArray(dsa.from_array(temp_v, chunks=shape), dims=dims,
+                     coords={"time": times})
+    )
+    assert split_plan["time"] != -1
+
+    assert np.isfinite(whole["ALK"]).any(), "fixture should produce real estimates"
+    for name in ("ALK", "DIC"):
+        np.testing.assert_array_equal(chunked[name], whole[name])
 
 
 @needs_pyesper

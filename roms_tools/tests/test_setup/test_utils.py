@@ -1138,3 +1138,143 @@ class TestQueryKdtreeNearest:
             )
         assert distances_km[0] > 100.0
         assert "FarRiver" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# group_by_month / group_by_year: contiguous slices, not fancy indexing
+# ---------------------------------------------------------------------------
+
+
+def _grouping_fixture(time_chunks):
+    """A dask-backed forcing-shaped dataset on a 12-month daily axis (plus the
+    bracketing days), chunked as given along time.
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    times = pd.date_range("2009-12-31", "2011-01-01", freq="D")  # 367 steps
+    values = np.arange(len(times) * 2 * 3, dtype="f8").reshape(len(times), 2, 3)
+    arr = dsa.from_array(values, chunks=(tuple(time_chunks), 2, 3), name="srcblk")
+    ds = xr.Dataset(
+        {"v": (("bry_time", "s", "x"), arr)},
+        coords={"abs_time": ("bry_time", times)},
+    )
+    return ds, times
+
+
+_MONTHLY_CHUNKS = (1, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 1)
+
+
+def _blocks_touched(groups, chunk_sizes):
+    """Time steps each group's graph actually forces, summed over groups.
+
+    `save_mfdataset(compute=True)` runs a separate `dask.compute` per output file
+    and shares nothing between them, so this sum -- not the dataset size -- is
+    what the write really costs.
+    """
+    from dask.core import flatten
+    from dask.optimization import cull
+
+    total = 0
+    for g in groups:
+        arr = g["v"].data
+        culled, _ = cull(dict(arr.__dask_graph__()), list(flatten(arr.__dask_keys__())))
+        touched = {k[1] for k in culled if isinstance(k, tuple) and k[0] == "srcblk"}
+        total += sum(chunk_sizes[i] for i in sorted(touched))
+    return total
+
+
+def test_group_by_month_does_not_multiply_the_work_it_writes():
+    """Regression: grouping must not make each file pay for its neighbours' blocks.
+
+    `groupby` selects by fancy indexing, which re-blocks the result on dask's own
+    heuristic; the pieces then straddle source blocks, and since every output file
+    is its own `dask.compute`, each one re-runs whatever it straddles. With
+    month-sized source chunks that cost 2.8x the necessary estimation on this
+    axis. Contiguous `isel` slices preserve the blocking, so each file pays for
+    its own month and nothing else.
+    """
+    from roms_tools.setup.utils import _group_by_month_via_groupby, group_by_month
+
+    ds, times = _grouping_fixture(_MONTHLY_CHUNKS)
+    sizes = list(_MONTHLY_CHUNKS)
+
+    new_groups, _ = group_by_month(ds, "/tmp/out")
+    old_groups, _ = _group_by_month_via_groupby(ds, "/tmp/out")
+
+    necessary = len(times)
+    assert _blocks_touched(new_groups, sizes) == necessary, "should be exactly 1.0x"
+    assert _blocks_touched(old_groups, sizes) > necessary, (
+        "fixture should still demonstrate the groupby overhead it replaced"
+    )
+
+
+def test_group_by_month_matches_groupby_exactly():
+    """Purely a performance change: same files, same names, same values."""
+    from roms_tools.setup.utils import _group_by_month_via_groupby, group_by_month
+
+    ds, times = _grouping_fixture(_MONTHLY_CHUNKS)
+    new_groups, new_names = group_by_month(ds, "/tmp/out")
+    old_groups, old_names = _group_by_month_via_groupby(ds, "/tmp/out")
+
+    assert new_names == old_names
+    assert [g.sizes["bry_time"] for g in new_groups] == [
+        g.sizes["bry_time"] for g in old_groups
+    ]
+    for new, old in zip(new_groups, old_groups, strict=True):
+        np.testing.assert_array_equal(new["v"].values, old["v"].values)
+        np.testing.assert_array_equal(
+            new["abs_time"].values, old["abs_time"].values
+        )
+    # Every step written exactly once -- no gap, no double-write.
+    assert sum(g.sizes["bry_time"] for g in new_groups) == len(times)
+
+
+def test_group_by_month_falls_back_when_a_month_is_not_contiguous():
+    """A slice only equals a group when equal keys are adjacent. On a
+    non-monotonic axis a month spans several runs, and emitting one file per run
+    would give two files the SAME name -- the second silently overwriting the
+    first. The guard falls back to `groupby`, which merges them instead.
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    from roms_tools.setup.utils import group_by_month
+
+    times = pd.DatetimeIndex(
+        list(pd.date_range("2010-01-01", periods=3))
+        + list(pd.date_range("2010-02-01", periods=2))
+        + list(pd.date_range("2010-01-10", periods=2))  # January again
+    )
+    values = np.arange(len(times) * 2, dtype="f8").reshape(len(times), 2)
+    ds = xr.Dataset(
+        {"v": (("t", "x"), dsa.from_array(values, chunks=(len(times), 2)))},
+        coords={"abs_time": ("t", times)},
+    )
+
+    groups, names = group_by_month(ds, "/tmp/out")
+    assert len(set(names)) == len(names), f"filename collision: {names}"
+    assert names == ["/tmp/out_201001", "/tmp/out_201002"]
+    assert sum(g.sizes["t"] for g in groups) == len(times)
+
+
+def test_group_by_year_preserves_every_step():
+    """Same treatment for yearly grouping (used for monthly-frequency data)."""
+    import dask.array as dsa
+    import pandas as pd
+
+    from roms_tools.setup.utils import group_by_year
+
+    times = pd.date_range("2009-06-15", periods=30, freq="MS")
+    values = np.arange(len(times) * 2, dtype="f8").reshape(len(times), 2)
+    ds = xr.Dataset(
+        {"v": (("t", "x"), dsa.from_array(values, chunks=((3,) * 10, 2)))},
+        coords={"abs_time": ("t", times)},
+    )
+
+    groups, names = group_by_year(ds, "/tmp/out")
+    assert names == ["/tmp/out_2009", "/tmp/out_2010", "/tmp/out_2011"]
+    assert sum(g.sizes["t"] for g in groups) == len(times)
+    np.testing.assert_array_equal(
+        np.concatenate([g["v"].values for g in groups]), values
+    )

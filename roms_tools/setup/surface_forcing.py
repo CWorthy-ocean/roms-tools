@@ -979,6 +979,17 @@ class SurfaceForcing:
         product bleed outward past its own domain) would extrapolate it into
         territory it never simulated.
 
+        Note what this does and does not achieve. It removes the discontinuity
+        caused by switching source mid-field; it does not make the boundary
+        invisible. What remains there is the two products' genuine disagreement
+        plus the fallback's own meteorological gradient, and neither is an
+        artefact. Nor does a wider band help indefinitely: once the cell adjacent
+        to the seam has a weight near zero it is already pure fallback, so
+        widening only pushes the transition deeper into the primary's interior,
+        where the primary is the better product. Measured across the real
+        CONUS404/ERA5 boundary, the mean seam discontinuity improved most at a
+        band of ~150 km against ERA5 and then flattened.
+
         Distance is computed with :func:`scipy.ndimage.distance_transform_edt` on
         the footprint mask, scaled by the grid's mean cell size. That is O(N) --
         unlike :func:`~roms_tools.setup.utils.min_dist_to_land`, whose

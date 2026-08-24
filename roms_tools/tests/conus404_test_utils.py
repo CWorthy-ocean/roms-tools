@@ -116,7 +116,7 @@ def synthetic_conus404(
         the quantization the test sees is the real one.
         """
         steps = np.concatenate(
-            [np.zeros((1,) + flux_true.shape[1:]), flux_true[1:] * 3600.0]
+            [np.zeros((1, *flux_true.shape[1:])), flux_true[1:] * 3600.0]
         )
         return (RADIATION_ACCUM_OFFSET_J_M2 + np.cumsum(steps, axis=0)).astype(
             np.float32
@@ -199,9 +199,7 @@ def synthetic_conus404(
     return ds, expected
 
 
-def write_conus404_store(
-    path: str | Path, ds: xr.Dataset, fmt: str = "zarr"
-) -> Path:
+def write_conus404_store(path: str | Path, ds: xr.Dataset, fmt: str = "zarr") -> Path:
     """Write a synthetic dataset to disk as a zarr store or a NetCDF file.
 
     ``fmt="zarr"`` exercises the ``read_zarr`` code path (which requires dask);

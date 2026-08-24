@@ -51,6 +51,10 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - Surface Forcing
      - Optional (streaming supported)
      - `Climate Data Store <https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels>`_
+   * - CONUS404
+     - Surface Forcing (North America, high-resolution)
+     - No (streamed)
+     - `USGS/OSN <https://hytest-org.github.io/hytest/dataset_access/CONUS404_ACCESS.html>`_
    * - Dai & Trenberth
      - River Forcing (discharge)
      - No (auto-downloaded)
@@ -373,6 +377,57 @@ Global 1/4° atmospheric reanalysis from ECMWF providing meteorological surface 
         - Total precipitation (m)
       * - ``sst``
         - Sea surface temperature (K) — used for land masking
+
+
+CONUS404
+~~~~~~~~
+
+4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. Streamed from the zarr store on the USGS Open Storage Network pod; no download is needed, but ``use_dask=True`` and the ``s3fs`` package are (``pip install "roms-tools[stream]"``). Select it with ``source={"name": "CONUS404"}``; the store path defaults to ``s3://hytest/conus404/conus404_hourly.zarr``.
+
+:Version: CONUS404 hourly, 1979-10-01 to 2024-10-01
+:Required for: Surface Forcing (optional alternative to ERA5)
+:Available at: `HyTEST / USGS <https://hytest-org.github.io/hytest/dataset_access/CONUS404_ACCESS.html>`_ (see also the `data release <https://doi.org/10.5066/P9PHPK4F>`_)
+
+.. warning::
+
+   CONUS404 is a **regional** dataset on a **curvilinear** (Lambert Conformal Conic) grid, which has three consequences:
+
+   * Its lat/lon bounding box (17.65–57.34° N, 138.73–57.07° W) substantially overstates coverage, because the domain is a rectangle in projected space rather than in lat/lon. Its corners are 17.65° N at 122.57° W / 73.23° W and 51.69° N at 138.73° W / 57.07° W, so the 57.34° N maximum occurs only near the top centre. Along the US west coast the northern limit falls from ~55° N at 125° W to ~53° N at 135° W, and there is no data at all west of ~139° W. A Gulf of Alaska domain is therefore almost entirely outside CONUS404; a California Current domain is fully inside.
+   * Any part of the ROMS grid outside the footprint is **not** extrapolated — it comes back as NaN. Use a fully contained grid or pass ``bypass_validation=True``.
+   * It requires xESMF (install ROMS-Tools via conda), and ``correct_radiation`` must be ``False``: the ERA5 correction climatology is matched by exact lat/lon coordinate value, which a curvilinear grid cannot satisfy.
+
+   Note also that CONUS404 carries no instantaneous radiation fields, only accumulations since the 1979 model start. ROMS-Tools differences them, which leaves an intrinsic ~±4.6 W/m² quantization noise floor on ``swrad`` and ``lwrad`` (the accumulations are float32 and reach ~2.4 × 10¹¹ J/m² by 2020, where one float32 step is 4.55 W/m² per hour).
+
+.. dropdown:: Required fields
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Field
+        - Description
+      * - ``time``
+        - Time
+      * - ``lat``, ``lon``
+        - 2D latitude/longitude of the mass points (degrees north/east)
+      * - ``U10``, ``V10``
+        - 10 m wind components (m/s), relative to the **model grid**
+      * - ``COSALPHA``, ``SINALPHA``
+        - Local cosine/sine of the map rotation — used to rotate the winds to east/north
+      * - ``ACSWDNB``, ``ACSWUPB``
+        - Accumulated down/upwelling short-wave radiation at the surface (J/m²); differenced and subtracted to give net short-wave
+      * - ``ACLWDNB``
+        - Accumulated downwelling long-wave radiation at the surface (J/m²)
+      * - ``T2``
+        - 2 m temperature (K)
+      * - ``TD2``
+        - 2 m dewpoint temperature (K)
+      * - ``PSFC``
+        - Surface pressure (Pa) — used for specific humidity
+      * - ``PREC_ACC_NC``
+        - Precipitation accumulated over the prior hour (mm)
+      * - ``LANDMASK``
+        - Land mask (1 land, 0 water) — retained for diagnostics only
 
 
 Dai & Trenberth

@@ -97,7 +97,7 @@ def test_radiation_is_never_negative(dataset):
 
 
 def test_swrad_is_net_not_downward(dataset):
-    """swrad must be net shortwave (down minus up), matching ERA5's `ssr`."""
+    """Swrad must be net shortwave (down minus up), matching ERA5's `ssr`."""
     data, expected = dataset
     from roms_tools.tests.conus404_test_utils import ALBEDO
 
@@ -133,9 +133,7 @@ def test_wind_rotation_preserves_speed(dataset):
     data, expected = dataset
     u, _ = _aligned(data, expected, "uwnd")
     v, _ = _aligned(data, expected, "vwnd")
-    np.testing.assert_allclose(
-        np.hypot(u, v), np.hypot(5.0, 2.0), rtol=1e-6, atol=1e-5
-    )
+    np.testing.assert_allclose(np.hypot(u, v), np.hypot(5.0, 2.0), rtol=1e-6, atol=1e-5)
 
 
 # --- unit conversions ------------------------------------------------------
@@ -171,9 +169,7 @@ def test_qair_uses_psfc_by_default(dataset):
     tair = data.ds[data.var_names["Tair"]].compute()
     # The synthetic PSFC is a constant 101300 Pa.
     exp = specific_humidity_from_dewpoint(tair, tair - 5.0, patm=1013.0)
-    np.testing.assert_allclose(
-        data.ds["qair"].compute().values, exp.values, rtol=1e-6
-    )
+    np.testing.assert_allclose(data.ds["qair"].compute().values, exp.values, rtol=1e-6)
 
 
 def test_qair_era5_magnus_matches_era5_bit_for_bit(synthetic_store):

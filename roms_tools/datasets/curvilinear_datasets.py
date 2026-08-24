@@ -555,9 +555,21 @@ class CONUS404Dataset(CurvilinearDataset):
     A 4 km Lambert Conformal Conic reanalysis over the conterminous United States
     and surrounding waters, hourly from 1979-10-01 to 2024-10-01, distributed as a
     zarr store on the USGS Open Storage Network pod (see
-    :data:`DEFAULT_CONUS404_PATH`). Coverage is roughly 17.6-57.3 N and
-    138.7-57.1 W; a ROMS grid extending past that will contain NaN, by design --
-    see the notes below.
+    :data:`DEFAULT_CONUS404_PATH`).
+
+    **Footprint.** The lat/lon bounding box (17.65-57.34 N, 138.73-57.07 W)
+    substantially overstates coverage, because the domain is a rectangle in
+    Lambert Conformal space, not in lat/lon. Its actual corners are::
+
+        SW  17.65 N, 122.57 W        SE  17.65 N,  73.23 W
+        NW  51.69 N, 138.73 W        NE  51.69 N,  57.07 W
+
+    so the 57.34 N maximum occurs only near the top *centre* of the domain. Along
+    the US west coast the northern limit falls off quickly: ~55.1 N at 125 W,
+    ~54.1 N at 130 W, ~52.9 N at 135 W, and nothing at all west of ~139 W. A Gulf
+    of Alaska domain is therefore almost entirely outside CONUS404, while a
+    California Current domain is fully inside. A ROMS grid extending past the
+    footprint yields NaN there, by design -- see the notes below.
 
     :meth:`post_process` emits exactly the variables and units that
     ``ERA5Dataset`` does (``uwnd``, ``vwnd``, ``swrad``, ``lwrad``, ``Tair``,

@@ -8,6 +8,11 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
+from roms_tools.datasets.curvilinear_datasets import (
+    DEFAULT_CONUS404_PATH,
+    CONUS404Dataset,
+    CurvilinearDataset,
+)
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCSurfaceForcingDataset,
     ERA5Correction,
@@ -24,7 +29,11 @@ from roms_tools.processing_methods import (
     RegridConfig,
     _xesmf_available,
 )
-from roms_tools.regrid import build_lateral_regridder, select_source_mask
+from roms_tools.regrid import (
+    LateralRegridFromROMS,
+    build_lateral_regridder,
+    select_source_mask,
+)
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
@@ -83,7 +92,9 @@ class SurfaceForcing:
     source : RawDataSource
         Dictionary specifying the source of the surface forcing data. Keys include:
 
-          - "name" (str): Name of the data source. Currently supported: "ERA5"
+          - "name" (str): Name of the data source. For ``type="physics"``:
+            "ERA5" (global, ~28 km) or "CONUS404" (North America only, 4 km).
+            See the CONUS404 notes below.
           - "path" (optional; Union[str, Path, List[Union[str, Path]]]): Path(s) to the raw data file(s). Accepted formats:
 
             - A single string (supports wildcards),
@@ -135,6 +146,30 @@ class SurfaceForcing:
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
 
+
+    Notes
+    -----
+    **CONUS404.** A 4 km WRF reanalysis over North America, hourly from
+    1979-10-01 to 2024-10-01, streamed by default from the USGS/OSN zarr store
+    (which needs ``use_dask=True`` and the ``s3fs`` package; install the
+    ``stream`` extra). Note that its lat/lon bounding box overstates coverage --
+    the domain is a rectangle in Lambert Conformal space, so along the US west
+    coast its northern limit drops from ~55 N at 125 W to nothing west of ~139 W.
+    See :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset` for the
+    exact corners. Points of note:
+
+    - Being a **regional** source on a **curvilinear** grid, it is regridded with
+      non-extrapolating xESMF bilinear, so any part of the ROMS grid outside its
+      footprint comes back as **NaN by design**. Use a fully contained grid, pass
+      ``bypass_validation=True``, or layer it over a global source. It requires
+      xESMF; the scipy engine cannot interpolate a 2D source grid.
+    - ``correct_radiation`` must be ``False``: the ERA5 correction climatology is
+      matched by exact lat/lon coordinate value, which a curvilinear grid cannot
+      satisfy.
+    - Its radiation is derived by differencing float32 accumulations since the
+      1979 model start, which carries an intrinsic ~+/-4.6 W/m^2 quantization
+      noise floor. See
+      :data:`~roms_tools.datasets.curvilinear_datasets.CONUS404_RADIATION_NOISE_FLOOR_W_M2`.
 
     Examples
     --------
@@ -299,17 +334,28 @@ class SurfaceForcing:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
 
-        # On the no-prefill xESMF path, destination extrapolation would silently fill
-        # points outside the source coverage. Guard against a grid that outruns the
-        # data (coastal gaps *within* coverage are still filled by the masked regrid).
         regrid = self._regrid
-        if regrid.extrap_is_active:
-            check_source_coverage(data, target_coords, self.source["name"])
+        self._source_is_curvilinear = isinstance(data, CurvilinearDataset)
+        if self._source_is_curvilinear:
+            # A curvilinear source is regridded by `LateralRegridFromROMS`, which
+            # never consults `RegridConfig`. Coverage checking is skipped because
+            # `check_source_coverage` compares 1D coordinate axes, which for a
+            # projected source are index coordinates in metres; and the fills are
+            # skipped because such a source carries no masked cells. The regrid
+            # does not extrapolate, so a target point outside the source footprint
+            # comes back as NaN.
+            self._warn_if_regrid_options_set_for_curvilinear()
+        else:
+            # On the no-prefill xESMF path, destination extrapolation would silently fill
+            # points outside the source coverage. Guard against a grid that outruns the
+            # data (coastal gaps *within* coverage are still filled by the masked regrid).
+            if regrid.extrap_is_active:
+                check_source_coverage(data, target_coords, self.source["name"])
 
-        # Whole-domain source prefill when requested, else a nearest-neighbor
-        # pre-fill on the scipy path so interpolation cannot propagate NaNs.
-        apply_source_prefill(data, regrid, self.prefill_kwargs)
-        apply_scipy_fallback_fill(data, regrid)
+            # Whole-domain source prefill when requested, else a nearest-neighbor
+            # pre-fill on the scipy path so interpolation cannot propagate NaNs.
+            apply_source_prefill(data, regrid, self.prefill_kwargs)
+            apply_scipy_fallback_fill(data, regrid)
 
         self._set_variable_info(data)
         var_names = {
@@ -319,21 +365,7 @@ class SurfaceForcing:
             if name in data.ds.data_vars
         }
 
-        # On the default (no-prefill) xESMF path, use the source "mask" for masked
-        # bilinear regridding; a set prefill / the scipy path leaves the source
-        # already NaN-free, so no mask is needed (plain bilinear / scipy interp).
-        source_mask = select_source_mask(
-            data.ds, is_vector=False, use_xesmf=regrid.use_xesmf, prefill=regrid.prefill
-        )
-        processed_fields = {}
-        # lateral regridding
-        lateral_regrid = build_lateral_regridder(
-            target_coords, data, regrid, source_mask
-        )
-        for var_name in var_names:
-            processed_fields[var_name] = lateral_regrid.apply(
-                data.ds[var_names[var_name]["name"]]
-            )
+        processed_fields = self._regrid_laterally(data, target_coords, var_names)
 
         # rotation of velocities
         if "uwnd" in processed_fields and "vwnd" in processed_fields:
@@ -375,9 +407,12 @@ class SurfaceForcing:
         if not self.bypass_validation:
             self._validate(ds)
 
-        # Shift radiation time for hourly ERA5 data
-        if self.type == "physics" and self.source["name"] == "ERA5":
-            ds = self._apply_rad_time(ds)
+        # Shift radiation time for sources whose radiation is a backward-hourly
+        # mean. Driven by the dataset class's `rad_time_offset` rather than the
+        # source name, so a source with instantaneous radiation gets no shift.
+        rad_time_offset = getattr(data, "rad_time_offset", None)
+        if self.type == "physics" and rad_time_offset:
+            ds = self._apply_rad_time(ds, rad_time_offset)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -409,6 +444,11 @@ class SurfaceForcing:
             if self.source["name"] == "ERA5":
                 # ERA5's default path (the ARCO cloud archive) is applied
                 # later, by `resolve_era5_source` in `_get_data`.
+                self.source["path"] = None
+            elif self.source["name"] == "CONUS404":
+                # CONUS404's default path (the OSN zarr store) is applied later,
+                # by `_get_data`, so an explicitly provided path round-trips
+                # through `to_yaml` exactly as given.
                 self.source["path"] = None
             elif self.source["name"] == "MBL_co2":
                 logging.info(
@@ -463,6 +503,27 @@ class SurfaceForcing:
                     "'sss' must be called separately from 'sDIC' and 'sALK'."
                 )
 
+        # The radiation correction is an ERA5-vs-observations ratio climatology
+        # defined on the ERA5 0.25-degree lat/lon grid, and
+        # `ERA5Correction.match_subdomain` selects by exact coordinate match --
+        # which a curvilinear source cannot satisfy. (`_get_correction_data` would
+        # also raise, but its message tells the user to switch to ERA5, which is
+        # not the useful advice here.)
+        if self.type == "physics" and self.source["name"] == "CONUS404":
+            if self.correct_radiation:
+                raise ValueError(
+                    "`correct_radiation=True` is not supported for the CONUS404 "
+                    "source: the ERA5 correction climatology is defined on the "
+                    "ERA5 lat/lon grid and is matched by exact coordinate value, "
+                    "which a curvilinear source cannot satisfy. Set "
+                    "`correct_radiation=False`."
+                )
+            if self.source["climatology"]:
+                raise ValueError(
+                    "CONUS404 provides hourly time-varying data; "
+                    "'climatology' must be 'False'."
+                )
+
         # Check that climatology is false for t-varying co2
         if self.type == "bgc" and self.source["name"] == "MBL_co2":
             if self.source["climatology"]:
@@ -511,6 +572,93 @@ class SurfaceForcing:
 
         return use_coarse_grid
 
+    def _warn_if_regrid_options_set_for_curvilinear(self) -> None:
+        """Log a note when prefill/regrid options are set but the source is curvilinear.
+
+        Mirrors ``InitialConditions._warn_if_regrid_options_set_for_roms``: the
+        options are accepted but have no effect, because a curvilinear source is
+        regridded by :class:`~roms_tools.regrid.LateralRegridFromROMS`, which does
+        not consult ``RegridConfig``. Noted in the log rather than raised, so a
+        blueprint that sets them globally still runs.
+        """
+        if any(
+            opt is not None
+            for opt in (
+                self.prefill,
+                self.prefill_kwargs,
+                self.extrap_method,
+                self.extrap_kwargs,
+            )
+        ):
+            logging.info(
+                "prefill/extrap_method apply to lat/lon sources only; ignoring them "
+                "for the curvilinear %s source, which is regridded with "
+                "non-extrapolating xESMF bilinear.",
+                self.source["name"],
+            )
+
+    def _regrid_laterally(
+        self,
+        data: LatLonDataset | CurvilinearDataset,
+        target_coords: dict[str, xr.DataArray],
+        var_names: dict[str, dict[str, str]],
+    ) -> dict[str, xr.DataArray]:
+        """Regrid every source variable onto the ROMS grid.
+
+        A curvilinear source goes through
+        :class:`~roms_tools.regrid.LateralRegridFromROMS` (xESMF, curvilinear
+        source, ``unmapped_to_nan=True``, no extrapolation), mirroring the
+        ROMS-source branch in ``InitialConditions._regrid_laterally``. A lat/lon
+        source takes the configured engine as before.
+
+        Wind components are regridded as scalars here and rotated onto the ROMS
+        grid angle by the caller.
+        """
+        processed_fields: dict[str, xr.DataArray] = {}
+
+        if isinstance(data, CurvilinearDataset):
+            # xESMF locates the source grid by the names "lat"/"lon".
+            rename = {
+                data.coord_names["latitude"]: "lat",
+                data.coord_names["longitude"]: "lon",
+            }
+            rename = {k: v for k, v in rename.items() if k != v}
+
+            # dict.fromkeys keeps insertion order while de-duplicating the several
+            # var_names entries that may alias one source variable.
+            source_vars = list(
+                dict.fromkeys(var_names[var]["name"] for var in var_names)
+            )
+            ds_in = data.ds[source_vars]
+            if rename:
+                ds_in = ds_in.rename(rename)
+
+            regridder = LateralRegridFromROMS(ds_in, target_coords)
+            try:
+                regridded = regridder.apply(ds_in)
+            finally:
+                regridder.destroy()
+
+            for var_name in var_names:
+                processed_fields[var_name] = regridded[var_names[var_name]["name"]]
+            return processed_fields
+
+        regrid = self._regrid
+        # On the default (no-prefill) xESMF path, use the source "mask" for masked
+        # bilinear regridding; a set prefill / the scipy path leaves the source
+        # already NaN-free, so no mask is needed (plain bilinear / scipy interp).
+        source_mask = select_source_mask(
+            data.ds, is_vector=False, use_xesmf=regrid.use_xesmf, prefill=regrid.prefill
+        )
+        lateral_regrid = build_lateral_regridder(
+            target_coords, data, regrid, source_mask
+        )
+        for var_name in var_names:
+            processed_fields[var_name] = lateral_regrid.apply(
+                data.ds[var_names[var_name]["name"]]
+            )
+        return processed_fields
+
     def _get_data(self):
         data_dict = {
             "filename": self.source["path"],
@@ -547,9 +695,40 @@ class SurfaceForcing:
                         "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
                     )
                 data = dataset_cls(**data_dict)
+            elif self.source["name"] == "CONUS404":
+                if not self._regrid.use_xesmf:
+                    raise ValueError(
+                        "CONUS404 is a curvilinear source and requires the xESMF "
+                        "regrid engine; the scipy engine interpolates along 1D "
+                        "coordinate axes and cannot handle a 2D source grid. "
+                        "Install `roms-tools` via conda (which includes xesmf) and "
+                        "leave `regrid_method='auto'`."
+                    )
+                # Add 1 hr since radiation time will shift by 1 hr
+                if data_dict["end_time"] is not None:
+                    data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
+                if not self.source["path"]:
+                    logging.info(
+                        "No path specified for CONUS404 source; defaulting to the "
+                        "HyTEST zarr store on the USGS/OSN pod (%s).",
+                        DEFAULT_CONUS404_PATH,
+                    )
+                    self.source["path"] = DEFAULT_CONUS404_PATH
+                    data_dict["filename"] = DEFAULT_CONUS404_PATH
+                if str(data_dict["filename"]).startswith("s3://") and not self.use_dask:
+                    raise ValueError(
+                        "Cloud-based CONUS404 access requires `use_dask=True`. "
+                        "Please enable Dask by setting `use_dask=True`."
+                    )
+                # `initial_slice_bounds` names lat/lon dimensions and is a no-op on
+                # the zarr path; CurvilinearDataset logs and ignores it, so don't
+                # pass it at all.
+                data_dict.pop("initial_slice_bounds", None)
+                data = CONUS404Dataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "ERA5" is a valid option for source["name"] when type is "physics".'
+                    'Only "ERA5" and "CONUS404" are valid options for '
+                    'source["name"] when type is "physics".'
                 )
 
         elif self.type == "bgc":
@@ -839,7 +1018,7 @@ class SurfaceForcing:
         )
 
         if self.type == "physics":
-            if self.source["name"] == "ERA5":
+            if getattr(data, "rad_time_offset", None):
                 time_coords = [
                     "time",
                     "rad_time",
@@ -909,18 +1088,28 @@ class SurfaceForcing:
                 mask = self.target_coords["mask"]
                 nan_check(ds[var_name].isel(time=0), mask)
 
-    def _apply_rad_time(self, ds):
-        """Shifts the short and long wave radiation time dimension by 30 minutes, and renames the 'time'
-        dimension to 'rad_time'. Done only for ERA5 data that is a time-average for hourly date.
+    def _apply_rad_time(self, ds, offset: timedelta):
+        """Add a ``rad_time`` coordinate offset from ``time``.
+
+        Sources whose radiation is an average over the preceding hour (ERA5's
+        hourly ``ssr``/``strd``, or a differenced CONUS404 accumulation) label the
+        flux at the end of its averaging interval, so the value is representative
+        of the interval midpoint. ROMS reads radiation on ``rad_time`` to account
+        for that.
 
         Parameters
         ----------
         ds : xarray.Dataset
-            The dataset to shift time for. ds must contain variables 'swrad' and 'lwrad'.
+            The dataset to add ``rad_time`` to. Its ``time`` coordinate is already
+            in days relative to ``model_reference_date``.
+        offset : timedelta
+            The source dataset's ``rad_time_offset``; negative for a
+            backward-looking average.
 
         """
-        # Create time dimension shifted 30 minutes earlier
-        ds = ds.assign_coords(rad_time=("time", ds["time"].values - 30 / 60 / 24))
+        # `time` is in relative days at this point, so express the offset in days.
+        offset_days = offset.total_seconds() / 86400.0
+        ds = ds.assign_coords(rad_time=("time", ds["time"].values + offset_days))
         ds.rad_time.attrs["long_name"] = ds.time.attrs["long_name"]
         ds.rad_time.attrs["units"] = ds.time.attrs["units"]
 
@@ -943,9 +1132,17 @@ class SurfaceForcing:
         ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["prefill"] = str(self.prefill)
-        ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
-        ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
+        if getattr(self, "_source_is_curvilinear", False):
+            # A curvilinear source bypasses RegridConfig entirely, so recording
+            # the resolved config here would misreport what actually ran: the
+            # regrid is non-extrapolating xESMF bilinear with no source prefill.
+            ds.attrs["prefill"] = "None"
+            ds.attrs["regrid_method"] = "xesmf"
+            ds.attrs["extrap_method"] = "None"
+        else:
+            ds.attrs["prefill"] = str(self.prefill)
+            ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
+            ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         ds.attrs["type"] = self.type
         ds.attrs["source"] = self.source["name"]

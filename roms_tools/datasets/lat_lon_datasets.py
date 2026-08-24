@@ -5,7 +5,7 @@ import logging
 import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, ClassVar, Literal, cast
@@ -2233,6 +2233,15 @@ class ERA5Dataset(LatLonDataset):
     """Represents ERA5 data on original grid."""
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
+    rad_time_offset: ClassVar[timedelta] = timedelta(minutes=-30)
+    """Offset from the radiation time stamp to the middle of its averaging period.
+
+    ERA5's hourly ``ssr``/``strd`` are accumulations over the *preceding* hour, so
+    the flux labelled at ``t`` represents the interval centred on ``t - 30 min``.
+    ``SurfaceForcing`` reads this to build the ``rad_time`` coordinate; a source
+    with instantaneous radiation should leave it unset.
+    """
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {

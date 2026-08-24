@@ -180,8 +180,9 @@ class SurfaceForcing:
     cannot cover the whole domain on its own, e.g. CONUS404 over ERA5. Behavior
     worth knowing before relying on it:
 
-    - The boundary is a **hard edge**: every point comes from exactly one source.
-      ``blend_width_km`` is reserved for a smooth transition and raises above zero.
+    - By default the boundary is a **hard edge**: every point comes from exactly one
+      source. Set ``blend_width_km`` to average the two across a band of that width,
+      measured inward from the edge of the primary's footprint.
     - With ``coarse_grid_mode="auto"`` the **primary source decides** the output
       resolution. The two will usually disagree, since a limited-extent source is
       normally the finer one, and taking the fallback's answer would coarsen away
@@ -270,16 +271,20 @@ class SurfaceForcing:
     Same shape as ``source``. Only valid for ``type="physics"``. See the
     "Layering two sources" notes on this class."""
     blend_width_km: float = 0.0
-    """Width of a smooth transition between the two sources, in km.
+    """Width of the transition between the two sources, in km.
 
-    ``0.0`` (default) is a hard edge. Larger values are not implemented yet."""
+    ``0.0`` (default) is a hard edge. A positive value ramps the primary source's
+    weight from 0 at the edge of its footprint to 1 that far inside it, so the two
+    sources are averaged across the band. The ramp is one-sided, running inward
+    through the primary's own territory -- see :meth:`_compute_blend_weights`."""
     blend_options: dict | None = None
     """Tuning for the two-source merge. Recognized keys:
 
     ``"time_align"`` (``"exact"`` | ``"nearest"`` | ``"linear"``, default
     ``"exact"``), ``"time_tolerance"`` (for ``"nearest"``),
     ``"on_missing_primary_var"`` (``"error"`` | ``"fallback"``, default
-    ``"error"``)."""
+    ``"error"``), ``"blend_profile"`` (``"smoothstep"`` | ``"linear"``, default
+    ``"smoothstep"``; only used when ``blend_width_km`` > 0)."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -584,16 +589,15 @@ class SurfaceForcing:
                     "fallback would silently contribute nothing. Use `prefill=None` "
                     "together with `fallback_source`."
                 )
-            if self.blend_width_km:
-                raise NotImplementedError(
-                    "Feathered blending is not implemented yet; use "
-                    "`blend_width_km=0.0` for a hard edge at the primary source's "
-                    "boundary."
+            if self.blend_width_km < 0:
+                raise ValueError(
+                    f"`blend_width_km` must be >= 0, got {self.blend_width_km}."
                 )
             valid_blend_keys = {
                 "time_align",
                 "time_tolerance",
                 "on_missing_primary_var",
+                "blend_profile",
             }
             unknown = set(self.blend_options or {}) - valid_blend_keys
             if unknown:
@@ -943,11 +947,18 @@ class SurfaceForcing:
         """Build the primary-source weight field, or ``None`` for a hard edge."""
         if not self.blend_width_km:
             return None
-        footprint = next(iter(primary_fields.values()))
-        if "time" in footprint.dims:
-            footprint = footprint.isel(time=0)
+
+        # A point counts as covered only where *every* primary field has a value.
+        # Taking the intersection is the conservative reading: a variable missing
+        # there would fall back anyway, so including the point in the feather band
+        # would only smooth toward a value the merge does not use.
+        footprint = None
+        for da in primary_fields.values():
+            valid = (da.isel(time=0) if "time" in da.dims else da).notnull()
+            footprint = valid if footprint is None else (footprint & valid)
+
         return self._compute_blend_weights(
-            footprint.notnull(), target_coords, self.blend_width_km
+            footprint, target_coords, self.blend_width_km
         )
 
     def _compute_blend_weights(
@@ -956,27 +967,83 @@ class SurfaceForcing:
         target_coords: dict[str, xr.DataArray],
         width_km: float,
     ) -> xr.DataArray:
-        """Feather the primary's weight to zero across ``width_km`` at its edge.
+        """Ramp the primary's weight from 0 at its footprint edge to 1 inside it.
 
-        Not implemented. The intended approach is a distance-to-edge ramp built
-        with :func:`~roms_tools.setup.utils.min_dist_to_land`, which already
-        computes "metres to the nearest point where a 2D mask is zero" on the
-        target grid -- pass it ``primary_footprint`` instead of the land mask, then
-        ``clip(dist_km / width_km, 0, 1)`` (or a smoothstep for a continuous
-        derivative). The weight field is 2D and time-invariant, so it is built once
-        and broadcast, which is why the merge belongs in target-grid space.
+        The ramp is **one-sided**: it runs inward from the edge through the
+        primary's own territory, rather than straddling the seam. That is the right
+        way round for a nested product. The outer rim of a regional model's domain
+        is its lateral relaxation zone, where it is nudged toward the reanalysis
+        that drove it and is least independent of it -- CONUS404 is ERA5-forced,
+        with interior spectral nudging besides. So preferring the global source
+        there gives up almost nothing, while the reverse (letting the regional
+        product bleed outward past its own domain) would extrapolate it into
+        territory it never simulated.
 
-        Two caveats to honor when implementing: feathering ``swrad``/``lwrad`` with
-        the same weights is only right while the radiation correction is applied to
-        one source alone (so its discontinuity feathers along with the rest), and a
-        feathered ``rain`` can produce non-physical drizzle in the transition band
-        when the two products' precipitation climatologies differ sharply -- a
-        per-variable width override is the natural way out.
+        Distance is computed with :func:`scipy.ndimage.distance_transform_edt` on
+        the footprint mask, scaled by the grid's mean cell size. That is O(N) --
+        unlike :func:`~roms_tools.setup.utils.min_dist_to_land`, whose
+        every-point-to-every-point search is fine for a coastline but would take
+        minutes on a large domain. It is exact for a uniform grid and approximate
+        where the spacing varies appreciably, which is well inside the tolerance of
+        a smoothing profile.
+
+        Parameters
+        ----------
+        primary_footprint : xr.DataArray
+            2D boolean, True where the primary source has data.
+        target_coords : dict
+            Target grid coordinates (unused; kept for interface stability).
+        width_km : float
+            Distance over which the primary's weight rises from 0 to 1.
+
+        Returns
+        -------
+        xr.DataArray
+            Weights in [0, 1] on ``(eta_rho, xi_rho)``, time-invariant.
         """
-        raise NotImplementedError(
-            "Feathered blending is not implemented yet; use blend_width_km=0.0 "
-            "for a hard edge at the primary source's boundary."
-        )
+        from scipy.ndimage import distance_transform_edt
+
+        footprint = np.asarray(primary_footprint.values, dtype=bool)
+
+        if footprint.all():
+            # No seam anywhere, so nothing to feather. This case must be caught
+            # explicitly: with no zeros in the input, `distance_transform_edt`
+            # measures to the array border instead, which would paint a spurious
+            # feather band around the whole domain.
+            logging.info(
+                "The primary source covers the entire domain, so blend_width_km "
+                "has no effect."
+            )
+            return xr.ones_like(primary_footprint, dtype=float)
+
+        # Mean cell size, in metres. `pm`/`pn` are the inverse spacings along xi
+        # and eta on the fine grid; the coarse grid doubles them.
+        factor = 2.0 if self.use_coarse_grid else 1.0
+        dx = factor * float((1 / self.grid.ds.pm).mean())
+        dy = factor * float((1 / self.grid.ds.pn).mean())
+
+        # Distance from each covered point to the nearest uncovered one. Array
+        # order is (eta, xi), hence sampling=(dy, dx). Points outside the footprint
+        # come back as 0, which is what we want: weight 0, i.e. pure fallback.
+        distance_m = distance_transform_edt(footprint, sampling=(dy, dx))
+
+        w = np.clip(distance_m / (width_km * 1000.0), 0.0, 1.0)
+
+        profile = (self.blend_options or {}).get("blend_profile", "smoothstep")
+        if profile == "smoothstep":
+            # Hermite smoothstep: continuous first derivative at both ends, so the
+            # blend introduces no kink in the field's gradient. A linear ramp is
+            # continuous in value but not slope, which shows up in derived
+            # quantities like wind stress curl.
+            w = w * w * (3.0 - 2.0 * w)
+        elif profile != "linear":
+            raise ValueError(
+                f"Unknown blend_profile {profile!r}; expected 'smoothstep' or 'linear'."
+            )
+
+        weights = xr.DataArray(w, dims=primary_footprint.dims)
+        weights.attrs["long_name"] = "primary source weight"
+        return weights
 
     def _warn_if_regrid_options_set_for_curvilinear(self) -> None:
         """Log a note when prefill/regrid options are set but the source is curvilinear.
@@ -1605,6 +1672,10 @@ class SurfaceForcing:
                 "feathered" if self.blend_width_km else "hard_edge"
             )
             ds.attrs["blend_width_km"] = str(self.blend_width_km)
+            if self.blend_width_km:
+                ds.attrs["blend_profile"] = (self.blend_options or {}).get(
+                    "blend_profile", "smoothstep"
+                )
             ds.attrs["coarse_grid_decided_by"] = self.source["name"]
             if self.correct_radiation:
                 ds.attrs["radiation_correction_applied_to"] = ",".join(

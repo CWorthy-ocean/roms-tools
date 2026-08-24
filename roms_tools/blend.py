@@ -12,10 +12,11 @@ primary is the only signal of missing coverage, which is why the merge has to
 happen before ``substitute_nans_by_fillvalue`` turns every remaining NaN into
 zero.
 
-``weights`` is the extension point for feathering the seam between the two
-sources. It is designed so that the weighted form reduces *exactly* to the hard
-edge when the weights are zero or one, which keeps the two behaviors on a single
-code path rather than two that have to be kept in step.
+``weights`` carries the feathered transition across the seam between the two
+sources (built by ``SurfaceForcing._compute_blend_weights``). It is designed so
+that the weighted form reduces *exactly* to the hard edge when the weights are
+zero or one, which keeps the two behaviours on one code path rather than two that
+have to be kept in step.
 """
 
 from __future__ import annotations

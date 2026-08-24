@@ -1890,20 +1890,6 @@ def test_prefill_with_fallback_source_rejected(
         )
 
 
-def test_blend_width_km_is_not_implemented(
-    layering_grid, cropped_era5_path, regional_era5_path
-):
-    with pytest.raises(NotImplementedError, match="not implemented yet"):
-        SurfaceForcing(
-            **_layered_kwargs(
-                layering_grid,
-                source={"name": "ERA5", "path": cropped_era5_path},
-                fallback_source={"name": "CONUS404"},
-                blend_width_km=50.0,
-            )
-        )
-
-
 def test_blend_width_km_without_fallback_rejected(layering_grid, regional_era5_path):
     with pytest.raises(ValueError, match="only applies when `fallback_source` is set"):
         SurfaceForcing(
@@ -1940,5 +1926,215 @@ def test_climatology_with_fallback_rejected(layering_grid, regional_era5_path):
                     "climatology": True,
                 },
                 fallback_source={"name": "CONUS404"},
+            )
+        )
+
+
+# --- feathered blending ----------------------------------------------------
+
+
+@requires_xesmf
+def test_feathering_converges_to_the_hard_edge(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    """A vanishing blend width must reproduce the hard-edge result.
+
+    The property that keeps the two code paths honest: `layer_field` runs the
+    weighted branch whenever weights are supplied, so if that branch ever drifts
+    from the unweighted one this fails.
+    """
+    hard = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+        )
+    )
+    narrow = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+            blend_width_km=1e-6,
+        )
+    )
+    np.testing.assert_allclose(
+        narrow.ds["Tair"].values, hard.ds["Tair"].values, atol=1e-6
+    )
+
+
+@requires_xesmf
+def test_feathering_produces_intermediate_values_in_the_band(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    """Inside the band the output is a genuine mix; outside it is not.
+
+    Uses the cropped primary's constant `Tair` offset as a source label: a point
+    taken purely from one source reads 0 or the full offset, whereas a feathered
+    point must land strictly between.
+    """
+    feathered = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+            blend_width_km=200.0,
+        )
+    )
+    fallback_only = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid, source={"name": "ERA5", "path": regional_era5_path}
+        )
+    )
+    diff = (feathered.ds["Tair"] - fallback_only.ds["Tair"]).isel(time=0).values
+    frac = diff / CROPPED_TAIR_OFFSET_K
+
+    # Weights stay in range: nothing overshoots either source.
+    assert frac.min() > -1e-6 and frac.max() < 1.0 + 1e-6
+
+    # And some points are genuinely intermediate, which a hard edge never produces.
+    mixed = (frac > 0.05) & (frac < 0.95)
+    assert mixed.any(), "no intermediate points: the band did not form"
+
+
+@requires_xesmf
+def test_feathering_is_monotone_with_distance_from_the_seam(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    """A wider band admits more fallback influence, never less."""
+    weights = {}
+    for width in (100.0, 400.0):
+        sfc = SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": cropped_era5_path},
+                fallback_source={"name": "ERA5", "path": regional_era5_path},
+                blend_width_km=width,
+            )
+        )
+        base = SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid, source={"name": "ERA5", "path": regional_era5_path}
+            )
+        )
+        weights[width] = (sfc.ds["Tair"] - base.ds["Tair"]).isel(
+            time=0
+        ).values / CROPPED_TAIR_OFFSET_K
+    # Widening the band can only pull each point further toward the fallback.
+    assert (weights[400.0] <= weights[100.0] + 1e-6).all()
+    assert weights[400.0].mean() < weights[100.0].mean()
+
+
+@requires_xesmf
+def test_feathering_records_itself_in_attrs(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    sfc = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+            blend_width_km=150.0,
+        )
+    )
+    assert sfc.ds.attrs["blend_method"] == "feathered"
+    assert sfc.ds.attrs["blend_width_km"] == "150.0"
+    assert sfc.ds.attrs["blend_profile"] == "smoothstep"
+
+
+@requires_xesmf
+def test_feathering_leaves_no_uncovered_points(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    """Blending must not reintroduce gaps; `_validate` runs unbypassed."""
+    sfc = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+            blend_width_km=200.0,
+        )
+    )
+    assert float(sfc.ds["qair"].isel(time=0).min()) > 0.0
+
+
+@requires_xesmf
+def test_full_coverage_yields_uniform_weights(
+    layering_grid, cropped_era5_path, regional_era5_path, caplog
+):
+    """A seamless footprint must produce no band at all.
+
+    Guards a real trap rather than a hypothetical one: `distance_transform_edt`
+    ignores the array exterior when the mask contains any zeros, but with *no*
+    zeros it measures to the border instead -- which would paint a spurious
+    feather band around the entire domain. Exercised directly, because suppressing
+    extrapolation means even a full-extent primary leaves the outer grid margin
+    uncovered, so 100% coverage is not reachable through the normal path.
+    """
+    sfc = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+            blend_width_km=200.0,
+        )
+    )
+    footprint = xr.ones_like(sfc.ds["Tair"].isel(time=0), dtype=bool)
+    with caplog.at_level(logging.INFO):
+        weights = sfc._compute_blend_weights(footprint, sfc.target_coords, 500.0)
+    assert "has no effect" in caplog.text
+    assert (weights.values == 1.0).all()
+
+    # And with a seam present, the exterior is correctly ignored: a covered point
+    # against the grid edge but far from the seam still gets full primary weight.
+    holed = footprint.copy()
+    holed[:, -1] = False
+    weights = sfc._compute_blend_weights(holed, sfc.target_coords, 1.0)
+    assert weights.values[0, 0] == pytest.approx(1.0)
+    assert weights.values[0, -1] == pytest.approx(0.0)
+
+
+@requires_xesmf
+def test_linear_profile_differs_from_smoothstep(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    out = {}
+    for profile in ("smoothstep", "linear"):
+        sfc = SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": cropped_era5_path},
+                fallback_source={"name": "ERA5", "path": regional_era5_path},
+                blend_width_km=300.0,
+                blend_options={"blend_profile": profile},
+            )
+        )
+        out[profile] = sfc.ds["Tair"].isel(time=0).values
+    assert not np.allclose(out["smoothstep"], out["linear"])
+
+
+def test_unknown_blend_profile_rejected(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    with pytest.raises(ValueError, match="Unknown blend_profile"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": cropped_era5_path},
+                fallback_source={"name": "ERA5", "path": regional_era5_path},
+                blend_width_km=100.0,
+                blend_options={"blend_profile": "bogus"},
+            )
+        )
+
+
+def test_negative_blend_width_rejected(layering_grid, regional_era5_path):
+    with pytest.raises(ValueError, match="must be >= 0"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": regional_era5_path},
+                fallback_source={"name": "CONUS404"},
+                blend_width_km=-5.0,
             )
         )

@@ -174,6 +174,29 @@ class SurfaceForcing:
       noise floor. See
       :data:`~roms_tools.datasets.curvilinear_datasets.CONUS404_RADIATION_NOISE_FLOOR_W_M2`.
 
+    **Layering two sources.** Setting ``fallback_source`` takes each target point
+    from ``source`` where that source has data and from ``fallback_source``
+    everywhere else, emitting one file. It exists for a regional product that
+    cannot cover the whole domain on its own, e.g. CONUS404 over ERA5. Behavior
+    worth knowing before relying on it:
+
+    - The boundary is a **hard edge**: every point comes from exactly one source.
+      ``blend_width_km`` is reserved for a smooth transition and raises above zero.
+    - With ``coarse_grid_mode="auto"`` the **primary source decides** the output
+      resolution. The two will usually disagree, since a limited-extent source is
+      normally the finer one, and taking the fallback's answer would coarsen away
+      the resolution the primary was added for. A note is logged when they differ.
+    - ``correct_radiation`` applies **only to the sources that have a correction
+      registered** (today, ERA5). Applying an ERA5-vs-observations ratio field to a
+      different product would not be a correction, so this leaves a small step in
+      ``swrad``/``lwrad`` at the boundary.
+    - A comparison of the two sources over their overlap region is logged at INFO.
+      It is the cheapest way to catch a unit or convention mismatch between them;
+      read it before trusting the output.
+    - ``prefill`` is rejected alongside ``fallback_source``: it makes the primary
+      NaN-free, erasing the coverage gaps the fallback exists to fill.
+    - Only for ``type="physics"``, and not for climatologies.
+
     Examples
     --------
     >>> surface_forcing = SurfaceForcing(

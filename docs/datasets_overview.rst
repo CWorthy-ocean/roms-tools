@@ -382,7 +382,7 @@ Global 1/4° atmospheric reanalysis from ECMWF providing meteorological surface 
 CONUS404
 ~~~~~~~~
 
-4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. Streamed from the zarr store on the USGS Open Storage Network pod; no download is needed, but ``use_dask=True`` and the ``s3fs`` package are (``pip install "roms-tools[stream]"``). Select it with ``source={"name": "CONUS404"}``; the store path defaults to ``s3://hytest/conus404/conus404_hourly.zarr``.
+4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. For a domain that extends past its footprint, layer it over ERA5 with ``fallback_source={"name": "ERA5"}``. Streamed from the zarr store on the USGS Open Storage Network pod; no download is needed, but ``use_dask=True`` and the ``s3fs`` package are (``pip install "roms-tools[stream]"``). Select it with ``source={"name": "CONUS404"}``; the store path defaults to ``s3://hytest/conus404/conus404_hourly.zarr``.
 
 :Version: CONUS404 hourly, 1979-10-01 to 2024-10-01
 :Required for: Surface Forcing (optional alternative to ERA5)

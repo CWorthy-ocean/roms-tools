@@ -50,7 +50,8 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 stream = [
-    "gcsfs",
+    "gcsfs",       # ARCO ERA5 on Google Cloud Storage
+    "s3fs",        # CONUS404 on the USGS/OSN S3-compatible pod
     "zarr",
     "copernicusmarine",
 ]

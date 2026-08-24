@@ -328,6 +328,7 @@ def _load_data_dask(
     chunks: dict[str, int] | None = None,
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
     initial_slice_bounds_use_isel: bool = False,
+    storage_options: dict[str, object] | None = None,
 ) -> xr.Dataset:
     """Load dataset from the specified file using Dask.
 
@@ -403,7 +404,10 @@ def _load_data_dask(
                 decode_timedelta=decode_timedelta,
                 chunks={},  # {} is fastest, and indicates that dask should only use on-disk zarr chunking
                 consolidated=None,
-                storage_options={"token": "anon"},
+                # Credential/endpoint options are supplied by the dataset class, since
+                # they are backend-specific: GCS wants {"token": "anon"}, while an S3
+                # store needs {"anon": True} plus an endpoint_url.
+                storage_options=storage_options,
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
@@ -522,6 +526,7 @@ def load_data(
     chunks: dict[str, int] | None = None,
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
     initial_slice_bounds_use_isel: bool = False,
+    storage_options: dict[str, object] | None = None,
 ):
     """Load dataset from the specified file.
 
@@ -565,6 +570,12 @@ def load_data(
         When ``use_dask=True``, if True apply ``initial_slice_bounds`` with
         :meth:`xarray.Dataset.isel` so integer pairs are inclusive index ranges (ROMS).
         Lat/lon datasets should leave this False (default).
+    storage_options : dict, optional
+        Backend-specific options forwarded to :func:`xarray.open_zarr` for remote
+        stores; only used on the ``read_zarr`` path. These are not interchangeable
+        across backends, so the dataset class supplies them: GCS wants
+        ``{"token": "anon"}``, whereas an S3-compatible store wants
+        ``{"anon": True, "client_kwargs": {"endpoint_url": ...}}``.
 
     Returns
     -------
@@ -610,6 +621,7 @@ def load_data(
             chunks,
             initial_slice_bounds,
             initial_slice_bounds_use_isel,
+            storage_options,
         )
     else:
         ds_list = []
@@ -1213,6 +1225,18 @@ def has_gcsfs() -> bool:
 
     """
     return find_spec("gcsfs") is not None
+
+
+def has_s3fs() -> bool:
+    """Determine if the s3fs package is installed.
+
+    Returns
+    -------
+    bool
+        `True` if package is found, `False` otherwise.
+
+    """
+    return find_spec("s3fs") is not None
 
 
 def has_copernicus() -> bool:

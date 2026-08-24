@@ -52,6 +52,8 @@ class SkippableOptions(enum.StrEnum):
     """marks tests that require Dask to execute"""
     USE_GCSFS = "use_gcsfs"
     """marks tests that require GCSFS to execute"""
+    USE_S3FS = "use_s3fs"
+    """marks tests that require s3fs to execute"""
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -85,6 +87,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Run tests that require GCSFS",
     )
+    parser.addoption(
+        f"--{SkippableOptions.USE_S3FS}",
+        action="store_true",
+        default=False,
+        help="Run tests that require s3fs",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -97,6 +105,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "use_copernicus: marks tests that require the Copernicus Marine Toolkit to execute",
         "use_dask: marks tests that require Dask to execute",
         "use_gcsfs: marks tests that require GCSFS to execute",
+        "use_s3fs: marks tests that require s3fs to execute",
     ]:
         config.addinivalue_line("markers", marker)
 

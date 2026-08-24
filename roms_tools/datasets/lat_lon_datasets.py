@@ -177,6 +177,7 @@ class LatLonDataset:
     chunks: dict[str, int] | None = None
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     read_zarr: bool = False
+    storage_options: dict[str, object] | None = None
     allow_flex_time: bool = False
     start_time_pad: bool = True
     end_time_pad: bool = True
@@ -257,6 +258,7 @@ class LatLonDataset:
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
             initial_slice_bounds=self.initial_slice_bounds,
+            storage_options=self.storage_options,
         )
 
         return ds
@@ -2348,6 +2350,12 @@ class ERA5ARCODataset(ERA5Dataset):
 
     def __post_init__(self) -> None:
         self.read_zarr = True
+        # Anonymous GCS access. This used to be hardcoded inside
+        # `_load_data_dask`, but credential options are backend-specific, so each
+        # zarr-backed class now supplies its own. (`GLORYSDefaultDataset` also sets
+        # `read_zarr`, but it reads through `ds_loader_fn`, so it never needs these.)
+        if self.storage_options is None:
+            self.storage_options = {"token": "anon"}
         if not has_gcsfs():
             msg = get_pkg_error_msg("cloud-based ERA5 data", "gcsfs", "stream")
             raise RuntimeError(msg)

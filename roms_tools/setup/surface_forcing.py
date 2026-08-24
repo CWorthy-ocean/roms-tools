@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -375,7 +376,9 @@ class SurfaceForcing:
 
         self.ds = ds
 
-    def _normalize_source_dict(self, source: RawDataSource, label: str = "source"):
+    def _normalize_source_dict(
+        self, source: dict[str, Any], label: str = "source"
+    ) -> dict[str, Any]:
         """Validate one source dict and fill in its defaults.
 
         Returns a new dict rather than mutating in place, so the same normalization
@@ -727,7 +730,9 @@ class SurfaceForcing:
             )
         return processed_fields
 
-    def _get_data_for(self, source: RawDataSource):
+    def _get_data_for(
+        self, source: dict[str, Any]
+    ) -> "LatLonDataset | CurvilinearDataset":
         """Build the source-dataset object for one normalized source dict.
 
         Parameterized on the given source dict rather than reading
@@ -736,7 +741,7 @@ class SurfaceForcing:
         back into the dict they are handed, which the caller relies on for the
         YAML round-trip.
         """
-        data_dict = {
+        data_dict: dict[str, Any] = {
             "filename": source["path"],
             "start_time": self.start_time,
             "end_time": self.end_time,
@@ -748,6 +753,7 @@ class SurfaceForcing:
             "end_time_pad": self.end_time_pad,
         }
 
+        data: LatLonDataset | CurvilinearDataset
         if self.type == "physics":
             if source["name"] == "ERA5":
                 # Add 1 hr since radiation time will shift by 1 hr
@@ -820,7 +826,8 @@ class SurfaceForcing:
                 )
 
         elif self.type == "restoring":
-            if "sss" in self.restoring_forces:
+            restoring_forces = self.restoring_forces or []
+            if "sss" in restoring_forces:
                 if source["name"] == "WOA":
                     data = WOARestoringSurfaceDataset(**data_dict)
                 elif source["name"] == "UNIFIED":
@@ -829,7 +836,7 @@ class SurfaceForcing:
                     raise ValueError(
                         'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring", and restoring_forces is ["sss"].'
                     )
-            if "sDIC" in self.restoring_forces:
+            if "sDIC" in restoring_forces:
                 if source["name"] == "SODA":
                     data = SODARestoringSurfaceDataset(**data_dict)
                 else:

@@ -769,6 +769,16 @@ class CONUS404Dataset(CurvilinearDataset):
         but applied directly to avoid a needless ``arctan2``/``cos``/``sin`` round
         trip and to match the form WRF documents.
 
+        The sign here was verified against ERA5 rather than assumed, since a flip
+        is invisible to a self-consistent unit test and yields plausible-looking
+        winds. Over 42 ocean points spanning the domain's full map rotation
+        (-26.4 to +26.4 degrees), regressing the CONUS404-minus-ERA5 wind
+        *direction* difference on the rotation angle gives a slope of -0.09 as
+        implemented (uncorrelated, mean absolute difference 9.8 degrees, i.e.
+        ordinary 4 km versus 28 km disagreement) and -2.09 with the sign flipped
+        (mean absolute difference 27.3 degrees) -- the -2*alpha signature a sign
+        error necessarily produces.
+
         ``SurfaceForcing`` does not call this (unlike ``InitialConditions``), so
         :meth:`post_process` invokes it.
         """

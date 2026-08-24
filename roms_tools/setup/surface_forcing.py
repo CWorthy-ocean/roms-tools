@@ -790,7 +790,7 @@ class SurfaceForcing:
                 processed_fields["swrad"],
                 processed_fields["lwrad"],
             ) = self._apply_radiation_corrections(
-                processed_fields["swrad"], processed_fields["lwrad"], data
+                processed_fields["swrad"], processed_fields["lwrad"], data, source_name
             )
 
         return processed_fields
@@ -1165,16 +1165,30 @@ class SurfaceForcing:
 
         return data
 
-    def _get_correction_data(self):
-        if self.source["name"] == "ERA5":
-            correction_data = ERA5Correction(use_dask=self.use_dask)
-        else:
-            raise ValueError(
-                "The 'correct_radiation' feature is currently only supported for 'ERA5' as the source. "
-                "Please ensure your 'source' is set to 'ERA5' or implement additional handling for other sources."
-            )
+    def _get_correction_data(self, source_name: str):
+        """Return the radiation-correction climatology for one source, or None.
 
-        return correction_data
+        The correction is an ERA5-vs-observations ratio field, so it belongs to
+        ERA5 alone. When layering, a source with no registered correction simply
+        goes uncorrected -- applying ERA5's correction to another product would not
+        be a correction. As the sole source it is still an error, since the user
+        asked for a correction and would silently not get one.
+        """
+        if source_name == "ERA5":
+            return ERA5Correction(use_dask=self.use_dask)
+        if self.fallback_source is not None:
+            logging.info(
+                "No radiation correction is defined for %s, so its shortwave and "
+                "longwave are used uncorrected; the correction still applies to the "
+                "ERA5-sourced points. Expect a small step in swrad/lwrad at the "
+                "boundary between the two sources.",
+                source_name,
+            )
+            return None
+        raise ValueError(
+            "The 'correct_radiation' feature is currently only supported for 'ERA5' as the source. "
+            "Please ensure your 'source' is set to 'ERA5' or implement additional handling for other sources."
+        )
 
     def _set_variable_info(self, data):
         """Sets up a dictionary with metadata for variables based on the type of data
@@ -1256,6 +1270,7 @@ class SurfaceForcing:
         swrad: xr.DataArray,
         lwrad: xr.DataArray,
         data: LatLonDataset,
+        source_name: str,
     ) -> tuple[xr.DataArray, xr.DataArray]:
         """Apply climatological corrections to shortwave and longwave radiation.
 
@@ -1275,6 +1290,9 @@ class SurfaceForcing:
         data : LatLonDataset
             ERA5 dataset providing the mask and spatial coordinates used to
             align the correction data.
+        source_name : str
+            Name of the source these fields came from. A source with no registered
+            correction is returned unchanged (only possible when layering).
 
         Returns
         -------
@@ -1283,7 +1301,9 @@ class SurfaceForcing:
         lwrad_corrected : xr.DataArray
             Longwave radiation scaled by the STRD correction factor.
         """
-        correction_data = self._get_correction_data()
+        correction_data = self._get_correction_data(source_name)
+        if correction_data is None:
+            return swrad, lwrad
 
         coords_correction = {
             "lat": data.ds[data.dim_names["latitude"]],
@@ -1557,6 +1577,12 @@ class SurfaceForcing:
             )
             ds.attrs["blend_width_km"] = str(self.blend_width_km)
             ds.attrs["coarse_grid_decided_by"] = self.source["name"]
+            if self.correct_radiation:
+                ds.attrs["radiation_correction_applied_to"] = ",".join(
+                    name
+                    for name in (self.source["name"], self.fallback_source["name"])
+                    if name == "ERA5"
+                )
             coverage = getattr(self, "_primary_coverage_fraction", None)
             if coverage is not None:
                 ds.attrs["primary_coverage_fraction"] = f"{coverage:.4f}"

@@ -531,9 +531,12 @@ def specific_humidity_from_dewpoint(
     dewpoint : xr.DataArray
         Dewpoint temperature at 2 m, in degrees Celsius.
     patm : float or xr.DataArray, optional
-        Atmospheric pressure in hPa. Defaults to 1010.0, the fixed value ERA5
-        processing has always used. Sources that provide a real surface-pressure
-        field may pass it instead; over the ocean the two differ by ~0.3%.
+        Atmospheric pressure in hPa. Every source should pass its own
+        surface-pressure field; the 1010.0 default is a last-resort fallback for
+        an extract that carries none. Specific humidity is a mass ratio, so this
+        scales the result directly -- and because ROMS drives evaporation off the
+        small difference ``q_sat(SST) - qair``, a 1% error here becomes roughly 3%
+        in the flux.
 
     Returns
     -------

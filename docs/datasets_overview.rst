@@ -377,6 +377,8 @@ Global 1/4° atmospheric reanalysis from ECMWF providing meteorological surface 
         - Total precipitation (m)
       * - ``sst``
         - Sea surface temperature (K) — used for land masking
+      * - ``sp`` *(recommended)*
+        - Surface pressure (Pa) — used to convert vapour pressure into specific humidity. ``msl`` (mean sea level pressure) is accepted instead; the two are equal at sea level, so either is accurate over the ocean. If a download carries neither, ROMS-Tools warns and falls back to a fixed 1010 hPa, which shifts ``qair`` by a few percent in either direction depending on the local pressure anomaly — and roughly three times that in the ``q_sat(SST) - qair`` deficit that drives evaporation. Include one of them.
 
 
 CONUS404
@@ -423,7 +425,7 @@ CONUS404
       * - ``TD2``
         - 2 m dewpoint temperature (K)
       * - ``PSFC``
-        - Surface pressure (Pa) — used for specific humidity
+        - Surface pressure (Pa) — used for specific humidity, matching how ERA5 is handled, so the two products agree across a layering boundary
       * - ``PREC_ACC_NC``
         - Precipitation accumulated over the prior hour (mm)
       * - ``LANDMASK``

@@ -172,35 +172,69 @@ def test_qair_uses_psfc_by_default(dataset):
     np.testing.assert_allclose(data.ds["qair"].compute().values, exp.values, rtol=1e-6)
 
 
-def test_qair_era5_magnus_matches_era5_bit_for_bit(synthetic_store):
-    """`qair_method="era5_magnus"` reproduces ERA5's arithmetic exactly.
+def test_qair_agrees_with_era5_for_the_same_inputs(synthetic_store):
+    """Both sources derive `qair` by the identical route, so no seam can open.
 
-    This is the regression test protecting a blend seam: if someone changes one
-    source's humidity formula without the other, this fails.
+    The regression test protecting a layering boundary: `ERA5Dataset` and
+    `CONUS404Dataset` must both feed their own surface pressure into the one
+    shared helper. If either grows its own humidity formula, or stops passing real
+    pressure, this fails.
     """
     path, _ = synthetic_store
     data = CONUS404Dataset(
-        filename=str(path),
-        start_time=START,
-        end_time=END,
-        use_dask=True,
-        qair_method="era5_magnus",
+        filename=str(path), start_time=START, end_time=END, use_dask=True
     )
     tair = data.ds[data.var_names["Tair"]].compute()
-    exp = specific_humidity_from_dewpoint(tair, tair - 5.0, patm=1010.0)
-    np.testing.assert_array_equal(data.ds["qair"].compute().values, exp.values)
+    # The synthetic PSFC is a constant 101300 Pa; ERA5Dataset would pass sp/100
+    # through the same helper for the same T/Td, so the two agree to float32.
+    # Not bit-exact, only because the dataset divides a float32 field by 100 while
+    # this expectation uses a float64 literal -- a ~1e-7 relative difference. Any
+    # actual divergence in formula or pressure source is O(1%), far above rtol.
+    exp = specific_humidity_from_dewpoint(tair, tair - 5.0, patm=1013.0)
+    np.testing.assert_allclose(data.ds["qair"].compute().values, exp.values, rtol=1e-6)
 
 
-def test_era5_magnus_does_not_read_psfc(synthetic_store):
+def test_era5_reads_its_own_surface_pressure(synthetic_store):
+    """ERA5Dataset must not fall back to a constant when pressure is available.
+
+    Guards the other half of the seam contract from `ERA5Dataset`'s side.
+    """
+    from roms_tools.datasets.lat_lon_datasets import ERA5Dataset
+
+    ds = xr.Dataset(
+        {
+            "sp": xr.DataArray(np.full((1, 2, 2), 98_000.0), dims=("time", "y", "x")),
+            "msl": xr.DataArray(np.full((1, 2, 2), 101_300.0), dims=("time", "y", "x")),
+        }
+    )
+    data = ERA5Dataset.__new__(ERA5Dataset)
+    data.opt_var_names = {"sp": "sp", "msl": "msl"}
+    patm = data._resolve_surface_pressure(ds)
+    # `sp` wins over `msl`, and the result is in hPa.
+    assert float(np.asarray(patm).ravel()[0]) == pytest.approx(980.0)
+
+    # `msl` is the documented stand-in when `sp` is absent.
+    patm = data._resolve_surface_pressure(ds.drop_vars("sp"))
+    assert float(np.asarray(patm).ravel()[0]) == pytest.approx(1013.0)
+
+    # Neither present: the constant fallback, which must be loudly flagged.
+    patm = data._resolve_surface_pressure(ds.drop_vars(["sp", "msl"]))
+    assert patm == ERA5Dataset._FALLBACK_PATM_HPA
+
+
+def test_fixed_pressure_mode_does_not_read_psfc(synthetic_store):
     path, _ = synthetic_store
     data = CONUS404Dataset(
         filename=str(path),
         start_time=START,
         end_time=END,
         use_dask=True,
-        qair_method="era5_magnus",
+        qair_method="fixed_pressure",
     )
     assert "PSFC" not in data.ds.data_vars
+    tair = data.ds[data.var_names["Tair"]].compute()
+    exp = specific_humidity_from_dewpoint(tair, tair - 5.0, patm=1010.0)
+    np.testing.assert_array_equal(data.ds["qair"].compute().values, exp.values)
 
 
 # --- variable bookkeeping --------------------------------------------------

@@ -581,26 +581,30 @@ class CONUS404Dataset(CurvilinearDataset):
 
     Parameters
     ----------
-    qair_method : {"psfc", "era5_magnus"}, optional
+    qair_method : {"psfc", "fixed_pressure"}, optional
         How to derive specific humidity, both via
         :func:`~roms_tools.datasets.utils.specific_humidity_from_dewpoint` from
         ``T2``/``TD2``:
 
-        - ``"psfc"`` (default) uses CONUS404's own ``PSFC`` field.
-        - ``"era5_magnus"`` uses the fixed 1010 hPa that ERA5 processing assumes,
-          making the result bit-identical to ``ERA5Dataset`` for the same inputs.
+        - ``"psfc"`` (default) uses CONUS404's own ``PSFC`` field, and is what you
+          want. ``ERA5Dataset`` likewise uses ERA5's own surface pressure, so the
+          two agree by construction and can be layered without a step at the seam.
+        - ``"fixed_pressure"`` substitutes a constant 1010 hPa. Its only use is
+          matching an ERA5 source whose extract carries *no* pressure field, where
+          ``ERA5Dataset`` falls back to the same constant; better still is to
+          include ``sp`` in that download.
 
-        Measured difference between the two, on 2020-06-15 CONUS404 data: ~1.1%
-        (mean, max 1.3%) over open ocean off central California, where ``PSFC``
-        runs 1018-1023 hPa under the North Pacific High; up to ~7% over high
-        terrain. So 1010 hPa is not a neutral choice, and ``"psfc"`` is the
-        physically correct one -- but it does leave a ~1% step in ``qair`` at a
-        seam against an ERA5-derived field, since ERA5 processing uses the fixed
-        value. Choose ``"era5_magnus"`` to remove that step instead.
+        The difference is not small or one-signed: measured against ``PSFC`` on
+        2020-06-15 CONUS404 data it is ~1.1% (max 1.3%) over open ocean off
+        central California, where pressure runs 1018-1023 hPa under the North
+        Pacific High, and up to ~7% over high terrain -- with the opposite sign
+        inside low-pressure systems. Because ROMS drives evaporation off the small
+        difference ``q_sat(SST) - qair``, a 1% humidity error becomes roughly 3% in
+        the quantity that matters.
 
         CONUS404's own ``Q2`` is deliberately *not* used: it is a mixing ratio
         rather than specific humidity, and deriving humidity by a different route
-        than the blend partner would put a step at the seam even though each
+        than a layering partner would put a step at the seam even though each
         route is individually defensible.
 
     Notes
@@ -674,7 +678,7 @@ class CONUS404Dataset(CurvilinearDataset):
     )
     climatology: bool = False
     needs_lateral_fill: bool = False
-    qair_method: Literal["psfc", "era5_magnus"] = "psfc"
+    qair_method: Literal["psfc", "fixed_pressure"] = "psfc"
 
     def __post_init__(self) -> None:
         """Resolve the store backend, then run the base initialization."""
@@ -691,7 +695,7 @@ class CONUS404Dataset(CurvilinearDataset):
         elif filename.startswith(("http://", "https://")) or filename.endswith(".zarr"):
             self.read_zarr = True
 
-        if self.qair_method == "era5_magnus":
+        if self.qair_method == "fixed_pressure":
             # PSFC is unused in this mode; don't pay to read it.
             self.var_names = {k: v for k, v in self.var_names.items() if k != "psfc"}
 

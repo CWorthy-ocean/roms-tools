@@ -782,13 +782,19 @@ class SurfaceForcing:
 
             # Whole-domain source prefill when requested, else a nearest-neighbor
             # pre-fill on the scipy path so interpolation cannot propagate NaNs.
-            # Both are skipped when extrapolation is suppressed: either one would
-            # make the source NaN-free and erase the coverage footprint that the
-            # fallback exists to fill. (`_input_checks` rejects an explicit
-            # `prefill` alongside `fallback_source` for the same reason.)
-            if not suppress_extrapolation:
-                apply_source_prefill(data, regrid, self.prefill_kwargs)
-                apply_scipy_fallback_fill(data, regrid)
+            #
+            # Both are safe to run even when extrapolation is suppressed, and both
+            # need to. `apply_source_prefill` is already a no-op here, since
+            # `_input_checks` rejects an explicit `prefill` alongside
+            # `fallback_source` (a whole-domain fill really would erase the
+            # coverage footprint). `apply_scipy_fallback_fill` only fills masked
+            # cells *within* the source grid, and `DataArray.interp` returns NaN
+            # beyond the source's coordinate range regardless, so the footprint
+            # survives. Skipping it would let the source's land NaNs propagate into
+            # coastal target points, which would then be taken from the fallback
+            # instead of the primary -- a silent, and wrong, source swap.
+            apply_source_prefill(data, regrid, self.prefill_kwargs)
+            apply_scipy_fallback_fill(data, regrid)
 
         self._set_variable_info(data)
         var_names = {

@@ -2256,6 +2256,18 @@ class ERA5Dataset(LatLonDataset):
         }
     )
 
+    # Surface pressure, used to convert vapour pressure into specific humidity.
+    # Optional because an ERA5 extract downloaded for surface forcing may carry
+    # neither field; `post_process` then falls back to a fixed value and says so.
+    # `sp` is preferred, with `msl` accepted as a stand-in: the two are equal at
+    # sea level by construction, and ROMS only consumes the ocean points.
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sp": "sp",
+            "msl": "msl",
+        }
+    )
+
     dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
@@ -2265,6 +2277,51 @@ class ERA5Dataset(LatLonDataset):
     )
 
     climatology: bool = False
+
+    # Fallback pressure, in hPa, when the source carries no pressure field. This
+    # was the value hardcoded for every point and every time step before ERA5's
+    # own surface pressure was used; it is a fair global mean but a poor ocean
+    # value (the sea surface averages ~1013 hPa, and 1018-1023 under a summer
+    # subtropical high), which biased `qair` high by ~1%.
+    _FALLBACK_PATM_HPA: ClassVar[float] = 1010.0
+
+    def _resolve_surface_pressure(self, ds: xr.Dataset) -> xr.DataArray | float:
+        """Return surface pressure in hPa for the humidity conversion.
+
+        Specific humidity is a mass ratio, so converting a vapour pressure into
+        one requires dividing by the total air pressure: assuming a pressure
+        11 hPa below the truth inflates ``qair`` by ~1%, which in turn shifts the
+        ``q_sat(SST) - qair`` deficit that drives evaporation by ~3%.
+
+        Prefers ``sp`` (true surface pressure). Falls back to ``msl`` (mean sea
+        level pressure), which is equal to ``sp`` at sea level by construction and
+        so is a good stand-in over the ocean, where ROMS consumes these fields;
+        over land the two diverge, but those points are masked and refilled from
+        ocean neighbours anyway. Falls back last to a fixed value, with a warning,
+        so an extract carrying neither field still works.
+        """
+        for key in ("sp", "msl"):
+            name = self.opt_var_names.get(key)
+            if name and name in ds.data_vars:
+                if key == "msl":
+                    logging.info(
+                        "Using mean sea level pressure (%s) for the humidity "
+                        "conversion; %r is absent. The two agree at sea level, so "
+                        "this is accurate over the ocean.",
+                        name,
+                        self.opt_var_names.get("sp"),
+                    )
+                return ds[name] / 100.0  # Pa -> hPa
+
+        logging.warning(
+            "No surface pressure field found in the ERA5 source, so specific "
+            "humidity falls back to a fixed %.1f hPa. Over the ocean this "
+            "typically overestimates `qair` by ~1%%, and the evaporation-driving "
+            "humidity deficit by ~3%%. Include `sp` (or `msl`) in your ERA5 "
+            "download to avoid this.",
+            self._FALLBACK_PATM_HPA,
+        )
+        return self._FALLBACK_PATM_HPA
 
     def post_process(self) -> None:
         """
@@ -2309,17 +2366,27 @@ class ERA5Dataset(LatLonDataset):
             tair = ds[vn["Tair"]]
             d2m = ds[vn["d2m"]]
 
-            # Magnus relative humidity -> specific humidity, at a fixed 1010 hPa.
-            # Shared with every other surface-forcing source (see
-            # `specific_humidity_from_dewpoint`) so that two sources layered over
-            # one another cannot disagree at the seam.
-            qair_abs = specific_humidity_from_dewpoint(tair, d2m, patm=1010.0)
+            # Magnus relative humidity -> specific humidity, using ERA5's own
+            # surface pressure. Shared with every other surface-forcing source
+            # (see `specific_humidity_from_dewpoint`) so that two sources layered
+            # over one another cannot disagree at the seam.
+            patm = self._resolve_surface_pressure(ds)
+            qair_abs = specific_humidity_from_dewpoint(tair, d2m, patm=patm)
 
             # Assign qair and drop d2m in one lazy operation
             ds = ds.assign({"qair": qair_abs})
             ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
             ds["qair"].attrs["units"] = "kg/kg"
             ds = ds.drop_vars([vn["d2m"]])
+
+            # The pressure fields have served their purpose; drop them so nothing
+            # downstream tries to regrid or write them.
+            pressure_vars = [
+                name for name in self.opt_var_names.values() if name in ds.data_vars
+            ]
+            if pressure_vars:
+                ds = ds.drop_vars(pressure_vars)
+            self.opt_var_names = {}
 
             # Update var_names
             self.var_names = {
@@ -2354,6 +2421,14 @@ class ERA5ARCODataset(ERA5Dataset):
             "d2m": "2m_dewpoint_temperature",
             "rain": "total_precipitation",
             "mask": "sea_surface_temperature",
+        }
+    )
+
+    # The ARCO archive always carries surface pressure, so there is no need to
+    # also read mean sea level pressure as a stand-in.
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sp": "surface_pressure",
         }
     )
 

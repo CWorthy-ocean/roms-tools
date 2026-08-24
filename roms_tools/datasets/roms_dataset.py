@@ -10,6 +10,7 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.datasets.utils import (
+    bbox_indices_from_2d_latlon,
     check_dataset,
     convert_to_float64,
     extrapolate_deepest_to_bottom,
@@ -820,34 +821,23 @@ def choose_subdomain(
     eta_dim, xi_dim = "eta_rho", "xi_rho"
     lat_coord, lon_coord = f"lat_{location}", f"lon_{location}"
     _check_latlon_coords(ds, eta_dim, xi_dim, location)
-    ds_lon = ds[lon_coord]
 
-    if lon_max_buf < lon_min_buf:  # crosses dateline
-        subset_mask_lon = (ds_lon >= lon_min_buf) | (ds_lon <= lon_max_buf)
-    else:
-        subset_mask_lon = (ds_lon >= lon_min_buf) & (ds_lon <= lon_max_buf)
-
-    # Full mask including latitude
-    subset_mask = (
-        (ds[lat_coord] >= lat_min - margin_lat)
-        & (ds[lat_coord] <= lat_max + margin_lat)
-        & subset_mask_lon
+    eta_slice, xi_slice = bbox_indices_from_2d_latlon(
+        ds[lat_coord],
+        ds[lon_coord],
+        eta_dim,
+        xi_dim,
+        lat_min - margin_lat,
+        lat_max + margin_lat,
+        lon_min_buf,
+        lon_max_buf,
+        source_name="ROMS",
     )
-
-    eta_mask = subset_mask.any(dim=xi_dim)
-    xi_mask = subset_mask.any(dim=eta_dim)
-    eta_indices = np.where(eta_mask)[0]
-    xi_indices = np.where(xi_mask)[0]
-    first_eta, last_eta = eta_indices[0], eta_indices[-1]
-    first_xi, last_xi = xi_indices[0], xi_indices[-1]
+    first_eta, last_eta = eta_slice.start, eta_slice.stop - 1
+    first_xi, last_xi = xi_slice.start, xi_slice.stop - 1
 
     # Subset rho points
-    ds = ds.isel(
-        **{
-            "eta_rho": slice(first_eta, last_eta + 1),
-            "xi_rho": slice(first_xi, last_xi + 1),
-        }
-    )
+    ds = ds.isel(**{"eta_rho": eta_slice, "xi_rho": xi_slice})
 
     # Subset u points only if these dimensions exist
     if "xi_u" in ds.dims:

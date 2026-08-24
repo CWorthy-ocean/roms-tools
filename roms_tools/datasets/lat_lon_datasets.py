@@ -29,6 +29,7 @@ from roms_tools.datasets.utils import (
     extrapolate_deepest_to_bottom,
     select_relevant_fields,
     select_relevant_times,
+    specific_humidity_from_dewpoint,
     validate_start_end_time,
 )
 from roms_tools.fill import LateralFill, nearest_neighbor_fill
@@ -2297,20 +2298,11 @@ class ERA5Dataset(LatLonDataset):
             tair = ds[vn["Tair"]]
             d2m = ds[vn["d2m"]]
 
-            # Relative humidity (Magnus formula)
-            qair = np.exp((17.625 * d2m) / (243.04 + d2m)) / np.exp(
-                (17.625 * tair) / (243.04 + tair)
-            )
-
-            # Convert relative to absolute humidity
-            patm = 1010.0
-            cff = (
-                (1.0007 + 3.46e-6 * patm)
-                * 6.1121
-                * np.exp(17.502 * tair / (240.97 + tair))
-            )
-            cff = cff * qair
-            qair_abs = 0.62197 * (cff / (patm - 0.378 * cff))
+            # Magnus relative humidity -> specific humidity, at a fixed 1010 hPa.
+            # Shared with every other surface-forcing source (see
+            # `specific_humidity_from_dewpoint`) so that two sources layered over
+            # one another cannot disagree at the seam.
+            qair_abs = specific_humidity_from_dewpoint(tair, d2m, patm=1010.0)
 
             # Assign qair and drop d2m in one lazy operation
             ds = ds.assign({"qair": qair_abs})

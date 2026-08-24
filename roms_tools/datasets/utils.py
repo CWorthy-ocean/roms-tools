@@ -507,3 +507,115 @@ def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:
         return np.datetime64(dt, "ns")
 
     return np.vectorize(convert_datetime)(data_array)
+
+
+def specific_humidity_from_dewpoint(
+    tair: xr.DataArray, dewpoint: xr.DataArray, patm: float | xr.DataArray = 1010.0
+) -> xr.DataArray:
+    """Compute specific humidity from 2 m air and dewpoint temperature.
+
+    Relative humidity comes from the Magnus formula, saturation vapour pressure
+    from Buck's formula with its pressure enhancement factor, and specific
+    humidity from ``q = 0.62197 e / (p - 0.378 e)``.
+
+    Extracted from :meth:`ERA5Dataset.post_process` so that every surface-forcing
+    source computes ``qair`` with the same arithmetic. Sources that will be
+    layered over one another **must** share this function: a different formula
+    per source produces a step discontinuity at the seam between them, even when
+    each formula is individually defensible.
+
+    Parameters
+    ----------
+    tair : xr.DataArray
+        Air temperature at 2 m, in degrees Celsius.
+    dewpoint : xr.DataArray
+        Dewpoint temperature at 2 m, in degrees Celsius.
+    patm : float or xr.DataArray, optional
+        Atmospheric pressure in hPa. Defaults to 1010.0, the fixed value ERA5
+        processing has always used. Sources that provide a real surface-pressure
+        field may pass it instead; over the ocean the two differ by ~0.3%.
+
+    Returns
+    -------
+    xr.DataArray
+        Specific humidity in kg/kg. Lazy if the inputs are lazy.
+    """
+    # Relative humidity (Magnus formula)
+    rh = np.exp((17.625 * dewpoint) / (243.04 + dewpoint)) / np.exp(
+        (17.625 * tair) / (243.04 + tair)
+    )
+
+    # Convert relative to specific humidity
+    cff = (
+        (1.0007 + 3.46e-6 * patm) * 6.1121 * np.exp(17.502 * tair / (240.97 + tair))
+    )
+    cff = cff * rh
+
+    return 0.62197 * (cff / (patm - 0.378 * cff))
+
+
+def bbox_indices_from_2d_latlon(
+    lat: xr.DataArray,
+    lon: xr.DataArray,
+    y_dim: str,
+    x_dim: str,
+    lat_min: float,
+    lat_max: float,
+    lon_min: float,
+    lon_max: float,
+    source_name: str = "source",
+) -> tuple[slice, slice]:
+    """Smallest index box on ``(y_dim, x_dim)`` containing a lat/lon bounding box.
+
+    Works on 2D (curvilinear) coordinate variables, where a lat/lon window does
+    not correspond to a rectangle in index space; the returned slices are the
+    tightest index box that contains every cell inside the window.
+
+    ``lat`` and ``lon`` must already be expressed in the same longitude
+    convention as the bounds. Pass ``lon_max < lon_min`` to request a box that
+    crosses the antimeridian.
+
+    Parameters
+    ----------
+    lat, lon : xr.DataArray
+        2D coordinate variables with dimensions ``(y_dim, x_dim)``.
+    y_dim, x_dim : str
+        Names of the two horizontal dimensions.
+    lat_min, lat_max, lon_min, lon_max : float
+        Bounding box, in the same convention as ``lon``.
+    source_name : str, optional
+        Used in the error message when the box does not intersect the data.
+
+    Returns
+    -------
+    tuple[slice, slice]
+        ``(y_slice, x_slice)``, suitable for ``ds.isel``.
+
+    Raises
+    ------
+    ValueError
+        If the bounding box does not intersect the coordinate arrays.
+    """
+    if lon_max < lon_min:  # crosses the antimeridian
+        mask_lon = (lon >= lon_min) | (lon <= lon_max)
+    else:
+        mask_lon = (lon >= lon_min) & (lon <= lon_max)
+
+    mask = (lat >= lat_min) & (lat <= lat_max) & mask_lon
+
+    y_indices = np.where(mask.any(dim=x_dim))[0]
+    x_indices = np.where(mask.any(dim=y_dim))[0]
+
+    if len(y_indices) == 0 or len(x_indices) == 0:
+        raise ValueError(
+            f"The requested domain does not intersect the {source_name} data. "
+            f"Requested latitude {lat_min:.4f} to {lat_max:.4f} and longitude "
+            f"{lon_min:.4f} to {lon_max:.4f}; the data spans latitude "
+            f"{float(lat.min()):.4f} to {float(lat.max()):.4f} and longitude "
+            f"{float(lon.min()):.4f} to {float(lon.max()):.4f}."
+        )
+
+    return (
+        slice(y_indices[0], y_indices[-1] + 1),
+        slice(x_indices[0], x_indices[-1] + 1),
+    )

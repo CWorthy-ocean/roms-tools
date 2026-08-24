@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
+from roms_tools.blend import coverage_fraction, layer_fields
 from roms_tools.datasets.curvilinear_datasets import (
     DEFAULT_CONUS404_PATH,
     CONUS404Dataset,
@@ -32,6 +33,7 @@ from roms_tools.processing_methods import (
 )
 from roms_tools.regrid import (
     LateralRegridFromROMS,
+    LateralRegridToROMS,
     build_lateral_regridder,
     select_source_mask,
 )
@@ -239,6 +241,22 @@ class SurfaceForcing:
     ``"inverse_dist"``. Ignored when a ``prefill`` is set or on the scipy path."""
     extrap_kwargs: dict | None = None
     """Method-specific keyword arguments for ``extrap_method``."""
+    fallback_source: RawDataSource | None = None
+    """Optional secondary source, used wherever ``source`` has no coverage.
+
+    Same shape as ``source``. Only valid for ``type="physics"``. See the
+    "Layering two sources" notes on this class."""
+    blend_width_km: float = 0.0
+    """Width of a smooth transition between the two sources, in km.
+
+    ``0.0`` (default) is a hard edge. Larger values are not implemented yet."""
+    blend_options: dict | None = None
+    """Tuning for the two-source merge. Recognized keys:
+
+    ``"time_align"`` (``"exact"`` | ``"nearest"`` | ``"linear"``, default
+    ``"exact"``), ``"time_tolerance"`` (for ``"nearest"``),
+    ``"on_missing_primary_var"`` (``"error"`` | ``"fallback"``, default
+    ``"error"``)."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -264,13 +282,28 @@ class SurfaceForcing:
         )
 
         data = self._get_data_for(self.source)
+        fallback_data = (
+            self._get_data_for(self.fallback_source)
+            if self.fallback_source is not None
+            else None
+        )
 
         if self.coarse_grid_mode == "always":
             use_coarse_grid = True
         elif self.coarse_grid_mode == "never":
             use_coarse_grid = False
         elif self.coarse_grid_mode == "auto":
+            # Decided from the primary source alone. A limited-extent source only
+            # exists because it is finer than the global one, so the primary sets
+            # the resolution the output can support; taking the fallback's answer
+            # would coarsen away exactly what the primary was added for. There is
+            # also only one output file and one `interp_bulk_frc` flag, so there is
+            # no way to represent "coarse here, fine there".
             use_coarse_grid = self._determine_coarse_grid_usage(data)
+            if fallback_data is not None:
+                self._log_coarse_grid_disagreement(
+                    fallback_data, use_coarse_grid, self.fallback_source["name"]
+                )
         self.use_coarse_grid = use_coarse_grid
 
         if self.type == "bgc":
@@ -327,8 +360,53 @@ class SurfaceForcing:
 
         self._source_is_curvilinear = isinstance(data, CurvilinearDataset)
         processed_fields = self._build_processed_fields(
-            data, target_coords, self.source["name"]
+            data,
+            target_coords,
+            self.source["name"],
+            # A limited-extent primary is *expected* not to cover the whole grid;
+            # that is the point of having a fallback.
+            coverage_required=fallback_data is None,
+            suppress_extrapolation=fallback_data is not None,
         )
+
+        if fallback_data is not None:
+            self._primary_coverage_fraction = coverage_fraction(
+                next(iter(processed_fields.values())), target_coords["mask"]
+            )
+            logging.info(
+                "Primary source %s covers %.1f%% of the wet target points; the "
+                "remainder comes from the fallback source %s.",
+                self.source["name"],
+                100 * self._primary_coverage_fraction,
+                self.fallback_source["name"],
+            )
+            fallback_fields = self._build_processed_fields(
+                fallback_data,
+                target_coords,
+                self.fallback_source["name"],
+                # The fallback is the guarantee that the grid is covered at all, so
+                # its coverage check stays on.
+                coverage_required=True,
+            )
+            self._align_radiation_time_conventions(
+                data,
+                fallback_data,
+                processed_fields,
+                fallback_fields,
+                self.fallback_source["name"],
+            )
+            self._check_blend_compatibility(processed_fields, fallback_fields)
+            blend_options = self.blend_options or {}
+            processed_fields = layer_fields(
+                processed_fields,
+                fallback_fields,
+                weights=self._blend_weights(processed_fields, target_coords),
+                on_missing_primary_var=blend_options.get(
+                    "on_missing_primary_var", "error"
+                ),
+                time_align=blend_options.get("time_align", "exact"),
+                time_tolerance=blend_options.get("time_tolerance"),
+            )
 
         # rotation of velocities
         if "uwnd" in processed_fields and "vwnd" in processed_fields:
@@ -368,6 +446,8 @@ class SurfaceForcing:
         # source name, so a source with instantaneous radiation gets no shift.
         rad_time_offset = getattr(data, "rad_time_offset", None)
         if self.type == "physics" and rad_time_offset:
+            # The primary owns the emitted rad_time; any fallback has already been
+            # shifted onto its convention by `_align_radiation_time_conventions`.
             ds = self._apply_rad_time(ds, rad_time_offset)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
@@ -449,6 +529,60 @@ class SurfaceForcing:
 
         self.source = self._normalize_source_dict(self.source, label="source")
 
+        if self.fallback_source is not None:
+            if self.type != "physics":
+                raise ValueError(
+                    "`fallback_source` is only supported for `type='physics'`. "
+                    "BGC surface forcing is climatological and restoring forcing "
+                    "drops the time axis, so neither has a layering use case."
+                )
+            self.fallback_source = self._normalize_source_dict(
+                self.fallback_source, label="fallback_source"
+            )
+            if self.source == self.fallback_source:
+                # Not an error: it is the natural way to check that layering is
+                # transparent. But it does double the work for no result, so say so.
+                logging.info(
+                    "`source` and `fallback_source` are identical (%s); the merge "
+                    "will be a no-op and the source will be read twice.",
+                    self.source["name"],
+                )
+            if self.source["climatology"] or self.fallback_source["climatology"]:
+                raise ValueError(
+                    "Layering is not supported for climatologies: a monthly "
+                    "climatology and a time-varying record cannot share one time "
+                    "axis. Set 'climatology' to False on both sources."
+                )
+            if self.prefill is not None:
+                raise ValueError(
+                    f"`prefill={self.prefill!r}` fills the whole primary source "
+                    "before regridding, which makes it NaN-free and so erases the "
+                    "coverage footprint that `fallback_source` exists to fill -- the "
+                    "fallback would silently contribute nothing. Use `prefill=None` "
+                    "together with `fallback_source`."
+                )
+            if self.blend_width_km:
+                raise NotImplementedError(
+                    "Feathered blending is not implemented yet; use "
+                    "`blend_width_km=0.0` for a hard edge at the primary source's "
+                    "boundary."
+                )
+            valid_blend_keys = {
+                "time_align",
+                "time_tolerance",
+                "on_missing_primary_var",
+            }
+            unknown = set(self.blend_options or {}) - valid_blend_keys
+            if unknown:
+                raise ValueError(
+                    f"Unknown `blend_options` keys: {sorted(unknown)}. Valid keys "
+                    f"are {sorted(valid_blend_keys)}."
+                )
+        elif self.blend_width_km:
+            raise ValueError(
+                "`blend_width_km` only applies when `fallback_source` is set."
+            )
+
         # Validate 'coarse_grid_mode'
         valid_modes = ["auto", "always", "never"]
         if self.coarse_grid_mode not in valid_modes:
@@ -490,7 +624,7 @@ class SurfaceForcing:
         # also raise, but its message tells the user to switch to ERA5, which is
         # not the useful advice here.)
         if self.type == "physics" and self.source["name"] == "CONUS404":
-            if self.correct_radiation:
+            if self.correct_radiation and self.fallback_source is None:
                 raise ValueError(
                     "`correct_radiation=True` is not supported for the CONUS404 "
                     "source: the ERA5 correction climatology is defined on the "
@@ -559,6 +693,7 @@ class SurfaceForcing:
         source_name: str,
         *,
         coverage_required: bool = True,
+        suppress_extrapolation: bool = False,
     ) -> dict[str, xr.DataArray]:
         """Take one source dataset from raw to ROMS-grid fields.
 
@@ -582,6 +717,13 @@ class SurfaceForcing:
             Whether the source must cover the whole target grid. True (default)
             for a sole source. A limited-extent source that is only expected to
             cover part of the domain should pass False.
+        suppress_extrapolation : bool, optional
+            Disable destination extrapolation for this source, so target points
+            outside its coverage stay NaN. Required for a lat/lon primary that is
+            to be layered over a fallback: otherwise ``"inverse_dist"`` fills the
+            whole domain from it, the coverage gaps vanish, and the fallback
+            silently contributes nothing. A curvilinear source never extrapolates,
+            so this is a no-op there.
 
         Returns
         -------
@@ -617,8 +759,13 @@ class SurfaceForcing:
 
             # Whole-domain source prefill when requested, else a nearest-neighbor
             # pre-fill on the scipy path so interpolation cannot propagate NaNs.
-            apply_source_prefill(data, regrid, self.prefill_kwargs)
-            apply_scipy_fallback_fill(data, regrid)
+            # Both are skipped when extrapolation is suppressed: either one would
+            # make the source NaN-free and erase the coverage footprint that the
+            # fallback exists to fill. (`_input_checks` rejects an explicit
+            # `prefill` alongside `fallback_source` for the same reason.)
+            if not suppress_extrapolation:
+                apply_source_prefill(data, regrid, self.prefill_kwargs)
+                apply_scipy_fallback_fill(data, regrid)
 
         self._set_variable_info(data)
         var_names = {
@@ -628,7 +775,12 @@ class SurfaceForcing:
             if name in data.ds.data_vars
         }
 
-        processed_fields = self._regrid_laterally(data, target_coords, var_names)
+        processed_fields = self._regrid_laterally(
+            data,
+            target_coords,
+            var_names,
+            suppress_extrapolation=suppress_extrapolation,
+        )
 
         # The radiation correction is welded to its source: the climatology is
         # regridded through that source's own lat/lon grid and borrows its mask, so
@@ -642,6 +794,160 @@ class SurfaceForcing:
             )
 
         return processed_fields
+
+    def _log_coarse_grid_disagreement(
+        self, fallback_data, use_coarse_grid: bool, fallback_name: str
+    ) -> None:
+        """Note when the two sources would choose different output resolutions.
+
+        They usually will: the whole reason for a limited-extent primary is that
+        it is finer than the fallback. Logged rather than raised, since the
+        primary's answer is the intended one.
+        """
+        fallback_choice = self._determine_coarse_grid_usage(fallback_data)
+        if fallback_choice != use_coarse_grid:
+            logging.info(
+                "The two sources disagree about the output grid: %s implies the %s "
+                "and %s implies the %s. Using the primary source's choice (%s). "
+                "Set `coarse_grid_mode` explicitly to override.",
+                self.source["name"],
+                "coarse grid" if use_coarse_grid else "fine grid",
+                fallback_name,
+                "coarse grid" if fallback_choice else "fine grid",
+                "coarse grid" if use_coarse_grid else "fine grid",
+            )
+
+    def _align_radiation_time_conventions(
+        self, data, fallback_data, primary_fields, fallback_fields, fallback_name: str
+    ) -> None:
+        """Put the fallback's radiation on the primary's time convention.
+
+        Radiation carries a per-source ``rad_time_offset``: an hourly-mean product
+        labels its flux at the end of the averaging interval, an instantaneous one
+        does not. The output file has a single ``rad_time``, taken from the primary,
+        so if the fallback's convention differs its radiation has to be shifted to
+        match before the merge. Applying one shift to a field that is half
+        hourly-mean and half instantaneous would be wrong over half the domain.
+
+        Modifies ``fallback_fields`` in place.
+        """
+        primary_offset = getattr(data, "rad_time_offset", None) or timedelta(0)
+        fallback_offset = getattr(fallback_data, "rad_time_offset", None) or timedelta(
+            0
+        )
+        if primary_offset == fallback_offset:
+            return
+
+        shift = fallback_offset - primary_offset
+        logging.info(
+            "The two sources label radiation differently (%s offset %s, %s offset "
+            "%s); shifting the fallback's radiation by %s onto the primary's "
+            "convention before merging.",
+            self.source["name"],
+            primary_offset,
+            fallback_name,
+            fallback_offset,
+            shift,
+        )
+        for var_name in ("swrad", "lwrad"):
+            if var_name not in fallback_fields or var_name not in primary_fields:
+                continue
+            field = fallback_fields[var_name]
+            if "time" not in field.dims:
+                continue
+            shifted = field.assign_coords(time=field["time"] - np.timedelta64(shift))
+            fallback_fields[var_name] = shifted.interp(
+                time=primary_fields[var_name]["time"]
+            )
+
+    def _check_blend_compatibility(
+        self,
+        primary_fields: dict[str, xr.DataArray],
+        fallback_fields: dict[str, xr.DataArray],
+    ) -> None:
+        """Compare the two sources where they overlap, and log the difference.
+
+        The cheapest high-value check available: one two-dimensional,
+        single-timestep reduction per variable over the region where both sources
+        are valid. Every unit or convention mismatch between two independently
+        written ``post_process`` implementations shows up here immediately -- a
+        Kelvin-versus-Celsius slip as a ~273 offset, millimetres-versus-centimetres
+        as a factor of 10, net-versus-downward shortwave as ~+6%, and a wind
+        rotation error as a large spread with a near-zero mean.
+
+        Logged rather than raised for now, because a legitimate difference between
+        two reanalyses is not an error and no threshold would be defensible without
+        data behind it.
+        """
+        for var_name in sorted(set(primary_fields) & set(fallback_fields)):
+            p_units = primary_fields[var_name].attrs.get("units")
+            f_units = fallback_fields[var_name].attrs.get("units")
+            if p_units and f_units and p_units != f_units:
+                raise ValueError(
+                    f"The two sources disagree on the units of {var_name!r}: the "
+                    f"primary reports {p_units!r} and the fallback {f_units!r}. "
+                    f"Both must emit the ROMS surface-forcing conventions."
+                )
+
+        logging.info("Source comparison over the overlap region (primary - fallback):")
+        for var_name in sorted(set(primary_fields) & set(fallback_fields)):
+            p = primary_fields[var_name]
+            f = fallback_fields[var_name]
+            if "time" in p.dims:
+                p = p.isel(time=0)
+            if "time" in f.dims:
+                f = f.isel(time=0)
+            try:
+                diff = (p - f).where(p.notnull() & f.notnull())
+                mean = float(diff.mean().compute())
+                std = float(diff.std().compute())
+            except Exception as exc:  # pragma: no cover - diagnostic only
+                logging.info("  %-6s could not be compared (%s)", var_name, exc)
+                continue
+            logging.info("  %-6s mean %+.4g   std %.4g", var_name, mean, std)
+
+    def _blend_weights(
+        self,
+        primary_fields: dict[str, xr.DataArray],
+        target_coords: dict[str, xr.DataArray],
+    ) -> "xr.DataArray | None":
+        """Build the primary-source weight field, or ``None`` for a hard edge."""
+        if not self.blend_width_km:
+            return None
+        footprint = next(iter(primary_fields.values()))
+        if "time" in footprint.dims:
+            footprint = footprint.isel(time=0)
+        return self._compute_blend_weights(
+            footprint.notnull(), target_coords, self.blend_width_km
+        )
+
+    def _compute_blend_weights(
+        self,
+        primary_footprint: xr.DataArray,
+        target_coords: dict[str, xr.DataArray],
+        width_km: float,
+    ) -> xr.DataArray:
+        """Feather the primary's weight to zero across ``width_km`` at its edge.
+
+        Not implemented. The intended approach is a distance-to-edge ramp built
+        with :func:`~roms_tools.setup.utils.min_dist_to_land`, which already
+        computes "metres to the nearest point where a 2D mask is zero" on the
+        target grid -- pass it ``primary_footprint`` instead of the land mask, then
+        ``clip(dist_km / width_km, 0, 1)`` (or a smoothstep for a continuous
+        derivative). The weight field is 2D and time-invariant, so it is built once
+        and broadcast, which is why the merge belongs in target-grid space.
+
+        Two caveats to honor when implementing: feathering ``swrad``/``lwrad`` with
+        the same weights is only right while the radiation correction is applied to
+        one source alone (so its discontinuity feathers along with the rest), and a
+        feathered ``rain`` can produce non-physical drizzle in the transition band
+        when the two products' precipitation climatologies differ sharply -- a
+        per-variable width override is the natural way out.
+        """
+        raise NotImplementedError(
+            "Feathered blending is not implemented yet; use blend_width_km=0.0 "
+            "for a hard edge at the primary source's boundary."
+        )
 
     def _warn_if_regrid_options_set_for_curvilinear(self) -> None:
         """Log a note when prefill/regrid options are set but the source is curvilinear.
@@ -673,6 +979,8 @@ class SurfaceForcing:
         data: LatLonDataset | CurvilinearDataset,
         target_coords: dict[str, xr.DataArray],
         var_names: dict[str, dict[str, str]],
+        *,
+        suppress_extrapolation: bool = False,
     ) -> dict[str, xr.DataArray]:
         """Regrid every source variable onto the ROMS grid.
 
@@ -724,6 +1032,17 @@ class SurfaceForcing:
         lateral_regrid = build_lateral_regridder(
             target_coords, data, regrid, source_mask
         )
+        if suppress_extrapolation and lateral_regrid.use_xesmf:
+            # Rebuild without destination extrapolation, so points outside the
+            # source's coverage come back as NaN for the fallback to fill.
+            lateral_regrid = LateralRegridToROMS(
+                target_coords,
+                data.dim_names,
+                source_ds=data.ds,
+                use_xesmf=True,
+                source_mask=source_mask,
+                extrap_method=None,
+            )
         for var_name in var_names:
             processed_fields[var_name] = lateral_regrid.apply(
                 data.ds[var_names[var_name]["name"]]
@@ -1228,7 +1547,21 @@ class SurfaceForcing:
             ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
 
         ds.attrs["type"] = self.type
-        ds.attrs["source"] = self.source["name"]
+
+        if self.fallback_source is not None:
+            # `source` stays the primary name, for anything already parsing it.
+            ds.attrs["layered"] = "True"
+            ds.attrs["fallback_source"] = self.fallback_source["name"]
+            ds.attrs["blend_method"] = (
+                "feathered" if self.blend_width_km else "hard_edge"
+            )
+            ds.attrs["blend_width_km"] = str(self.blend_width_km)
+            ds.attrs["coarse_grid_decided_by"] = self.source["name"]
+            coverage = getattr(self, "_primary_coverage_fraction", None)
+            if coverage is not None:
+                ds.attrs["primary_coverage_fraction"] = f"{coverage:.4f}"
+        else:
+            ds.attrs["layered"] = "False"
 
         return ds
 

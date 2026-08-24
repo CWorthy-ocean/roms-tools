@@ -25,7 +25,10 @@ def _field(value, *, times=None, with_time=True):
     if with_time:
         if times is None:
             times = np.array(
-                [np.datetime64("2020-06-15T00") + np.timedelta64(h, "h") for h in range(NT)]
+                [
+                    np.datetime64("2020-06-15T00") + np.timedelta64(h, "h")
+                    for h in range(NT)
+                ]
             )
         data = np.full((len(times), NY, NX), float(value))
         return xr.DataArray(
@@ -180,7 +183,9 @@ def test_nearest_alignment_tolerates_jitter():
     shifted = primary["time"].values + np.timedelta64(3, "m")
     fallback = _field(2.0, times=shifted)
     aligned = align_fallback_time(
-        fallback, primary["time"], method="nearest",
+        fallback,
+        primary["time"],
+        method="nearest",
         tolerance=np.timedelta64(30, "m"),
     )
     np.testing.assert_array_equal(aligned["time"].values, primary["time"].values)
@@ -239,7 +244,8 @@ def test_variable_only_in_primary_raises():
 def test_unknown_on_missing_primary_var_raises():
     with pytest.raises(ValueError, match="Unknown on_missing_primary_var"):
         layer_fields(
-            {"Tair": _field(1.0)}, {"Tair": _field(2.0)},
+            {"Tair": _field(1.0)},
+            {"Tair": _field(2.0)},
             on_missing_primary_var="bogus",
         )
 

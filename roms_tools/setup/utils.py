@@ -55,6 +55,14 @@ HEADER_CHAR = "="
 
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
+# Fields whose value is a source dict, and which therefore need the nested
+# path/grid handling in `serialize_source_dict` / `deserialize_source_dict` rather
+# than the generic path walk. A plain dict would round-trip through the generic
+# path either way (both `serialize_paths` and `normalize_paths` recurse into
+# dicts), but routing them here keeps one place to change and handles a nested
+# `grid`.
+_SOURCE_DICT_FIELDS = ("source", "bgc_source", "fallback_source")
+
 
 def apply_source_prefill(data, regrid_config, prefill_kwargs) -> None:
     """Apply a whole-domain source prefill when the config requests one.
@@ -2298,7 +2306,7 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     else:
         raise TypeError("Forcing object must be a dataclass or pydantic model")
 
-    forcing_data = {}
+    forcing_data: dict[str, Any] = {}
 
     for name in field_names:
         if name in exclude_set:
@@ -2306,8 +2314,11 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
 
         value = getattr(forcing_object, name)
 
-        if name in {"source", "bgc_source"}:
-            forcing_data[name] = serialize_source_dict(value)
+        if name in _SOURCE_DICT_FIELDS:
+            if value is None:
+                forcing_data[name] = None
+            else:
+                forcing_data[name] = serialize_source_dict(value)
             continue
 
         value = serialize_datetime(value)
@@ -2384,9 +2395,9 @@ def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
     # Convert path-like strings back to Path objects
     forcing_data = normalize_paths(forcing_data)
 
-    # Deserialize source and bgc_source nested dictionaries
-    for key in ["source", "bgc_source"]:
-        if key in forcing_data:
+    # Deserialize the nested source dictionaries
+    for key in _SOURCE_DICT_FIELDS:
+        if forcing_data.get(key) is not None:
             forcing_data[key] = deserialize_source_dict(forcing_data[key])
 
     return forcing_data

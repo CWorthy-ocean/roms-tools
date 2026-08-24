@@ -252,7 +252,7 @@ def _check_variable_sets(
                 f"The fallback source provides {missing_in_primary} but the primary "
                 f"source does not. Taking those from the fallback everywhere is "
                 f"often reasonable -- it is spatially uniform, so it introduces no "
-                f'seam -- but say so explicitly with blend_options='
+                f"seam -- but say so explicitly with blend_options="
                 f'{{"on_missing_primary_var": "fallback"}}.'
             )
         logging.info(
@@ -283,9 +283,7 @@ def _check_horizontal_shapes(
                 )
 
 
-def coverage_fraction(
-    field: xr.DataArray, mask: xr.DataArray | None = None
-) -> float:
+def coverage_fraction(field: xr.DataArray, mask: xr.DataArray | None = None) -> float:
     """Fraction of (wet) target points where ``field`` has a value.
 
     A cheap single-time-step diagnostic that catches the two failure modes a

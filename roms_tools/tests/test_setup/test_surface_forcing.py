@@ -1614,3 +1614,331 @@ def test_conus404_streaming_from_osn():
     assert 50.0 < float(ds["lwrad"].max()) < 700.0
     assert 0.0 < float(ds["qair"].max()) < 0.06
     assert float(np.abs(ds["uwnd"]).max()) < 80.0
+
+
+# ---------------------------------------------------------------------------
+# Two-source layering (fallback_source)
+# ---------------------------------------------------------------------------
+
+
+# The temperature offset stamped into the cropped source, so the merge's choice of
+# source is directly observable in the output rather than merely plausible.
+CROPPED_TAIR_OFFSET_K = 5.0
+
+
+@pytest.fixture(scope="module")
+def regional_era5_path():
+    # A Path, not a str: `normalize_paths` reconstitutes any path-like string as a
+    # Path on load, so a str would not survive a to_yaml/from_yaml comparison.
+    return Path(download_test_data("ERA5_regional_test_data.nc"))
+
+
+@pytest.fixture(scope="module")
+def cropped_era5_path(regional_era5_path, tmp_path_factory):
+    """A latitude-cropped copy of the regional ERA5 file, with `t2m` offset.
+
+    Stands in for a limited-extent *primary* source: it leaves the northern part
+    of the test grid uncovered, which the full file (as fallback) then fills.
+    Deliberately lat/lon rather than curvilinear, so the extrapolation-suppression
+    path is exercised too.
+
+    `t2m` is offset by a constant so that the layered result reveals which source
+    each point came from. Without it the two sources hold identical values
+    wherever they overlap, and the merge could pick either one -- or neither
+    consistently -- without any test noticing.
+    """
+    ds = xr.open_dataset(regional_era5_path)
+    lat = ds["latitude"]
+    cutoff = float(lat.min() + 0.55 * (lat.max() - lat.min()))
+    cropped = (
+        ds.sel(latitude=slice(None, cutoff))
+        if bool(lat[0] < lat[-1])
+        else ds.sel(latitude=slice(cutoff, None))
+    )
+    cropped["t2m"] = cropped["t2m"] + CROPPED_TAIR_OFFSET_K
+    path = tmp_path_factory.mktemp("era5_cropped") / "ERA5_cropped.nc"
+    cropped.to_netcdf(path)
+    return path
+
+
+@pytest.fixture
+def layering_grid():
+    """A grid inside the regional ERA5 extent (matches the module's other fixtures)."""
+    return Grid(
+        nx=10, ny=10, size_x=700, size_y=1800, center_lon=-18, center_lat=65, rot=20
+    )
+
+
+def _layered_kwargs(grid, **overrides):
+    kwargs = dict(
+        grid=grid,
+        start_time=datetime(2020, 1, 31),
+        end_time=datetime(2020, 2, 2),
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+@requires_xesmf
+def test_layering_is_transparent_when_primary_covers_everything(
+    layering_grid, regional_era5_path, tmp_path
+):
+    """A fully-covering primary must give byte-identical output to no fallback.
+
+    The strongest single check on the merge: if layering ever perturbs a field it
+    should have passed straight through, this fails.
+    """
+    single = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid, source={"name": "ERA5", "path": regional_era5_path}
+        )
+    )
+    layered = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": regional_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+        )
+    )
+    # Same source data both sides, so the merge must be a no-op.
+    for var_name in single.ds.data_vars:
+        np.testing.assert_array_equal(
+            layered.ds[var_name].values,
+            single.ds[var_name].values,
+            err_msg=f"{var_name} changed under a no-op layering",
+        )
+
+
+@requires_xesmf
+def test_layered_output_takes_each_point_from_the_right_source(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    """Every point comes from the primary where it has data, the fallback elsewhere.
+
+    The cropped primary carries a constant `Tair` offset, so differencing the
+    layered result against a fallback-only run labels each point with the source it
+    actually came from -- rather than merely checking the answer is plausible.
+
+    Note `bypass_validation` is deliberately NOT set: `_validate` passing is itself
+    the assertion that the fallback left nothing uncovered.
+    """
+    layered = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+        )
+    )
+    fallback_only = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid, source={"name": "ERA5", "path": regional_era5_path}
+        )
+    )
+
+    diff = (layered.ds["Tair"] - fallback_only.ds["Tair"]).isel(time=0).values
+    from_primary = np.isclose(diff, CROPPED_TAIR_OFFSET_K, atol=1e-3)
+    from_fallback = np.isclose(diff, 0.0, atol=1e-3)
+
+    # Every point came from exactly one source -- no partial averaging, no third
+    # value from an unintended interpolation across the seam.
+    assert (from_primary | from_fallback).all(), (
+        f"{(~(from_primary | from_fallback)).sum()} point(s) match neither source; "
+        f"unexplained differences range "
+        f"{diff[~(from_primary | from_fallback)].min():.4f} to "
+        f"{diff[~(from_primary | from_fallback)].max():.4f}"
+    )
+    # And both sources actually contributed, so the test is not vacuous.
+    assert from_primary.any(), "the primary contributed nothing"
+    assert from_fallback.any(), "the fallback contributed nothing"
+
+    # Nothing is left uncovered: qair is strictly positive in a real atmosphere, so
+    # an exact 0.0 would mark a point the fill-value substitution had to patch.
+    assert float(layered.ds["qair"].isel(time=0).min()) > 0.0
+
+
+@requires_xesmf
+def test_layering_reports_partial_coverage_in_attrs(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    layered = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+        )
+    )
+    assert layered.ds.attrs["layered"] == "True"
+    assert layered.ds.attrs["source"] == "ERA5"
+    assert layered.ds.attrs["fallback_source"] == "ERA5"
+    assert layered.ds.attrs["blend_method"] == "hard_edge"
+    coverage = float(layered.ds.attrs["primary_coverage_fraction"])
+    assert 0.0 < coverage < 1.0
+
+
+@requires_xesmf
+def test_extrapolation_is_suppressed_for_a_latlon_primary(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    """Without this, `inverse_dist` fills the domain and the fallback does nothing."""
+    layered = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+        )
+    )
+    assert float(layered.ds.attrs["primary_coverage_fraction"]) < 1.0
+
+
+@requires_xesmf
+def test_unit_mismatch_between_sources_is_caught(
+    layering_grid, cropped_era5_path, regional_era5_path, monkeypatch
+):
+    """A Kelvin-vs-Celsius style slip must not merge silently."""
+    import roms_tools.setup.surface_forcing as sf_mod
+
+    real = sf_mod.SurfaceForcing._build_processed_fields
+    state = {"calls": 0}
+
+    def sabotage(self, *args, **kwargs):
+        fields = real(self, *args, **kwargs)
+        state["calls"] += 1
+        if state["calls"] == 2:  # the fallback pass
+            fields["Tair"] = fields["Tair"].assign_attrs(units="K")
+        else:
+            fields["Tair"] = fields["Tair"].assign_attrs(units="degrees C")
+        return fields
+
+    monkeypatch.setattr(sf_mod.SurfaceForcing, "_build_processed_fields", sabotage)
+    with pytest.raises(ValueError, match="disagree on the units"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": cropped_era5_path},
+                fallback_source={"name": "ERA5", "path": regional_era5_path},
+            )
+        )
+
+
+@requires_xesmf
+def test_layered_roundtrip_yaml(
+    layering_grid, cropped_era5_path, regional_era5_path, tmp_path
+):
+    sfc = SurfaceForcing(
+        **_layered_kwargs(
+            layering_grid,
+            source={"name": "ERA5", "path": cropped_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+        )
+    )
+    filepath = tmp_path / "layered_surface_forcing.yaml"
+    sfc.to_yaml(filepath)
+    restored = SurfaceForcing.from_yaml(filepath, use_dask=True)
+    assert sfc == restored
+    assert restored.fallback_source == sfc.fallback_source
+    # The injected 'climatology' default must be applied identically to both.
+    assert restored.fallback_source["climatology"] is False
+
+
+# --- input validation ------------------------------------------------------
+
+
+def test_fallback_source_rejected_for_bgc(layering_grid, regional_era5_path):
+    with pytest.raises(ValueError, match="only supported for `type='physics'`"):
+        SurfaceForcing(
+            grid=layering_grid,
+            start_time=datetime(2020, 1, 31),
+            end_time=datetime(2020, 2, 2),
+            source={"name": "UNIFIED", "path": regional_era5_path},
+            fallback_source={"name": "ERA5", "path": regional_era5_path},
+            type="bgc",
+            use_dask=True,
+        )
+
+
+@requires_xesmf
+def test_identical_sources_are_allowed_but_noted(
+    layering_grid, regional_era5_path, caplog
+):
+    """Not an error -- it is how transparency is checked -- but worth a log line."""
+    with caplog.at_level(logging.INFO):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": regional_era5_path},
+                fallback_source={"name": "ERA5", "path": regional_era5_path},
+            )
+        )
+    assert "the merge will be a no-op" in caplog.text
+
+
+def test_prefill_with_fallback_source_rejected(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    """A prefill makes the primary NaN-free and silently voids the fallback."""
+    with pytest.raises(ValueError, match="erases the coverage footprint"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": cropped_era5_path},
+                fallback_source={"name": "CONUS404"},
+                prefill="2d_lateral_fill",
+            )
+        )
+
+
+def test_blend_width_km_is_not_implemented(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": cropped_era5_path},
+                fallback_source={"name": "CONUS404"},
+                blend_width_km=50.0,
+            )
+        )
+
+
+def test_blend_width_km_without_fallback_rejected(layering_grid, regional_era5_path):
+    with pytest.raises(ValueError, match="only applies when `fallback_source` is set"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": regional_era5_path},
+                blend_width_km=50.0,
+            )
+        )
+
+
+def test_unknown_blend_option_rejected(
+    layering_grid, cropped_era5_path, regional_era5_path
+):
+    with pytest.raises(ValueError, match="Unknown `blend_options` keys"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={"name": "ERA5", "path": cropped_era5_path},
+                fallback_source={"name": "CONUS404"},
+                blend_options={"feather": True},
+            )
+        )
+
+
+def test_climatology_with_fallback_rejected(layering_grid, regional_era5_path):
+    with pytest.raises(ValueError, match="not supported for climatologies"):
+        SurfaceForcing(
+            **_layered_kwargs(
+                layering_grid,
+                source={
+                    "name": "ERA5",
+                    "path": regional_era5_path,
+                    "climatology": True,
+                },
+                fallback_source={"name": "CONUS404"},
+            )
+        )

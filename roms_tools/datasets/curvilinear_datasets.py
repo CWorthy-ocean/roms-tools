@@ -47,46 +47,41 @@ from roms_tools.fill import LateralFill, nearest_neighbor_fill
 from roms_tools.processing_methods import METHOD_META, PrefillMethod
 from roms_tools.utils import (
     get_dask_chunks,
-    has_s3fs,
     get_pkg_error_msg,
+    has_s3fs,
     load_data,
     unchunk_dask,
 )
 
+# Number of source cells to extend the subdomain beyond the target grid. Matches
+# the lat/lon and ROMS defaults; see
+# https://github.com/CWorthy-ocean/roms-tools/issues/153.
 DEFAULT_NR_BUFFER_POINTS = 20
-"""Number of source cells to extend the subdomain beyond the target grid.
-
-Matches the lat/lon and ROMS defaults; see
-https://github.com/CWorthy-ocean/roms-tools/issues/153.
-"""
 
 SECONDS_PER_HOUR = 3600.0
 
+# Default streaming path to the CONUS404 hourly archive on the USGS/OSN pod.
 DEFAULT_CONUS404_PATH = "s3://hytest/conus404/conus404_hourly.zarr"
-"""Default streaming path to the CONUS404 hourly archive on the USGS/OSN pod."""
 
+# Anonymous access options for the OSN S3-compatible endpoint. The same store is
+# also reachable over plain HTTPS at
+# https://usgs.osn.mghpcc.org/hytest/conus404/conus404_hourly.zarr, which needs no
+# s3fs but coalesces range requests less efficiently.
 CONUS404_STORAGE_OPTIONS: dict[str, Any] = {
     "anon": True,
     "client_kwargs": {"endpoint_url": "https://usgs.osn.mghpcc.org/"},
 }
-"""Anonymous access options for the OSN S3-compatible endpoint.
 
-The same store is also reachable over plain HTTPS at
-``https://usgs.osn.mghpcc.org/hytest/conus404/conus404_hourly.zarr``, which needs
-no ``s3fs`` but coalesces range requests less efficiently.
-"""
-
+# Quantization noise floor of CONUS404 radiation, in W/m^2.
+#
+# The radiation fields are stored as float32 accumulations since the 1979-10-01
+# model start. By 2020 they reach ~2.4e11 J/m^2, where one float32 ULP is
+# 16384 J/m^2 -- i.e. 4.55 W/m^2 once differenced over an hour. Measured on the
+# real store (2020-06-15): night-time differences come out exactly 0.0, daytime
+# peaks reach ~1030 W/m^2, and occasional -4.55 W/m^2 artifacts appear (which
+# CONUS404Dataset.post_process clips to zero). Intrinsic to the product; it
+# cannot be recovered.
 CONUS404_RADIATION_NOISE_FLOOR_W_M2 = 4.55
-"""Quantization noise floor of CONUS404 radiation, in W/m^2.
-
-The radiation fields are stored as float32 accumulations since the 1979-10-01
-model start. By 2020 they reach ~2.4e11 J/m^2, where one float32 ULP is
-16384 J/m^2 -- i.e. 4.55 W/m^2 once differenced over an hour. Measured on the
-real store (2020-06-15): night-time differences come out exactly 0.0, daytime
-peaks reach ~1030 W/m^2, and occasional -4.55 W/m^2 artifacts appear (which
-:meth:`CONUS404Dataset.post_process` clips to zero). This is intrinsic to the
-product and cannot be recovered.
-"""
 
 
 @dataclass(kw_only=True)
@@ -287,6 +282,8 @@ class CurvilinearDataset:
 
     def select_relevant_times(self, ds: xr.Dataset) -> xr.Dataset:
         """Restrict the dataset to the requested time window."""
+        if self.start_time is None:
+            raise ValueError("select_relevant_times requires `start_time` to be set.")
         time_dim = self.dim_names["time"]
         return select_relevant_times(
             ds=ds,
@@ -334,7 +331,13 @@ class CurvilinearDataset:
 
         spacings = []
         for dim in (y_dim, x_dim):
-            if dim in ds.coords and ds[dim].attrs.get("units") in ("m", "meter", "metre", "meters", "metres"):
+            if dim in ds.coords and ds[dim].attrs.get("units") in (
+                "m",
+                "meter",
+                "metre",
+                "meters",
+                "metres",
+            ):
                 values = np.asarray(ds[dim].values, dtype=float)
                 if values.size > 1:
                     spacings.append(float(np.abs(np.diff(values)).min()))
@@ -690,9 +693,7 @@ class CONUS404Dataset(CurvilinearDataset):
 
         if self.qair_method == "era5_magnus":
             # PSFC is unused in this mode; don't pay to read it.
-            self.var_names = {
-                k: v for k, v in self.var_names.items() if k != "psfc"
-            }
+            self.var_names = {k: v for k, v in self.var_names.items() if k != "psfc"}
 
         if self.start_time is None:
             logging.warning(
@@ -740,6 +741,8 @@ class CONUS404Dataset(CurvilinearDataset):
         Independent of the ``end_time + 1h`` bump that ``SurfaceForcing`` applies
         for the radiation time shift.
         """
+        if self.start_time is None:
+            raise ValueError("select_relevant_times requires `start_time` to be set.")
         time_dim = self.dim_names["time"]
         return select_relevant_times(
             ds=ds,
@@ -853,9 +856,7 @@ class CONUS404Dataset(CurvilinearDataset):
             patm = ds[vn["psfc"]] / 100.0  # Pa -> hPa
         else:
             patm = 1010.0
-        qair = specific_humidity_from_dewpoint(
-            ds[vn["Tair"]], ds[vn["d2m"]], patm=patm
-        )
+        qair = specific_humidity_from_dewpoint(ds[vn["Tair"]], ds[vn["d2m"]], patm=patm)
         ds = ds.assign({"qair": qair})
         ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
         ds["qair"].attrs["units"] = "kg/kg"

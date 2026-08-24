@@ -1333,3 +1333,284 @@ def test_era5_default_path_requires_dask(small_grid: Grid, caplog) -> None:
             )
 
     assert "defaulting to ARCO ERA5 dataset on Google Cloud" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# CONUS404 (curvilinear source)
+# ---------------------------------------------------------------------------
+
+from roms_tools.processing_methods import _xesmf_available  # noqa: E402
+from roms_tools.tests.conus404_test_utils import (  # noqa: E402
+    synthetic_conus404,
+    write_conus404_store,
+)
+
+# A curvilinear source is regridded with xESMF; the scipy engine cannot
+# interpolate on a 2D source grid, so there is nothing to fall back to.
+requires_xesmf = pytest.mark.skipif(
+    not _xesmf_available(), reason="curvilinear regridding requires xesmf"
+)
+
+CONUS404_START = datetime(2020, 6, 15, 3)
+CONUS404_END = datetime(2020, 6, 15, 9)
+# Centre of the synthetic patch built below.
+CONUS404_CENTER = (-124.0, 36.0)
+
+
+@pytest.fixture(scope="module")
+def synthetic_conus404_store(tmp_path_factory):
+    """A synthetic CONUS404 zarr store large enough to contain a small ROMS grid."""
+    ds, _ = synthetic_conus404(
+        ny=100,
+        nx=120,
+        ntime=24,
+        center_lon=CONUS404_CENTER[0],
+        center_lat=CONUS404_CENTER[1],
+        rot_deg=15.0,
+    )
+    return write_conus404_store(
+        tmp_path_factory.mktemp("conus404_sf") / "synthetic", ds, fmt="zarr"
+    )
+
+
+def _conus404_grid(size_km: float, center=None) -> Grid:
+    lon, lat = center or CONUS404_CENTER
+    return Grid(
+        nx=12,
+        ny=12,
+        size_x=size_km,
+        size_y=size_km,
+        center_lon=lon,
+        center_lat=lat,
+        rot=0,
+    )
+
+
+@requires_xesmf
+def test_conus404_surface_forcing_structure(synthetic_conus404_store):
+    """A grid inside the footprint produces the standard physics variable set."""
+    sfc = SurfaceForcing(
+        grid=_conus404_grid(150),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    assert set(sfc.ds.data_vars) == {
+        "uwnd",
+        "vwnd",
+        "swrad",
+        "lwrad",
+        "Tair",
+        "qair",
+        "rain",
+    }
+    assert "rad_time" in sfc.ds.coords
+    assert sfc.ds.attrs["source"] == "CONUS404"
+
+
+@requires_xesmf
+def test_conus404_rad_time_is_shifted_thirty_minutes(synthetic_conus404_store):
+    """CONUS404 radiation is a backward hourly mean, like ERA5's."""
+    sfc = SurfaceForcing(
+        grid=_conus404_grid(150),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    np.testing.assert_allclose(
+        sfc.ds.rad_time.values, sfc.ds.time.values - 30 / 60 / 24
+    )
+
+
+@requires_xesmf
+def test_conus404_metadata_reports_no_extrapolation(synthetic_conus404_store):
+    """The curvilinear path bypasses RegridConfig, so the attrs must say so."""
+    sfc = SurfaceForcing(
+        grid=_conus404_grid(150),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    assert sfc.ds.attrs["extrap_method"] == "None"
+    assert sfc.ds.attrs["prefill"] == "None"
+    assert sfc.ds.attrs["regrid_method"] == "xesmf"
+
+
+@requires_xesmf
+def test_conus404_outside_footprint_is_nan(synthetic_conus404_store):
+    """A grid outrunning the source is partially uncovered, not extrapolated.
+
+    This is the contract a two-source layering feature is built on: the primary
+    source must leave holes for a fallback to fill, rather than silently
+    extrapolating across the whole domain.
+    """
+    inside = SurfaceForcing(
+        grid=_conus404_grid(150),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    # `qair` is strictly positive in any real atmosphere, so an exact 0.0 marks a
+    # point that had no source coverage and was filled at the end of the pipeline.
+    assert (inside.ds["qair"].isel(time=0).values != 0.0).all()
+
+    # Shift the grid north-west so roughly half of it leaves the patch.
+    straddling = SurfaceForcing(
+        grid=_conus404_grid(300, center=(-125.6, 37.6)),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+        bypass_validation=True,
+    )
+    covered = straddling.ds["qair"].isel(time=0).values != 0.0
+    assert 0.0 < covered.mean() < 1.0, (
+        f"expected partial coverage, got {covered.mean():.3f}"
+    )
+
+
+@requires_xesmf
+def test_conus404_validation_raises_when_grid_outruns_source(
+    synthetic_conus404_store,
+):
+    with pytest.raises(ValueError, match="NaN values found"):
+        SurfaceForcing(
+            grid=_conus404_grid(600, center=(-126.5, 38.5)),
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+            type="physics",
+            correct_radiation=False,
+            use_dask=True,
+        )
+
+
+@requires_xesmf
+def test_conus404_correct_radiation_raises(synthetic_conus404_store):
+    """The ERA5 correction climatology cannot be matched to a curvilinear grid."""
+    with pytest.raises(ValueError, match="not supported for the CONUS404 source"):
+        SurfaceForcing(
+            grid=_conus404_grid(150),
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+            type="physics",
+            correct_radiation=True,
+            use_dask=True,
+        )
+
+
+@requires_xesmf
+def test_conus404_climatology_raises(synthetic_conus404_store):
+    with pytest.raises(ValueError, match="'climatology' must be 'False'"):
+        SurfaceForcing(
+            grid=_conus404_grid(150),
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={
+                "name": "CONUS404",
+                "path": str(synthetic_conus404_store),
+                "climatology": True,
+            },
+            type="physics",
+            correct_radiation=False,
+            use_dask=True,
+        )
+
+
+def test_conus404_scipy_engine_raises(synthetic_conus404_store):
+    with pytest.raises(ValueError, match="requires the xESMF regrid engine"):
+        SurfaceForcing(
+            grid=_conus404_grid(150),
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+            type="physics",
+            correct_radiation=False,
+            use_dask=True,
+            regrid_method="scipy",
+        )
+
+
+def test_conus404_default_path_requires_dask():
+    """The default (cloud) store cannot be read eagerly."""
+    with pytest.raises(ValueError, match="requires `use_dask=True`"):
+        SurfaceForcing(
+            grid=_conus404_grid(150),
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={"name": "CONUS404"},
+            type="physics",
+            correct_radiation=False,
+            use_dask=False,
+        )
+
+
+@requires_xesmf
+def test_conus404_roundtrip_yaml(synthetic_conus404_store, tmp_path):
+    """The source dict, including an explicit store path, survives to_yaml.
+
+    The path is passed as a ``Path`` because ``normalize_paths`` reconstitutes any
+    path-like string as a ``Path`` on load, so a ``str`` in would not compare equal
+    coming out. That applies to every local source, not just this one.
+    """
+    sfc = SurfaceForcing(
+        grid=_conus404_grid(150),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": synthetic_conus404_store},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    filepath = tmp_path / "conus404_surface_forcing.yaml"
+    sfc.to_yaml(filepath)
+    restored = SurfaceForcing.from_yaml(filepath, use_dask=True)
+    assert sfc == restored
+
+
+@pytest.mark.stream
+@pytest.mark.use_s3fs
+@pytest.mark.use_dask
+def test_conus404_streaming_from_osn():
+    """Read the real CONUS404 store. Structure and plausibility only."""
+    sfc = SurfaceForcing(
+        grid=_conus404_grid(200),
+        start_time=datetime(2020, 6, 15, 0),
+        end_time=datetime(2020, 6, 15, 2),
+        source={"name": "CONUS404"},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    assert sfc.source["path"].startswith("s3://hytest/")
+    ds = sfc.ds.compute()
+    assert set(ds.data_vars) == {
+        "uwnd",
+        "vwnd",
+        "swrad",
+        "lwrad",
+        "Tair",
+        "qair",
+        "rain",
+    }
+    # Physically plausible ranges, deliberately loose.
+    assert -60.0 < float(ds["Tair"].min()) and float(ds["Tair"].max()) < 60.0
+    assert 0.0 <= float(ds["swrad"].min()) and float(ds["swrad"].max()) < 1400.0
+    assert 50.0 < float(ds["lwrad"].max()) < 700.0
+    assert 0.0 < float(ds["qair"].max()) < 0.06
+    assert float(np.abs(ds["uwnd"]).max()) < 80.0

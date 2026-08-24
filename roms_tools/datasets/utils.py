@@ -546,9 +546,7 @@ def specific_humidity_from_dewpoint(
     )
 
     # Convert relative to specific humidity
-    cff = (
-        (1.0007 + 3.46e-6 * patm) * 6.1121 * np.exp(17.502 * tair / (240.97 + tair))
-    )
+    cff = (1.0007 + 3.46e-6 * patm) * 6.1121 * np.exp(17.502 * tair / (240.97 + tair))
     cff = cff * rh
 
     return 0.62197 * (cff / (patm - 0.378 * cff))

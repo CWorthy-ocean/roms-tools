@@ -588,7 +588,11 @@ class CONUS404Dataset(CurvilinearDataset):
 
         - ``"psfc"`` (default) uses CONUS404's own ``PSFC`` field, and is what you
           want. ``ERA5Dataset`` likewise uses ERA5's own surface pressure, so the
-          two agree by construction and can be layered without a step at the seam.
+          two derive humidity by an identical route and contribute no *methodological*
+          step at a layering boundary. They will still differ there by however much
+          the two reanalyses genuinely disagree -- of order a few percent, since one
+          resolves 4 km and the other 28 km. That residual is physical, not an
+          artefact, and is what the planned feathering is for.
         - ``"fixed_pressure"`` substitutes a constant 1010 hPa. Its only use is
           matching an ERA5 source whose extract carries *no* pressure field, where
           ``ERA5Dataset`` falls back to the same constant; better still is to

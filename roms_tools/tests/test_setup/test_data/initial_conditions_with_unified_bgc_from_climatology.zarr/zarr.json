@@ -1,8 +1,8 @@
 {
   "attributes": {
     "title": "ROMS initial conditions file created by ROMS-Tools",
-    "roms_tools_version": "4.1.1.dev7+g432e38afb",
-    "roms_tools_git_commit": "a567578b-dirty",
+    "roms_tools_version": "4.0.0",
+    "roms_tools_git_commit": "a203bfab-dirty",
     "ini_time": "2021-06-29 00:00:00",
     "model_reference_date": "2000-01-01 00:00:00",
     "adjust_depth_for_sea_surface_height": "False",

@@ -15,7 +15,6 @@ import pytest
 import xarray as xr
 
 from roms_tools import BGCMarbl, BGCModel
-from roms_tools.setup.utils import get_tracer_defaults
 
 
 class _FakeBoundaryForcing:
@@ -92,16 +91,60 @@ def test_source_provided_tracer_not_overwritten_by_derivation():
     assert np.allclose(ic.ds["Lig"].values, 42.0)  # kept, not 3*Fe
 
 
-def test_missing_tracers_filled_with_defaults():
+def test_missing_tracers_filled_with_ocean_background():
     ic = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "ALK": 2300.0}))
     BGCMarbl().process_bgc_fields(ic)
-    defaults = get_tracer_defaults()
-    # DOCr has no source and is filled with its MARBL default constant.
+    # DOCr has no source and is filled with its open-ocean background constant.
     assert "DOCr" in ic.ds
-    assert np.allclose(ic.ds["DOCr"].values, defaults["DOCr"])
-    # A phytoplankton tracer with no CHL source is also default-filled.
+    assert np.allclose(ic.ds["DOCr"].values, BGCMarbl._OCEAN_FILL["DOCr"])
+    # A phytoplankton tracer has no CHL source and no ocean background defined,
+    # so it falls back to zero.
     assert "spChl" in ic.ds
-    assert np.allclose(ic.ds["spChl"].values, defaults["spChl"])
+    assert np.allclose(ic.ds["spChl"].values, 0.0)
+
+
+def test_ocean_fill_mirrors_main_compute_missing_bgc_variables():
+    """The constant fills must match the ``(None, factor)`` entries of the
+    ``compute_missing_bgc_variables`` table this class replaced.
+
+    Regression guard: these were briefly taken from ``get_tracer_defaults()``,
+    which reads ``river_tracer_defaults.nc`` -- river-mouth concentrations. That
+    put DOC at 460.476 mmol/m3 uniformly through the ocean interior instead of
+    1e-6, and zeroed the refractory DOM pools.
+    """
+    assert BGCMarbl._OCEAN_FILL == {
+        "NH4": 1e-6,
+        "DOC": 1e-6,
+        "DON": 1.0,
+        "DOP": 0.1,
+        "DOCr": 1e-6,
+        "DONr": 0.8,
+        "DOPr": 0.003,
+    }
+
+
+def test_fill_does_not_use_river_tracer_defaults():
+    """No river-mouth value may reach an ocean field."""
+    from roms_tools.setup.utils import get_tracer_defaults
+
+    river = get_tracer_defaults()
+    ic = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "ALK": 2300.0}))
+    BGCMarbl().process_bgc_fields(ic)
+    for var in ("DOC", "DON", "DOP", "DONr", "DOPr"):
+        assert not np.allclose(ic.ds[var].values, river[var]), (
+            f"{var} was filled with its river default ({river[var]}) "
+            "instead of its ocean background"
+        )
+    assert np.allclose(ic.ds["DOC"].values, 1e-6)
+
+
+def test_unsourced_tracer_without_background_warns(caplog):
+    """A tracer set to zero for want of any source is reported, not silent."""
+    ic = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "ALK": 2300.0}))
+    with caplog.at_level("WARNING"):
+        BGCMarbl().process_bgc_fields(ic)
+    assert "no ocean background value" in caplog.text
+    assert "spChl" in caplog.text
 
 
 def test_derivation_is_per_object_no_prioritization():

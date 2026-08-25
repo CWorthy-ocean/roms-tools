@@ -10,7 +10,7 @@ The design intentionally separates two concerns:
   set, the input variables it can interpret, per-variable metadata).
 * :class:`BGCMarbl` — the concrete MARBL implementation, including the
   stoichiometric relationships used to derive missing tracers and the constant
-  defaults used to fill the remainder.
+  open-ocean values used to fill the remainder.
 
 The public entry point is :meth:`BGCMarbl.process_bgc_fields`, which operates on
 one or more *already-built* ``type="bgc"`` :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource`
@@ -20,9 +20,10 @@ internally on their own ``.bgc`` list). It makes
 **no prioritization decisions**: the caller is responsible for arranging (via each
 object's ``use_vars``) that variables do not overlap across files.  It only (1) derives
 tracers from the key fields present in each object (``CHL``/``Fe``/``DIC``/``ALK``),
-(2) fills any tracer still missing across the union with a constant default (written
-into the first object — the values are spatially uniform, so which file is arbitrary),
-and (3) warns if the tracer set is still incomplete.
+(2) fills any tracer still missing across the union with its constant open-ocean
+background (written into the first object — the values are spatially uniform, so which
+file is arbitrary), and (3) reports what was filled and warns if any tracer had no
+background value to fall back on.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from typing import Callable
 import numpy as np
 import xarray as xr
 
-from roms_tools.setup.utils import get_tracer_defaults, get_variable_metadata
+from roms_tools.setup.utils import get_variable_metadata
 
 
 def bgc_variable_info(var_names) -> dict[str, dict]:
@@ -132,7 +133,8 @@ class BGCMarbl(BGCModel):
     * ``DIC`` → ``DIC_ALT_CO2`` and ``ALK`` → ``ALK_ALT_CO2`` (identity copies)
     * ``CHL`` → the full small-phytoplankton / diatom / diazotroph / zooplankton
       tracer set (fixed stoichiometric ratios); ``CHL`` itself is then dropped.
-    * constant defaults for organic-matter tracers that have no other source.
+    * constant open-ocean background values for organic-matter tracers that have
+      no other source (:attr:`_OCEAN_FILL`).
     """
 
     name = "MARBL"
@@ -169,6 +171,24 @@ class BGCMarbl(BGCModel):
 
     # Fe → Lig multiplicative factor.
     _FE_TO_LIG = 3.0
+
+    # Open-ocean background concentrations for tracers that have neither a source
+    # nor a parent field to derive from. These mirror the ``(None, factor)`` entries
+    # of ``compute_missing_bgc_variables`` in ``setup/utils.py`` -- the ocean-side
+    # fill this class replaced -- and are deliberately NOT the values in
+    # ``river_tracer_defaults.nc``: those are river-mouth concentrations, so filling
+    # an initial-condition or open-boundary field from them put 460 mmol m-3 of DOC
+    # (roughly an order of magnitude above open-ocean DOC) uniformly through the
+    # whole domain, at every depth.
+    _OCEAN_FILL: dict[str, float] = {
+        "NH4":  1e-6,     # mmol m-3
+        "DOC":  1e-6,     # mmol m-3
+        "DON":  1.0,      # mmol m-3
+        "DOP":  0.1,      # mmol m-3
+        "DOCr": 1e-6,     # mmol m-3
+        "DONr": 0.8,      # mmol m-3
+        "DOPr": 0.003,    # mmol m-3
+    }
 
     # ------------------------------------------------------------------
     # Derivation rules — the single definition of the tracer math.
@@ -267,10 +287,11 @@ class BGCMarbl(BGCModel):
            ``CHL``→ the phytoplankton/zooplankton set (``CHL`` is then dropped). A
            derived tracer is only added where it is not already present.
         2. **Fills** any tracer still missing across the union of objects with its
-           constant MARBL default (:func:`~roms_tools.setup.utils.get_tracer_defaults`),
-           written into the *first* object (values are spatially uniform, so which
-           file receives them is immaterial).
-        3. **Warns** if the tracer set is still incomplete.
+           constant open-ocean background (:attr:`_OCEAN_FILL`), written into the
+           *first* object (values are spatially uniform, so which file receives them
+           is immaterial). Tracers with no background value defined are set to zero.
+        3. **Reports** every constant fill, and warns for any tracer that fell back
+           to zero.
 
         Parameters
         ----------
@@ -313,17 +334,47 @@ class BGCMarbl(BGCModel):
             if a.has("CHL"):
                 a.drop("CHL")
 
-        # 2. Fill any tracer still missing across the union with its constant default,
-        #    into the first object (spatially-uniform, so the choice of file is arbitrary).
+        # 2. Fill any tracer still missing across the union with its constant ocean
+        #    background, into the first object (spatially-uniform, so the choice of
+        #    file is arbitrary).
         present: set[str] = set()
         for a in adapters:
             present |= a.present_vars()
-        defaults = get_tracer_defaults()
+        filled: list[tuple[str, float]] = []
+        unsourced: list[str] = []
         for var in sorted(self.tracer_vars() - present):
-            adapters[0].assign_const(var, float(defaults.get(var, 0.0)))
+            if var in self._OCEAN_FILL:
+                value = self._OCEAN_FILL[var]
+            else:
+                # No source, no parent field, and no ocean background defined for
+                # this tracer -- zero is the only defensible cold start, but it is a
+                # modelling decision the caller has to be told about.
+                value = 0.0
+                unsourced.append(var)
+            adapters[0].assign_const(var, float(value))
+            filled.append((var, value))
             present.add(var)
 
-        # 3. Completeness check.
+        # 3. Report what was filled, then check completeness. A constant fill is a
+        #    silent modelling decision otherwise: it produces a valid-looking file
+        #    whose tracer is uniform at every depth.
+        if filled:
+            logging.info(
+                "BGC constant fill — %d tracer(s) had no source and were set to a "
+                "uniform value:\n  %s",
+                len(filled),
+                ", ".join(f"{var}={value:g}" for var, value in filled),
+            )
+        if unsourced:
+            logging.warning(
+                "BGC sourcing incomplete — %d tracer(s) have no source, no field to "
+                "derive from, and no ocean background value, so they were set to "
+                "zero:\n  %s\n"
+                "Provide a source that supplies these tracers (or a key field such "
+                "as CHL/Fe from which they can be derived).",
+                len(unsourced),
+                ", ".join(unsourced),
+            )
         self.warn_missing(present)
 
         if filepath is not None:

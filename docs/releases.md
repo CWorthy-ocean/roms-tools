@@ -15,6 +15,8 @@
 ### Miscellaneous
 
 * Update datasets list to include ETOPO2022 ([#668](https://github.com/CWorthy-ocean/roms-tools/pull/668))
+* The tagged GitHub release is now created automatically when the "Finalize release notes for `<tag>`" PR is merged, using the release notes just finalized in the docs as the release body — instead of the manual tag-and-publish step with GitHub's weaker auto-generated summary. ([#670](https://github.com/CWorthy-ocean/roms-tools/pull/670))
+* Merging the release-notes finalization PR no longer causes the release-notes updater to re-open a spurious "Unreleased" section. ([#670](https://github.com/CWorthy-ocean/roms-tools/pull/670))
 
 ## 4.1.1
 

@@ -1,0 +1,119 @@
+name: Publish Release
+
+# Auto-creates the tagged GitHub release when the "Finalize release notes for
+# <tag>" PR (opened by finalize_release_notes.yaml from the next_release_notes
+# branch) is merged into main. The release body is the curated notes we just
+# merged, extracted by ci/release_body.py.
+#
+# The release is created with a Personal Access Token (secrets.RELEASE_PAT),
+# NOT the default GITHUB_TOKEN: releases created by GITHUB_TOKEN do not fire
+# `on: release` workflows, which would silently skip PyPI trusted publishing
+# (pypipublish.yaml). A PAT-created release cascades normally.
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  publish-release:
+    # Only the finalize-release-notes PR, and only when actually merged.
+    # head.ref == next_release_notes is the unique signal: finalize_release_notes.yaml
+    # is the only workflow that opens a PR from that branch into main. The
+    # head.repo == base.repo check rejects a look-alike PR opened from a fork
+    # (defense in depth — fork PRs also get no secrets, so RELEASE_PAT is empty).
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'next_release_notes' &&
+      github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name &&
+      startsWith(github.event.pull_request.title, 'Finalize release notes for ')
+    runs-on: ubuntu-latest
+    # Serialize duplicate webhook deliveries / manual re-runs for the same PR so
+    # the "release already exists?" check and the create step cannot race.
+    concurrency:
+      group: publish-release-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    # Note: this job creates the release with RELEASE_PAT, not GITHUB_TOKEN, so
+    # this permissions block does not bound its writes — scope RELEASE_PAT itself
+    # to `contents: write` on these repos. It is kept for correctness of any
+    # future GITHUB_TOKEN use.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Guard against a missing merge commit
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [ -z "$MERGE_SHA" ]; then
+            echo "::error::merge_commit_sha is empty — cannot target the release."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          # Check out the exact merge commit, not `main`: another PR could merge
+          # between this event and the checkout, and the release must target the
+          # tree whose release notes we are publishing.
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          # PAT so the created release cascades to on:release workflows (see header).
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Derive and validate release tag
+        id: tag
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          raw="${PR_TITLE#Finalize release notes for }"
+          # Standardized convention: tags have no leading v (e.g. 0.5.0).
+          tag="$(printf '%s' "$raw" | tr -d '`[:space:]')"
+          tag="${tag#v}"
+          tag="${tag#V}"
+          if ! printf '%s' "$tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)*$'; then
+            echo "::error::Could not parse a semver tag from PR title: '$PR_TITLE'"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Derived release tag: $tag"
+
+      - name: Cross-check tag against finalized release notes
+        # Fails loudly if the PR title disagrees with the newest finalized
+        # release in the docs (retitled PR, or finalize didn't actually run).
+        run: python ci/release_body.py "${{ steps.tag.outputs.tag }}" --check-only
+
+      - name: Skip if the release already exists
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if gh release view "${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.tag.outputs.tag }} already exists — nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release body from finalized notes
+        if: steps.exists.outputs.skip == 'false'
+        run: python ci/release_body.py "${{ steps.tag.outputs.tag }}" > "$RUNNER_TEMP/release_body.md"
+
+      - name: Create the GitHub release
+        if: steps.exists.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          # To also append GitHub's auto-generated contributor list below the
+          # curated notes, add: --generate-notes
+          gh release create "$TAG" \
+            --target "$MERGE_SHA" \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release_body.md"

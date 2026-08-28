@@ -1544,6 +1544,10 @@ class InitialConditionsSource:
             use_dask=self.use_dask,
             format=format,
             serialize_dask=serialize_dask,
+            # ESPER's chunks are few, large and uneven, and it prints per chunk --
+            # the dask bar is misleading and collides with those prints. Cosmetic
+            # only; scheduling is untouched. See save_datasets' `show_progress`.
+            show_progress=not self._is_esper_source,
         )
 
         return saved_filenames
@@ -1669,12 +1673,16 @@ class InitialConditionsSource:
         if serialize_dask is None:
             serialize_dask = False
 
+        _bgc_objs = [bgc] if isinstance(bgc, InitialConditionsSource) else list(bgc)
         return save_datasets(
             [merged_ds],
             [str(filepath)],
             use_dask=physics.use_dask,
             format=format,
             serialize_dask=serialize_dask,
+            # Any ESPER contributor is enough: the merged dataset carries its
+            # chunks, so the bar misbehaves the same way. See `show_progress`.
+            show_progress=not any(o._is_esper_source for o in _bgc_objs),
         )
 
     def to_yaml(self, filepath: str | Path) -> None:
@@ -2082,6 +2090,9 @@ class InitialConditions:
             use_dask=self.use_dask,
             format=format,
             serialize_dask=serialize_dask,
+            # self.ds is the merge of physics + every bgc companion, so one ESPER
+            # contributor is enough to make the bar misbehave. See `show_progress`.
+            show_progress=not any(o._is_esper_source for o in self.bgc),
         )
 
     def to_yaml(self, filepath: str | Path) -> None:

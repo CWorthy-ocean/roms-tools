@@ -1688,6 +1688,10 @@ class BoundaryForcingSource:
             use_dask=self.use_dask,
             format=format,
             serialize_dask=serialize_dask,
+            # ESPER's chunks are few, large and uneven, and it prints per chunk --
+            # the dask bar is misleading and collides with those prints. Cosmetic
+            # only; scheduling is untouched. See save_datasets' `show_progress`.
+            show_progress=not self._is_esper_source,
         )
 
         return saved_filenames

@@ -960,6 +960,7 @@ def save_datasets(
     verbose=True,
     format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
     serialize_dask: bool = False,
+    show_progress: bool = True,
 ):
     """Save the list of datasets to NetCDF files.
 
@@ -1005,6 +1006,14 @@ def save_datasets(
           run like this: its chunks' concurrent memory cost exhausted a 251 GB
           machine, confirmed via a kernel OOM-kill log -- the reason the
           serialized option exists.)
+
+    show_progress : bool, optional
+        Only meaningful when ``use_dask=True`` and ``serialize_dask`` is False
+        (the serialized write never draws a bar). Defaults to True. Pass False
+        for a source whose chunks are few, large and uneven -- an ESPER/PyESPER
+        write -- where the dask bar is misleading and collides with the source's
+        own per-chunk prints. Purely cosmetic: it decides whether a bar is drawn,
+        never how the write is scheduled.
 
     Returns
     -------
@@ -1067,18 +1076,28 @@ def save_datasets(
         # and the confirmed real-world failures (a kernel OOM-kill, and a
         # separate netCDF4-lock hang) this guards against.
         #
-        # A dask `ProgressBar` is skipped whenever `serialize_dask` is forcing
-        # the synchronous scheduler: with only a handful of large, uneven-
-        # duration chunks (e.g. one PyESPER call per chunk, tens of seconds
-        # each), the percentage barely moves for minutes at a time then jumps --
-        # and the bar's background redraw interleaves with each chunk's own
-        # print()s on the same terminal line, garbling both. It looks broken
-        # rather than informative, so it's replaced with a plain start/done
-        # message pair (the per-chunk progress is already visible via
-        # whatever prints the high-memory source itself emits, e.g. PyESPER's
-        # "PyESPER_NN took ... to run" per chunk). Kept for the ordinary
-        # (non-serialized) write, where many small chunks make the dask bar an
-        # accurate, useful signal.
+        # A dask `ProgressBar` is skipped when `serialize_dask` forces the
+        # synchronous scheduler, and independently whenever `show_progress` is
+        # False. Both cases are the same pathology: with only a handful of large,
+        # uneven-duration chunks (e.g. one PyESPER call per chunk, tens of
+        # seconds each), the percentage barely moves for minutes at a time then
+        # jumps -- and the bar's background redraw interleaves with each chunk's
+        # own print()s on the same terminal line, garbling both. It looks broken
+        # rather than informative.
+        #
+        # That chunk profile comes from the *source*, not from the scheduler, so
+        # it shows up on the ordinary concurrent write too -- which is why
+        # `show_progress` exists rather than this keying off `serialize_dask`
+        # alone. Callers that know they are writing such a source pass
+        # `show_progress=False` (see `BoundaryForcingSource.save` /
+        # `InitialConditions.save`, which key it off `_is_esper_source`); the
+        # per-chunk progress is already visible via whatever the source itself
+        # prints, e.g. PyESPER's "PyESPER_NN took ... to run".
+        #
+        # Left on for every ordinary regrid-backed write, where many small,
+        # evenly-sized chunks make the dask bar an accurate, useful signal. Note
+        # this only decides whether to *draw* a bar -- it never influences how
+        # the write is scheduled.
         if serialize_dask:
             if verbose:
                 logging.info("Writing NetCDF file(s)...")
@@ -1090,11 +1109,13 @@ def save_datasets(
                     "Finished writing NetCDF file(s) in %s",
                     _format_elapsed(time.perf_counter() - _start),
                 )
-        else:
+        elif show_progress:
             from dask.diagnostics import ProgressBar
 
             with ProgressBar():
                 xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        else:
+            xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
         xr.save_mfdataset(dataset_list, output_filenames, format=format)
 

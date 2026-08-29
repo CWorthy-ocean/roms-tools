@@ -974,8 +974,7 @@ class BoundaryForcingSource:
         """Down-select ``fields`` (bare BGC var name -> DataArray) to ``self.use_vars``.
 
         Presence-only check: raises ``ValueError`` if any requested variable is not
-        present in this source's own (regridded) fields. No MARBL/derivation logic is
-        applied — that is handled later by :meth:`BGCMarbl.process_bgc_fields`.
+        present in this source's own (regridded) fields.
         """
         if self.use_vars is None:
             return fields
@@ -1485,49 +1484,12 @@ class BoundaryForcingSource:
         Parameters
         ----------
         var_name : str
-            The name of the boundary forcing field to plot. Options include:
+            The name of the boundary forcing field to plot. Format:
 
-            - "temp_{direction}": Potential temperature,
-            - "salt_{direction}": Salinity,
-            - "zeta_{direction}": Sea surface height,
-            - "u_{direction}": u-flux component,
-            - "v_{direction}": v-flux component,
-            - "ubar_{direction}": Vertically integrated u-flux component,
-            - "vbar_{direction}": Vertically integrated v-flux component,
-            - "PO4_{direction}": Dissolved Inorganic Phosphate (mmol/m³),
-            - "NO3_{direction}": Dissolved Inorganic Nitrate (mmol/m³),
-            - "SiO3_{direction}": Dissolved Inorganic Silicate (mmol/m³),
-            - "NH4_{direction}": Dissolved Ammonia (mmol/m³),
-            - "Fe_{direction}": Dissolved Inorganic Iron (mmol/m³),
-            - "Lig_{direction}": Iron Binding Ligand (mmol/m³),
-            - "O2_{direction}": Dissolved Oxygen (mmol/m³),
-            - "DIC_{direction}": Dissolved Inorganic Carbon (mmol/m³),
-            - "DIC_ALT_CO2_{direction}": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³),
-            - "ALK_{direction}": Alkalinity (meq/m³),
-            - "ALK_ALT_CO2_{direction}": Alkalinity, Alternative CO2 (meq/m³),
-            - "DOC_{direction}": Dissolved Organic Carbon (mmol/m³),
-            - "DON_{direction}": Dissolved Organic Nitrogen (mmol/m³),
-            - "DOP_{direction}": Dissolved Organic Phosphorus (mmol/m³),
-            - "DOPr_{direction}": Refractory Dissolved Organic Phosphorus (mmol/m³),
-            - "DONr_{direction}": Refractory Dissolved Organic Nitrogen (mmol/m³),
-            - "DOCr_{direction}": Refractory Dissolved Organic Carbon (mmol/m³),
-            - "zooC_{direction}": Zooplankton Carbon (mmol/m³),
-            - "spChl_{direction}": Small Phytoplankton Chlorophyll (mg/m³),
-            - "spC_{direction}": Small Phytoplankton Carbon (mmol/m³),
-            - "spP_{direction}": Small Phytoplankton Phosphorous (mmol/m³),
-            - "spFe_{direction}": Small Phytoplankton Iron (mmol/m³),
-            - "spCaCO3_{direction}": Small Phytoplankton CaCO3 (mmol/m³),
-            - "diatChl_{direction}": Diatom Chlorophyll (mg/m³),
-            - "diatC_{direction}": Diatom Carbon (mmol/m³),
-            - "diatP_{direction}": Diatom Phosphorus (mmol/m³),
-            - "diatFe_{direction}": Diatom Iron (mmol/m³),
-            - "diatSi_{direction}": Diatom Silicate (mmol/m³),
-            - "diazChl_{direction}": Diazotroph Chlorophyll (mg/m³),
-            - "diazC_{direction}": Diazotroph Carbon (mmol/m³),
-            - "diazP_{direction}": Diazotroph Phosphorus (mmol/m³),
-            - "diazFe_{direction}": Diazotroph Iron (mmol/m³),
+            "{base_var_name}_{direction}" ,
 
-            where {direction} can be one of ["south", "east", "north", "west"].
+            where {base_var_name} is a physical, BGC, or other boundary tracer name,
+            and {direction} is one of ["south", "east", "north", "west"].
 
         time : int, optional
             The time index to plot. Default is 0.
@@ -1784,22 +1746,26 @@ class BoundaryForcingSource:
 
 @dataclass(kw_only=True)
 class BoundaryForcing:
-    """Monolithic, YAML-traceable ROMS boundary forcing, supporting any number of
-    BGC sources in one constructor call.
+    """Wrapper class that can initialize and process multiple constituent
+    :class:`BoundaryForcingSource` objects.  This class is the intended
+    interface for generating and writing ROMS boundary forcing files, and
+    its use is fully supported by the ``to_yaml()``/``from_yaml()``
+    conventions.
 
     Internally builds one ``type="physics"`` :class:`BoundaryForcingSource` plus one
     ``type="bgc"`` :class:`BoundaryForcingSource` per ``bgc_sources`` item (each
     wired with ``physics_forcing=`` to reuse the physics object's T/S -- see
     :class:`BoundaryForcingSource`'s own docstring for that mechanism), and
-    completes the BGC tracer set via ``bgc_model().process_bgc_fields()``. Unlike
-    :class:`InitialConditions`, there is **no merge into one dataset** here: ROMS's
+    completes the BGC tracer set via ``bgc_model().process_bgc_fields()``.
+
+    Unlike :class:`InitialConditions`, there is **no merge into one dataset** here: ROMS's
     ``frcfiles`` namelist key accepts a list, so each BGC source is written to its
-    own file, exactly like the physics object. The multi-object split is purely an
-    internal implementation detail: this class is a single constructor call and a
-    single ``to_yaml()``/``from_yaml()`` round-trip, exactly like the pre-split
-    monolithic class -- only ``.save()`` needs one filename per file being written
-    (there being more than one file at all is an unavoidable ROMS-level fact, not
-    an API choice).
+    own file, like the physics object.
+
+    The constituent `BoundaryForcingSource` objects are  public and
+    documented.  They can be accessed as ``.physics`` and ``.bgc[i]``,
+    each a :class:`BoundaryForcingSource` carrying its own ``.ds``
+    xarray DataSet and ``.plot()`` capability.
 
     Parameters
     ----------

@@ -104,7 +104,10 @@ _BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {"constants
 @dataclass(kw_only=True)
 class InitialConditionsSource:
     """Represents initial conditions for ROMS, including physical and biogeochemical
-    data.
+    data. This class will not typically be called by a user.  Instead, multiple
+    InitialConditionsSource objects are created when interacting with the
+    user-facing InitialConditions class, from which a final  ROMS input file
+    can be saved.
 
     Parameters
     ----------
@@ -1362,48 +1365,12 @@ class InitialConditionsSource:
         Parameters
         ----------
         var_name : str
-            The name of the initial conditions field to plot. Options include:
+            The name of the initial conditions field to plot. Format:
 
-            - "temp": Potential temperature.
-            - "salt": Salinity.
-            - "zeta": Free surface.
-            - "u": u-flux component.
-            - "v": v-flux component.
-            - "w": w-flux component.
-            - "ubar": Vertically integrated u-flux component.
-            - "vbar": Vertically integrated v-flux component.
-            - "PO4": Dissolved Inorganic Phosphate (mmol/m³).
-            - "NO3": Dissolved Inorganic Nitrate (mmol/m³).
-            - "SiO3": Dissolved Inorganic Silicate (mmol/m³).
-            - "NH4": Dissolved Ammonia (mmol/m³).
-            - "Fe": Dissolved Inorganic Iron (mmol/m³).
-            - "Lig": Iron Binding Ligand (mmol/m³).
-            - "O2": Dissolved Oxygen (mmol/m³).
-            - "DIC": Dissolved Inorganic Carbon (mmol/m³).
-            - "DIC_ALT_CO2": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³).
-            - "ALK": Alkalinity (meq/m³).
-            - "ALK_ALT_CO2": Alkalinity, Alternative CO2 (meq/m³).
-            - "DOC": Dissolved Organic Carbon (mmol/m³).
-            - "DON": Dissolved Organic Nitrogen (mmol/m³).
-            - "DOP": Dissolved Organic Phosphorus (mmol/m³).
-            - "DOPr": Refractory Dissolved Organic Phosphorus (mmol/m³).
-            - "DONr": Refractory Dissolved Organic Nitrogen (mmol/m³).
-            - "DOCr": Refractory Dissolved Organic Carbon (mmol/m³).
-            - "zooC": Zooplankton Carbon (mmol/m³).
-            - "spChl": Small Phytoplankton Chlorophyll (mg/m³).
-            - "spC": Small Phytoplankton Carbon (mmol/m³).
-            - "spP": Small Phytoplankton Phosphorous (mmol/m³).
-            - "spFe": Small Phytoplankton Iron (mmol/m³).
-            - "spCaCO3": Small Phytoplankton CaCO3 (mmol/m³).
-            - "diatChl": Diatom Chlorophyll (mg/m³).
-            - "diatC": Diatom Carbon (mmol/m³).
-            - "diatP": Diatom Phosphorus (mmol/m³).
-            - "diatFe": Diatom Iron (mmol/m³).
-            - "diatSi": Diatom Silicate (mmol/m³).
-            - "diazChl": Diazotroph Chlorophyll (mg/m³).
-            - "diazC": Diazotroph Carbon (mmol/m³).
-            - "diazP": Diazotroph Phosphorus (mmol/m³).
-            - "diazFe": Diazotroph Iron (mmol/m³).
+            "{base_var_name}_{direction}" ,
+
+            where {base_var_name} is a physical, BGC, or other boundary tracer name,
+            and {direction} is one of ["south", "east", "north", "west"].
 
         s : int, optional
             The index of the vertical layer (`s_rho`) to plot. If not specified, the plot
@@ -1562,24 +1529,11 @@ class InitialConditionsSource:
         serialize_dask: bool | None = None,
     ) -> xr.Dataset | list[Path]:
         """Merge a physics object with one or more bgc-only objects into a single
-        ROMS-ready initial-conditions dataset.
+        ROMS-ready initial-conditions dataset. Fully dask-lazy.
 
-        ROMS's ``inifile`` namelist parameter is a single scalar path -- unlike
-        boundary/surface forcing's file list (``frcfiles``), which supports a true
-        per-variable union across multiple files -- so a multi-bgc-source initial
-        condition has to be assembled into ONE dataset before writing, rather than
-        written out as separate files the way boundary BGC sources can be.
-
-        This exists so ``physics_forcing``-based, multi-bgc-source initial
-        conditions (one physics object + N bgc-only objects, each built with
-        ``physics_forcing=physics``) have one shared, tested way to combine back
-        into a single dataset, instead of every caller (Forge included)
-        re-deriving the same ``xr.merge`` incantation.
-
-        Fully dask-lazy: this is a plain ``xr.merge`` with no ``.load()``/
-        ``.compute()``; nothing is materialized unless ``filepath`` is given (in
-        which case :func:`~roms_tools.utils.save_datasets` triggers the write) or
-        the caller computes the returned dataset itself.
+        Note: ROMS's ``inifile`` namelist parameter is a single scalar path, unlike
+        boundary/surface forcing's file list. Initial condition has to be assembled
+        into ONE dataset before writing, rather than written out as separate files.
 
         Parameters
         ----------
@@ -1776,8 +1730,11 @@ class InitialConditionsSource:
 
 @dataclass(kw_only=True)
 class InitialConditions:
-    """Monolithic, YAML-traceable ROMS initial conditions, supporting any number of
-    BGC sources in one constructor call.
+    """Wrapper class that can initialize and process multiple constituent
+    :class:`InitialConditionsSource` objects.  This class is the intended
+    interface for generating and writing ROMS initial conditions files, and
+    its use is fully supported by the ``to_yaml()``/``from_yaml()``
+    conventions.
 
     Internally builds one ``type="physics"`` :class:`InitialConditionsSource` plus
     one ``type="bgc"`` :class:`InitialConditionsSource` per ``bgc_sources`` item
@@ -1785,11 +1742,12 @@ class InitialConditions:
     of redundantly regridding it -- see :class:`InitialConditionsSource`'s own
     docstring for that mechanism), completes the BGC tracer set via
     ``bgc_model().process_bgc_fields()``, and merges everything into one ``.ds`` via
-    :meth:`InitialConditionsSource.merge` -- ROMS's ``inifile`` namelist key is a
-    single scalar path, so multiple separate IC files are never an option. The
-    multi-object split is purely an internal implementation detail: this class is a
-    single constructor call, a single ``.ds``, and a single ``to_yaml()``/
-    ``from_yaml()`` round-trip, exactly like the pre-split monolithic class.
+    :meth:`InitialConditionsSource.merge`.
+
+    The constituent `InitialConditionsSource` objects are  public and
+    documented.  They can be accessed as ``.physics`` and ``.bgc[i]``,
+    each a :class:`InitialConditionsSource` carrying its own ``.ds``
+    xarray DataSet and ``.plot()`` capability.
 
     Parameters
     ----------

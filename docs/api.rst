@@ -33,6 +33,7 @@ Initial Conditions
    :toctree: generated/
 
    roms_tools.InitialConditions
+   roms_tools.InitialConditionsSource
 
 Boundary Forcing
 --------------------
@@ -41,6 +42,16 @@ Boundary Forcing
    :toctree: generated/
 
    roms_tools.BoundaryForcing
+   roms_tools.BoundaryForcingSource
+
+Biogeochemistry
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.BGCModel
+   roms_tools.BGCMarbl
 
 River Forcing
 --------------------

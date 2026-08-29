@@ -1,16 +1,14 @@
 """BGC model abstractions for roms-tools.
 
-This module centralises everything roms-tools needs to know about a biogeochemical
-(BGC) model's tracer vocabulary and how to complete a partially-specified tracer
-set.  This replaces ``compute_missing_bgc_variables`` in ``setup/utils.py``, which hard-coded MARBL's tracer set inline.
+This module contains information that roms-tools needs to know about a biogeochemical
+(BGC) model's tracers, including naming, transformations, and how to complete a
+partially-specified tracer set.
 
-The design intentionally separates two concerns:
-
-* :class:`BGCModel` — the abstract description of a BGC model (its output tracer
-  set, the input variables it can interpret, per-variable metadata).
-* :class:`BGCMarbl` — the concrete MARBL implementation, including the
-  stoichiometric relationships used to derive missing tracers and the constant
-  open-ocean values used to fill the remainder.
+* :class:`BGCModel` — a proto-class designed to be subclassed by particular
+ BGC models.  It establishes what constitutes BGC model knowledge to roms-tools.
+* :class:`BGCMarbl` — MARBL tracer and tracer processing for roms-tools,
+  including the stoichiometric relationships used to derive missing tracers
+  and the constant open-ocean values used to fill the remainder.
 
 The public entry point is :meth:`BGCMarbl.process_bgc_fields`, which operates on
 one or more *already-built* ``type="bgc"`` :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource`
@@ -18,11 +16,10 @@ or :class:`~roms_tools.setup.initial_conditions.InitialConditionsSource` objects
 (the ``BoundaryForcing``/``InitialConditions`` wrapper classes call this
 internally on their own ``.bgc`` list). It makes
 **no prioritization decisions**: the caller is responsible for arranging (via each
-object's ``use_vars``) that variables do not overlap across files.  It only (1) derives
-tracers from the key fields present in each object (``CHL``/``Fe``/``DIC``/``ALK``),
+object's ``use_vars``) that variables do not overlap across files.  It will (1) derive
+missing tracers from these fields if present in each source (``CHL``/``Fe``/``DIC``/``ALK``),
 (2) fills any tracer still missing across the union with its constant open-ocean
-background (written into the first object — the values are spatially uniform, so which
-file is arbitrary), and (3) reports what was filled and warns if any tracer had no
+background and (3) reports what was filled and warns if any tracer had no
 background value to fall back on.
 """
 
@@ -126,8 +123,8 @@ class BGCModel:
 class BGCMarbl(BGCModel):
     """MARBL biogeochemical model.
 
-    Implements the MARBL tracer vocabulary and the relationships used to complete
-    a partial tracer set:
+    Implements the MARBL tracers and known pre-processing fields, and the
+    relationships used to complete a partial tracer set:
 
     * ``Fe`` → ``Lig`` (ligand = iron × 3)
     * ``DIC`` → ``DIC_ALT_CO2`` and ``ALK`` → ``ALK_ALT_CO2`` (identity copies)
@@ -135,6 +132,42 @@ class BGCMarbl(BGCModel):
       tracer set (fixed stoichiometric ratios); ``CHL`` itself is then dropped.
     * constant open-ocean background values for organic-matter tracers that have
       no other source (:attr:`_OCEAN_FILL`).
+
+    MARBL tracers and units, for reference:
+
+    - "PO4": Dissolved Inorganic Phosphate (mmol/m³),
+    - "NO3": Dissolved Inorganic Nitrate (mmol/m³),
+    - "SiO3": Dissolved Inorganic Silicate (mmol/m³),
+    - "NH4": Dissolved Ammonia (mmol/m³),
+    - "Fe": Dissolved Inorganic Iron (mmol/m³),
+    - "Lig": Iron Binding Ligand (mmol/m³),
+    - "O2": Dissolved Oxygen (mmol/m³),
+    - "DIC": Dissolved Inorganic Carbon (mmol/m³),
+    - "DIC_ALT_CO2": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³),
+    - "ALK": Alkalinity (meq/m³),
+    - "ALK_ALT_CO2": Alkalinity, Alternative CO2 (meq/m³),
+    - "DOC": Dissolved Organic Carbon (mmol/m³),
+    - "DON": Dissolved Organic Nitrogen (mmol/m³),
+    - "DOP": Dissolved Organic Phosphorus (mmol/m³),
+    - "DOPr": Refractory Dissolved Organic Phosphorus (mmol/m³),
+    - "DONr": Refractory Dissolved Organic Nitrogen (mmol/m³),
+    - "DOCr": Refractory Dissolved Organic Carbon (mmol/m³),
+    - "zooC": Zooplankton Carbon (mmol/m³),
+    - "spChl": Small Phytoplankton Chlorophyll (mg/m³),
+    - "spC": Small Phytoplankton Carbon (mmol/m³),
+    - "spP": Small Phytoplankton Phosphorous (mmol/m³),
+    - "spFe": Small Phytoplankton Iron (mmol/m³),
+    - "spCaCO3": Small Phytoplankton CaCO3 (mmol/m³),
+    - "diatChl": Diatom Chlorophyll (mg/m³),
+    - "diatC": Diatom Carbon (mmol/m³),
+    - "diatP": Diatom Phosphorus (mmol/m³),
+    - "diatFe": Diatom Iron (mmol/m³),
+    - "diatSi": Diatom Silicate (mmol/m³),
+    - "diazChl": Diazotroph Chlorophyll (mg/m³),
+    - "diazC": Diazotroph Carbon (mmol/m³),
+    - "diazP": Diazotroph Phosphorus (mmol/m³),
+    - "diazFe": Diazotroph Iron (mmol/m³),
+
     """
 
     name = "MARBL"
@@ -307,7 +340,8 @@ class BGCMarbl(BGCModel):
             ``filepath`` is given. Defaults to ``None``, which resolves to
             ``False`` (the ordinary concurrent write) on each object's own
             :meth:`save` -- pass ``True`` to force the serialized,
-            one-task-at-a-time write onto every object instead.
+            one-task-at-a-time write, which is slower but can allow writing
+            in low-memory situations.
 
         Returns
         -------
@@ -430,8 +464,11 @@ def _is_forcing(x) -> bool:
 
 
 class _ForcingBGCAdapter:
-    """Hide the per-object dataset layout from :class:`BGCMarbl`.
+    """Hides the per-object dataset layout from :class:`BGCMarbl`.
 
+    This allows a single interface to underlying tracer sources, so such that
+    we do not need bespoke code to process BoundaryForcingSource and InitialConditionsSource
+    objects.
     :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource` stores BGC
     tracers suffixed by boundary direction (``PO4_south`` ...), whereas
     :class:`~roms_tools.setup.initial_conditions.InitialConditionsSource` stores

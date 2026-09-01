@@ -181,6 +181,25 @@ class ReleaseCollector(RootModel):
         return release_types.pop()
 
     @model_validator(mode="after")
+    def check_all_releases_same_tracer_set(self):
+        """Ensure all releases use the same tracer_set."""
+        tracer_sets = set(r.tracer_set for r in self.root)
+        if len(tracer_sets) > 1:
+            set_list = ", ".join(sorted(tracer_sets))
+            raise ValueError(
+                f"Not all releases have the same `tracer_set`. Received: {set_list}. "
+                "All releases must use either `tracer_set='marbl'` or "
+                "`tracer_set='cdr_simple'`."
+            )
+        return self
+
+    @property
+    def tracer_set(self):
+        """Common tracer_set across all releases."""
+        tracer_sets = set(r.tracer_set for r in self.root)
+        return tracer_sets.pop()
+
+    @model_validator(mode="after")
     def check_all_releases_same_time_interpolation(self):
         """Ensure all releases use the same interpolation."""
         interp_values = set(r.time_interpolation for r in self.root)
@@ -287,7 +306,9 @@ class CDRForcingDatasetBuilder:
 
         if self.release_type == ReleaseType.volume:
             ds = add_tracer_metadata_to_ds(
-                ds, with_flux_units=False
+                ds,
+                with_flux_units=False,
+                tracer_set=self.releases[0].tracer_set,
             )  # adds the coordinate "tracer_name"
             ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
             ds["cdr_tracer"] = xr.zeros_like(
@@ -296,7 +317,9 @@ class CDRForcingDatasetBuilder:
 
         elif self.release_type == ReleaseType.tracer_perturbation:
             ds = add_tracer_metadata_to_ds(
-                ds, with_flux_units=True
+                ds,
+                with_flux_units=True,
+                tracer_set=self.releases[0].tracer_set,
             )  # adds the coordinate "tracer_name"
             ds["cdr_trcflx"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
@@ -415,6 +438,11 @@ class CDRForcing(BaseModel):
     def release_type(self) -> ReleaseType:
         """Type of the release."""
         return self.releases.release_type
+
+    @property
+    def tracer_set(self):
+        """Tracer schema shared by all releases."""
+        return self.releases.tracer_set
 
     @property
     def ds(self) -> xr.Dataset:
@@ -870,7 +898,9 @@ class CDRForcing(BaseModel):
         integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
 
         # Add a row of units only for integrated tracers
-        tracer_meta = get_tracer_metadata_dict(include_bgc=True, unit_type="integrated")
+        tracer_meta = get_tracer_metadata_dict(
+            tracer_set=self.tracer_set, unit_type="integrated"
+        )
         units_row = {
             col: tracer_meta.get(col, {}).get("units", "") for col in integrated_tracers
         }
@@ -938,7 +968,8 @@ class CDRForcing(BaseModel):
             The path to the YAML file where the parameters will be saved.
         """
         forcing_dict = self.model_dump()
-        metadata = self.releases[0].get_tracer_metadata()
+        release0 = self.releases[0]
+        metadata = release0.get_tracer_metadata(release0.tracer_set)
         forcing_dict["CDRForcing"]["_tracer_metadata"] = metadata
 
         write_to_yaml(forcing_dict, filepath)

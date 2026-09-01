@@ -21,8 +21,9 @@ from scipy.interpolate import interp1d
 
 from roms_tools.setup.utils import (
     convert_to_relative_days,
-    get_tracer_defaults,
+    get_tracer_defaults_for_set,
     get_tracer_metadata_dict,
+    TracerSet,
 )
 
 NonNegativeFloat = Annotated[float, Ge(0)]
@@ -229,6 +230,10 @@ class Release(BaseModel):
         Time points of the release events. Must be strictly increasing and within the simulation window.
     time_interpolation : bool, optional
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
+    tracer_set : {"marbl", "cdr_simple"}, optional
+        Tracer schema. ``"marbl"`` (default) uses the full MARBL suite;
+        ``"cdr_simple"`` uses only ``CDR_tracer_1`` (alkalinity) and
+        ``CDR_tracer_2`` (DIC) for non-MARBL OAE/DOR setups.
     """
 
     name: str
@@ -247,6 +252,9 @@ class Release(BaseModel):
     """Time points of the release events."""
     time_interpolation: bool = False
     """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
+    tracer_set: TracerSet = "marbl"
+    """Tracer schema: ``"marbl"`` (full MARBL suite) or ``"cdr_simple"``
+    (``CDR_tracer_1`` / ``CDR_tracer_2`` for non-MARBL OAE/DOR)."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
@@ -287,12 +295,12 @@ class Release(BaseModel):
                 self.times.append(end_time)
 
     @classmethod
-    def get_tracer_metadata(cls):
+    def get_tracer_metadata(cls, tracer_set: TracerSet = "marbl"):
         return {}
 
     @classmethod
-    def get_metadata(cls):
-        return pd.DataFrame(cls.get_tracer_metadata())
+    def get_metadata(cls, tracer_set: TracerSet = "marbl"):
+        return pd.DataFrame(cls.get_tracer_metadata(tracer_set))
 
     def _compute_integrated_tracers(
         self,
@@ -429,40 +437,46 @@ class VolumeRelease(Release):
         default=0.0, validate_default=True
     )
     """Volume flux(es) of the release in m³/s over time."""
-    tracer_concentrations: dict[
-        str, Concentration | NonNegativeFloat | list[NonNegativeFloat]
-    ] = Field({})
-    """Dictionary of tracer names and their concentration values."""
+    tracer_concentrations: dict[str, Concentration | float | list[float]] = Field({})
+    """Dictionary of tracer names and their concentration values.
+
+    For ``tracer_set="marbl"``, all values must be non-negative.
+    For ``tracer_set="cdr_simple"``, ``CDR_tracer_2`` (DIC) may be negative (DOR);
+    ``CDR_tracer_1`` (alkalinity) must remain non-negative.
+    """
 
     release_type: Literal[ReleaseType.volume] = ReleaseType.volume
 
     @field_validator("tracer_concentrations", mode="after")
     @classmethod
     def _create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
-        defaults = get_tracer_defaults()
-        for tracer_name in defaults.keys():
-            if tracer_name in tracer_concentrations:
-                continue
-            else:
-                if tracer_name in ["temp", "salt"]:
-                    tracer_concentrations[tracer_name] = defaults[tracer_name]
-                else:
-                    fill_values = info.data["fill_values"]
-                    if fill_values == "auto":
-                        tracer_concentrations[tracer_name] = defaults[tracer_name]
-                    elif fill_values == "zero":
-                        tracer_concentrations[tracer_name] = 0.0
+        tracer_set: TracerSet = info.data.get("tracer_set", "marbl")
+        defaults = get_tracer_defaults_for_set(tracer_set)
 
-        tracer_concentrations = {
+        filled: dict[str, Concentration | float | list[float]] = {}
+        for tracer_name in defaults:
+            if tracer_name in tracer_concentrations:
+                filled[tracer_name] = tracer_concentrations[tracer_name]
+                continue
+            if tracer_set == "cdr_simple":
+                filled[tracer_name] = 0.0
+            elif tracer_name in ["temp", "salt"]:
+                filled[tracer_name] = defaults[tracer_name]
+            else:
+                fill_values = info.data["fill_values"]
+                if fill_values == "auto":
+                    filled[tracer_name] = defaults[tracer_name]
+                elif fill_values == "zero":
+                    filled[tracer_name] = 0.0
+
+        return {
             tracer: (
                 conc
                 if isinstance(conc, Concentration)
                 else Concentration(name=tracer, values=conc)
             )
-            for tracer, conc in tracer_concentrations.items()
+            for tracer, conc in filled.items()
         }
-
-        return tracer_concentrations
 
     @field_validator("volume_fluxes", mode="after")
     @classmethod
@@ -470,6 +484,21 @@ class VolumeRelease(Release):
         if not isinstance(volume_fluxes, Flux):
             volume_fluxes = Flux("volume", volume_fluxes)
         return volume_fluxes
+
+    @model_validator(mode="after")
+    def _check_concentration_signs(self) -> "VolumeRelease":
+        """Enforce non-negativity except for CDR_tracer_2 in cdr_simple mode."""
+        for tracer_name, conc in self.tracer_concentrations.items():
+            values = conc.values if isinstance(conc, Concentration) else conc
+            vals = values if isinstance(values, list) else [values]
+            if self.tracer_set == "cdr_simple" and tracer_name == "CDR_tracer_2":
+                continue
+            if any(v < 0 for v in vals):
+                raise ValueError(
+                    f"Tracer concentration for '{tracer_name}' must be non-negative. "
+                    f"Got: {values}"
+                )
+        return self
 
     @model_validator(mode="after")
     def _check_lengths(self) -> "VolumeRelease":
@@ -497,9 +526,11 @@ class VolumeRelease(Release):
         self._extend_times_to_endpoints(start_time, end_time)
 
     @staticmethod
-    def get_tracer_metadata():
+    def get_tracer_metadata(tracer_set: TracerSet = "marbl"):
         """Returns long names and expected units for the tracer concentrations."""
-        return get_tracer_metadata_dict(include_bgc=True, unit_type="concentration")
+        return get_tracer_metadata_dict(
+            tracer_set=tracer_set, unit_type="concentration"
+        )
 
     def _do_accounting(
         self,
@@ -613,7 +644,7 @@ class TracerPerturbation(Release):
 
     times: list[datetime] = Field([])
     tracer_fluxes: dict[str, Flux | float | list[float]] = Field({})
-    """Dictionary of tracer names and their non-negative flux values."""
+    """Dictionary of tracer names and their flux values."""
 
     release_type: Literal[ReleaseType.tracer_perturbation] = (
         ReleaseType.tracer_perturbation
@@ -621,18 +652,21 @@ class TracerPerturbation(Release):
 
     @field_validator("tracer_fluxes", mode="after")
     @classmethod
-    def _create_fluxes(cls, tracer_fluxes):
-        # Fill all tracer fluxes that are not provided with zero
-        defaults = get_tracer_defaults()
-        for tracer_name in defaults.keys():
-            if tracer_name not in tracer_fluxes:
-                tracer_fluxes[tracer_name] = 0.0
+    def _create_fluxes(cls, tracer_fluxes, info: ValidationInfo):
+        tracer_set: TracerSet = info.data.get("tracer_set", "marbl")
+        defaults = get_tracer_defaults_for_set(tracer_set)
 
-        tracer_fluxes = {
+        filled: dict[str, Flux | float | list[float]] = {}
+        for tracer_name in defaults:
+            if tracer_name in tracer_fluxes:
+                filled[tracer_name] = tracer_fluxes[tracer_name]
+            else:
+                filled[tracer_name] = 0.0
+
+        return {
             tracer: (flux if isinstance(flux, Flux) else Flux(name=tracer, values=flux))
-            for tracer, flux in tracer_fluxes.items()
+            for tracer, flux in filled.items()
         }
-        return tracer_fluxes
 
     @model_validator(mode="after")
     def _check_tracer_flux_lengths(self):
@@ -654,9 +688,9 @@ class TracerPerturbation(Release):
         self._extend_times_to_endpoints(start_time, end_time)
 
     @staticmethod
-    def get_tracer_metadata():
+    def get_tracer_metadata(tracer_set: TracerSet = "marbl"):
         """Returns long names and expected units for the tracer fluxes."""
-        return get_tracer_metadata_dict(include_bgc=True, unit_type="flux")
+        return get_tracer_metadata_dict(tracer_set=tracer_set, unit_type="flux")
 
     def _do_accounting(
         self,

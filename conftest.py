@@ -619,7 +619,9 @@ def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcingSource:
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid) -> BoundaryForcingSource:
+def boundary_forcing_with_2d_fill(
+    use_dask: bool, small_grid: Grid
+) -> BoundaryForcingSource:
     """Fixture for creating a BoundaryForcingSource object."""
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
@@ -669,7 +671,9 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcingSour
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryForcingSource:
+def bgc_boundary_forcing_from_unified_climatology(
+    use_dask: bool,
+) -> BoundaryForcingSource:
     """Fixture for creating a BoundaryForcingSource object."""
     grid = Grid(
         nx=2,

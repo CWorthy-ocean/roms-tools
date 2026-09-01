@@ -80,6 +80,7 @@ def serialize_dask_and_boost_threads(serialize: bool):
     finally:
         numba.set_num_threads(prev_numba_threads)
 
+
 FilePaths: TypeAlias = str | Path | list[Path | str]
 
 NetCDFFormat = Literal[

@@ -26,7 +26,8 @@ background value to fall back on.
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
+from typing import ClassVar
 
 import numpy as np
 import xarray as xr
@@ -126,7 +127,7 @@ class BGCMarbl(BGCModel):
     Implements the MARBL tracers and known pre-processing fields, and the
     relationships used to complete a partial tracer set:
 
-    * ``Fe`` → ``Lig`` (ligand = iron × 3)
+    * ``Fe`` → ``Lig`` (ligand = iron * 3)
     * ``DIC`` → ``DIC_ALT_CO2`` and ``ALK`` → ``ALK_ALT_CO2`` (identity copies)
     * ``CHL`` → the full small-phytoplankton / diatom / diazotroph / zooplankton
       tracer set (fixed stoichiometric ratios); ``CHL`` itself is then dropped.
@@ -172,34 +173,61 @@ class BGCMarbl(BGCModel):
 
     name = "MARBL"
 
-    _TRACER_VARS = frozenset({
-        "PO4", "NO3", "SiO3", "NH4", "Fe", "Lig", "O2",
-        "DIC", "DIC_ALT_CO2", "ALK", "ALK_ALT_CO2",
-        "DOC", "DON", "DOP", "DOPr", "DONr", "DOCr",
-        "spChl", "spC", "spP", "spFe", "spCaCO3",
-        "diatChl", "diatC", "diatP", "diatFe", "diatSi",
-        "diazChl", "diazC", "diazP", "diazFe",
-        "zooC",
-    })
+    _TRACER_VARS = frozenset(
+        {
+            "PO4",
+            "NO3",
+            "SiO3",
+            "NH4",
+            "Fe",
+            "Lig",
+            "O2",
+            "DIC",
+            "DIC_ALT_CO2",
+            "ALK",
+            "ALK_ALT_CO2",
+            "DOC",
+            "DON",
+            "DOP",
+            "DOPr",
+            "DONr",
+            "DOCr",
+            "spChl",
+            "spC",
+            "spP",
+            "spFe",
+            "spCaCO3",
+            "diatChl",
+            "diatC",
+            "diatP",
+            "diatFe",
+            "diatSi",
+            "diazChl",
+            "diazC",
+            "diazP",
+            "diazFe",
+            "zooC",
+        }
+    )
     _INTERPRETABLE_INPUTS = frozenset({"CHL"})
 
     # CHL → per-PFT tracer stoichiometric factors (multiplicative on total CHL).
-    _CHL_FACTORS: dict[str, float] = {
-        "zooC":    1.35,      # mmol m-3
-        "spChl":   0.675,     # mg m-3
-        "spC":     3.375,     # mmol m-3
-        "spP":     0.03,      # mmol m-3
-        "spFe":    1.35e-5,   # mmol m-3
-        "spCaCO3": 0.0675,    # mmol m-3
-        "diatChl": 0.0675,    # mg m-3
-        "diatC":   0.2025,    # mmol m-3
-        "diatP":   0.02,      # mmol m-3
-        "diatFe":  1.35e-6,   # mmol m-3
-        "diatSi":  0.0675,    # mmol m-3
-        "diazChl": 0.0075,    # mg m-3
-        "diazC":   0.0375,    # mmol m-3
-        "diazP":   0.01,      # mmol m-3
-        "diazFe":  7.5e-7,    # mmol m-3
+    _CHL_FACTORS: ClassVar[dict[str, float]] = {
+        "zooC": 1.35,  # mmol m-3
+        "spChl": 0.675,  # mg m-3
+        "spC": 3.375,  # mmol m-3
+        "spP": 0.03,  # mmol m-3
+        "spFe": 1.35e-5,  # mmol m-3
+        "spCaCO3": 0.0675,  # mmol m-3
+        "diatChl": 0.0675,  # mg m-3
+        "diatC": 0.2025,  # mmol m-3
+        "diatP": 0.02,  # mmol m-3
+        "diatFe": 1.35e-6,  # mmol m-3
+        "diatSi": 0.0675,  # mmol m-3
+        "diazChl": 0.0075,  # mg m-3
+        "diazC": 0.0375,  # mmol m-3
+        "diazP": 0.01,  # mmol m-3
+        "diazFe": 7.5e-7,  # mmol m-3
     }
 
     # Fe → Lig multiplicative factor.
@@ -213,14 +241,14 @@ class BGCMarbl(BGCModel):
     # an initial-condition or open-boundary field from them put 460 mmol m-3 of DOC
     # (roughly an order of magnitude above open-ocean DOC) uniformly through the
     # whole domain, at every depth.
-    _OCEAN_FILL: dict[str, float] = {
-        "NH4":  1e-6,     # mmol m-3
-        "DOC":  1e-6,     # mmol m-3
-        "DON":  1.0,      # mmol m-3
-        "DOP":  0.1,      # mmol m-3
-        "DOCr": 1e-6,     # mmol m-3
-        "DONr": 0.8,      # mmol m-3
-        "DOPr": 0.003,    # mmol m-3
+    _OCEAN_FILL: ClassVar[dict[str, float]] = {
+        "NH4": 1e-6,  # mmol m-3
+        "DOC": 1e-6,  # mmol m-3
+        "DON": 1.0,  # mmol m-3
+        "DOP": 0.1,  # mmol m-3
+        "DOCr": 1e-6,  # mmol m-3
+        "DONr": 0.8,  # mmol m-3
+        "DOPr": 0.003,  # mmol m-3
     }
 
     # ------------------------------------------------------------------
@@ -273,7 +301,9 @@ class BGCMarbl(BGCModel):
     # derivation without going through a forcing object.
     # ------------------------------------------------------------------
     @classmethod
-    def derive_phytoplankton_from_chl(cls, chl: xr.DataArray) -> dict[str, xr.DataArray]:
+    def derive_phytoplankton_from_chl(
+        cls, chl: xr.DataArray
+    ) -> dict[str, xr.DataArray]:
         """Derive the per-PFT and zooplankton tracers from total chlorophyll.
 
         Parameters
@@ -294,11 +324,13 @@ class BGCMarbl(BGCModel):
 
     @classmethod
     def derive_ligand_from_iron(cls, fe: xr.DataArray) -> xr.DataArray:
-        """Derive ligand from iron: ``Lig = Fe × 3`` (mmol m-3)."""
+        """Derive ligand from iron: ``Lig = Fe * 3`` (mmol m-3)."""
         return cls._transform_for("Lig")(fe)
 
     @classmethod
-    def derive_alt_co2(cls, dic: xr.DataArray, alk: xr.DataArray) -> dict[str, xr.DataArray]:
+    def derive_alt_co2(
+        cls, dic: xr.DataArray, alk: xr.DataArray
+    ) -> dict[str, xr.DataArray]:
         """Derive the alternative-CO2 tracers as identity copies of DIC/ALK."""
         return {
             "DIC_ALT_CO2": cls._transform_for("DIC_ALT_CO2")(dic),

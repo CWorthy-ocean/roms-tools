@@ -98,7 +98,10 @@ _DATASET_MAP: dict[str, dict[str, dict[str, type[LatLonDataset | ROMSDataset]]]]
 
 #: BGC source names ``InitialConditions`` accepts: the dataset-backed ones above, plus
 #: the two derived pseudo-sources that load no dataset at all.
-_BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {"constants", "ESPER"}
+_BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {
+    "constants",
+    "ESPER",
+}
 
 
 @dataclass(kw_only=True)
@@ -903,9 +906,7 @@ class InitialConditionsSource:
 
     def _input_checks(self):
         if self.type not in ("physics", "bgc"):
-            raise ValueError(
-                f"`type` must be 'physics' or 'bgc', got {self.type!r}."
-            )
+            raise ValueError(f"`type` must be 'physics' or 'bgc', got {self.type!r}.")
 
         # -------------------------------------------------------
         # type / physics_forcing checks

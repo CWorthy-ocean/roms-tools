@@ -530,7 +530,9 @@ def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
 )
 def test_regrid_method_produces_nan_free_boundaries(use_dask, regrid_method):
     """The regrid engine can be chosen independently of prefill; all are NaN-free."""
-    bf = BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method)
+    bf = BoundaryForcingSource(
+        **_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method
+    )
     _assert_no_nan_in_boundary_fields(bf)
 
 
@@ -859,7 +861,9 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
     ]:  # test for Path object and str
         bdry_forcing.to_yaml(filepath)
 
-        bdry_forcing_from_file = BoundaryForcingSource.from_yaml(filepath, use_dask=use_dask)
+        bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+            filepath, use_dask=use_dask
+        )
 
         assert bdry_forcing == bdry_forcing_from_file
 
@@ -874,7 +878,9 @@ def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
 
     boundary_forcing.to_yaml(yaml_filepath)
     boundary_forcing.save(filepath1, group=True)
-    bdry_forcing_from_file = BoundaryForcingSource.from_yaml(yaml_filepath, use_dask=use_dask)
+    bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+        yaml_filepath, use_dask=use_dask
+    )
     bdry_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -909,7 +915,9 @@ def test_files_have_same_hash_clim(bdry_forcing_fixture, tmp_path, use_dask, req
 
     bgc_boundary_forcing.to_yaml(yaml_filepath)
     bgc_boundary_forcing.save(filepath1, group=True)
-    bdry_forcing_from_file = BoundaryForcingSource.from_yaml(yaml_filepath, use_dask=use_dask)
+    bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+        yaml_filepath, use_dask=use_dask
+    )
     bdry_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -1347,8 +1355,17 @@ def test_roms_bgc_source_is_rejected_with_a_useful_message():
     from roms_tools.setup.boundary_forcing import BoundaryForcingSource
 
     grid = Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55,
-        rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0,
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
     )
     with pytest.raises(ValueError, match="nesting"):
         BoundaryForcingSource(
@@ -1370,8 +1387,17 @@ def _static_bgc_grid():
     from roms_tools import Grid
 
     return Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=-20, center_lat=55,
-        rot=0, N=3, theta_s=5.0, theta_b=2.0, hc=250.0,
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=-20,
+        center_lat=55,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
     )
 
 

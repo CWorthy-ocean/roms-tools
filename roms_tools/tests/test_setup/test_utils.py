@@ -159,7 +159,9 @@ def test_roundtrip_yaml(
     ]:  # test for Path object and str
         boundary_forcing_from_multiple_source_files.to_yaml(filepath)
 
-        bdry_forcing_from_file = BoundaryForcingSource.from_yaml(filepath, use_dask=use_dask)
+        bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+            filepath, use_dask=use_dask
+        )
 
         assert boundary_forcing_from_multiple_source_files == bdry_forcing_from_file
 
@@ -893,7 +895,8 @@ def test_materialize_before_check_realizes_and_preserves_metadata():
     """`materialize_before_check` computes each named variable via one combined
     `dask.compute()` call and writes the realized (non-dask-backed) result back
     into `ds` in place, preserving attrs/encoding -- so a later real compute
-    (e.g. `.save()`) doesn't need to redo the (potentially expensive) work."""
+    (e.g. `.save()`) doesn't need to redo the (potentially expensive) work.
+    """
     import dask.array as da
 
     calls = {"n": 0}
@@ -934,7 +937,9 @@ def test_materialize_before_check_realizes_and_preserves_metadata():
 
     # A second call with the now-realized variable must not recompute it.
     materialize_before_check(ds, ["foo"], materialize=True, serialize_dask=False)
-    assert calls["n"] == 2, "materializing an already-concrete variable should be a no-op"
+    assert calls["n"] == 2, (
+        "materializing an already-concrete variable should be a no-op"
+    )
 
     # An empty/unknown var_names list is also a safe no-op.
     materialize_before_check(ds, [], materialize=True)
@@ -1223,9 +1228,7 @@ def test_group_by_month_matches_groupby_exactly():
     ]
     for new, old in zip(new_groups, old_groups, strict=True):
         np.testing.assert_array_equal(new["v"].values, old["v"].values)
-        np.testing.assert_array_equal(
-            new["abs_time"].values, old["abs_time"].values
-        )
+        np.testing.assert_array_equal(new["abs_time"].values, old["abs_time"].values)
     # Every step written exactly once -- no gap, no double-write.
     assert sum(g.sizes["bry_time"] for g in new_groups) == len(times)
 

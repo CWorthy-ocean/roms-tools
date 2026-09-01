@@ -2199,7 +2199,10 @@ def get_roms_tools_version_info() -> dict[str, str | None]:
     except (OSError, subprocess.SubprocessError):
         pass
 
-    return {"roms_tools_version": roms_tools_version, "roms_tools_git_commit": git_commit}
+    return {
+        "roms_tools_version": roms_tools_version,
+        "roms_tools_git_commit": git_commit,
+    }
 
 
 def write_to_yaml(yaml_data, filepath: str | Path) -> None:
@@ -2558,7 +2561,10 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     else:
         raise TypeError("Forcing object must be a dataclass or pydantic model")
 
-    forcing_data = {}
+    # Annotated because the values are heterogeneous -- `serialize_bgc_sources`
+    # returns a list where `serialize_source_dict` returns a dict, and inferring
+    # the type from whichever lands first rejects the other.
+    forcing_data: dict[str, Any] = {}
 
     for name in field_names:
         if name in exclude_set:
@@ -2652,7 +2658,9 @@ def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
         if key in forcing_data:
             forcing_data[key] = deserialize_source_dict(forcing_data[key])
     if "bgc_sources" in forcing_data:
-        forcing_data["bgc_sources"] = deserialize_bgc_sources(forcing_data["bgc_sources"])
+        forcing_data["bgc_sources"] = deserialize_bgc_sources(
+            forcing_data["bgc_sources"]
+        )
 
     return forcing_data
 

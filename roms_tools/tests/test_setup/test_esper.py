@@ -424,8 +424,9 @@ def test_esper_estimates_are_identical_under_time_chunking(monkeypatch):
     # The stubbed budget really did split the time axis.
     monkeypatch.setattr(esper_module, "_MAX_POINTS_PER_CHUNK", 30)
     split_plan = _pyesper_chunk_plan(
-        xr.DataArray(dsa.from_array(temp_v, chunks=shape), dims=dims,
-                     coords={"time": times})
+        xr.DataArray(
+            dsa.from_array(temp_v, chunks=shape), dims=dims, coords={"time": times}
+        )
     )
     assert split_plan["time"] != -1
 
@@ -1050,7 +1051,11 @@ def test_estimate_bgc_fields_threaded_scheduler_matches_synchronous():
     depth = xr.DataArray(np.linspace(0, 1000, nz), dims=("s",))
 
     out = estimate_bgc_fields(
-        temp, salt, lon, lat, depth,
+        temp,
+        salt,
+        lon,
+        lat,
+        depth,
         source={"name": "ESPER", "path": _PYESPER_PATH, "method": "nn"},
         roms_variables=["NO3", "ALK"],
         est_dates=2020.0,
@@ -1066,7 +1071,10 @@ def test_estimate_bgc_fields_threaded_scheduler_matches_synchronous():
 
     for name, a, b in zip(("NO3", "ALK"), threaded, serial):
         np.testing.assert_allclose(
-            a.values, b.values, rtol=1e-12, atol=0.0,
+            a.values,
+            b.values,
+            rtol=1e-12,
+            atol=0.0,
             err_msg=f"{name}: threaded and synchronous schedulers disagree",
         )
 

@@ -1162,8 +1162,14 @@ def _write_synthetic_glodap(directory):
     lat = np.arange(35.0, 76.0, 1.0)
     lon = np.arange(-30.0, 31.0, 1.0)
     depth = np.array([0.0, 50.0, 200.0, 1000.0])
-    for file_var, value in (("TAlk", 2300.0), ("TCO2", 2100.0), ("PO4", 1.0),
-                            ("NO3", 15.0), ("silicate", 10.0), ("oxygen", 280.0)):
+    for file_var, value in (
+        ("TAlk", 2300.0),
+        ("TCO2", 2100.0),
+        ("PO4", 1.0),
+        ("NO3", 15.0),
+        ("silicate", 10.0),
+        ("oxygen", 280.0),
+    ):
         # Mirrors the real files: `Depth` is a 1-D *data variable* on an unlabelled
         # `depth_surface` dimension, which `GLODAPv2Dataset.clean_up` promotes to a
         # dimension coordinate. Writing it as a plain coord would not exercise that.
@@ -1198,8 +1204,19 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
     from roms_tools.datasets.download import download_test_data
 
     glodap_dir = _write_synthetic_glodap(tmp_path / "glodap")
-    grid = Grid(nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55,
-                rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0)
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
     ic = InitialConditions(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
@@ -1207,8 +1224,12 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
             "name": "GLORYS",
             "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
         },
-        bgc_sources=[{"source": {"name": "GLODAP", "path": str(glodap_dir)},
-                      "use_vars": ["ALK", "DIC"]}],
+        bgc_sources=[
+            {
+                "source": {"name": "GLODAP", "path": str(glodap_dir)},
+                "use_vars": ["ALK", "DIC"],
+            }
+        ],
         bgc_model=BGCMarbl,
         use_dask=False,
         bypass_validation=True,

@@ -727,7 +727,8 @@ def test_save_datasets_progressbar_skipped_when_serialize_dask(
     for minutes then jump, and its background redraw garbles the per-chunk
     print()s those sources emit -- looking broken rather than informative. It
     must be skipped whenever ``serialize_dask`` is True, and still shown
-    otherwise."""
+    otherwise.
+    """
     import dask.diagnostics
 
     entered = []
@@ -755,11 +756,10 @@ def test_save_datasets_progressbar_skipped_when_serialize_dask(
     assert bool(entered) is expect_progressbar
 
 
-def test_save_datasets_serialize_dask_logs_plain_start_done_messages(
-    tmp_path, caplog
-):
+def test_save_datasets_serialize_dask_logs_plain_start_done_messages(tmp_path, caplog):
     """With no ProgressBar, the serialize_dask=True write must still log a
-    plain start/done message pair so it doesn't look silent/stalled."""
+    plain start/done message pair so it doesn't look silent/stalled.
+    """
     ds = xr.Dataset({"a": ("x", np.arange(10))}).chunk({"x": 5})
     output_path = tmp_path / "test_output"
 

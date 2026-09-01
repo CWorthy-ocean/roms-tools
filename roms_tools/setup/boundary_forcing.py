@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -152,7 +153,10 @@ _DATASET_MAP: dict[str, dict[str, dict[str, type]]] = {
 
 #: BGC source names ``BoundaryForcing`` accepts: the dataset-backed ones above, plus the
 #: two derived pseudo-sources that load no dataset at all.
-_BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {"constants", "ESPER"}
+_BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {
+    "constants",
+    "ESPER",
+}
 
 
 @dataclass(kw_only=True)
@@ -848,7 +852,7 @@ class BoundaryForcingSource:
         self._set_boundary_info()
 
         ds = xr.Dataset()
-        for direction, is_enabled in self.boundaries.items():
+        for direction, is_enabled in self._active_boundaries.items():
             if not is_enabled:
                 continue
             # zeta = 0: SSH is not applicable to BGC fields. Precompute both depth
@@ -857,9 +861,12 @@ class BoundaryForcingSource:
             self._get_depth_coordinates(0, direction, "rho", "interface")
 
             template = self.ds_depth_coords[f"layer_depth_rho_{direction}"]
+            # Validated as a mapping in __post_init__; `RawDataSource`'s value
+            # union is too wide to express that, so narrow it here.
+            constants = cast(dict[str, float], self.source["constants"])
             fields = {
                 var: xr.full_like(template, float(val))
-                for var, val in self.source["constants"].items()
+                for var, val in constants.items()
             }
             fields = self._apply_use_vars(fields)
             for var_name in fields:
@@ -941,11 +948,15 @@ class BoundaryForcingSource:
         )
 
         pf = self.physics_forcing
+        if pf is None:  # pragma: no cover - enforced in __post_init__
+            raise ValueError(
+                "An ESPER BGC BoundaryForcingSource requires `physics_forcing`."
+            )
         self._set_boundary_info()
         climatology = bool(self.source.get("climatology", False))
 
         ds = xr.Dataset()
-        for direction, is_enabled in self.boundaries.items():
+        for direction, is_enabled in self._active_boundaries.items():
             if not is_enabled:
                 continue
             # zeta = 0: SSH is not applicable to BGC fields.
@@ -965,15 +976,17 @@ class BoundaryForcingSource:
                 salt = salt.swap_dims({"bry_time": "abs_time"}).rename(
                     {"abs_time": "time"}
                 )
-            est_dates = (
-                _decimal_year(temp["time"]) if "time" in temp.dims else None
-            )
+            est_dates = _decimal_year(temp["time"]) if "time" in temp.dims else None
 
             lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
             lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
 
             fields = estimate_bgc_fields(
-                temp, salt, lon, lat, depth,
+                temp,
+                salt,
+                lon,
+                lat,
+                depth,
                 source=self.source,
                 roms_variables=ESPER_SUPPORTED_VARS,
                 est_dates=est_dates,
@@ -1020,7 +1033,7 @@ class BoundaryForcingSource:
         ``ds`` stores variables suffixed by direction (``PO4_south``); this strips the
         suffix of each active boundary so the model-agnostic metadata can be built.
         """
-        active = [d for d, on in self.boundaries.items() if on]
+        active = [d for d, on in self._active_boundaries.items() if on]
         bare: set[str] = set()
         for v in ds.data_vars:
             name = str(v)
@@ -1609,6 +1622,22 @@ class BoundaryForcingSource:
             line_plot(field.where(mask), title=title, ax=ax)
 
     @property
+    def _active_boundaries(self) -> dict[str, bool]:
+        """``boundaries`` narrowed to non-optional.
+
+        The field is declared optional so callers may omit it, but ``__post_init__``
+        always replaces it with the result of
+        :func:`roms_tools.setup.utils.check_and_set_boundaries`, which never returns
+        ``None``. Annotated methods go through this accessor so that invariant is
+        visible to a type checker.
+        """
+        if self.boundaries is None:  # pragma: no cover - set in __post_init__
+            raise ValueError(
+                "`boundaries` is unset; it is populated during __post_init__."
+            )
+        return self.boundaries
+
+    @property
     def _is_esper_source(self) -> bool:
         """True when this source derives its tracers via PyESPER (the ESPER source).
 
@@ -1624,7 +1653,7 @@ class BoundaryForcingSource:
         group: bool = True,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
         serialize_dask: bool | None = None,
-    ) -> None:
+    ) -> list[Path]:
         """Save the boundary forcing fields to one or more NetCDF files.
 
         This method saves the dataset to disk as either a single NetCDF file or multiple files, depending on the `group` parameter.
@@ -2027,6 +2056,8 @@ class BoundaryForcing:
                     "`bgc_filepaths` must provide one path per bgc source "
                     f"(got {len(bgc_paths)} path(s) for {len(self.bgc)} source(s))."
                 )
+            if self.bgc_model is None:  # pragma: no cover - set in __post_init__
+                raise ValueError("`bgc_model` is required to save bgc sources.")
             self.bgc_model().process_bgc_fields(
                 self.bgc,
                 filepath=[str(p) for p in bgc_paths],
@@ -2054,9 +2085,7 @@ class BoundaryForcing:
         # `bgc_model` is a class, not a plain value -- to_dict's generic
         # serialization has no way to make that YAML-safe, so it's excluded above
         # and handled explicitly via the name registry (see bgc_model.py).
-        forcing_dict["BoundaryForcing"]["bgc_model"] = bgc_model_to_name(
-            self.bgc_model
-        )
+        forcing_dict["BoundaryForcing"]["bgc_model"] = bgc_model_to_name(self.bgc_model)
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod

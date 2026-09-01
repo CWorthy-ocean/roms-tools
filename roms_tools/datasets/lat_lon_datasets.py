@@ -1368,7 +1368,9 @@ class WOADataset(LatLonDataset):
     Time units provided in WOA datasets are not decoded by xarray, so `decode_times` is set to `False` when reading data.
     """
 
-    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+    # Annotated `int | None` (like `LatLonDataset`) rather than `int` so the
+    # `WOABGCDataset` subclass can override it with None; see its own comment.
+    _default_lateral_dask_chunk: ClassVar[int | None] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     needs_lateral_fill: bool = True
     has_encoded_times: bool = False
@@ -1555,6 +1557,11 @@ class WOABGCDataset(WOADataset):
         """
         from roms_tools.datasets.download import woa23_filename
 
+        if isinstance(self.filename, list):
+            raise ValueError(
+                f"WOA expects `filename` to be a single directory, not a list "
+                f"of files (got {len(self.filename)} entries)."
+            )
         base_dir = Path(self.filename)
         if not base_dir.is_dir():
             raise FileNotFoundError(f"WOA directory not found: {base_dir}")
@@ -2262,7 +2269,7 @@ class GLODAPv2Dataset(LatLonDataset):
     """GLODAPv2 2016b gridded dataset — one per-variable file per data variable.
 
     Files are named ``GLODAPv2.2016b.{var}.nc`` and live in the directory given by
-    ``filename``.  Each file holds one variable on a 1° × 1° lat/lon grid with
+    ``filename``.  Each file holds one variable on a 1° x 1° lat/lon grid with
     coordinate names ``lat``, ``lon``, and ``Depth``.  There is **no time dimension**;
     the data represent an observational climatology.
 
@@ -2286,6 +2293,11 @@ class GLODAPv2Dataset(LatLonDataset):
         that are not present on disk are silently skipped.  All datasets are merged
         into one using :func:`xarray.merge`, which is dask-lazy when ``use_dask=True``.
         """
+        if isinstance(self.filename, list):
+            raise ValueError(
+                f"GLODAP expects `filename` to be a single directory, not a list "
+                f"of files (got {len(self.filename)} entries)."
+            )
         base_dir = Path(self.filename)
         if not base_dir.is_dir():
             raise FileNotFoundError(f"GLODAP directory not found: {base_dir}")
@@ -2450,7 +2462,7 @@ class GLODAPv2BGCDataset(GLODAPv2Dataset):
     Notes
     -----
     GLODAPv2 values are in **µmol kg⁻¹**.  :meth:`post_process` converts to
-    **mmol m⁻³** using ``val × (sigma0 + 1000) / 1000`` via TEOS-10.
+    **mmol m⁻³** using ``val * (sigma0 + 1000) / 1000`` via TEOS-10.
     """
 
     dim_names: dict[str, str] = field(

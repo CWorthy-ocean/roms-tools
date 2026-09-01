@@ -237,7 +237,7 @@ def test_missing_required_tracer_files_raise_and_name_the_paths(tmp_path):
     directory.mkdir()
     for _subdir, decade, code in WOA23_BGC_VARIABLES.values():
         if code in ("t", "s"):
-            for period in list(range(1, 13)) + [0]:
+            for period in [*range(1, 13), 0]:
                 _write_file(directory, code, decade, period)
 
     with pytest.raises(FileNotFoundError, match="Required WOA23 files are missing"):
@@ -250,7 +250,7 @@ def test_missing_optional_ts_warns_and_leaves_the_tracers_usable(tmp_path, caplo
     directory.mkdir()
     for _subdir, decade, code in WOA23_BGC_VARIABLES.values():
         if code not in ("t", "s"):
-            for period in list(range(1, 13)) + [0]:
+            for period in [*range(1, 13), 0]:
                 _write_file(directory, code, decade, period)
 
     with caplog.at_level(logging.WARNING):

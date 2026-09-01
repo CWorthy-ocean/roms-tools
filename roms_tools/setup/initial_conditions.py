@@ -594,10 +594,23 @@ class InitialConditionsSource:
 
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
+            ref_time = processed_fields["temp"]["time"]
             for var_name in var_names:
-                processed_fields[var_name] = processed_fields[var_name].assign_coords(
-                    {"time": processed_fields["temp"]["time"]}
-                )
+                field = processed_fields[var_name]
+                if "time" in field.dims:
+                    processed_fields[var_name] = field.assign_coords({"time": ref_time})
+                else:
+                    # Static source (an observational climatology such as GLODAP, which
+                    # ships no time dimension) -- there is no axis to relabel, so give it
+                    # the physics one. ROMS's ``inifile`` is a single scalar path, so every
+                    # bgc source is merged into one dataset with one time axis; without
+                    # this the merge fails on a field whose dims are (depth, eta_rho,
+                    # xi_rho), with a CoordinateValidationError naming neither the source
+                    # nor the reason. Broadcasting a constant-in-time field onto the
+                    # single initial-conditions record changes no values.
+                    processed_fields[var_name] = field.expand_dims(
+                        {"time": ref_time}, axis=0
+                    )
 
         # Get depth coordinates
         zeta = (

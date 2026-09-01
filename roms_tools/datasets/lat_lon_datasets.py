@@ -1450,7 +1450,18 @@ class WOABGCDataset(WOADataset):
     ``deep_fill``.
     """
 
-    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+    # Follow the files' own chunking rather than the generic lateral 50. This class
+    # overrides ``load_data`` and opens the NCEI files itself as
+    # ``chunks=self.chunks or {}``, so leaving this None reaches xarray as ``{}`` --
+    # "chunk as stored". 50 fits these files badly: they store lat/lon in 90 x 180
+    # blocks, which 50 divides evenly into neither, so every dask chunk straddled a
+    # stored one -- twenty "specified chunks separate the stored chunks" warnings per
+    # open, and redundant decompression behind them.
+    #
+    # Only safe *because* of that override. On the generic path (``WOADataset``)
+    # None would not mean on-disk: ``_load_data_dask`` substitutes
+    # ``get_dask_chunks()``, whose lateral default is -1.
+    _default_lateral_dask_chunk: ClassVar[int | None] = None
 
     #: Internal key -> (NCEI directory, decade token, one-letter code, netCDF variable).
     _woa_files: ClassVar[dict[str, tuple[str, str, str, str]]] = {

@@ -1359,3 +1359,69 @@ def test_roms_bgc_source_is_rejected_with_a_useful_message():
             source={"name": "ROMS", "path": "restart.nc", "grid": grid},
             use_dask=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# A static (no-time) BGC source cannot also be a climatology
+# ---------------------------------------------------------------------------
+
+
+def _static_bgc_grid():
+    from roms_tools import Grid
+
+    return Grid(
+        nx=2, ny=2, size_x=500, size_y=1000, center_lon=-20, center_lat=55,
+        rot=0, N=3, theta_s=5.0, theta_b=2.0, hc=250.0,
+    )
+
+
+def test_static_bgc_source_rejects_climatology_flag():
+    """`climatology=True` on a source with no time axis must fail loudly, and say why.
+
+    A static source is bracketed to `start_time`/`end_time` by `_bracket_static_time`;
+    it is never cycled over twelve months. Claiming otherwise used to surface far
+    downstream, where `add_time_info_to_ds` builds a 12-element `month` coordinate and
+    xarray raises `AlignmentError: ... conflicting dimension sizes: {2, 12}` -- naming
+    neither the source nor the offending flag.
+    """
+    from datetime import datetime
+
+    from roms_tools import BoundaryForcingSource
+
+    with pytest.raises(ValueError, match="carries no time axis"):
+        BoundaryForcingSource(
+            grid=_static_bgc_grid(),
+            start_time=datetime(2012, 1, 30),
+            end_time=datetime(2012, 2, 1),
+            boundaries={"south": True, "east": False, "north": False, "west": False},
+            source={
+                "name": "constants",
+                "constants": {"ALK": 2300.0},
+                "climatology": True,
+            },
+            type="bgc",
+            use_dask=False,
+            bypass_validation=True,
+        )
+
+
+def test_static_bgc_source_without_the_flag_still_brackets():
+    """The control: the same source minus the flag still builds.
+
+    It gets the two bracketing records ROMS interpolates between.
+    """
+    from datetime import datetime
+
+    from roms_tools import BoundaryForcingSource
+
+    bf = BoundaryForcingSource(
+        grid=_static_bgc_grid(),
+        start_time=datetime(2012, 1, 30),
+        end_time=datetime(2012, 2, 1),
+        boundaries={"south": True, "east": False, "north": False, "west": False},
+        source={"name": "constants", "constants": {"ALK": 2300.0}},
+        type="bgc",
+        use_dask=False,
+        bypass_validation=True,
+    )
+    assert bf.ds.sizes["bry_time"] == 2

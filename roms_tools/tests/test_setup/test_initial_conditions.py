@@ -1140,3 +1140,89 @@ def test_ic_roms_source_ignores_regrid_options(use_dask, caplog):
         )
     assert "lat/lon sources only" in caplog.text
     assert "temp" in ic.ds
+
+
+# ---------------------------------------------------------------------------
+# A static (no-time) BGC source in initial conditions
+# ---------------------------------------------------------------------------
+
+
+def _write_synthetic_glodap(directory):
+    """A minimal GLODAP-shaped source: one file per variable, lat/lon/depth, NO time.
+
+    GLODAP's real layout is exactly this -- ``{dir}/GLODAPv2.2016b.{file_var}.nc``, each
+    holding one variable on a 1 degree grid with no time dimension -- so a synthetic one
+    exercises the static-source path without needing the multi-GB download.
+    """
+    import numpy as np
+    import xarray as xr
+
+    directory.mkdir(parents=True, exist_ok=True)
+    # Comfortably covers the test grid (centred at 0E/55N) plus the regrid margin.
+    lat = np.arange(35.0, 76.0, 1.0)
+    lon = np.arange(-30.0, 31.0, 1.0)
+    depth = np.array([0.0, 50.0, 200.0, 1000.0])
+    for file_var, value in (("TAlk", 2300.0), ("TCO2", 2100.0), ("PO4", 1.0),
+                            ("NO3", 15.0), ("silicate", 10.0), ("oxygen", 280.0)):
+        # Mirrors the real files: `Depth` is a 1-D *data variable* on an unlabelled
+        # `depth_surface` dimension, which `GLODAPv2Dataset.clean_up` promotes to a
+        # dimension coordinate. Writing it as a plain coord would not exercise that.
+        xr.Dataset(
+            {
+                file_var: (
+                    ("depth_surface", "lat", "lon"),
+                    np.full((depth.size, lat.size, lon.size), value, dtype="f4"),
+                ),
+                "Depth": (("depth_surface",), depth),
+            },
+            coords={"lat": lat, "lon": lon},
+        ).to_netcdf(directory / f"GLODAPv2.2016b.{file_var}.nc")
+    return directory
+
+
+def test_static_bgc_source_takes_the_physics_time(tmp_path):
+    """A BGC source with no time axis must be broadcast onto the physics time.
+
+    ROMS's ``inifile`` is a single scalar path, so every bgc source is merged into one
+    dataset with one time axis. A static source (GLODAP) has no axis to relabel, and
+    the merge used to fail with `CoordinateValidationError: coordinate time has
+    dimensions ('time',), but these are not a subset of the DataArray dimensions
+    ('depth', 'eta_rho', 'xi_rho')` -- naming neither the source nor the reason.
+    """
+    from datetime import datetime
+    from pathlib import Path
+
+    import numpy as np
+
+    from roms_tools import BGCMarbl, Grid, InitialConditions
+    from roms_tools.datasets.download import download_test_data
+
+    glodap_dir = _write_synthetic_glodap(tmp_path / "glodap")
+    grid = Grid(nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55,
+                rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0)
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[{"source": {"name": "GLODAP", "path": str(glodap_dir)},
+                      "use_vars": ["ALK", "DIC"]}],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+    )
+
+    # The static field now carries the physics time axis, and merged cleanly.
+    assert "ocean_time" in ic.ds["ALK"].dims
+    assert ic.ds.sizes["ocean_time"] == 1
+    assert ic.ds["ALK"].dims == ic.ds["temp"].dims
+
+    # Values survive the broadcast intact. Not the raw 2300: GLODAP ships umol/kg and
+    # roms-tools converts to mmol/m3 via potential density, so a uniform source comes
+    # out uniform but scaled by ~1.025.
+    alk = ic.ds["ALK"].values
+    assert np.isfinite(alk).all()
+    assert np.allclose(alk, alk.flat[0]), "a spatially uniform source must stay uniform"
+    assert 2000.0 < float(alk.flat[0]) < 2600.0

@@ -388,6 +388,7 @@ class BoundaryForcingSource:
         # BGC "constants" source: no dataset to load/regrid. Broadcast the user-supplied
         # values onto each active boundary's rho grid and finish early.
         if self.type == "bgc" and self.source["name"] == "constants":
+            self._reject_climatology_on_static_source()
             self.ds = self._process_bgc_constants(target_coords)
             return
 
@@ -397,6 +398,9 @@ class BoundaryForcingSource:
             return
 
         data = self._get_data()
+
+        if self.type == "bgc" and "time" not in data.ds.dims:
+            self._reject_climatology_on_static_source()
 
         # Regrid engine is chosen independently of the prefill via the resolved
         # ``RegridConfig`` (built in _resolve_prefill_options):
@@ -875,6 +879,28 @@ class BoundaryForcingSource:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         return ds
+
+    def _reject_climatology_on_static_source(self) -> None:
+        """Reject ``climatology=True`` on a BGC source that carries no time axis.
+
+        A static source (``constants``, or an observational climatology such as GLODAP
+        that ships no time dimension) is given the two bracketing records ROMS needs by
+        :meth:`_bracket_static_time` -- it is never cycled over a twelve-month axis.
+        Claiming ``climatology=True`` therefore describes an axis that does not exist,
+        and used to fail far downstream: ``add_time_info_to_ds`` builds a 12-element
+        ``month`` coordinate and ``assign_coords`` raises an ``AlignmentError`` about
+        "conflicting dimension sizes: {2, 12}", naming neither the source nor the flag.
+
+        The field is constant in time either way, so dropping the flag loses nothing.
+        """
+        if not self.source.get("climatology"):
+            return
+        raise ValueError(
+            f"BGC source {self.source['name']!r} carries no time axis, so it cannot "
+            "also be a climatology: it is bracketed to `start_time`/`end_time` rather "
+            "than cycled over twelve months. Remove `'climatology': True` from this "
+            "source -- the field is constant in time either way."
+        )
 
     def _bracket_static_time(self, ds: xr.Dataset) -> xr.Dataset:
         """Give a static (no-time) BGC dataset the two bracketing time records ROMS needs.

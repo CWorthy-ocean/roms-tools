@@ -3,12 +3,18 @@
 The estimation tests need both the PyESPER package and its on-disk data
 (``Mat_fullgrid/`` + ``NeuralNetworks/``); they are skipped unless a PyESPER directory is
 available. Set ``ROMS_TOOLS_PYESPER_PATH`` to point at it (defaults to a local checkout).
-The pure input-validation tests run everywhere (they don't import PyESPER).
+
+The dict-shape validation tests run everywhere -- they trip on `method`/`equation`
+before `validate_esper_source` reaches its import check. Anything that expects a
+*successful* validation is marked ``needs_pyesper``, because that check now makes a
+missing package an error in its own right; the two tests that assert on the guidance
+message stub the import out instead, so they run bare.
 """
 
 import copy
 import itertools
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -82,9 +88,13 @@ def _small_grid() -> Grid:
 # --------------------------------------------------------------------------------------
 # Input validation (no PyESPER / data needed)
 # --------------------------------------------------------------------------------------
+@needs_pyesper
 def test_validate_esper_source_accepts_missing_path():
     """`path` is optional: without one, PyESPER must simply be importable from the
     environment (e.g. pip install -e), and it locates its own data directories.
+
+    Needs PyESPER present: validation ends with the import check, so "no path" only
+    passes when the environment supplies the package.
     """
     validate_esper_source({"name": "ESPER"})  # must not raise
 
@@ -448,7 +458,12 @@ def test_ic_esper_without_path_uses_the_importable_pyesper():
         assert np.isfinite(np.asarray(ic.ds[var_name].values)).any()
 
 
+@needs_pyesper
 def test_bf_esper_requires_physics_forcing():
+    """Needs PyESPER present: `_input_checks` validates the ESPER source (import
+    check included) before it gets to the `physics_forcing` requirement, so without
+    the package this raises ImportError instead of the ValueError under test.
+    """
     with pytest.raises(ValueError, match="requires `physics_forcing`"):
         BoundaryForcingSource(
             grid=_small_grid(),
@@ -1129,3 +1144,82 @@ def test_esper_validate_does_not_recompute_at_save_time(monkeypatch, tmp_path):
             "more time(s) during .save() -- validate-time results were not "
             "reused, reproducing the original double-compute bug"
         )
+
+
+# ---------------------------------------------------------------------------
+# Missing / wrong PyESPER: the message has to name the fork and how to get it
+# ---------------------------------------------------------------------------
+
+
+class _BlockPyESPER:
+    """Import hook that makes PyESPER unimportable, whatever is installed."""
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "PyESPER" or name.startswith("PyESPER."):
+            raise ImportError(f"No module named {name!r}")
+
+
+def _drop_pyesper_modules(monkeypatch):
+    for mod in [
+        m for m in list(sys.modules) if m == "PyESPER" or m.startswith("PyESPER.")
+    ]:
+        monkeypatch.delitem(sys.modules, mod, raising=False)
+
+
+def test_missing_pyesper_points_at_the_cworthy_fork(monkeypatch):
+    """No PyESPER at all: say which fork, and give the install steps verbatim.
+
+    The upstream project shares the name, so "install PyESPER" is ambiguous advice --
+    the message has to carry the CWorthy URL and the editable-install command.
+    """
+    from roms_tools.setup.esper import validate_esper_source
+
+    _drop_pyesper_modules(monkeypatch)
+    monkeypatch.setattr(sys, "meta_path", [_BlockPyESPER(), *sys.meta_path])
+
+    with pytest.raises(ImportError) as excinfo:
+        validate_esper_source({"name": "ESPER"})
+
+    msg = str(excinfo.value)
+    assert "https://github.com/CWorthy-ocean/PyESPER" in msg
+    assert "pip install -e ." in msg
+    assert "No PyESPER is importable" in msg
+
+
+def test_upstream_pyesper_is_named_as_the_wrong_project(monkeypatch):
+    """An importable PyESPER without the `*_xr` methods is upstream, not the fork.
+
+    This is the confusing failure: the package imports fine and only the `*_xr` names
+    are missing, which reads like a version skew rather than the wrong project. The
+    message must say so, and point at where the offending package was found.
+    """
+    import types
+
+    from roms_tools.setup.esper import validate_esper_source
+
+    _drop_pyesper_modules(monkeypatch)
+    stub = types.ModuleType("PyESPER")
+    stub.__file__ = "/somewhere/site-packages/PyESPER/__init__.py"
+    monkeypatch.setitem(sys.modules, "PyESPER", stub)
+
+    with pytest.raises(ImportError) as excinfo:
+        validate_esper_source({"name": "ESPER"})
+
+    msg = str(excinfo.value)
+    assert "upstream PyESPER, not" in msg
+    assert "/somewhere/site-packages/PyESPER/__init__.py" in msg
+    assert "https://github.com/CWorthy-ocean/PyESPER" in msg
+
+
+def test_validate_esper_source_checks_the_import_before_any_regridding():
+    """The import check lives in `validate_esper_source`, which `_input_checks` calls.
+
+    That places it at the start of the ESPER object's construction rather than inside
+    `estimate_bgc_fields`, so a missing PyESPER is reported before the source's own
+    depth-coordinate and derivation setup runs.
+    """
+    import inspect
+
+    from roms_tools.setup import esper
+
+    assert "_ensure_pyesper" in inspect.getsource(esper.validate_esper_source)

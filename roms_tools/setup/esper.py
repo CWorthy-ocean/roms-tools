@@ -3,8 +3,12 @@
 Unlike the gridded BGC sources (CESM/UNIFIED/GLODAP), which regrid a dataset onto the
 ROMS grid, the ``ESPER`` source *derives* biogeochemical variables from the physics
 temperature/salinity that are already on the ROMS grid, using the PyESPER empirical
-routines (https://github.com/LarissaMDias/PyESPER). It is therefore handled like the
-``constants`` source: no dataset load, no lateral/vertical regridding.
+routines. It is therefore handled like the ``constants`` source: no dataset load, no
+lateral/vertical regridding.
+
+Requires CWorthy's PyESPER fork (https://github.com/CWorthy-ocean/PyESPER), not
+upstream (https://github.com/LarissaMDias/PyESPER): only the fork provides the
+dask-native ``*_xr`` methods called here. See ``_PYESPER_INSTALL_HINT``.
 
 The heavy lifting -- dask-lazy, chunked, uncertainty-free estimation -- lives in PyESPER's
 ``lir_xr``/``nn_xr``/``mixed_xr`` (a fork addition). This module only:
@@ -73,6 +77,29 @@ ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 
 _VALID_METHODS = ("lir", "nn", "mixed")
 
+#: Shared install guidance. ``{problem}`` names which of the two failure modes was hit
+#: -- nothing importable at all, versus an importable PyESPER that turns out to be
+#: upstream rather than the fork. The second is the confusing one: the package imports
+#: fine and only fails on the ``*_xr`` names, which reads like a version skew rather
+#: than the wrong project.
+_PYESPER_INSTALL_HINT = (
+    "The ESPER BGC source requires CWorthy's PyESPER fork. PyESPER support is "
+    "considered experimental at this time.\n"
+    "\n"
+    "{problem}\n"
+    "\n"
+    "Install it from source:\n"
+    "\n"
+    "    git clone https://github.com/CWorthy-ocean/PyESPER\n"
+    "    cd PyESPER\n"
+    "    pip install -e .\n"
+    "\n"
+    "The editable install also lets PyESPER locate its own data directories "
+    "(`Mat_fullgrid/` and the top-level `NeuralNetworks/`) automatically, and brings "
+    "in its runtime dependencies (numpy, scipy, pandas, numba, PyCO2SYS, seawater). "
+    "Alternatively, leave it uninstalled and point `source['path']` at the checkout."
+)
+
 
 def _ensure_pyesper(path=None):
     """Import PyESPER's xarray methods, optionally making ``path`` importable first.
@@ -88,14 +115,26 @@ def _ensure_pyesper(path=None):
     if path and path not in sys.path:
         sys.path.insert(0, path)
     try:
-        from PyESPER import lir_xr, mixed_xr, nn_xr
-    except ImportError as exc:  # pragma: no cover - environment-dependent
+        import PyESPER
+    except ImportError as exc:
+        where = f" (nothing importable at `source['path']`: {path})" if path else ""
         raise ImportError(
-            "The ESPER BGC source requires the PyESPER package (with the dask-native "
-            "`*_xr` methods) and its runtime deps (numpy, scipy, pandas, numba, "
-            "PyCO2SYS, seawater). Either install PyESPER into the environment "
-            "(pip install -e <checkout>) or point `source['path']` at its checkout "
-            "(containing Mat_fullgrid/ and NeuralNetworks/)."
+            _PYESPER_INSTALL_HINT.format(
+                problem=f"No PyESPER is importable in this environment{where}."
+            )
+        ) from exc
+    try:
+        from PyESPER import lir_xr, mixed_xr, nn_xr
+    except ImportError as exc:
+        raise ImportError(
+            _PYESPER_INSTALL_HINT.format(
+                problem=(
+                    "A PyESPER was found at "
+                    f"{getattr(PyESPER, '__file__', 'an unknown location')}, but it has "
+                    "no `lir_xr`/`nn_xr`/`mixed_xr` -- so it is upstream PyESPER, not "
+                    "the CWorthy fork."
+                )
+            )
         ) from exc
     return {"lir": lir_xr, "nn": nn_xr, "mixed": mixed_xr}
 
@@ -253,7 +292,14 @@ def _decimal_year(time_da: xr.DataArray) -> xr.DataArray:
 
 
 def validate_esper_source(source: dict) -> None:
-    """Validate an ESPER ``source``/``bgc_source`` dict (raises ``ValueError``)."""
+    """Validate an ESPER ``source``/``bgc_source`` dict (raises ``ValueError``).
+
+    Also checks that the required PyESPER is importable. This runs from
+    ``_input_checks``, so a missing or wrong PyESPER is reported before the grid and
+    physics regrid are built rather than partway through construction -- on a
+    production grid that is the difference between failing immediately and failing
+    minutes in.
+    """
     method = str(source.get("method", "nn")).lower()
     if method not in _VALID_METHODS:
         raise ValueError(
@@ -265,6 +311,7 @@ def validate_esper_source(source: dict) -> None:
             "ESPER source 'equation' must be 8 (salinity+temperature) or 16 "
             f"(salinity only), got {equation!r}."
         )
+    _ensure_pyesper(source.get("path"))
 
 
 def estimate_bgc_fields(

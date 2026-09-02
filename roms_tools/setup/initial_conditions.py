@@ -36,6 +36,7 @@ from roms_tools.setup.bgc_model import (
     bgc_variable_info,
     validate_bgc_model,
 )
+from roms_tools.setup.blend import apply_salinity_blends
 from roms_tools.setup.utils import (
     _CLIMATOLOGY_ONLY_BGC,
     _SELF_DOWNLOADING_BGC,
@@ -2011,6 +2012,17 @@ class InitialConditions:
                 bgc_sources,
                 shared_kwargs,
                 type_="bgc",
+            )
+            # Optional per-item `salinity_blend`: hand low-salinity cells over to a
+            # second source across a taper. Runs here, after every source is on the
+            # target grid and before process_bgc_fields, because the blend is what
+            # removes the variable overlap that the completion step and merge() both
+            # assume is absent. One salinity field for every variable -- an initial
+            # condition has a single time.
+            apply_salinity_blends(
+                self.bgc,
+                bgc_sources,
+                lambda _name, salt=self.physics.ds["salt"]: salt,
             )
             self.bgc_model().process_bgc_fields(self.bgc)
         else:

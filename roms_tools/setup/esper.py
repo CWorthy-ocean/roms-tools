@@ -53,9 +53,45 @@ import xarray as xr
 
 from roms_tools.setup.utils import compute_potential_density, get_variable_metadata
 
-# PyESPER never *grows* chunks, so this constant is the ceiling on ESPER chunk
-# size in practice.
+# Fallback ceiling on ESPER chunk size, used only when PyESPER does not expose its
+# own budget helper. Equal to the value PyESPER itself hard-coded before it made the
+# cap dynamic, so behaviour on an older fork is unchanged.
 _MAX_POINTS_PER_CHUNK = 6_000_000
+
+
+def _pyesper_point_budget(method: str, n_variables: int) -> int:
+    """Points per chunk to target, taken from PyESPER's own per-chunk budget.
+
+    Ask PyESPER rather than keeping a twin constant here. PyESPER adds a rechunk
+    layer only when the largest block it receives *exceeds* its budget, and that
+    budget is derived from the method and the variable count -- ``mixed`` is
+    charged for both the LIR and the NN path, so its cap is roughly a third of
+    ``nn``'s. Building our plan from the same number keeps every block inside the
+    budget, so PyESPER short-circuits instead of re-blocking the array.
+
+    Matching it matters far more than it looks. A plan even slightly *above*
+    PyESPER's cap makes it rechunk, and that severs the block alignment between
+    the ESPER estimate and the upstream regrid feeding it, so the upstream chain
+    is recomputed per output block. A pac-12km initial condition
+    (962 x 1858 x 100) hit exactly that: our flat 6,000,000 sat 1.9% above
+    ``mixed``'s 5,883,516 cap, and one call ran for 10 hours -- against 4.4
+    seconds for the slowest call of the same grid under ``nn``, which cleared the
+    cap and so was never rechunked -- while writing 1.5 TiB into a 10 GiB file.
+
+    Falls back to :data:`_MAX_POINTS_PER_CHUNK` when the helper is absent (an
+    older fork) or does not recognise the method.
+    """
+    try:
+        from PyESPER.xr_methods import _max_points_per_chunk
+    except ImportError:
+        return _MAX_POINTS_PER_CHUNK
+    try:
+        return int(_max_points_per_chunk(method, n_variables))
+    except KeyError:
+        # Unknown method: validate_esper_source already rejects those, so this is
+        # only reachable if PyESPER's method table and ours drift apart.
+        return _MAX_POINTS_PER_CHUNK
+
 
 # Dim names treated as the time axis when no datetime coordinate identifies one
 # (see _time_dim). Ordered by how specific they are to a real time axis.
@@ -203,11 +239,14 @@ def _month_aligned_time_chunks(
     return tuple(months)
 
 
-def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int | tuple[int, ...]]:
-    """Compute a ``_MAX_POINTS_PER_CHUNK``-ish chunk plan from ``da``'s own shape,
-    to apply uniformly to every PyESPER input (see that constant's docstring for
-    why) -- one plan, not each input rechunked independently, so they stay
-    consistently blocked with each other. Apply it with
+def _pyesper_chunk_plan(
+    da: xr.DataArray, max_points: int | None = None
+) -> dict[str, int | tuple[int, ...]]:
+    """Compute a ``max_points``-ish chunk plan from ``da``'s own shape, to apply
+    uniformly to every PyESPER input (see :func:`_pyesper_point_budget` for where
+    the ceiling comes from and why matching it matters) -- one plan, not each
+    input rechunked independently, so they stay consistently blocked with each
+    other. Apply it with
     :func:`_apply_chunk_plan`, which drops the entries a given input can't take.
 
     Cuts along **time** whenever there is a time axis to cut (see
@@ -225,8 +264,13 @@ def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int | tuple[int, ...]]:
     dim" behaviour when there is no time axis -- initial conditions, a single
     instant, where a spatial split is the only option and implies no upstream
     time range anyway.
+
+    ``max_points`` is the per-chunk ceiling, normally
+    :func:`_pyesper_point_budget` for the request being made; it defaults to
+    :data:`_MAX_POINTS_PER_CHUNK` so the plan can be exercised on its own.
     """
-    if da.size <= _MAX_POINTS_PER_CHUNK:
+    cap = _MAX_POINTS_PER_CHUNK if max_points is None else max(int(max_points), 1)
+    if da.size <= cap:
         return {d: -1 for d in da.dims}
 
     plan: dict[str, int | tuple[int, ...]] = {d: -1 for d in da.dims}
@@ -234,11 +278,11 @@ def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int | tuple[int, ...]]:
 
     if time_dim is not None and da.sizes[time_dim] > 1:
         per_step = max(1, da.size // da.sizes[time_dim])
-        if per_step <= _MAX_POINTS_PER_CHUNK:
+        if per_step <= cap:
             # The ordinary case: one time step's spatial slab fits the budget, so
             # time is the only axis that needs cutting.
             plan[time_dim] = _month_aligned_time_chunks(
-                da, time_dim, max(1, _MAX_POINTS_PER_CHUNK // per_step)
+                da, time_dim, max(1, cap // per_step)
             )
             return plan
         # A single time step already busts the budget (a very large grid): take
@@ -249,15 +293,15 @@ def _pyesper_chunk_plan(da: xr.DataArray) -> dict[str, int | tuple[int, ...]]:
         if spatial:
             chunk_dim = max(spatial, key=lambda d: da.sizes[d])
             per_slice = max(1, per_step // da.sizes[chunk_dim])
-            plan[chunk_dim] = max(1, _MAX_POINTS_PER_CHUNK // per_slice)
+            plan[chunk_dim] = max(1, cap // per_slice)
         return plan
 
     # No time axis: collapse every dim to one chunk, then split the largest dim
-    # just enough to bring each block down to ~_MAX_POINTS_PER_CHUNK points --
-    # one big axis is enough to cap the block count without fragmenting them all.
+    # just enough to bring each block down to ~`cap` points -- one big axis is
+    # enough to cap the block count without fragmenting them all.
     chunk_dim = max(da.dims, key=lambda d: da.sizes[d])
     per_slice = max(1, da.size // da.sizes[chunk_dim])
-    plan[chunk_dim] = max(1, _MAX_POINTS_PER_CHUNK // per_slice)
+    plan[chunk_dim] = max(1, cap // per_slice)
     return plan
 
 
@@ -371,13 +415,17 @@ def estimate_bgc_fields(
     # ESPER expects depth positive-downward in metres; ROMS layer depths are negative.
     depth_pos = np.abs(depth)
 
-    # Defensive rechunk before the PyESPER call -- see _MAX_POINTS_PER_CHUNK's
+    # Defensive rechunk before the PyESPER call -- see _pyesper_point_budget's
     # docstring. temp/salt carry whatever chunking the upstream regrid pipeline
     # left them with (often many small chunks); one plan derived from temp's own
     # shape and time axis is applied to every input so they stay consistently
-    # blocked.
+    # blocked. The ceiling comes from PyESPER's own budget for *this* method and
+    # variable count, so our blocks land inside it and PyESPER does not re-block
+    # them behind our back.
     if hasattr(temp.data, "chunks"):
-        chunk_plan = _pyesper_chunk_plan(temp)
+        chunk_plan = _pyesper_chunk_plan(
+            temp, _pyesper_point_budget(method, len(esper_vars))
+        )
         salt = _apply_chunk_plan(salt, chunk_plan)
         temp = _apply_chunk_plan(temp, chunk_plan)
         lon = _apply_chunk_plan(lon, chunk_plan) if hasattr(lon.data, "chunks") else lon

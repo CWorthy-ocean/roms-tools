@@ -12,6 +12,7 @@ message stub the import out instead, so they run bare.
 """
 
 import copy
+import importlib.util
 import itertools
 import os
 import sys
@@ -19,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 import dask
+import dask.array
 import numpy as np
 import pytest
 import xarray as xr
@@ -38,6 +40,7 @@ from roms_tools.setup.esper import (
     _apply_chunk_plan,
     _decimal_year,
     _pyesper_chunk_plan,
+    _pyesper_point_budget,
     _time_dim,
     estimate_bgc_fields,
     validate_esper_source,
@@ -1231,3 +1234,68 @@ def test_validate_esper_source_checks_the_import_before_any_regridding():
     from roms_tools.setup import esper
 
     assert "_ensure_pyesper" in inspect.getsource(esper.validate_esper_source)
+
+
+# ---------------------------------------------------------------------------
+# Our chunk plan must stay inside PyESPER's own per-chunk budget
+# ---------------------------------------------------------------------------
+
+pyesper_importable = pytest.mark.skipif(
+    importlib.util.find_spec("PyESPER") is None,
+    reason="PyESPER must be importable to compare against its own chunk budget",
+)
+
+
+@pyesper_importable
+@pytest.mark.parametrize("method", ["nn", "lir", "mixed"])
+@pytest.mark.parametrize("n_variables", [1, 2, 6])
+def test_point_budget_matches_pyesper_exactly(method, n_variables):
+    """We must use PyESPER's number, not a constant of our own that tracks it.
+
+    PyESPER rechunks when the largest block it receives *exceeds* its budget, so
+    any independent constant here is one divergence away from silently forcing a
+    rechunk -- which is what a flat 6,000,000 did to `mixed`.
+    """
+    from PyESPER.xr_methods import _max_points_per_chunk
+
+    assert _pyesper_point_budget(method, n_variables) == _max_points_per_chunk(
+        method, n_variables
+    )
+
+
+@pyesper_importable
+@pytest.mark.parametrize("method", ["nn", "lir", "mixed"])
+def test_chunk_plan_never_exceeds_pyesper_budget_on_a_production_ic(method):
+    """A pac-12km initial condition must not come back over PyESPER's cap.
+
+    This is the regression: 962 x 1858 x 100 with `mixed` produced blocks of
+    6,000,000 points against a 5,883,516 cap -- 1.9% over, enough to trigger a
+    rechunk that severed block alignment with the upstream regrid and turned a
+    4-second call into a 10-hour one.
+    """
+    budget = _pyesper_point_budget(method, 6)
+    da = xr.DataArray(
+        dask.array.zeros((100, 962, 1858), chunks=(100, 962, 1858)),
+        dims=("s_rho", "eta_rho", "xi_rho"),
+    )
+
+    plan = _pyesper_chunk_plan(da, budget)
+    sizes = [da.sizes[d] if plan[d] == -1 else plan[d] for d in da.dims]
+    largest_block = 1
+    for n in sizes:
+        largest_block *= n if isinstance(n, int) else max(n)
+
+    assert largest_block <= budget, (
+        f"{method}: plan yields {largest_block:,} points against PyESPER's "
+        f"{budget:,} cap -- PyESPER will rechunk and sever block alignment"
+    )
+
+
+@pyesper_importable
+def test_mixed_gets_a_smaller_budget_than_nn():
+    """`mixed` runs both paths, so it is charged for both and must chunk smaller.
+
+    Pins the asymmetry the bug hid behind: it is precisely why one flat constant
+    cannot serve every method.
+    """
+    assert _pyesper_point_budget("mixed", 6) < _pyesper_point_budget("nn", 6)

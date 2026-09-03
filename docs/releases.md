@@ -11,6 +11,7 @@
 ### Improvements
 
 * Added code so that ETOPO2022 can be used with ROMS-Tools ([#668](https://github.com/CWorthy-ocean/roms-tools/pull/668))
+* `import roms_tools` is about 1.5 seconds faster after the first import in a given environment (about 3.4 s to 1.9 s on a laptop), because the great-circle-distance and distance-to-land numba kernels are now loaded from numba's on-disk cache instead of being recompiled in every process. ([#674](https://github.com/CWorthy-ocean/roms-tools/pull/674))
 
 ### Miscellaneous
 

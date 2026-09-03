@@ -599,6 +599,18 @@ def get_variable_metadata():
             "flux_units": "meq/s",
             "integrated_units": "meq",
         },
+        "CDR_tracer_1": {
+            "long_name": "CDR tracer 1 (alkalinity)",
+            "units": "meq/m^3",
+            "flux_units": "meq/s",
+            "integrated_units": "meq",
+        },
+        "CDR_tracer_2": {
+            "long_name": "CDR tracer 2 (DIC)",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+            "integrated_units": "mmol",
+        },
         "DOC": {
             "long_name": "dissolved organic carbon",
             "units": "mmol/m^3",
@@ -1215,10 +1227,70 @@ MARBL_TRACER_NAMES = (
     "diazFe",
 )
 
+# Non-MARBL CDR suite: ROMS physics tracers (temp, salt) plus two CDR tracers
+# for OAE / DOR with prescribed eta/beta gas exchange.
+CDR_SIMPLE_TRACER_NAMES = (
+    "temp",
+    "salt",
+    "CDR_tracer_1",
+    "CDR_tracer_2",
+)
+
+TracerSet = Literal["marbl", "cdr_simple"]
+
+
+def resolve_tracer_names(
+    *,
+    include_bgc: bool = True,
+    tracer_set: TracerSet | None = None,
+) -> list[str]:
+    """Return tracer names for a schema.
+
+    Parameters
+    ----------
+    include_bgc : bool, optional
+        Used when ``tracer_set`` is ``None`` or ``"marbl"``. If True (default),
+        returns the full MARBL list; if False, returns only ``temp`` and ``salt``.
+    tracer_set : {"marbl", "cdr_simple"}, optional
+        Explicit CDR/river tracer schema. ``"cdr_simple"`` returns ``temp``,
+        ``salt``, and the two non-MARBL CDR tracers. When omitted, ``include_bgc``
+        selects the MARBL subset.
+    """
+    if tracer_set == "cdr_simple":
+        return list(CDR_SIMPLE_TRACER_NAMES)
+    if tracer_set == "marbl" or tracer_set is None:
+        return list(MARBL_TRACER_NAMES) if include_bgc else ["temp", "salt"]
+    raise ValueError(
+        f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_simple".'
+    )
+
+
+def get_tracer_defaults_for_set(tracer_set: TracerSet = "marbl") -> dict[str, float]:
+    """Return default concentrations for the requested tracer schema.
+
+    For ``"marbl"``, values come from ``river_tracer_defaults.nc``.
+    For ``"cdr_simple"``, ``temp`` / ``salt`` use the same physics defaults as
+    MARBL; ``CDR_tracer_1`` / ``CDR_tracer_2`` default to ``0.0``.
+    """
+    if tracer_set == "cdr_simple":
+        marbl_defaults = get_tracer_defaults()
+        return {
+            "temp": marbl_defaults["temp"],
+            "salt": marbl_defaults["salt"],
+            "CDR_tracer_1": 0.0,
+            "CDR_tracer_2": 0.0,
+        }
+    if tracer_set == "marbl":
+        return get_tracer_defaults()
+    raise ValueError(
+        f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_simple".'
+    )
+
 
 def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    tracer_set: TracerSet | None = None,
 ):
     """Generate a dictionary containing metadata for model tracers.
 
@@ -1230,9 +1302,13 @@ def get_tracer_metadata_dict(
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
+        Ignored when ``tracer_set="cdr_simple"``.
 
     unit_type : str
         One of "concentration" (default), "flux", or "integrated".
+
+    tracer_set : {"marbl", "cdr_simple"}, optional
+        Tracer schema. Defaults to MARBL behavior via ``include_bgc``.
 
     Returns
     -------
@@ -1240,10 +1316,7 @@ def get_tracer_metadata_dict(
         A dictionary where keys are tracer names and values are dictionaries
         containing 'units' and 'long_name' for each tracer.
     """
-    if include_bgc:
-        tracer_names = list(MARBL_TRACER_NAMES)
-    else:
-        tracer_names = ["temp", "salt"]
+    tracer_names = resolve_tracer_names(include_bgc=include_bgc, tracer_set=tracer_set)
 
     metadata = get_variable_metadata()
 
@@ -1264,7 +1337,12 @@ def get_tracer_metadata_dict(
     return tracer_dict
 
 
-def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
+def add_tracer_metadata_to_ds(
+    ds,
+    include_bgc=True,
+    with_flux_units=False,
+    tracer_set: TracerSet | None = None,
+):
     """Adds tracer metadata to a dataset.
 
     This function adds tracer metadata (name, unit, long name) as coordinates to
@@ -1277,17 +1355,24 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
+        Ignored when ``tracer_set="cdr_simple"``.
     with_flux_units : bool, optional
         If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
         If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
+    tracer_set : {"marbl", "cdr_simple"}, optional
+        Tracer schema. Defaults to MARBL behavior via ``include_bgc``.
 
     Returns
     -------
     xarray.Dataset
         The dataset with added tracer metadata.
     """
-    unit_type = "flux" if with_flux_units else "concentration"
-    tracer_dict = get_tracer_metadata_dict(include_bgc, unit_type=unit_type)
+    unit_type: Literal["concentration", "flux", "integrated"] = (
+        "flux" if with_flux_units else "concentration"
+    )
+    tracer_dict = get_tracer_metadata_dict(
+        include_bgc, unit_type=unit_type, tracer_set=tracer_set
+    )
 
     tracer_names = list(tracer_dict.keys())
     tracer_units = [tracer_dict[tracer]["units"] for tracer in tracer_names]

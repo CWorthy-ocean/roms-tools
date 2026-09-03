@@ -1227,8 +1227,11 @@ MARBL_TRACER_NAMES = (
     "diazFe",
 )
 
-# Two-tracer suite for non-MARBL CDR (OAE / DOR) with prescribed eta/beta gas exchange.
+# Non-MARBL CDR suite: ROMS physics tracers (temp, salt) plus two CDR tracers
+# for OAE / DOR with prescribed eta/beta gas exchange.
 CDR_SIMPLE_TRACER_NAMES = (
+    "temp",
+    "salt",
     "CDR_tracer_1",
     "CDR_tracer_2",
 )
@@ -1249,8 +1252,9 @@ def resolve_tracer_names(
         Used when ``tracer_set`` is ``None`` or ``"marbl"``. If True (default),
         returns the full MARBL list; if False, returns only ``temp`` and ``salt``.
     tracer_set : {"marbl", "cdr_simple"}, optional
-        Explicit CDR/river tracer schema. ``"cdr_simple"`` returns the two-tracer
-        non-MARBL suite. When omitted, ``include_bgc`` selects the MARBL subset.
+        Explicit CDR/river tracer schema. ``"cdr_simple"`` returns ``temp``,
+        ``salt``, and the two non-MARBL CDR tracers. When omitted, ``include_bgc``
+        selects the MARBL subset.
     """
     if tracer_set == "cdr_simple":
         return list(CDR_SIMPLE_TRACER_NAMES)
@@ -1265,10 +1269,17 @@ def get_tracer_defaults_for_set(tracer_set: TracerSet = "marbl") -> dict[str, fl
     """Return default concentrations for the requested tracer schema.
 
     For ``"marbl"``, values come from ``river_tracer_defaults.nc``.
-    For ``"cdr_simple"``, both tracers default to ``0.0``.
+    For ``"cdr_simple"``, ``temp`` / ``salt`` use the same physics defaults as
+    MARBL; ``CDR_tracer_1`` / ``CDR_tracer_2`` default to ``0.0``.
     """
     if tracer_set == "cdr_simple":
-        return {name: 0.0 for name in CDR_SIMPLE_TRACER_NAMES}
+        marbl_defaults = get_tracer_defaults()
+        return {
+            "temp": marbl_defaults["temp"],
+            "salt": marbl_defaults["salt"],
+            "CDR_tracer_1": 0.0,
+            "CDR_tracer_2": 0.0,
+        }
     if tracer_set == "marbl":
         return get_tracer_defaults()
     raise ValueError(

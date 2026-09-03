@@ -232,8 +232,9 @@ class Release(BaseModel):
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
     tracer_set : {"marbl", "cdr_simple"}, optional
         Tracer schema. ``"marbl"`` (default) uses the full MARBL suite;
-        ``"cdr_simple"`` uses only ``CDR_tracer_1`` (alkalinity) and
-        ``CDR_tracer_2`` (DIC) for non-MARBL OAE/DOR setups.
+        ``"cdr_simple"`` uses ``temp``, ``salt``, ``CDR_tracer_1`` (alkalinity),
+        and ``CDR_tracer_2`` (DIC) for non-MARBL OAE/DOR setups. ROMS still
+        needs ``temp`` / ``salt`` on volume releases; they are not MARBL-only.
     """
 
     name: str
@@ -254,7 +255,7 @@ class Release(BaseModel):
     """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
     tracer_set: TracerSet = "marbl"
     """Tracer schema: ``"marbl"`` (full MARBL suite) or ``"cdr_simple"``
-    (``CDR_tracer_1`` / ``CDR_tracer_2`` for non-MARBL OAE/DOR)."""
+    (``temp``, ``salt``, ``CDR_tracer_1``, ``CDR_tracer_2`` for non-MARBL OAE/DOR)."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
@@ -458,10 +459,11 @@ class VolumeRelease(Release):
             if tracer_name in tracer_concentrations:
                 filled[tracer_name] = tracer_concentrations[tracer_name]
                 continue
-            if tracer_set == "cdr_simple":
-                filled[tracer_name] = 0.0
-            elif tracer_name in ["temp", "salt"]:
+            if tracer_name in ["temp", "salt"]:
+                # Physics tracers always get river/physics defaults (also for cdr_simple).
                 filled[tracer_name] = defaults[tracer_name]
+            elif tracer_set == "cdr_simple":
+                filled[tracer_name] = 0.0
             else:
                 fill_values = info.data["fill_values"]
                 if fill_values == "auto":

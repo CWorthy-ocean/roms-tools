@@ -1070,7 +1070,7 @@ class TestCDRSimpleForcing:
         self.start_time = datetime(2022, 1, 1)
         self.end_time = datetime(2022, 1, 31)
 
-    def test_volume_release_dataset_has_two_tracers(self):
+    def test_volume_release_dataset_has_physics_and_cdr_tracers(self):
         release = VolumeRelease(
             name="oae",
             lat=66.0,
@@ -1078,7 +1078,12 @@ class TestCDRSimpleForcing:
             depth=50.0,
             tracer_set="cdr_simple",
             volume_fluxes=10.0,
-            tracer_concentrations={"CDR_tracer_1": 2000.0, "CDR_tracer_2": 0.0},
+            tracer_concentrations={
+                "temp": 20.0,
+                "salt": 1.0,
+                "CDR_tracer_1": 2000.0,
+                "CDR_tracer_2": 0.0,
+            },
         )
         cdr = CDRForcing(
             start_time=self.start_time,
@@ -1086,14 +1091,19 @@ class TestCDRSimpleForcing:
             releases=[release],
         )
         assert cdr.tracer_set == "cdr_simple"
-        assert cdr.ds.sizes["ntracers"] == 2
-        assert list(cdr.ds.tracer_name.values) == ["CDR_tracer_1", "CDR_tracer_2"]
+        assert cdr.ds.sizes["ntracers"] == 4
+        assert list(cdr.ds.tracer_name.values) == [
+            "temp",
+            "salt",
+            "CDR_tracer_1",
+            "CDR_tracer_2",
+        ]
         assert "cdr_volume" in cdr.ds
         assert "cdr_tracer" in cdr.ds
-        alk = cdr.ds.cdr_tracer.isel(ntracers=0)
-        dic = cdr.ds.cdr_tracer.isel(ntracers=1)
-        assert np.allclose(alk.values, 2000.0)
-        assert np.allclose(dic.values, 0.0)
+        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=0).values, 20.0)
+        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=1).values, 1.0)
+        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=2).values, 2000.0)
+        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=3).values, 0.0)
 
     def test_tracer_perturbation_dor_dataset(self):
         release = TracerPerturbation(
@@ -1109,10 +1119,12 @@ class TestCDRSimpleForcing:
             end_time=self.end_time,
             releases=[release],
         )
-        assert cdr.ds.sizes["ntracers"] == 2
+        assert cdr.ds.sizes["ntracers"] == 4
         assert "cdr_trcflx" in cdr.ds
-        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=0).values, 0.0)
-        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=1).values, -1.0e6)
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=0).values, 0.0)  # temp
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=1).values, 0.0)  # salt
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=2).values, 0.0)  # ALK
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=3).values, -1.0e6)  # DIC
 
     def test_combined_oae_dor_perturbation(self):
         release = TracerPerturbation(
@@ -1128,8 +1140,8 @@ class TestCDRSimpleForcing:
             end_time=self.end_time,
             releases=[release],
         )
-        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=0).values, 1.0e6)
-        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=1).values, -5.0e5)
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=2).values, 1.0e6)
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=3).values, -5.0e5)
 
     def test_roundtrip_yaml_preserves_tracer_set(self, tmp_path):
         grid = Grid(
@@ -1161,8 +1173,10 @@ class TestCDRSimpleForcing:
         restored = CDRForcing.from_yaml(filepath)
         assert restored.tracer_set == "cdr_simple"
         assert restored.releases[0].tracer_set == "cdr_simple"
-        assert restored.ds.sizes["ntracers"] == 2
+        assert restored.ds.sizes["ntracers"] == 4
         assert list(restored.ds.tracer_name.values) == [
+            "temp",
+            "salt",
             "CDR_tracer_1",
             "CDR_tracer_2",
         ]

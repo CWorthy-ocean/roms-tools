@@ -536,20 +536,35 @@ class TestCDRSimpleTracerSet:
             "tracer_set": "cdr_simple",
         }
 
-    def test_volume_release_fills_two_tracers(self):
+    def test_volume_release_fills_physics_and_cdr_tracers(self):
         vr = VolumeRelease(
             **self.params,
             tracer_concentrations={"CDR_tracer_1": 100.0},
         )
-        assert set(vr.tracer_concentrations) == {"CDR_tracer_1", "CDR_tracer_2"}
+        assert set(vr.tracer_concentrations) == {
+            "temp",
+            "salt",
+            "CDR_tracer_1",
+            "CDR_tracer_2",
+        }
         assert vr.tracer_concentrations["CDR_tracer_1"].values == 100.0
         assert vr.tracer_concentrations["CDR_tracer_2"].values == 0.0
+        # temp/salt use physics defaults (not zero)
+        assert vr.tracer_concentrations["temp"].values != 0.0
+        assert vr.tracer_concentrations["salt"].values != 0.0
 
     def test_volume_release_oae(self):
         vr = VolumeRelease(
             **self.params,
-            tracer_concentrations={"CDR_tracer_1": 2000.0, "CDR_tracer_2": 0.0},
+            tracer_concentrations={
+                "temp": 20.0,
+                "salt": 1.0,
+                "CDR_tracer_1": 2000.0,
+                "CDR_tracer_2": 0.0,
+            },
         )
+        assert vr.tracer_concentrations["temp"].values == 20.0
+        assert vr.tracer_concentrations["salt"].values == 1.0
         assert vr.tracer_concentrations["CDR_tracer_1"].values == 2000.0
         assert vr.tracer_concentrations["CDR_tracer_2"].values == 0.0
 
@@ -576,14 +591,21 @@ class TestCDRSimpleTracerSet:
                 tracer_concentrations={"CDR_tracer_1": -1.0},
             )
 
-    def test_tracer_perturbation_fills_two_tracers(self):
+    def test_tracer_perturbation_fills_physics_and_cdr_tracers(self):
         tp = TracerPerturbation(
             **self.params,
             tracer_fluxes={"CDR_tracer_1": 1.0e6},
         )
-        assert set(tp.tracer_fluxes) == {"CDR_tracer_1", "CDR_tracer_2"}
+        assert set(tp.tracer_fluxes) == {
+            "temp",
+            "salt",
+            "CDR_tracer_1",
+            "CDR_tracer_2",
+        }
         assert tp.tracer_fluxes["CDR_tracer_1"].values == 1.0e6
         assert tp.tracer_fluxes["CDR_tracer_2"].values == 0.0
+        assert tp.tracer_fluxes["temp"].values == 0.0
+        assert tp.tracer_fluxes["salt"].values == 0.0
 
     def test_tracer_perturbation_dor(self):
         tp = TracerPerturbation(
@@ -594,9 +616,11 @@ class TestCDRSimpleTracerSet:
         assert tp.tracer_fluxes["CDR_tracer_2"].values == -1.0e6
 
     def test_get_tracer_metadata(self):
+        expected = ["temp", "salt", "CDR_tracer_1", "CDR_tracer_2"]
         meta = VolumeRelease.get_tracer_metadata(tracer_set="cdr_simple")
-        assert list(meta.keys()) == ["CDR_tracer_1", "CDR_tracer_2"]
+        assert list(meta.keys()) == expected
         meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_simple")
-        assert list(meta_flux.keys()) == ["CDR_tracer_1", "CDR_tracer_2"]
+        assert list(meta_flux.keys()) == expected
         assert meta["CDR_tracer_1"]["units"] == "meq/m^3"
         assert meta_flux["CDR_tracer_1"]["units"] == "meq/s"
+        assert meta["temp"]["units"] == "degrees Celsius"

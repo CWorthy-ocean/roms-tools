@@ -1,5 +1,8 @@
 import logging
+import tempfile
 import time
+from pathlib import Path
+from urllib.request import urlopen
 
 import pooch
 
@@ -303,3 +306,167 @@ def download_test_data(filename: str) -> str:
     fname = _fetch(pup_test_data, filename)
 
     return fname
+
+
+# ---------------------------------------------------------------------------
+# World Ocean Atlas 2023
+# ---------------------------------------------------------------------------
+
+#: Root of the NCEI WOA23 netCDF tree.
+WOA23_BASE_URL = "https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA"
+
+#: Internal variable key -> (NCEI directory, decade token, one-letter file code).
+#:
+#: The decade token is the averaging period *over years*, not the period within a
+#: year: ``decav`` pools all years 1955-2022 for T/S, and ``all`` is the equivalent
+#: all-years token for the nutrients and oxygen (1965-2022). The month is carried
+#: entirely by the two-digit suffix on the filename (``01``-``12``; ``00`` is the
+#: annual field). Nutrients and oxygen are published on the 1 degree grid only.
+WOA23_BGC_VARIABLES: dict[str, tuple[str, str, str]] = {
+    "NO3": ("nitrate", "all", "n"),
+    "PO4": ("phosphate", "all", "p"),
+    "SiO3": ("silicate", "all", "i"),
+    "O2": ("oxygen", "all", "o"),
+    "temp_bgc": ("temperature", "decav", "t"),
+    "salt_bgc": ("salinity", "decav", "s"),
+}
+
+#: Grid-resolution suffix for the 1 degree product.
+WOA23_GRID = "01"
+
+
+def woa23_filename(code: str, period: int, decade: str, grid: str = WOA23_GRID) -> str:
+    """Build a WOA23 netCDF filename.
+
+    Parameters
+    ----------
+    code : str
+        One-letter variable code, e.g. ``"n"`` for nitrate.
+    period : int
+        ``0`` for the annual field, ``1``-``12`` for a monthly field.
+    decade : str
+        Over-years averaging token, e.g. ``"decav"`` or ``"all"``.
+    grid : str, optional
+        Grid-resolution suffix; ``"01"`` (1 degree) by default.
+
+    Returns
+    -------
+    str
+        The bare filename, e.g. ``"woa23_all_n01_01.nc"``.
+    """
+    return f"woa23_{decade}_{code}{period:02d}_{grid}.nc"
+
+
+def woa23_url(directory: str, decade: str, filename: str) -> str:
+    """Build the full NCEI download URL for a WOA23 file."""
+    return f"{WOA23_BASE_URL}/{directory}/netcdf/{decade}/1.00/{filename}"
+
+
+def _download_one(url: str, path: Path) -> None:
+    """Download ``url`` to ``path`` atomically, retrying transient failures.
+
+    The file is streamed to a temporary file in the destination directory and
+    then moved into place, so an interrupted download never leaves a truncated
+    file that a later run would mistake for a complete one.
+    """
+    for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                delete=False, dir=str(path.parent), suffix=".part"
+            ) as tmpfile:
+                tmp_path = Path(tmpfile.name)
+                with urlopen(url) as response:
+                    while chunk := response.read(1 << 20):
+                        tmpfile.write(chunk)
+            tmp_path.replace(path)
+            return
+        except OSError as error:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+            if attempt == MAX_DOWNLOAD_ATTEMPTS:
+                raise
+            delay = RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1)
+            logging.warning(
+                "Download of %s failed (attempt %d of %d): %s. Retrying in %.1f s.",
+                url,
+                attempt,
+                MAX_DOWNLOAD_ATTEMPTS,
+                error,
+                delay,
+            )
+            time.sleep(delay)
+
+
+def download_woa23_bgc(
+    target_dir: str | Path | None = None,
+    variables: list[str] | None = None,
+    include_annual: bool = True,
+    ts_decade: str = "decav",
+    clobber: bool = False,
+) -> Path:
+    """Download the WOA23 1 degree BGC climatology into a local directory.
+
+    Fetches the twelve monthly files for each requested variable and, when
+    ``include_annual`` is set, the full-depth annual file as well. The annual
+    files are what :class:`~roms_tools.datasets.lat_lon_datasets.WOABGCDataset`
+    uses to backfill below the monthly depth limits (800 m for the nutrients,
+    1500 m for oxygen and T/S).
+
+    Files already present are left alone unless ``clobber`` is set, so an
+    interrupted download can be resumed by simply calling this again.
+
+    Parameters
+    ----------
+    target_dir : str or Path, optional
+        Destination directory. Defaults to ``pooch.os_cache("roms-tools") / "WOA23"``.
+    variables : list of str, optional
+        Internal variable keys to fetch; defaults to all of
+        :data:`WOA23_BGC_VARIABLES`.
+    include_annual : bool, optional
+        Also fetch the ``*00`` annual files. Required for the ``"annual_blend"``
+        deep-fill mode. Default ``True``.
+    ts_decade : str, optional
+        Over-years averaging token for temperature and salinity. Default
+        ``"decav"`` (all years). WOA23 also offers the 30-year normals
+        ``"decav71A0"``, ``"decav81B0"`` and ``"decav91C0"``. The nutrients are
+        published under ``"all"`` only and ignore this.
+    clobber : bool, optional
+        Re-download files that already exist. Default ``False``.
+
+    Returns
+    -------
+    Path
+        The directory the files were written to.
+    """
+    directory = (
+        Path(target_dir)
+        if target_dir is not None
+        else Path(pooch.os_cache("roms-tools")) / "WOA23"
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+
+    keys = variables if variables is not None else list(WOA23_BGC_VARIABLES)
+    unknown = sorted(set(keys) - set(WOA23_BGC_VARIABLES))
+    if unknown:
+        raise ValueError(
+            f"Unknown WOA23 variable key(s) {unknown}. "
+            f"Valid keys: {sorted(WOA23_BGC_VARIABLES)}."
+        )
+
+    periods = list(range(1, 13)) + ([0] if include_annual else [])
+
+    for key in keys:
+        subdir, decade, code = WOA23_BGC_VARIABLES[key]
+        if key in ("temp_bgc", "salt_bgc"):
+            decade = ts_decade
+        for period in periods:
+            filename = woa23_filename(code, period, decade)
+            path = directory / filename
+            if path.exists() and not clobber:
+                continue
+            url = woa23_url(subdir, decade, filename)
+            logging.info("Downloading %s -> %s", url, path)
+            _download_one(url, path)
+
+    return directory

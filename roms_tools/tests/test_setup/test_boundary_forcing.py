@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 import textwrap
@@ -11,7 +12,7 @@ import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
-from roms_tools import BoundaryForcing, Grid
+from roms_tools import BGCMarbl, BoundaryForcing, BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.boundary_forcing import _interpolate_phys_to_bgc_time
 from roms_tools.setup.utils import _xesmf_available
@@ -37,7 +38,7 @@ requires_xesmf = pytest.mark.skipif(
     ],
 )
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
-    """Test the creation of the BoundaryForcing object."""
+    """Test the creation of the BoundaryForcingSource object."""
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
@@ -72,15 +73,15 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
 
 
 def test_boundary_forcing_creation_with_duplicates(
-    boundary_forcing: BoundaryForcing, use_dask: bool
+    boundary_forcing: BoundaryForcingSource, use_dask: bool
 ) -> None:
-    """Test the creation of the BoundaryForcing object with duplicates in source data
+    """Test the creation of the BoundaryForcingSource object with duplicates in source data
     works as expected.
     """
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
-    boundary_forcing_with_duplicates_in_source_data = BoundaryForcing(
+    boundary_forcing_with_duplicates_in_source_data = BoundaryForcingSource(
         grid=boundary_forcing.grid,
         start_time=boundary_forcing.start_time,
         end_time=boundary_forcing.end_time,
@@ -103,7 +104,7 @@ def test_boundary_forcing_creation_with_duplicates(
     ],
 )
 def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
-    """Test the creation of the BoundaryForcing object."""
+    """Test the creation of the BoundaryForcingSource object."""
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
@@ -114,49 +115,139 @@ def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
         k in boundary_forcing.boundaries for k in ["south", "east", "north", "west"]
     )
 
-    expected_bgc_variables = [
-        "PO4",
-        "NO3",
-        "SiO3",
-        "NH4",
-        "Fe",
-        "Lig",
-        "O2",
-        "DIC",
-        "DIC_ALT_CO2",
-        "ALK",
-        "ALK_ALT_CO2",
-        "DOC",
-        "DON",
-        "DOP",
-        "DOCr",
-        "DONr",
-        "DOPr",
-        "zooC",
-        "spChl",
-        "spC",
-        "spP",
-        "spFe",
-        "spCaCO3",
-        "diatChl",
-        "diatC",
-        "diatP",
-        "diatFe",
-        "diatSi",
-        "diazChl",
-        "diazC",
-        "diazP",
-        "diazFe",
+    # The forcing object now contains only the source's own (regridded) variables;
+    # MARBL derivation/fill is done separately by BGCMarbl.process_bgc_fields().
+    # Every present BGC variable must be a recognised MARBL name (tracer or the
+    # interpretable CHL input), and the core nutrients must always be present.
+    known = BGCMarbl().known_vars()
+    active_dirs = [
+        d for d in ["south", "east", "north", "west"] if boundary_forcing.boundaries[d]
     ]
-
-    for direction in ["south", "east", "north", "west"]:
-        if boundary_forcing.boundaries[direction]:
-            for var in expected_bgc_variables:
-                assert f"{var}_{direction}" in boundary_forcing.ds
+    core = {"PO4", "NO3", "SiO3", "O2", "DIC", "ALK"}
+    for direction in active_dirs:
+        present = {
+            str(v)[: -(len(direction) + 1)]
+            for v in boundary_forcing.ds.data_vars
+            if str(v).endswith(f"_{direction}")
+        }
+        present_bgc = {p for p in present if p in known}
+        assert present_bgc, f"no BGC variables on {direction} boundary"
+        assert present_bgc <= known
+        assert core <= present_bgc
 
     assert len(boundary_forcing.ds.bry_time) == 12
     assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
     assert hasattr(boundary_forcing.ds, "climatology")
+
+
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
+    ],
+)
+def test_process_bgc_fields_completes_boundary(boundary_forcing_fixture, request):
+    """BGCMarbl.process_bgc_fields() fills the full MARBL tracer set and drops CHL."""
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
+
+    # Work on a copy so the session-scoped fixture is not mutated.
+    bf = copy.copy(boundary_forcing)
+    bf.ds = boundary_forcing.ds.copy(deep=True)
+
+    result = BGCMarbl().process_bgc_fields(bf)
+    assert result is bf
+
+    marbl = BGCMarbl()
+    active_dirs = [d for d in ["south", "east", "north", "west"] if bf.boundaries[d]]
+    for direction in active_dirs:
+        for var in marbl.tracer_vars():
+            assert f"{var}_{direction}" in bf.ds, f"{var}_{direction} missing"
+        # CHL is consumed during expansion and must not remain.
+        assert f"CHL_{direction}" not in bf.ds
+
+
+def _small_bgc_grid():
+    return Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+
+
+def test_bgc_constants_source(use_dask):
+    """A constants BGC source broadcasts each value onto the boundary grid."""
+    bf = BoundaryForcingSource(
+        grid=_small_bgc_grid(),
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"name": "constants", "constants": {"Fe": 3.0e-3}},
+        type="bgc",
+        use_dask=use_dask,
+    )
+    active = [d for d in ["south", "east", "north", "west"] if bf.boundaries[d]]
+    for d in active:
+        assert f"Fe_{d}" in bf.ds
+        assert "s_rho" in bf.ds[f"Fe_{d}"].dims
+        assert np.allclose(bf.ds[f"Fe_{d}"].values, 3.0e-3)
+    # Two bracketing time records for a static source.
+    assert len(bf.ds.bry_time) == 2
+
+    # Fe is a key field: BGCMarbl derives Lig (= Fe * 3) into this object.
+    BGCMarbl().process_bgc_fields(bf)
+    for d in active:
+        assert np.allclose(bf.ds[f"Lig_{d}"].values, 3.0 * 3.0e-3)
+
+
+def test_bgc_constants_source_requires_mapping(use_dask):
+    with pytest.raises(ValueError, match="non-empty 'constants' mapping"):
+        BoundaryForcingSource(
+            grid=_small_bgc_grid(),
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            source={"name": "constants"},
+            type="bgc",
+            use_dask=use_dask,
+        )
+
+
+def test_use_vars_downselects_source_variables(use_dask):
+    """use_vars keeps only the requested variables present in the source."""
+    bf = BoundaryForcingSource(
+        grid=_small_bgc_grid(),
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"name": "constants", "constants": {"Fe": 3.0e-3, "NO3": 24.0}},
+        type="bgc",
+        use_vars=["Fe"],
+        use_dask=use_dask,
+    )
+    active = [d for d in ["south", "east", "north", "west"] if bf.boundaries[d]]
+    for d in active:
+        assert f"Fe_{d}" in bf.ds
+        assert f"NO3_{d}" not in bf.ds  # down-selected out
+
+
+def test_use_vars_absent_variable_raises(use_dask):
+    """use_vars errors if a requested variable is not present in the source data."""
+    with pytest.raises(ValueError, match="use_vars requested variable"):
+        BoundaryForcingSource(
+            grid=_small_bgc_grid(),
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            source={"name": "constants", "constants": {"Fe": 3.0e-3}},
+            type="bgc",
+            use_vars=["ALK"],  # not provided by this constants source
+            use_dask=use_dask,
+        )
 
 
 def _assert_no_nan_in_boundary_fields(boundary_forcing):
@@ -210,7 +301,7 @@ def test_boundary_forcing_creation_on_sparse_source(
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
-    bf = BoundaryForcing(
+    bf = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
@@ -222,7 +313,7 @@ def test_boundary_forcing_creation_on_sparse_source(
 
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
 
-    bf_bgc = BoundaryForcing(
+    bf_bgc = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
@@ -240,7 +331,7 @@ def test_start_time_end_time_error(use_dask):
     with pytest.raises(
         ValueError, match="Both `start_time` and `end_time` must be provided together"
     ):
-        BoundaryForcing(
+        BoundaryForcingSource(
             grid=None,
             start_time=datetime(2022, 1, 1),
             end_time=None,  # end_time is None, should raise an error
@@ -252,7 +343,7 @@ def test_start_time_end_time_error(use_dask):
     with pytest.raises(
         ValueError, match="Both `start_time` and `end_time` must be provided together"
     ):
-        BoundaryForcing(
+        BoundaryForcingSource(
             grid=None,
             start_time=None,  # start_time is None, should raise an error
             end_time=datetime(2022, 1, 2),
@@ -282,7 +373,7 @@ def test_start_time_end_time_warning(use_dask, caplog):
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
     with caplog.at_level(logging.INFO):
-        BoundaryForcing(
+        BoundaryForcingSource(
             grid=grid,
             start_time=None,
             end_time=None,
@@ -325,14 +416,14 @@ def test_boundary_divided_by_land_no_smearing(use_dask, monkeypatch):
 
     # Default (xESMF) path: masked weights ignore land source cells, so no
     # smearing across Iceland; build must succeed with NaN-free boundaries.
-    bf_xesmf = BoundaryForcing(**kwargs)
+    bf_xesmf = BoundaryForcingSource(**kwargs)
     _assert_no_nan_in_boundary_fields(bf_xesmf)
 
     # scipy nearest-neighbor pre-fill fallback path: also NaN-free, no smearing.
     monkeypatch.setattr(
         "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
     )
-    bf_fallback = BoundaryForcing(**kwargs)
+    bf_fallback = BoundaryForcingSource(**kwargs)
     _assert_no_nan_in_boundary_fields(bf_fallback)
 
 
@@ -362,8 +453,8 @@ def test_prefill_is_noop_when_no_fill_needed(use_dask, monkeypatch):
         "use_dask": use_dask,
     }
 
-    bf_no_prefill = BoundaryForcing(**kwargs, prefill=None)
-    bf_2d_fill = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    bf_no_prefill = BoundaryForcingSource(**kwargs, prefill=None)
+    bf_2d_fill = BoundaryForcingSource(**kwargs, prefill="2d_lateral_fill")
 
     xr.testing.assert_allclose(bf_no_prefill.ds, bf_2d_fill.ds, rtol=1.0e-4)
 
@@ -390,8 +481,8 @@ def test_xesmf_matches_scipy_within_tolerance(use_dask):
         "use_dask": use_dask,
     }
 
-    bf_xesmf = BoundaryForcing(**kwargs, regrid_method="xesmf")
-    bf_scipy = BoundaryForcing(**kwargs, regrid_method="scipy")
+    bf_xesmf = BoundaryForcingSource(**kwargs, regrid_method="xesmf")
+    bf_scipy = BoundaryForcingSource(**kwargs, regrid_method="scipy")
 
     # The two engines use different algorithms (xESMF spherical masked bilinear vs
     # scipy rectilinear interpn), so they agree only to a few percent. An atol is
@@ -401,7 +492,7 @@ def test_xesmf_matches_scipy_within_tolerance(use_dask):
 
 
 def _coarse_glorys_kwargs(use_dask):
-    """Common kwargs for a small coarse-GLORYS BoundaryForcing (has land)."""
+    """Common kwargs for a small coarse-GLORYS BoundaryForcingSource (has land)."""
     grid = Grid(
         nx=5, ny=5, size_x=500, size_y=500, center_lon=-10, center_lat=65, rot=0
     )
@@ -429,7 +520,7 @@ def _coarse_glorys_kwargs(use_dask):
 )
 def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
     """Every prefill method runnable with released xESMF yields NaN-free boundaries."""
-    bf = BoundaryForcing(**_coarse_glorys_kwargs(use_dask), prefill=prefill)
+    bf = BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask), prefill=prefill)
     _assert_no_nan_in_boundary_fields(bf)
 
 
@@ -439,23 +530,25 @@ def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
 )
 def test_regrid_method_produces_nan_free_boundaries(use_dask, regrid_method):
     """The regrid engine can be chosen independently of prefill; all are NaN-free."""
-    bf = BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method)
+    bf = BoundaryForcingSource(
+        **_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method
+    )
     _assert_no_nan_in_boundary_fields(bf)
 
 
 def test_regrid_method_invalid_raises(use_dask):
     with pytest.raises(ValueError, match="regrid_method"):
-        BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method="bogus")
+        BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask), regrid_method="bogus")
 
 
 def test_invalid_extrap_method_raises(use_dask):
     with pytest.raises(ValueError, match="extrap_method"):
-        BoundaryForcing(**_coarse_glorys_kwargs(use_dask), extrap_method="bogus")
+        BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask), extrap_method="bogus")
 
 
 def test_invalid_extrap_kwargs_raises(use_dask):
     with pytest.raises(ValueError, match="extrap_kwargs"):
-        BoundaryForcing(
+        BoundaryForcingSource(
             **_coarse_glorys_kwargs(use_dask),
             extrap_method="inverse_dist",
             extrap_kwargs={"bogus": 1},
@@ -467,7 +560,7 @@ def test_regrid_method_xesmf_requires_xesmf(use_dask, monkeypatch):
         "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
     )
     with pytest.raises(ImportError, match="xESMF"):
-        BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method="xesmf")
+        BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask), regrid_method="xesmf")
 
 
 def test_scipy_2d_lateral_fill_matches_legacy_amg(use_dask):
@@ -475,12 +568,12 @@ def test_scipy_2d_lateral_fill_matches_legacy_amg(use_dask):
     AMG+scipy path byte-for-byte (decoupled engine, appropriate inputs).
     """
     kwargs = _coarse_glorys_kwargs(use_dask)
-    bf_scipy = BoundaryForcing(
+    bf_scipy = BoundaryForcingSource(
         **kwargs, prefill="2d_lateral_fill", regrid_method="scipy"
     )
     # The deprecated flag mapped to prefill only -> default 'auto' engine (xESMF
     # here), so it differs from the scipy build but must still be NaN-free.
-    bf_default = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    bf_default = BoundaryForcingSource(**kwargs, prefill="2d_lateral_fill")
     _assert_no_nan_in_boundary_fields(bf_scipy)
     _assert_no_nan_in_boundary_fields(bf_default)
 
@@ -490,19 +583,19 @@ def test_apply_2d_horizontal_fill_deprecation_maps_to_prefill(use_dask, flag, ex
     """The deprecated bool warns and maps to the equivalent ``prefill``."""
     kwargs = _coarse_glorys_kwargs(use_dask)
     with pytest.warns(DeprecationWarning):
-        bf = BoundaryForcing(**kwargs, apply_2d_horizontal_fill=flag)
+        bf = BoundaryForcingSource(**kwargs, apply_2d_horizontal_fill=flag)
     assert bf.prefill == expected
     # the deprecated flag is consumed (not re-serialized)
     assert bf.apply_2d_horizontal_fill is None
     # produces the same dataset as the explicit prefill spelling
-    bf_explicit = BoundaryForcing(**kwargs, prefill=expected)
+    bf_explicit = BoundaryForcingSource(**kwargs, prefill=expected)
     xr.testing.assert_allclose(bf.ds, bf_explicit.ds, rtol=1e-12, atol=1e-13)
 
 
 def test_prefill_and_deprecated_flag_conflict_raises(use_dask):
     kwargs = _coarse_glorys_kwargs(use_dask)
     with pytest.raises(ValueError, match="not both"):
-        BoundaryForcing(
+        BoundaryForcingSource(
             **kwargs, prefill="2d_lateral_fill", apply_2d_horizontal_fill=True
         )
 
@@ -510,7 +603,7 @@ def test_prefill_and_deprecated_flag_conflict_raises(use_dask):
 def test_invalid_prefill_value_raises(use_dask):
     kwargs = _coarse_glorys_kwargs(use_dask)
     with pytest.raises(ValueError, match="not supported"):
-        BoundaryForcing(**kwargs, prefill="bogus_method")
+        BoundaryForcingSource(**kwargs, prefill="bogus_method")
 
 
 def test_xesmf_only_prefill_requires_xesmf(use_dask, monkeypatch):
@@ -520,39 +613,39 @@ def test_xesmf_only_prefill_requires_xesmf(use_dask, monkeypatch):
     )
     kwargs = _coarse_glorys_kwargs(use_dask)
     with pytest.raises(ImportError, match="xESMF"):
-        BoundaryForcing(**kwargs, prefill="inverse_dist")
+        BoundaryForcingSource(**kwargs, prefill="inverse_dist")
 
 
 def test_extrap_method_ignored_when_prefill_set(use_dask, caplog):
     """Setting extrap_method alongside a prefill logs an info note and is ignored."""
     kwargs = _coarse_glorys_kwargs(use_dask)
     with caplog.at_level(logging.INFO):
-        bf = BoundaryForcing(
+        bf = BoundaryForcingSource(
             **kwargs, prefill="2d_lateral_fill", extrap_method="nearest_s2d"
         )
     assert any("ignored because prefill" in r.message for r in caplog.records)
     # extrap_method has no effect: identical to the build without it
-    bf_no_extrap = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    bf_no_extrap = BoundaryForcingSource(**kwargs, prefill="2d_lateral_fill")
     xr.testing.assert_allclose(bf.ds, bf_no_extrap.ds, rtol=1e-12, atol=1e-13)
 
 
 def test_prefill_yaml_round_trip(use_dask, tmp_path):
     """New YAML emits ``prefill`` (not the deprecated flag) and round-trips."""
     kwargs = _coarse_glorys_kwargs(use_dask)
-    bf = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    bf = BoundaryForcingSource(**kwargs, prefill="2d_lateral_fill")
     fp = tmp_path / "bf.yaml"
     bf.to_yaml(fp)
     text = fp.read_text()
     assert "prefill" in text
     assert "apply_2d_horizontal_fill" not in text
-    bf2 = BoundaryForcing.from_yaml(fp, use_dask=use_dask)
+    bf2 = BoundaryForcingSource.from_yaml(fp, use_dask=use_dask)
     xr.testing.assert_allclose(bf.ds, bf2.ds, rtol=1e-12, atol=1e-13)
 
 
 def test_old_yaml_with_apply_2d_horizontal_fill_still_loads(use_dask, tmp_path):
     """A legacy YAML setting ``apply_2d_horizontal_fill`` loads and maps to prefill."""
     kwargs = _coarse_glorys_kwargs(use_dask)
-    bf = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    bf = BoundaryForcingSource(**kwargs, prefill="2d_lateral_fill")
     fp = tmp_path / "bf.yaml"
     bf.to_yaml(fp)
 
@@ -570,7 +663,7 @@ def test_old_yaml_with_apply_2d_horizontal_fill_still_loads(use_dask, tmp_path):
     fp.write_text("\n".join(new_lines) + "\n")
 
     with pytest.warns(DeprecationWarning):
-        bf_old = BoundaryForcing.from_yaml(fp, use_dask=use_dask)
+        bf_old = BoundaryForcingSource.from_yaml(fp, use_dask=use_dask)
     assert bf_old.prefill == "2d_lateral_fill"
     xr.testing.assert_allclose(bf.ds, bf_old.ds, rtol=1e-12, atol=1e-13)
 
@@ -600,12 +693,19 @@ def test_correct_depth_coords_zero_zeta(boundary_forcing_fixture, request, use_d
 def test_computed_missing_optional_fields(
     bgc_boundary_forcing_from_unified_climatology,
 ):
-    ds = bgc_boundary_forcing_from_unified_climatology.ds
+    bf_fixture = bgc_boundary_forcing_from_unified_climatology
+
+    # Missing tracers are filled by BGCMarbl.process_bgc_fields(), not at
+    # construction time.  Work on a copy so the session fixture is not mutated.
+    bf = copy.copy(bf_fixture)
+    bf.ds = bf_fixture.ds.copy(deep=True)
+    BGCMarbl().process_bgc_fields(bf)
+    ds = bf.ds
 
     # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
 
     for direction in ["south", "east", "north", "west"]:
-        if bgc_boundary_forcing_from_unified_climatology.boundaries[direction]:
+        if bf.boundaries[direction]:
             # 'DOCr' was missing in the source data and should have been filled with a constant default value
             assert np.allclose(
                 ds[f"DOCr_{direction}"].std(), 0.0, rtol=1e-10, atol=1e-10
@@ -748,7 +848,7 @@ def test_bgc_boundary_forcing_save(boundary_forcing_fixture, tmp_path, request):
     ],
 )
 def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
-    """Test that creating a BoundaryForcing object, saving its parameters to yaml file,
+    """Test that creating a BoundaryForcingSource object, saving its parameters to yaml file,
     and re-opening yaml file creates the same object.
     """
     bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
@@ -761,7 +861,9 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
     ]:  # test for Path object and str
         bdry_forcing.to_yaml(filepath)
 
-        bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
+        bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+            filepath, use_dask=use_dask
+        )
 
         assert bdry_forcing == bdry_forcing_from_file
 
@@ -776,7 +878,9 @@ def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
 
     boundary_forcing.to_yaml(yaml_filepath)
     boundary_forcing.save(filepath1, group=True)
-    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
+    bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+        yaml_filepath, use_dask=use_dask
+    )
     bdry_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -811,7 +915,9 @@ def test_files_have_same_hash_clim(bdry_forcing_fixture, tmp_path, use_dask, req
 
     bgc_boundary_forcing.to_yaml(yaml_filepath)
     bgc_boundary_forcing.save(filepath1, group=True)
-    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
+    bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+        yaml_filepath, use_dask=use_dask
+    )
     bdry_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -882,7 +988,7 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
     with mock.patch.dict(
         os.environ, {"PYDEVD_WARN_EVALUATION_TIMEOUT": "90"}, clear=True
     ):
-        bf = BoundaryForcing(
+        bf = BoundaryForcingSource(
             grid=tiny_grid,
             source={"name": "GLORYS"},
             type="physics",
@@ -914,7 +1020,7 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
         tmp_path, grid, start_time
     )
 
-    bf_from_regional = BoundaryForcing(
+    bf_from_regional = BoundaryForcingSource(
         grid=grid,
         source={"name": "GLORYS", "path": str(regional_file)},
         type="physics",
@@ -923,7 +1029,7 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
         prefill="2d_lateral_fill",
         use_dask=use_dask,
     )
-    bf_from_bigger_regional = BoundaryForcing(
+    bf_from_bigger_regional = BoundaryForcingSource(
         grid=grid,
         source={"name": "GLORYS", "path": str(bigger_regional_file)},
         type="physics",
@@ -957,7 +1063,7 @@ def test_nondefault_glorys_dataset_loading(small_grid: Grid, use_dask: bool) -> 
     with mock.patch.dict(
         os.environ, {"PYDEVD_WARN_EVALUATION_TIMEOUT": "90"}, clear=True
     ):
-        bf = BoundaryForcing(
+        bf = BoundaryForcingSource(
             grid=small_grid,
             source={
                 "name": "GLORYS",
@@ -1008,7 +1114,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
     fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
-    physics_bc = BoundaryForcing(
+    physics_bc = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 1, 2),
@@ -1018,7 +1124,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         use_dask=use_dask,
     )
 
-    bgc_bc = BoundaryForcing(
+    bgc_bc = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 1, 2),
@@ -1050,7 +1156,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         str(v).startswith(("temp_", "salt_")) for v in bgc_src.data_vars
     )
 
-    bgc_bc_depth = BoundaryForcing(
+    bgc_bc_depth = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 1, 2),
@@ -1077,7 +1183,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
             break
 
     # MLD-anchored interpolation: builds, produces BGC vars, and never leaks T/S.
-    bgc_bc_mld = BoundaryForcing(
+    bgc_bc_mld = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 1, 2),
@@ -1145,7 +1251,7 @@ def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
         hc=250.0,
     )
     with pytest.raises(ValueError, match="bgc_interpolation_method"):
-        BoundaryForcing(
+        BoundaryForcingSource(
             grid=grid,
             start_time=datetime(2012, 1, 1),
             end_time=datetime(2012, 1, 2),
@@ -1160,7 +1266,7 @@ def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
 def test_physics_forcing_survives_yaml_roundtrip(
     bgc_boundary_forcing_from_unified_density, tmp_path, use_dask
 ):
-    """A density BGC BoundaryForcing must round-trip through YAML with its companion
+    """A density BGC BoundaryForcingSource must round-trip through YAML with its companion
     physics_forcing intact, so the reloaded object stays in density space (instead of
     silently falling back to depth interpolation).
     """
@@ -1168,7 +1274,7 @@ def test_physics_forcing_survives_yaml_roundtrip(
     filepath = tmp_path / "density_bc.yaml"
     bf.to_yaml(filepath)
 
-    reloaded = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
+    reloaded = BoundaryForcingSource.from_yaml(filepath, use_dask=use_dask)
 
     # physics_forcing must survive serialization and be reconstructed.
     assert reloaded.physics_forcing is not None
@@ -1219,3 +1325,129 @@ def test_interpolate_phys_to_bgc_time_nearest_cyclic_wraps():
 
     out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=True)
     np.testing.assert_array_equal(out.values, [3.0])
+
+
+def test_bgc_source_names_match_the_dataset_map():
+    """Construction-time validation and load-time lookup must accept the same names.
+
+    Regression: a shared `BGC_DATASET_NAMES` constant unioned the source names that
+    `InitialConditions` and `BoundaryForcing` support. `_input_checks` validated
+    against that union while `_get_data` looked up a per-class dataset map, so
+    `BoundaryForcing` accepted a `"ROMS"` BGC source at construction and then rejected
+    it later with a *different* list of valid options. Both now read one map, so they
+    cannot disagree.
+    """
+    from roms_tools.setup.boundary_forcing import _BGC_SOURCE_NAMES, _DATASET_MAP
+
+    assert _BGC_SOURCE_NAMES == frozenset(_DATASET_MAP["bgc"]) | {"constants", "ESPER"}
+    # Boundary data from a parent ROMS run is the nesting workflow, not a BGC source.
+    assert "ROMS" not in _BGC_SOURCE_NAMES
+    assert "ROMS" not in _DATASET_MAP["physics"]
+
+
+def test_roms_bgc_source_is_rejected_with_a_useful_message():
+    """The rejection must happen at construction, naming the real alternative."""
+    from datetime import datetime
+
+    import pytest
+
+    from roms_tools import Grid
+    from roms_tools.setup.boundary_forcing import BoundaryForcingSource
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    with pytest.raises(ValueError, match="nesting"):
+        BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 1, 1),
+            end_time=datetime(2021, 1, 2),
+            type="bgc",
+            source={"name": "ROMS", "path": "restart.nc", "grid": grid},
+            use_dask=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# A static (no-time) BGC source cannot also be a climatology
+# ---------------------------------------------------------------------------
+
+
+def _static_bgc_grid():
+    from roms_tools import Grid
+
+    return Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=-20,
+        center_lat=55,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+
+
+def test_static_bgc_source_rejects_climatology_flag():
+    """`climatology=True` on a source with no time axis must fail loudly, and say why.
+
+    A static source is bracketed to `start_time`/`end_time` by `_bracket_static_time`;
+    it is never cycled over twelve months. Claiming otherwise used to surface far
+    downstream, where `add_time_info_to_ds` builds a 12-element `month` coordinate and
+    xarray raises `AlignmentError: ... conflicting dimension sizes: {2, 12}` -- naming
+    neither the source nor the offending flag.
+    """
+    from datetime import datetime
+
+    from roms_tools import BoundaryForcingSource
+
+    with pytest.raises(ValueError, match="carries no time axis"):
+        BoundaryForcingSource(
+            grid=_static_bgc_grid(),
+            start_time=datetime(2012, 1, 30),
+            end_time=datetime(2012, 2, 1),
+            boundaries={"south": True, "east": False, "north": False, "west": False},
+            source={
+                "name": "constants",
+                "constants": {"ALK": 2300.0},
+                "climatology": True,
+            },
+            type="bgc",
+            use_dask=False,
+            bypass_validation=True,
+        )
+
+
+def test_static_bgc_source_without_the_flag_still_brackets():
+    """The control: the same source minus the flag still builds.
+
+    It gets the two bracketing records ROMS interpolates between.
+    """
+    from datetime import datetime
+
+    from roms_tools import BoundaryForcingSource
+
+    bf = BoundaryForcingSource(
+        grid=_static_bgc_grid(),
+        start_time=datetime(2012, 1, 30),
+        end_time=datetime(2012, 2, 1),
+        boundaries={"south": True, "east": False, "north": False, "west": False},
+        source={"name": "constants", "constants": {"ALK": 2300.0}},
+        type="bgc",
+        use_dask=False,
+        bypass_validation=True,
+    )
+    assert bf.ds.sizes["bry_time"] == 2

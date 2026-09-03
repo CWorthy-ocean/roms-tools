@@ -1368,7 +1368,9 @@ class WOADataset(LatLonDataset):
     Time units provided in WOA datasets are not decoded by xarray, so `decode_times` is set to `False` when reading data.
     """
 
-    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+    # Annotated `int | None` (like `LatLonDataset`) rather than `int` so the
+    # `WOABGCDataset` subclass can override it with None; see its own comment.
+    _default_lateral_dask_chunk: ClassVar[int | None] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     needs_lateral_fill: bool = True
     has_encoded_times: bool = False
@@ -1413,6 +1415,338 @@ class WOADataset(LatLonDataset):
         self.dim_names["time"] = "time"
 
         return ds
+
+
+@dataclass(kw_only=True)
+class WOABGCDataset(WOADataset):
+    """World Ocean Atlas 2023 nutrients and oxygen as a gridded BGC source.
+
+    Reads a directory of per-variable, per-month WOA23 netCDF files and merges them
+    into one twelve-month climatology carrying the four BGC tracers WOA measures
+    (``NO3``, ``PO4``, ``SiO3``, ``O2``) plus the temperature and salinity used to
+    convert units and to build the density coordinate for ``"density"`` /
+    ``"density_mld"`` vertical interpolation.
+
+    WOA has no DIC, alkalinity or iron, so this source cannot satisfy MARBL on its
+    own; combine it with GLODAP, ESPER or a constants source via ``bgc_sources``.
+
+    Notes
+    -----
+    **Resolution.** WOA23 publishes nutrients and oxygen on the 1 degree grid only
+    (0.25 degree exists for T/S alone), so everything here is 1 degree.
+
+    **Month pairing.** In the NCEI layout the ``decav``/``all`` token is the
+    averaging period *over years*, not the period within a year; the month is the
+    two-digit filename suffix. Each variable is read from its files in ``01``-``12``
+    order, so index ``k`` is month ``k+1`` for every variable, and monthly tracers are
+    paired with the matching monthly T/S. The raw ``time`` values are dropped before
+    merging because they differ between variable families (January temperature is
+    396.5 "months since 1965-01-01" while January nitrate is 336.5, reflecting the
+    different start years); merging on them would yield a 24-step union axis. The
+    inherited :meth:`WOADataset.clean_up` then installs the shared mid-month axis.
+
+    **Depth.** Monthly WOA fields are shallow: 800 m (43 levels) for the nutrients
+    and 1500 m (57 levels) for oxygen and T/S. Only the annual field is full-depth
+    (5500 m, 102 levels). Since the shallow axes are exact leading slices of the
+    annual axis, each variable is extended to the full 102-level grid according to
+    ``deep_fill``.
+    """
+
+    # Follow the files' own chunking rather than the generic lateral 50. This class
+    # overrides ``load_data`` and opens the NCEI files itself as
+    # ``chunks=self.chunks or {}``, so leaving this None reaches xarray as ``{}`` --
+    # "chunk as stored". 50 fits these files badly: they store lat/lon in 90 x 180
+    # blocks, which 50 divides evenly into neither, so every dask chunk straddled a
+    # stored one -- twenty "specified chunks separate the stored chunks" warnings per
+    # open, and redundant decompression behind them.
+    #
+    # Only safe *because* of that override. On the generic path (``WOADataset``)
+    # None would not mean on-disk: ``_load_data_dask`` substitutes
+    # ``get_dask_chunks()``, whose lateral default is -1.
+    _default_lateral_dask_chunk: ClassVar[int | None] = None
+
+    #: Internal key -> (NCEI directory, decade token, one-letter code, netCDF variable).
+    _woa_files: ClassVar[dict[str, tuple[str, str, str, str]]] = {
+        "NO3": ("nitrate", "all", "n", "n_an"),
+        "PO4": ("phosphate", "all", "p", "p_an"),
+        "SiO3": ("silicate", "all", "i", "i_an"),
+        "O2": ("oxygen", "all", "o", "o_an"),
+        "temp_bgc": ("temperature", "decav", "t", "t_an"),
+        "salt_bgc": ("salinity", "decav", "s", "s_an"),
+    }
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "depth",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "NO3": "n_an",
+            "PO4": "p_an",
+            "SiO3": "i_an",
+            "O2": "o_an",
+        }
+    )
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            # Source temperature/salinity, under the stable internal keys the
+            # pipeline looks for via ``bgc_source_ts``. Used for the umol/kg ->
+            # mmol/m3 conversion and as the source density coordinate; dropped
+            # after vertical regridding, never written to ROMS output.
+            "temp_bgc": "t_an",
+            "salt_bgc": "s_an",
+        }
+    )
+    #: The opt_var_names keys that supply the density-coordinate source.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
+
+    climatology: bool = True
+    needs_lateral_fill: bool = True
+    has_encoded_times: bool = False
+
+    #: Over-years averaging token for T/S. The nutrients have only ``"all"``.
+    ts_decade: str = "decav"
+    #: How to extend the shallow monthly fields to full depth: ``"annual_blend"``
+    #: splices the full-depth annual climatology underneath with a linear taper
+    #: across the seam; ``"ffill"`` persists the deepest monthly value downward.
+    deep_fill: str = "annual_blend"
+    #: Half-width, in metres, of the ``"annual_blend"`` taper band, centred on each
+    #: variable's own deepest monthly level. The default gives 700-900 m for the
+    #: nutrients and 1400-1600 m for oxygen and T/S.
+    deep_blend_halfwidth: float = 100.0
+
+    def __post_init__(self) -> None:
+        if self.deep_fill not in ("ffill", "annual_blend"):
+            raise ValueError(
+                f"`deep_fill` must be 'ffill' or 'annual_blend', got "
+                f"{self.deep_fill!r}."
+            )
+        if self.deep_blend_halfwidth <= 0:
+            raise ValueError(
+                f"`deep_blend_halfwidth` must be positive, got "
+                f"{self.deep_blend_halfwidth!r}."
+            )
+        if not self.filename:
+            from roms_tools.datasets.download import download_woa23_bgc
+
+            self.filename = download_woa23_bgc(
+                include_annual=self.deep_fill == "annual_blend",
+                ts_decade=self.ts_decade,
+            )
+        super().__post_init__()
+
+    def _decade_for(self, key: str, decade: str) -> str:
+        """Return the over-years token to use for ``key``.
+
+        Temperature and salinity honour ``ts_decade``; the nutrients and oxygen are
+        published under a single token and ignore it.
+        """
+        return self.ts_decade if key in self.bgc_source_ts else decade
+
+    def load_data(self) -> xr.Dataset:
+        """Open and merge the per-variable, per-month WOA23 files.
+
+        ``self.filename`` is the **directory** holding the files, as with
+        :class:`GLODAPv2Dataset`. Only the objectively-analyzed ``*_an`` field is
+        read from each file; the eight other statistical fields WOA ships alongside
+        it (``*_mn``, ``*_dd``, ``*_sd``, ...) are never touched.
+        """
+        from roms_tools.datasets.download import woa23_filename
+
+        if isinstance(self.filename, list):
+            raise ValueError(
+                f"WOA expects `filename` to be a single directory, not a list "
+                f"of files (got {len(self.filename)} entries)."
+            )
+        base_dir = Path(self.filename)
+        if not base_dir.is_dir():
+            raise FileNotFoundError(f"WOA directory not found: {base_dir}")
+
+        required = set(self.var_names)
+        wanted = list(self.var_names) + list(self.opt_var_names)
+
+        open_kwargs: dict = {"decode_times": False}
+        if self.use_dask:
+            open_kwargs["chunks"] = self.chunks or {}
+
+        datasets: list[xr.Dataset] = []
+        missing_required: list[str] = []
+        for key in wanted:
+            _subdir, decade, code, file_var = self._woa_files[key]
+            decade = self._decade_for(key, decade)
+
+            monthly_paths = [
+                base_dir / woa23_filename(code, month, decade) for month in range(1, 13)
+            ]
+            absent = [p for p in monthly_paths if not p.exists()]
+            if absent:
+                if key in required:
+                    missing_required.extend(str(p) for p in absent)
+                else:
+                    logging.warning(
+                        "Optional WOA variable %r is incomplete in %s (%d of 12 "
+                        "monthly files missing); density-space BGC interpolation "
+                        "will fall back to depth space.",
+                        key,
+                        base_dir,
+                        len(absent),
+                    )
+                continue
+
+            da = self._open_monthly(monthly_paths, file_var, open_kwargs)
+            da = self._extend_to_full_depth(
+                da, base_dir, code, decade, file_var, open_kwargs
+            )
+            datasets.append(da.to_dataset(name=file_var))
+
+        if missing_required:
+            raise FileNotFoundError(
+                "Required WOA23 files are missing:\n  "
+                + "\n  ".join(sorted(missing_required))
+                + "\nRun roms_tools.datasets.download.download_woa23_bgc() to fetch "
+                "them, or point the source at a directory that already holds them."
+            )
+
+        return xr.merge(datasets)
+
+    def _open_monthly(
+        self, paths: list[Path], file_var: str, open_kwargs: dict
+    ) -> xr.DataArray:
+        """Concatenate one variable's twelve monthly files along a bare time axis.
+
+        The raw ``time`` coordinate is dropped: its values differ between the
+        nutrient and T/S families, so keeping it would make :func:`xarray.merge`
+        build a 24-step union axis instead of aligning the months.
+        """
+        ds = xr.open_mfdataset(
+            paths,
+            concat_dim="time",
+            combine="nested",
+            data_vars="minimal",
+            coords="minimal",
+            compat="override",
+            **open_kwargs,
+        )
+        da = ds[file_var]
+        if da.sizes.get("time") != 12:
+            raise ValueError(
+                f"Expected 12 monthly records for {file_var!r}, got "
+                f"{da.sizes.get('time')}. The WOA directory is incomplete."
+            )
+        return da.drop_vars(
+            [c for c in ("time", "climatology_bounds", "crs") if c in da.coords]
+        )
+
+    def _extend_to_full_depth(
+        self,
+        monthly: xr.DataArray,
+        base_dir: Path,
+        code: str,
+        decade: str,
+        file_var: str,
+        open_kwargs: dict,
+    ) -> xr.DataArray:
+        """Extend a shallow monthly field onto the full-depth annual axis.
+
+        Returns ``monthly`` unchanged when the annual file is unavailable and the
+        mode is ``"ffill"``; otherwise the result spans all 102 standard levels.
+        """
+        from roms_tools.datasets.download import woa23_filename
+
+        annual_path = base_dir / woa23_filename(code, 0, decade)
+        if not annual_path.exists():
+            if self.deep_fill == "annual_blend":
+                logging.warning(
+                    "Annual WOA file %s not found; falling back to 'ffill' for %r. "
+                    "Values below %.0f m will be the deepest monthly value rather "
+                    "than the annual climatology.",
+                    annual_path.name,
+                    file_var,
+                    float(monthly["depth"].max()),
+                )
+            return monthly
+
+        annual = xr.open_dataset(annual_path, **open_kwargs)[file_var]
+        annual = annual.isel(time=0, drop=True)
+
+        seam = float(monthly["depth"].max())
+        # The shallow axis is an exact leading slice of the annual axis, so a plain
+        # reindex places the monthly values on the full grid without interpolating.
+        extended = monthly.reindex(depth=annual["depth"]).ffill("depth")
+
+        if self.deep_fill == "ffill":
+            return extended
+
+        depth = annual["depth"]
+        low = seam - self.deep_blend_halfwidth
+        high = seam + self.deep_blend_halfwidth
+        # 1 above the band (pure monthly), 0 below it (pure annual), linear between.
+        weight = ((high - depth) / (high - low)).clip(0.0, 1.0)
+        return extended * weight + annual * (1.0 - weight)
+
+    def post_process(self) -> None:
+        """Convert the tracers to mmol/m3 and build the land/ocean mask.
+
+        WOA reports nutrients and oxygen in umol/kg, while ROMS expects mmol/m3.
+        The conversion uses TEOS-10 sigma-0 density from the loaded T/S, matching
+        :meth:`GLODAPv2BGCDataset.post_process`. T/S stay in ``self.ds`` so the
+        pipeline can use them as the source density coordinate; it drops them after
+        vertical regridding via ``bgc_source_ts``.
+        """
+        temp_var = self.opt_var_names.get("temp_bgc")
+        salt_var = self.opt_var_names.get("salt_bgc")
+
+        if temp_var in self.ds.data_vars and salt_var in self.ds.data_vars:
+            sigma0 = compute_potential_density(self.ds[temp_var], self.ds[salt_var])
+            density = sigma0 + 1000.0  # kg m-3
+        else:
+            logging.warning(
+                "WOA temperature/salinity unavailable; using a uniform 1025 kg m-3 "
+                "for the umol/kg -> mmol/m3 conversion."
+            )
+            density = 1025.0
+
+        conversion_factor = density / 1000.0
+        for file_var in self.var_names.values():
+            if file_var in self.ds.data_vars:
+                self.ds[file_var] = self.ds[file_var] * conversion_factor
+
+        # apply_lateral_fill() expects self.ds["mask"]. Build it from the NaN
+        # pattern of the first tracer at the surface; extrapolate_deepest_to_bottom()
+        # rebuilds it after the vertical fill pass.
+        first = next(iter(self.var_names.values()))
+        if first in self.ds.data_vars:
+            surface = self.ds[first].isel(
+                {self.dim_names["depth"]: 0, self.dim_names["time"]: 0}, drop=True
+            )
+            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+
+    def extrapolate_deepest_to_bottom(self) -> None:
+        """Fill vertical NaN gaps downward and upward, then rebuild the mask.
+
+        A plain forward fill is not enough: WOA can be NaN at the surface where
+        deeper data exist, and coverage differs between variables, so the mask
+        built from the first tracer can mark a cell as ocean where another tracer
+        is NaN. This mirrors :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
+        """
+        if "depth" not in self.dim_names:
+            return
+        dim = self.dim_names["depth"]
+        for var_name in self.ds.data_vars:
+            if var_name.startswith("mask") or dim not in self.ds[var_name].dims:
+                continue
+            self.ds[var_name] = self.ds[var_name].ffill(dim=dim).bfill(dim=dim)
+
+        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = self.ds[data_vars[0]].isel({dim: 0}, drop=True)
+            if self.dim_names.get("time") in surface.dims:
+                surface = surface.isel({self.dim_names["time"]: 0}, drop=True)
+            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
 
 
 @dataclass(kw_only=True)
@@ -1928,6 +2262,267 @@ class UnifiedBGCDataset(UnifiedDataset):
     bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
 
     climatology: bool = True
+
+
+@dataclass(kw_only=True)
+class GLODAPv2Dataset(LatLonDataset):
+    """GLODAPv2 2016b gridded dataset — one per-variable file per data variable.
+
+    Files are named ``GLODAPv2.2016b.{var}.nc`` and live in the directory given by
+    ``filename``.  Each file holds one variable on a 1° x 1° lat/lon grid with
+    coordinate names ``lat``, ``lon``, and ``Depth``.  There is **no time dimension**;
+    the data represent an observational climatology.
+
+    Parameters
+    ----------
+    filename : str or Path
+        Path to the **directory** that contains the GLODAP 2016b netCDF files.
+    """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+    _file_prefix: ClassVar[str] = "GLODAPv2.2016b"
+
+    needs_lateral_fill: bool = True
+    has_encoded_times: bool = False  # no time coordinate in these files
+
+    def load_data(self) -> xr.Dataset:
+        """Open and merge per-variable GLODAP files from the given directory.
+
+        Each variable named in ``var_names`` / ``opt_var_names`` maps to a file
+        ``{directory}/{prefix}.{file_var_name}.nc``.  Files for optional variables
+        that are not present on disk are silently skipped.  All datasets are merged
+        into one using :func:`xarray.merge`, which is dask-lazy when ``use_dask=True``.
+        """
+        if isinstance(self.filename, list):
+            raise ValueError(
+                f"GLODAP expects `filename` to be a single directory, not a list "
+                f"of files (got {len(self.filename)} entries)."
+            )
+        base_dir = Path(self.filename)
+        if not base_dir.is_dir():
+            raise FileNotFoundError(f"GLODAP directory not found: {base_dir}")
+
+        all_file_vars = set(self.var_names.values()) | set(self.opt_var_names.values())
+        required_file_vars = set(self.var_names.values())
+
+        open_kwargs: dict = {"decode_times": False}
+        if self.use_dask:
+            open_kwargs["chunks"] = self.chunks or {}
+
+        datasets: list[xr.Dataset] = []
+        missing_required: list[str] = []
+        for file_var in sorted(all_file_vars):
+            filepath = base_dir / f"{self._file_prefix}.{file_var}.nc"
+            if not filepath.exists():
+                if file_var in required_file_vars:
+                    missing_required.append(file_var)
+                continue
+            ds_one = xr.open_dataset(filepath, **open_kwargs)
+            # Each GLODAP file carries per-variable metadata arrays (e.g.
+            # Input_mean, SnR) that conflict across files at merge time.
+            # Keep only the target data variable plus the shared 1-D depth
+            # lookup (Depth) so that clean_up() can promote it to a coordinate.
+            keep = [v for v in [file_var, "Depth"] if v in ds_one.data_vars]
+            datasets.append(ds_one[keep])
+
+        if missing_required:
+            raise FileNotFoundError(
+                f"Required GLODAP variable files not found in {base_dir}: "
+                f"{sorted(missing_required)}"
+            )
+        if not datasets:
+            raise FileNotFoundError(
+                f"No GLODAP files found in {base_dir} with prefix '{self._file_prefix}'."
+            )
+
+        return xr.merge(datasets)
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Rename GLODAP native coordinates/variables to roms-tools conventions.
+
+        GLODAP files store the depth grid as a 1-D data variable ``Depth`` on
+        an unlabelled ``depth_surface`` dimension.  This method promotes it to a
+        proper dimension coordinate and renames all axes to the package standard
+        (``latitude``, ``longitude``, ``depth``).
+        """
+        # Promote the 1-D Depth data variable to a dimension coordinate and
+        # rename the underlying dimension from depth_surface → depth.
+        if "Depth" in ds.data_vars:
+            depth_dim = ds["Depth"].dims[0]  # "depth_surface"
+            ds = ds.assign_coords({depth_dim: ds["Depth"].values})
+            ds = ds.drop_vars("Depth")
+            ds = ds.rename({depth_dim: "depth"})
+        # Rename the lat/lon dimension coordinates to package convention.
+        rename = {}
+        if "lon" in ds.coords:
+            rename["lon"] = "longitude"
+        if "lat" in ds.coords:
+            rename["lat"] = "latitude"
+        if rename:
+            ds = ds.rename(rename)
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "depth": "depth",
+        }
+        # Build a preliminary land/ocean mask from the NaN pattern at the
+        # surface depth of the first available data variable.  apply_lateral_fill()
+        # expects self.ds["mask"] to exist.  For GLODAP the mask is rebuilt after
+        # the depth-fill pass in extrapolate_deepest_to_bottom() so that variables
+        # whose shallowest data is below depth[0] are also correctly treated as ocean.
+        data_vars = [v for v in ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = ds[data_vars[0]].isel(depth=0, drop=True)
+            ds["mask"] = xr.where(surface.isnull(), 0, 1)
+        return ds
+
+    def extrapolate_deepest_to_bottom(self) -> None:
+        """Forward- and backward-fill vertical NaN gaps for the sparse GLODAP grid.
+
+        The standard forward (downward) fill is not enough for GLODAP: a variable
+        can be NaN at the surface even when data exists at a deeper level, or two
+        variables can have different surface coverage so the mask (built from the
+        first variable) marks a cell as ocean while a second variable has NaN there.
+
+        This override adds a backward (upward) fill after the forward fill so that
+        the shallowest valid value is propagated to the surface.  The mask is then
+        rebuilt from the first non-mask variable at depth=0 so that apply_lateral_fill()
+        never encounters NaN values at ocean grid points.
+        """
+        if "depth" not in self.dim_names:
+            return
+        dim = self.dim_names["depth"]
+        for var_name in self.ds.data_vars:
+            if dim not in self.ds[var_name].dims:
+                continue
+            self.ds[var_name] = self.ds[var_name].ffill(dim=dim)
+            self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
+
+        # Rebuild the mask now that all variables have surface values wherever
+        # data exists at any depth.
+        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = self.ds[data_vars[0]].isel(depth=0, drop=True)
+            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+
+    @staticmethod
+    def _compute_density(
+        temperature: xr.DataArray,
+        salinity: xr.DataArray,
+    ) -> xr.DataArray:
+        """Compute seawater density from temperature and salinity (dask-lazy).
+
+        Parameters
+        ----------
+        temperature : xr.DataArray
+            In-situ temperature (°C), shape (depth, lat, lon).
+        salinity : xr.DataArray
+            Practical salinity (PSU), shape (depth, lat, lon).
+
+        Returns
+        -------
+        xr.DataArray
+            Density in kg m⁻³, same shape as inputs.
+
+        Notes
+        -----
+        **Placeholder implementation** — returns a spatially uniform value of
+        1025 kg m⁻³ regardless of T/S.  Replace the body of this method with a
+        full equation-of-state (e.g. TEOS-10 via ``gsw``) when available.
+        The placeholder uses :func:`xarray.full_like` so the result is dask-lazy
+        and carries the same chunk structure as the inputs.
+        """
+        return xr.full_like(temperature, 1025.0)
+
+
+@dataclass(kw_only=True)
+class GLODAPv2BGCDataset(GLODAPv2Dataset):
+    """GLODAPv2 2016b mapped to ROMS BGC variable names.
+
+    Loads six core BGC tracers plus temperature and salinity (T/S).  T/S serve
+    two roles:
+
+    1. **Unit conversion** in :meth:`post_process`: µmol kg⁻¹ → mmol m⁻³ using
+       TEOS-10 sigma-0 density.
+    2. **Density coordinate** for density-space vertical interpolation when the
+       downstream pipeline uses ``bgc_interpolation_method`` of ``"density"`` /
+       ``"density_mld"``.
+
+    After vertical interpolation the pipeline drops T/S via the
+    ``bgc_source_ts`` mechanism; they are never written to ROMS output.
+
+    Variables loaded
+    ----------------
+    BGC (kept in output): PO4, NO3, SiO3 (silicate), O2 (oxygen), DIC (TCO2),
+    ALK (TAlk).
+
+    Ancillary (for density, dropped by pipeline after vertical regrid):
+    temperature, salinity (stored internally as ``temp_bgc`` / ``salt_bgc``).
+
+    Notes
+    -----
+    GLODAPv2 values are in **µmol kg⁻¹**.  :meth:`post_process` converts to
+    **mmol m⁻³** using ``val * (sigma0 + 1000) / 1000`` via TEOS-10.
+    """
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "Depth",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "silicate",
+            "O2": "oxygen",
+            "DIC": "TCO2",
+            "ALK": "TAlk",
+        }
+    )
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            # T/S for density-coordinate interpolation and unit conversion.
+            # Stable internal keys so the pipeline can locate them without
+            # knowing dataset-specific variable names.
+            "temp_bgc": "temperature",
+            "salt_bgc": "salinity",
+        }
+    )
+    # Internal keys of the T/S pair that define the source density coordinate.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
+
+    def post_process(self) -> None:
+        """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³.
+
+        Uses TEOS-10 sigma-0 from the loaded T/S to compute density (dask-lazy).
+        T/S remain in ``self.ds`` so the downstream pipeline can use them as the
+        source density coordinate for density-space vertical interpolation; the
+        pipeline drops them after regridding via ``bgc_source_ts``.
+
+        If T/S are absent (e.g. the file did not include them), falls back to a
+        uniform 1025 kg m⁻³ density.
+        """
+        from roms_tools.setup.utils import compute_potential_density
+
+        if "temperature" in self.ds.data_vars and "salinity" in self.ds.data_vars:
+            sigma0 = compute_potential_density(
+                self.ds["temperature"], self.ds["salinity"]
+            )
+            density = sigma0 + 1000.0  # kg m⁻³
+        else:
+            density = self._compute_density(
+                next(iter(self.ds.data_vars.values())),
+                next(iter(self.ds.data_vars.values())),
+            )
+
+        conversion_factor = density / 1000.0  # µmol kg⁻¹ → mmol m⁻³
+
+        for file_var in self.var_names.values():
+            if file_var in self.ds.data_vars:
+                self.ds[file_var] = self.ds[file_var] * conversion_factor
 
 
 @dataclass(kw_only=True)

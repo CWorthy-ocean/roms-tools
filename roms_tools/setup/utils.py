@@ -3,7 +3,7 @@ import logging
 import time
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -40,7 +40,7 @@ from roms_tools.processing_methods import (  # noqa: F401
     validate_extrap,
     validate_prefill,
 )
-from roms_tools.utils import transpose_dimensions
+from roms_tools.utils import serialize_dask_and_boost_threads, transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -54,6 +54,39 @@ HEADER_SZ = 96
 HEADER_CHAR = "="
 
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
+
+# BGC sources that fetch their own data when the source dict carries no "path",
+# so the usual "`source` must include a 'path'" check does not apply to them.
+_SELF_DOWNLOADING_BGC: frozenset[str] = frozenset({"WOA"})
+
+# BGC sources that only ever exist as a 12-month climatology. Their "climatology"
+# flag defaults to True instead of False, since the alternative reliably fails
+# later with a confusing message about integer time values.
+_CLIMATOLOGY_ONLY_BGC: frozenset[str] = frozenset({"WOA"})
+
+# Extra source-dict keys forwarded to the dataset constructor, per source name.
+# Keys the caller omitted are not passed, so the dataclass defaults apply.
+_BGC_SOURCE_EXTRA_KWARGS: dict[str, tuple[str, ...]] = {
+    "WOA": ("deep_fill", "deep_blend_halfwidth", "ts_decade"),
+}
+
+
+def bgc_source_extra_kwargs(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Collect the per-source dataset options carried by a BGC source dict.
+
+    Parameters
+    ----------
+    source : Mapping
+        A ``source`` / ``bgc_source`` dictionary.
+
+    Returns
+    -------
+    dict
+        The subset of the options registered for this source name that the caller
+        actually supplied. Empty for sources that take no extra options.
+    """
+    allowed = _BGC_SOURCE_EXTRA_KWARGS.get(str(source.get("name")), ())
+    return {key: source[key] for key in allowed if key in source}
 
 
 def apply_source_prefill(data, regrid_config, prefill_kwargs) -> None:
@@ -225,7 +258,7 @@ def nan_check(field, mask, error_message=None) -> None:
         raise ValueError(error_message)
 
 
-def nan_check_batch(items) -> None:
+def nan_check_batch(items, serialize_dask: bool = False) -> None:
     """Validate several fields for NaNs at wet points in a single computation.
 
     Parameters
@@ -233,6 +266,13 @@ def nan_check_batch(items) -> None:
     items : iterable of (field, mask, error_message)
         One tuple per field to check. ``error_message`` may be ``None`` to use the
         default message.
+    serialize_dask : bool, optional
+        See :func:`roms_tools.utils.serialize_dask_and_boost_threads`. Defaults
+        to ``False`` -- the compute runs under the ambient dask scheduler.
+        ``True`` is a manual low-memory / troubleshooting tool (one task at a
+        time, peak memory bounded by a single chunk). Note this call happens
+        during object *construction* (via ``_validate()``), not at ``.save()``
+        time.
 
     Notes
     -----
@@ -249,10 +289,83 @@ def nan_check_batch(items) -> None:
     if not items:
         return
     flags = [nan_flag(field, mask) for field, mask, _ in items]
-    results = dask.compute(*flags)
+    with serialize_dask_and_boost_threads(serialize_dask):
+        results = dask.compute(*flags)
     for (_field, _mask, error_message), result in zip(items, results):
         if bool(np.asarray(result)):
             raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
+
+
+def materialize_before_check(
+    ds, var_names, materialize: bool, serialize_dask: bool = False
+) -> None:
+    """Realize each of ``var_names`` in ``ds`` via one combined ``dask.compute()`` call
+    and write the results back into ``ds`` in place, *before* any NaN-check view is
+    built from them.
+
+    Only does anything when ``materialize`` is True -- a source whose variables all
+    come out of one shared, expensive lazy computation (e.g. ESPER; see
+    ``InitialConditionsSource._is_esper_source``). :func:`nan_check_batch`'s own
+    compute of a narrower check view (e.g. ``ds[v].squeeze()``/
+    ``ds[v].isel(bry_time=0)``) already forces the same expensive upstream
+    computation to run, but discards the realized values -- so a later ``.save()``
+    on this same ``ds`` would recompute them from scratch.
+
+    ``serialize_dask`` additionally wraps the compute in
+    :func:`roms_tools.utils.serialize_dask_and_boost_threads` -- a manual
+    low-memory / troubleshooting tool (PyESPER serialises its own kernels, so it
+    is never *required*). The two concerns are deliberately independent:
+    materialize-and-cache is about avoiding a double compute; serialization is
+    about bounding memory to one task at a time.
+
+    ``var_names`` should be EVERY variable sharing the source's expensive computation
+    (e.g. an ESPER source's full ``use_vars`` list), not just the subset
+    ``nan_check_batch`` actually validates -- :func:`roms_tools.setup.bgc_model.bgc_variable_info`
+    flags only ``ALK`` as ``validate=True``, but ALK/DIC/NO3/PO4/SiO3/O2 all come from
+    one shared per-chunk PyESPER call. Caching only the validated variable(s) would
+    leave the rest lazy and still force a second real compute of them at save time --
+    reproducing the bug for everything except the one checked variable.
+
+    For an ESPER source this always saves total compute -- the narrower check
+    forces the same expensive PyESPER work and discards it, so ``.save()`` would
+    redo every chunk, whereas materializing computes each chunk exactly once.
+    What it spends is peak memory: the realized values for every variable and
+    direction stay resident until ``.save()`` consumes them (order 10 GB for a
+    12-month, 100-level basin-scale boundary -- 6 tracers x ~200M points x 8 B).
+
+    How large that trade is depends on the chunk plan. Where
+    :func:`roms_tools.setup.esper._pyesper_chunk_plan` collapses a dimension into
+    a single chunk, a check view over it (e.g. ``isel(bry_time=0)``) already
+    computes that whole chunk, so materializing is nearly free. That plan now cuts
+    multi-month boundary runs along *time* -- it has to, see its docstring -- so
+    there a single-time-slice check touches only the first block, and
+    materializing the full series is real extra work up front. Still cheaper in
+    total compute; it is peak memory, not throughput, that pays for it. Pass
+    ``serialize_dask`` when that peak is the binding constraint.
+
+    A no-op when ``materialize`` is False, or ``var_names`` is empty.
+
+    Notes
+    -----
+    dask (at least the version pinned here) does not reliably share/dedupe
+    computation across a single ``dask.compute()`` call between a collection and a
+    derived view of that same collection -- verified empirically (a monkeypatched,
+    call-counting ``map_blocks`` function was invoked twice, not once, when its full
+    array and a slice of it were requested together in one ``dask.compute()`` call
+    under the synchronous scheduler). This is why materialization must happen in its
+    own call, strictly *before* any NaN-check view is built from ``ds``: a check view
+    built before this call still points at the old, now-stale lazy graph and would
+    force a second real compute if used afterward.
+    """
+    if not materialize or not var_names:
+        return
+    names = [v for v in var_names if v in ds]
+    if not names:
+        return
+    with serialize_dask_and_boost_threads(serialize_dask):
+        realized = dask.compute(*(ds[v] for v in names))
+    for v, value in zip(names, realized):
+        ds[v] = value
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
@@ -533,6 +646,10 @@ def get_variable_metadata():
             "long_name": "vertically integrated v-flux component",
             "units": "m/s",
         },
+        "CHL": {
+            "long_name": "total chlorophyll",
+            "units": "mg/m^3",
+        },
         "PO4": {
             "long_name": "dissolved inorganic phosphate",
             "units": "mmol/m^3",
@@ -736,80 +853,6 @@ def get_variable_metadata():
         "nhy": {"long_name": "NHy decomposition", "units": "kg/m^2/s"},
     }
     return d
-
-
-def compute_missing_bgc_variables(bgc_data):
-    """Fills in missing biogeochemical (BGC) variables in the input dictionary.
-
-    This function checks for missing BGC variables in the provided dictionary and
-    computes them based on predefined relationships with existing variables. The
-    relationships specify either a multiplication factor applied to an existing
-    variable or a constant value if no related variable is available. The resulting
-    variables are added to the dictionary.
-
-    Parameters
-    ----------
-    bgc_data : dict
-        A dictionary containing biogeochemical variables as xarray DataArrays.
-        Missing variables are computed and added to this dictionary.
-
-        Assumptions:
-        - If `Fe` is part of the input dictionary, it is in units of mmol m-3.
-        - If `CHL` is part of the input dictionary, it is in units of mg m-3.
-        - If `ALK` is part of the input dictionary, it is in units of meq m-3 = mmol m-3.
-        - If `DIC` is part of the input dictionary, it is in units of mmol m-3.
-
-    Returns
-    -------
-    dict
-        The updated dictionary with missing BGC variables filled in.
-
-    Notes
-    -----
-    - If `NH4`, `DOC`, `DON`, `DOP`, `DOCr`, `DONr`, and `DOPr` are not part of the input
-      dictionary, they are filled with constant values.
-    - `CHL` is removed from the dictionary after the necessary calculations.
-    """
-    # Define the relationships for missing variables
-    variable_relations = {
-        "NH4": (None, 10**-6),  # mmol m-3
-        "Lig": ("Fe", 3),  # mmol m-3
-        "DIC_ALT_CO2": ("DIC", 1),  # mmol m-3
-        "ALK_ALT_CO2": ("ALK", 1),  # meq m-3 = mmol m-3
-        "DOC": (None, 10**-6),  # mmol m-3
-        "DON": (None, 1.0),  # mmol m-3
-        "DOP": (None, 0.1),  # mmol m-3
-        "DOCr": (None, 10**-6),  # mmol m-3
-        "DONr": (None, 0.8),  # mmol m-3
-        "DOPr": (None, 0.003),  # mmol m-3
-        "zooC": ("CHL", 1.35),  # mmol m-3
-        "spChl": ("CHL", 0.675),  # mg m-3
-        "spC": ("CHL", 3.375),  # mmol m-3
-        "spP": ("CHL", 0.03),  # mmol m-3
-        "spFe": ("CHL", 1.35e-5),  # mmol m-3
-        "spCaCO3": ("CHL", 0.0675),  # mmol m-3
-        "diatChl": ("CHL", 0.0675),  # mg m-3
-        "diatC": ("CHL", 0.2025),  # mmol m-3
-        "diatP": ("CHL", 0.02),  # mmol m-3
-        "diatFe": ("CHL", 1.35e-6),  # mmol m-3
-        "diatSi": ("CHL", 0.0675),  # mmol m-3
-        "diazChl": ("CHL", 0.0075),  # mg m-3
-        "diazC": ("CHL", 0.0375),  # mmol m-3
-        "diazP": ("CHL", 0.01),  # mmol m-3
-        "diazFe": ("CHL", 7.5e-7),  # mmol m-3
-    }
-
-    # Fill in missing variables using the defined relationships
-    for var_name, (base_var, factor) in variable_relations.items():
-        if var_name not in bgc_data:
-            if base_var:
-                bgc_data[var_name] = bgc_data[base_var] * factor
-            else:
-                bgc_data[var_name] = factor * xr.ones_like(bgc_data["ALK"])
-
-    bgc_data.pop("CHL", None)
-
-    return bgc_data
 
 
 def compute_potential_density(
@@ -1434,6 +1477,52 @@ def group_dataset(ds, filepath):
     return dataset_list, output_filenames
 
 
+def _contiguous_key_runs(index, key):
+    """``(key_value, slice)`` for each maximal run of equal ``key`` along ``index``.
+
+    The point of returning slices rather than the boolean/fancy indexing
+    ``groupby`` produces: for dask-backed data a fancy-index take re-blocks the
+    result on dask's own size heuristic, so the pieces stop lining up with the
+    source blocks. That is expensive here because
+    ``xarray.save_mfdataset(compute=True)`` issues a *separate* ``dask.compute``
+    per output file (``writes = [w.sync(compute=compute) for w in writers]``) and
+    shares nothing between them -- so every file pays in full for whichever
+    source blocks its selection happens to touch, neighbours included.
+
+    Measured on a 12-month daily boundary axis written to 14 monthly files, as
+    multiples of the necessary work: the two-stage year-then-month ``groupby``
+    cost 2.8x with month-sized source chunks (a 31-day month came back chunked
+    ``(24, 7)``, straddling blocks it had no business touching), contiguous
+    slices cost 1.0x. It is invisible for per-day-chunked physics, where the
+    blocks are finer than a month either way -- which is why it went unnoticed.
+
+    A slice is only equivalent to a group when equal keys are adjacent. ROMS
+    forcing time axes are monotonic, so that holds; callers verify it anyway
+    (see ``group_by_month``) because a repeated key would otherwise mean two
+    files sharing one name.
+    """
+    runs = []
+    start = 0
+    for i in range(1, len(index) + 1):
+        if i == len(index) or key(index[i]) != key(index[i - 1]):
+            runs.append((key(index[start]), slice(start, i)))
+            start = i
+    return runs
+
+
+def _time_runs_or_none(ds, key):
+    """``_contiguous_key_runs`` over ``ds["abs_time"]``, or None when the axis is
+    not monotonic in ``key``.
+
+    None means a key spans more than one run, so contiguous slices would emit two
+    datasets carrying the same output filename and the second would silently
+    overwrite the first. Callers fall back to ``groupby``, which merges them.
+    """
+    runs = _contiguous_key_runs(ds["abs_time"].to_index(), key)
+    keys = [k for k, _ in runs]
+    return None if len(set(keys)) != len(keys) else runs
+
+
 def group_by_month(ds, filepath):
     """Group the dataset by month and generate filenames with 'YYYYMM' format.
 
@@ -1449,24 +1538,34 @@ def group_by_month(ds, filepath):
     tuple
         A tuple containing the list of monthly datasets and corresponding output filenames.
     """
+    runs = _time_runs_or_none(ds, lambda ts: (ts.year, ts.month))
+    if runs is None:
+        return _group_by_month_via_groupby(ds, filepath)
+
+    time_dim = ds["abs_time"].dims[0]
     dataset_list = []
     output_filenames = []
+    for (year, month), sl in runs:
+        dataset_list.append(ds.isel({time_dim: sl}))
+        # Format: "filepath_YYYYMM.nc"
+        output_filenames.append(f"{filepath}_{year}{month:02}")
 
-    # Group dataset by year
-    grouped_by_year = ds.groupby("abs_time.year")
+    return dataset_list, output_filenames
 
-    for year, yearly_dataset in grouped_by_year:
-        # Further group each yearly group by month
-        grouped_by_month = yearly_dataset.groupby("abs_time.month")
 
-        for month, monthly_dataset in grouped_by_month:
+def _group_by_month_via_groupby(ds, filepath):
+    """``group_by_month`` for a time axis that isn't monotonic by (year, month).
+
+    Same output as the contiguous-slice path for well-formed input, at the
+    re-blocking cost ``_contiguous_key_runs`` documents -- but it merges a key
+    that appears in several runs, so no two files collide on a filename.
+    """
+    dataset_list = []
+    output_filenames = []
+    for year, yearly_dataset in ds.groupby("abs_time.year"):
+        for month, monthly_dataset in yearly_dataset.groupby("abs_time.month"):
             dataset_list.append(monthly_dataset)
-
-            # Format: "filepath_YYYYMM.nc"
-            year_month_str = f"{year}{month:02}"
-            output_filename = f"{filepath}_{year_month_str}"
-            output_filenames.append(output_filename)
-
+            output_filenames.append(f"{filepath}_{year}{month:02}")
     return dataset_list, output_filenames
 
 
@@ -1485,19 +1584,22 @@ def group_by_year(ds, filepath):
     tuple
         A tuple containing the list of yearly datasets and corresponding output filenames.
     """
+    runs = _time_runs_or_none(ds, lambda ts: ts.year)
+    if runs is None:
+        dataset_list = []
+        output_filenames = []
+        for year, yearly_dataset in ds.groupby("abs_time.year"):
+            dataset_list.append(yearly_dataset)
+            output_filenames.append(f"{filepath}_{year}")
+        return dataset_list, output_filenames
+
+    time_dim = ds["abs_time"].dims[0]
     dataset_list = []
     output_filenames = []
-
-    # Group dataset by year
-    grouped_by_year = ds.groupby("abs_time.year")
-
-    for year, yearly_dataset in grouped_by_year:
-        dataset_list.append(yearly_dataset)
-
+    for year, sl in runs:
+        dataset_list.append(ds.isel({time_dim: sl}))
         # Format: "filepath_YYYY.nc"
-        year_str = f"{year}"
-        output_filename = f"{filepath}_{year_str}"
-        output_filenames.append(output_filename)
+        output_filenames.append(f"{filepath}_{year}")
 
     return dataset_list, output_filenames
 
@@ -2062,6 +2164,63 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
+def get_roms_tools_version_info() -> dict[str, str | None]:
+    """Return the roms-tools package version, plus (when available) the exact git
+    commit of the checkout that produced it.
+
+    ``importlib.metadata.version("roms-tools")`` reflects whatever was captured at
+    the last ``pip install``/build -- for an editable install under active
+    development, a plain source edit does **not** refresh that metadata, so the
+    reported version can silently go stale relative to the code that actually ran.
+    Querying git directly at call time catches that: ``roms_tools_git_commit``
+    reflects the *actual* checked-out commit right now (with a ``-dirty`` suffix if
+    the working tree has uncommitted changes), independent of install-time
+    metadata. Returns ``None`` for the commit when not in a git checkout (e.g. a
+    real pip/conda install with no ``.git`` directory) or ``git`` is unavailable --
+    this is a best-effort traceability aid, not a hard requirement.
+
+    Returns
+    -------
+    dict[str, str | None]
+        ``{"roms_tools_version": ..., "roms_tools_git_commit": ... | None}``.
+    """
+    try:
+        roms_tools_version = importlib.metadata.version("roms-tools")
+    except importlib.metadata.PackageNotFoundError:
+        roms_tools_version = "unknown"
+
+    git_commit = None
+    try:
+        import subprocess
+
+        repo_dir = Path(__file__).resolve().parent
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if commit.returncode == 0:
+            git_commit = commit.stdout.strip()
+            dirty = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if dirty.returncode == 0 and dirty.stdout.strip():
+                git_commit += "-dirty"
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    return {
+        "roms_tools_version": roms_tools_version,
+        "roms_tools_git_commit": git_commit,
+    }
+
+
 def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
@@ -2085,12 +2244,11 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     filepath = Path(filepath)
 
     # Create YAML header with version information
-    try:
-        roms_tools_version = importlib.metadata.version("roms-tools")
-    except importlib.metadata.PackageNotFoundError:
-        roms_tools_version = "unknown"
-
-    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+    version_info = get_roms_tools_version_info()
+    header = (
+        f"---\nroms_tools_version: {version_info['roms_tools_version']}\n"
+        f"roms_tools_git_commit: {version_info['roms_tools_git_commit']}\n---\n"
+    )
 
     # Write to YAML file
     with filepath.open("w") as file:
@@ -2242,6 +2400,111 @@ def deserialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None
     return src
 
 
+def serialize_bgc_sources(
+    bgc_sources: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """Serialize a ``bgc_sources`` list (the ``BoundaryForcing``/``InitialConditions``
+    wrappers' multi-bgc-source field) for YAML output.
+
+    Each item is ``{"source": RawDataSource, "use_vars": ..., "bgc_interpolation_method": ...}``
+    -- only ``"source"`` needs the ``serialize_source_dict`` treatment (paths, a
+    nested ``Grid`` for a "ROMS" bgc source). Plain ``serialize_paths``/
+    ``serialize_datetime`` (already applied to every other field generically in
+    :func:`to_dict`) do not know about ``Grid`` objects, so without this a
+    ROMS-restart bgc source nested inside ``bgc_sources`` would reach ``yaml.dump()``
+    unconverted and fail (a `Grid` carries a non-YAML-safe `xr.Dataset` attribute).
+    """
+    if bgc_sources is None:
+        return None
+    return [
+        {**item, "source": serialize_source_dict(item.get("source"))}
+        for item in bgc_sources
+    ]
+
+
+def deserialize_bgc_sources(
+    bgc_sources: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """Inverse of :func:`serialize_bgc_sources` -- restores each item's ``"source"``
+    paths (nested ``Grid`` reconstruction, which needs the shared top-level ``Grid``
+    object, is handled by the caller, mirroring how the top-level ``source``/
+    ``bgc_source`` fields already do this in each class's own ``from_yaml``).
+    """
+    if bgc_sources is None:
+        return None
+    return [
+        {**item, "source": deserialize_source_dict(item.get("source"))}
+        for item in bgc_sources
+    ]
+
+
+def build_bgc_companions(
+    source_cls: type,
+    grid: Any,
+    physics_obj: Any,
+    bgc_sources: list[dict[str, Any]],
+    shared_kwargs: dict[str, Any],
+    *,
+    type_: str | None = "bgc",
+) -> list[Any]:
+    """Build one ``source_cls`` instance per ``bgc_sources`` item, each wired to
+    reuse ``physics_obj``'s temp/salt via ``physics_forcing=``.
+
+    Shared construction helper for the ``BoundaryForcing``/``InitialConditions``
+    wrapper classes' ``__post_init__`` -- both build one physics object, then N bgc
+    objects this same way; only what happens *after* (save each bgc object
+    separately vs. merge them into one dataset) differs between the two, so only
+    this common piece is factored out (see the wrapper classes themselves for that
+    divergent final step). A plain function here rather than a shared base class:
+    forcing a base class over two contracts that genuinely diverge (N-separate-files
+    vs. merge-to-one-file) would either leave everything abstract or smuggle
+    IC-only concepts like ``merge()`` into boundary's contract.
+
+    Parameters
+    ----------
+    source_cls : type
+        The ``*Source`` class to instantiate (``BoundaryForcingSource`` or
+        ``InitialConditionsSource``) -- passed in, not imported here, so this stays
+        free of any import-order dependency on either concrete class.
+    grid : Grid
+        Passed through to every constructed object.
+    physics_obj : source_cls
+        The already-built physics companion, passed as ``physics_forcing=`` to
+        every constructed bgc object.
+    bgc_sources : list[dict]
+        One dict per bgc source: ``{"source": RawDataSource, "use_vars": ... |
+        None, "bgc_interpolation_method": ... | None}``. A per-item
+        ``bgc_interpolation_method`` overrides ``shared_kwargs``'s.
+    shared_kwargs : dict
+        The wrapper's own shared kwargs to forward to every constructed object
+        (e.g. ``ini_time``/``start_time``+``end_time``, ``model_reference_date``,
+        ``use_dask``, ``chunks``, ``bgc_interpolation_method`` default, ``prefill``,
+        etc.) -- anything ``source_cls`` accepts that isn't ``source``/``type``/
+        ``physics_forcing``/``use_vars``, which this function sets itself.
+    type_ : str, optional
+        Forced onto each constructed object's ``type`` field when not ``None``
+        (``BoundaryForcingSource``/post-refactor ``InitialConditionsSource`` both
+        have one). Defaults to ``"bgc"``.
+
+    Returns
+    -------
+    list[source_cls]
+        One instance per ``bgc_sources`` item, in order.
+    """
+    companions = []
+    for item in bgc_sources:
+        kwargs = {**shared_kwargs, "grid": grid, "physics_forcing": physics_obj}
+        if type_ is not None:
+            kwargs["type"] = type_
+        kwargs["source"] = item["source"]
+        if item.get("use_vars"):
+            kwargs["use_vars"] = item["use_vars"]
+        if item.get("bgc_interpolation_method"):
+            kwargs["bgc_interpolation_method"] = item["bgc_interpolation_method"]
+        companions.append(source_cls(**kwargs))
+    return companions
+
+
 def serialize_grid(grid_obj: Any) -> dict[str, Any]:
     """Serialize a Grid object to a dictionary, excluding non-serializable attributes."""
     return pop_grid_data(asdict(grid_obj))
@@ -2314,7 +2577,10 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     else:
         raise TypeError("Forcing object must be a dataclass or pydantic model")
 
-    forcing_data = {}
+    # Annotated because the values are heterogeneous -- `serialize_bgc_sources`
+    # returns a list where `serialize_source_dict` returns a dict, and inferring
+    # the type from whichever lands first rejects the other.
+    forcing_data: dict[str, Any] = {}
 
     for name in field_names:
         if name in exclude_set:
@@ -2324,6 +2590,9 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
 
         if name in {"source", "bgc_source"}:
             forcing_data[name] = serialize_source_dict(value)
+            continue
+        if name == "bgc_sources":
+            forcing_data[name] = serialize_bgc_sources(value)
             continue
 
         value = serialize_datetime(value)
@@ -2404,6 +2673,10 @@ def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
     for key in ["source", "bgc_source"]:
         if key in forcing_data:
             forcing_data[key] = deserialize_source_dict(forcing_data[key])
+    if "bgc_sources" in forcing_data:
+        forcing_data["bgc_sources"] = deserialize_bgc_sources(
+            forcing_data["bgc_sources"]
+        )
 
     return forcing_data
 

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools import BoundaryForcing, Grid
+from roms_tools import BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
     _compute_density_coord,
@@ -22,6 +22,7 @@ from roms_tools.setup.utils import (
     gc_dist,
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
+    materialize_before_check,
     month_to_time_index,
     nan_check,
     nan_check_batch,
@@ -120,7 +121,7 @@ class TestGetTargetCoords:
 # Test yaml roundtrip with multiple source files
 @pytest.fixture()
 def boundary_forcing_from_multiple_source_files(request, use_dask):
-    """Fixture for creating a BoundaryForcing object."""
+    """Fixture for creating a BoundaryForcingSource object."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -135,7 +136,7 @@ def boundary_forcing_from_multiple_source_files(request, use_dask):
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
-    return BoundaryForcing(
+    return BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2011, 1, 1),
         end_time=datetime(2013, 1, 1),
@@ -147,7 +148,7 @@ def boundary_forcing_from_multiple_source_files(request, use_dask):
 def test_roundtrip_yaml(
     boundary_forcing_from_multiple_source_files, request, tmp_path, use_dask
 ):
-    """Test that creating a BoundaryForcing object, saving its parameters to yaml file,
+    """Test that creating a BoundaryForcingSource object, saving its parameters to yaml file,
     and re-opening yaml file creates the same object.
     """
     # Create a temporary filepath using the tmp_path fixture
@@ -158,7 +159,9 @@ def test_roundtrip_yaml(
     ]:  # test for Path object and str
         boundary_forcing_from_multiple_source_files.to_yaml(filepath)
 
-        bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
+        bdry_forcing_from_file = BoundaryForcingSource.from_yaml(
+            filepath, use_dask=use_dask
+        )
 
         assert boundary_forcing_from_multiple_source_files == bdry_forcing_from_file
 
@@ -385,7 +388,7 @@ def test_density_space_interpolation_returns_correct_values():
     interpolated onto a target density coordinate (built from target T/S) must equal
     a direct 1-D linear interpolation of the tracer in density space. This pins the
     full density-interpolation composition (``_compute_density_coord`` feeding
-    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing.
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcingSource.
     """
     from roms_tools.regrid import VerticalRegrid
 
@@ -617,7 +620,7 @@ def test_density_mld_interpolation_returns_correct_values():
     column. The regridded tracer must equal a direct 1-D linear interpolation of the
     tracer against the warped source depth coordinate, evaluated at the (real) target
     depths. This pins the full composition (``_compute_mld_warp`` feeding
-    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing, and also
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcingSource, and also
     checks the values explicitly against hand-computed anchors.
     """
     from roms_tools.regrid import VerticalRegrid
@@ -888,6 +891,73 @@ def test_nan_check_batch():
         )
 
 
+def test_materialize_before_check_realizes_and_preserves_metadata():
+    """`materialize_before_check` computes each named variable via one combined
+    `dask.compute()` call and writes the realized (non-dask-backed) result back
+    into `ds` in place, preserving attrs/encoding -- so a later real compute
+    (e.g. `.save()`) doesn't need to redo the (potentially expensive) work.
+    """
+    import dask.array as da
+
+    calls = {"n": 0}
+
+    def expensive(x):
+        calls["n"] += 1
+        return x * 2
+
+    arr = da.from_array(np.arange(10).astype("float64"), chunks=5).map_blocks(
+        expensive, dtype="float64"
+    )
+    da_var = xr.DataArray(arr, dims=["x"], name="foo", attrs={"units": "m"})
+    da_var.encoding["_FillValue"] = -999.0
+    ds = xr.Dataset({"foo": da_var, "bar": ("x", np.arange(10, 20))})
+
+    # `map_blocks` itself does some eager meta-inference work at construction
+    # time (calls `expensive` at least once before any real compute) -- reset
+    # the counter after building `ds` so the assertions below only measure
+    # what `materialize_before_check` itself does.
+    calls["n"] = 0
+
+    # materialize=False is a no-op: the variable stays dask-backed, nothing
+    # computed. (Materialization is driven by `materialize`, not by
+    # `serialize_dask` -- the two were decoupled when PyESPER became
+    # self-serialising; `serialize_dask` now only picks the scheduler regime
+    # for the compute.)
+    materialize_before_check(ds, ["foo"], materialize=False)
+    assert ds["foo"].chunks is not None
+    assert calls["n"] == 0
+
+    # The common (current-PyESPER) case: materialize under the ambient scheduler.
+    materialize_before_check(ds, ["foo"], materialize=True, serialize_dask=False)
+    assert ds["foo"].chunks is None, "foo should be realized (no longer dask-backed)"
+    assert calls["n"] == 2, "expensive() should run once per chunk, not be skipped"
+    assert ds["foo"].attrs == {"units": "m"}
+    assert ds["foo"].encoding["_FillValue"] == -999.0
+    np.testing.assert_array_equal(ds["foo"].values, np.arange(10) * 2)
+
+    # A second call with the now-realized variable must not recompute it.
+    materialize_before_check(ds, ["foo"], materialize=True, serialize_dask=False)
+    assert calls["n"] == 2, (
+        "materializing an already-concrete variable should be a no-op"
+    )
+
+    # An empty/unknown var_names list is also a safe no-op.
+    materialize_before_check(ds, [], materialize=True)
+    materialize_before_check(ds, ["not_a_real_var"], materialize=True)
+    assert calls["n"] == 2
+
+    # The legacy (serialized) regime still materializes identically.
+    arr2 = da.from_array(np.arange(10).astype("float64"), chunks=5).map_blocks(
+        expensive, dtype="float64"
+    )
+    ds["baz"] = xr.DataArray(arr2, dims=["x"])
+    calls["n"] = 0
+    materialize_before_check(ds, ["baz"], materialize=True, serialize_dask=True)
+    assert ds["baz"].chunks is None
+    assert calls["n"] == 2
+    np.testing.assert_array_equal(ds["baz"].values, np.arange(10) * 2)
+
+
 class TestMonthlyClimatologyExpansion:
     @staticmethod
     def _monthly_climatology_ds() -> xr.Dataset:
@@ -1073,3 +1143,141 @@ class TestQueryKdtreeNearest:
             )
         assert distances_km[0] > 100.0
         assert "FarRiver" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# group_by_month / group_by_year: contiguous slices, not fancy indexing
+# ---------------------------------------------------------------------------
+
+
+def _grouping_fixture(time_chunks):
+    """A dask-backed forcing-shaped dataset on a 12-month daily axis (plus the
+    bracketing days), chunked as given along time.
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    times = pd.date_range("2009-12-31", "2011-01-01", freq="D")  # 367 steps
+    values = np.arange(len(times) * 2 * 3, dtype="f8").reshape(len(times), 2, 3)
+    arr = dsa.from_array(values, chunks=(tuple(time_chunks), 2, 3), name="srcblk")
+    ds = xr.Dataset(
+        {"v": (("bry_time", "s", "x"), arr)},
+        coords={"abs_time": ("bry_time", times)},
+    )
+    return ds, times
+
+
+_MONTHLY_CHUNKS = (1, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 1)
+
+
+def _blocks_touched(groups, chunk_sizes):
+    """Time steps each group's graph actually forces, summed over groups.
+
+    `save_mfdataset(compute=True)` runs a separate `dask.compute` per output file
+    and shares nothing between them, so this sum -- not the dataset size -- is
+    what the write really costs.
+    """
+    from dask.core import flatten
+    from dask.optimization import cull
+
+    total = 0
+    for g in groups:
+        arr = g["v"].data
+        culled, _ = cull(dict(arr.__dask_graph__()), list(flatten(arr.__dask_keys__())))
+        touched = {k[1] for k in culled if isinstance(k, tuple) and k[0] == "srcblk"}
+        total += sum(chunk_sizes[i] for i in sorted(touched))
+    return total
+
+
+def test_group_by_month_does_not_multiply_the_work_it_writes():
+    """Regression: grouping must not make each file pay for its neighbours' blocks.
+
+    `groupby` selects by fancy indexing, which re-blocks the result on dask's own
+    heuristic; the pieces then straddle source blocks, and since every output file
+    is its own `dask.compute`, each one re-runs whatever it straddles. With
+    month-sized source chunks that cost 2.8x the necessary estimation on this
+    axis. Contiguous `isel` slices preserve the blocking, so each file pays for
+    its own month and nothing else.
+    """
+    from roms_tools.setup.utils import _group_by_month_via_groupby, group_by_month
+
+    ds, times = _grouping_fixture(_MONTHLY_CHUNKS)
+    sizes = list(_MONTHLY_CHUNKS)
+
+    new_groups, _ = group_by_month(ds, "/tmp/out")
+    old_groups, _ = _group_by_month_via_groupby(ds, "/tmp/out")
+
+    necessary = len(times)
+    assert _blocks_touched(new_groups, sizes) == necessary, "should be exactly 1.0x"
+    assert _blocks_touched(old_groups, sizes) > necessary, (
+        "fixture should still demonstrate the groupby overhead it replaced"
+    )
+
+
+def test_group_by_month_matches_groupby_exactly():
+    """Purely a performance change: same files, same names, same values."""
+    from roms_tools.setup.utils import _group_by_month_via_groupby, group_by_month
+
+    ds, times = _grouping_fixture(_MONTHLY_CHUNKS)
+    new_groups, new_names = group_by_month(ds, "/tmp/out")
+    old_groups, old_names = _group_by_month_via_groupby(ds, "/tmp/out")
+
+    assert new_names == old_names
+    assert [g.sizes["bry_time"] for g in new_groups] == [
+        g.sizes["bry_time"] for g in old_groups
+    ]
+    for new, old in zip(new_groups, old_groups, strict=True):
+        np.testing.assert_array_equal(new["v"].values, old["v"].values)
+        np.testing.assert_array_equal(new["abs_time"].values, old["abs_time"].values)
+    # Every step written exactly once -- no gap, no double-write.
+    assert sum(g.sizes["bry_time"] for g in new_groups) == len(times)
+
+
+def test_group_by_month_falls_back_when_a_month_is_not_contiguous():
+    """A slice only equals a group when equal keys are adjacent. On a
+    non-monotonic axis a month spans several runs, and emitting one file per run
+    would give two files the SAME name -- the second silently overwriting the
+    first. The guard falls back to `groupby`, which merges them instead.
+    """
+    import dask.array as dsa
+    import pandas as pd
+
+    from roms_tools.setup.utils import group_by_month
+
+    times = pd.DatetimeIndex(
+        list(pd.date_range("2010-01-01", periods=3))
+        + list(pd.date_range("2010-02-01", periods=2))
+        + list(pd.date_range("2010-01-10", periods=2))  # January again
+    )
+    values = np.arange(len(times) * 2, dtype="f8").reshape(len(times), 2)
+    ds = xr.Dataset(
+        {"v": (("t", "x"), dsa.from_array(values, chunks=(len(times), 2)))},
+        coords={"abs_time": ("t", times)},
+    )
+
+    groups, names = group_by_month(ds, "/tmp/out")
+    assert len(set(names)) == len(names), f"filename collision: {names}"
+    assert names == ["/tmp/out_201001", "/tmp/out_201002"]
+    assert sum(g.sizes["t"] for g in groups) == len(times)
+
+
+def test_group_by_year_preserves_every_step():
+    """Same treatment for yearly grouping (used for monthly-frequency data)."""
+    import dask.array as dsa
+    import pandas as pd
+
+    from roms_tools.setup.utils import group_by_year
+
+    times = pd.date_range("2009-06-15", periods=30, freq="MS")
+    values = np.arange(len(times) * 2, dtype="f8").reshape(len(times), 2)
+    ds = xr.Dataset(
+        {"v": (("t", "x"), dsa.from_array(values, chunks=((3,) * 10, 2)))},
+        coords={"abs_time": ("t", times)},
+    )
+
+    groups, names = group_by_year(ds, "/tmp/out")
+    assert names == ["/tmp/out_2009", "/tmp/out_2010", "/tmp/out_2011"]
+    assert sum(g.sizes["t"] for g in groups) == len(times)
+    np.testing.assert_array_equal(
+        np.concatenate([g["v"].values for g in groups]), values
+    )

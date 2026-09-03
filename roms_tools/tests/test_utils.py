@@ -708,3 +708,103 @@ def test_save_datasets_netcdf_format(tmp_path, netcdf_format: NetCDFFormat):
 
     with xr.open_dataset(output_path.with_suffix(".nc")) as loaded:
         xr.testing.assert_equal(ds, loaded)
+
+
+@pytest.mark.parametrize(
+    "serialize_dask,expect_progressbar",
+    [
+        (True, False),
+        (False, True),
+    ],
+)
+def test_save_datasets_progressbar_skipped_when_serialize_dask(
+    tmp_path, monkeypatch, serialize_dask, expect_progressbar
+):
+    """A dask ``ProgressBar`` is only meaningful/accurate for the ordinary
+    ambient-scheduler write (many small chunks). When ``serialize_dask`` forces
+    the synchronous scheduler (the manual serialize_dask=True write), a
+    handful of large, uneven-duration chunks make the percentage barely move
+    for minutes then jump, and its background redraw garbles the per-chunk
+    print()s those sources emit -- looking broken rather than informative. It
+    must be skipped whenever ``serialize_dask`` is True, and still shown
+    otherwise.
+    """
+    import dask.diagnostics
+
+    entered = []
+
+    class _SpyProgressBar:
+        def __enter__(self):
+            entered.append(True)
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(dask.diagnostics, "ProgressBar", _SpyProgressBar)
+
+    ds = xr.Dataset({"a": ("x", np.arange(10))}).chunk({"x": 5})
+    output_path = tmp_path / "test_output"
+
+    save_datasets(
+        [ds],
+        [str(output_path)],
+        use_dask=True,
+        serialize_dask=serialize_dask,
+    )
+
+    assert bool(entered) is expect_progressbar
+
+
+def test_save_datasets_serialize_dask_logs_plain_start_done_messages(tmp_path, caplog):
+    """With no ProgressBar, the serialize_dask=True write must still log a
+    plain start/done message pair so it doesn't look silent/stalled.
+    """
+    ds = xr.Dataset({"a": ("x", np.arange(10))}).chunk({"x": 5})
+    output_path = tmp_path / "test_output"
+
+    with caplog.at_level("INFO"):
+        save_datasets(
+            [ds],
+            [str(output_path)],
+            use_dask=True,
+            serialize_dask=True,
+        )
+
+    messages = [r.message for r in caplog.records]
+    assert any("Writing NetCDF file(s)..." in m for m in messages)
+    assert any(m.startswith("Finished writing NetCDF file(s) in") for m in messages)
+
+
+def test_save_datasets_defaults_to_concurrent_write(tmp_path, monkeypatch):
+    """`save_datasets` must not serialize unless explicitly asked.
+
+    Regression: `serialize_dask` was introduced on this branch with a default of
+    True, so every caller that did not pass it -- `SurfaceForcing.save` and
+    `Tides.save` both omit it and forward `use_dask=self.use_dask` -- silently
+    dropped onto dask's synchronous scheduler (and lost its progress bar). On
+    `main`, before the parameter existed, those writes were always concurrent.
+    The serialized path is a manual low-memory/troubleshooting tool; nothing may
+    turn it on by default.
+    """
+    import numpy as np
+    import xarray as xr
+
+    import roms_tools.utils as utils_mod
+
+    calls = []
+    real = utils_mod.serialize_dask_and_boost_threads
+
+    def spy(serialize):
+        calls.append(serialize)
+        return real(serialize)
+
+    monkeypatch.setattr(utils_mod, "serialize_dask_and_boost_threads", spy)
+
+    ds = xr.Dataset({"foo": ("x", np.arange(4, dtype="float64"))}).chunk({"x": 2})
+    utils_mod.save_datasets([ds], [str(tmp_path / "default")], use_dask=True)
+
+    assert True not in calls, (
+        "save_datasets serialized the write without being asked -- the "
+        "serialize_dask default is not False"
+    )

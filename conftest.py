@@ -10,7 +10,8 @@ import matplotlib
 import pytest
 
 from roms_tools import (
-    BoundaryForcing,
+    BGCMarbl,
+    BoundaryForcingSource,
     Grid,
     InitialConditions,
     RiverForcing,
@@ -441,6 +442,7 @@ def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        bgc_model=BGCMarbl,
         prefill="2d_lateral_fill",
         regrid_method="scipy",
         use_dask=use_dask,
@@ -476,6 +478,7 @@ def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialCondi
             "name": "CESM_REGRIDDED",
             "climatology": True,  # type: ignore[dict-item]
         },
+        bgc_model=BGCMarbl,
         prefill="2d_lateral_fill",
         regrid_method="scipy",
         use_dask=use_dask,
@@ -508,6 +511,7 @@ def initial_conditions_with_unified_bgc_from_climatology(
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        bgc_model=BGCMarbl,
         prefill="2d_lateral_fill",
         regrid_method="scipy",
         use_dask=use_dask,
@@ -546,6 +550,7 @@ def initial_conditions_with_unified_bgc_density(
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        bgc_model=BGCMarbl,
         bgc_interpolation_method="density",
         prefill="2d_lateral_fill",
         regrid_method="scipy",
@@ -569,6 +574,7 @@ def initial_conditions_from_roms(
         ini_time=datetime(1998, 1, 6),
         source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
         bgc_source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
+        bgc_model=BGCMarbl,
         use_dask=use_dask,
     )
 
@@ -593,11 +599,11 @@ def initial_conditions_from_roms_without_bgc(
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
-    """Fixture for creating a BoundaryForcing object."""
+def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcingSource:
+    """Fixture for creating a BoundaryForcingSource object."""
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
-    return BoundaryForcing(
+    return BoundaryForcingSource(
         grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
@@ -613,11 +619,13 @@ def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
-    """Fixture for creating a BoundaryForcing object."""
+def boundary_forcing_with_2d_fill(
+    use_dask: bool, small_grid: Grid
+) -> BoundaryForcingSource:
+    """Fixture for creating a BoundaryForcingSource object."""
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
-    return BoundaryForcing(
+    return BoundaryForcingSource(
         grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
@@ -628,8 +636,8 @@ def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid) -> BoundaryF
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
-    """Fixture for creating a BoundaryForcing object."""
+def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcingSource:
+    """Fixture for creating a BoundaryForcingSource object."""
     grid = Grid(
         nx=2,
         ny=2,
@@ -648,7 +656,7 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
         download_test_data("CESM_regional_coarse_test_data_climatology.nc")
     )
 
-    return BoundaryForcing(
+    return BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
@@ -663,8 +671,10 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryForcing:
-    """Fixture for creating a BoundaryForcing object."""
+def bgc_boundary_forcing_from_unified_climatology(
+    use_dask: bool,
+) -> BoundaryForcingSource:
+    """Fixture for creating a BoundaryForcingSource object."""
     grid = Grid(
         nx=2,
         ny=2,
@@ -681,7 +691,7 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
 
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
-    return BoundaryForcing(
+    return BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
@@ -696,12 +706,12 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing:
+def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcingSource:
     """Unified-BGC boundary forcing using density-space interpolation.
 
     Unlike ``bgc_boundary_forcing_from_unified_climatology`` (depth-space), density
     interpolation needs the model (physics) T/S as the target density coordinate,
-    supplied via a companion physics ``BoundaryForcing`` passed as ``physics_forcing``.
+    supplied via a companion physics ``BoundaryForcingSource`` passed as ``physics_forcing``.
     Uses the North Atlantic GLORYS physics so the target T/S overlap the domain.
     """
     grid = Grid(
@@ -720,7 +730,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
     fname_phys = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
 
-    physics_bc = BoundaryForcing(
+    physics_bc = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 1, 2),
@@ -734,7 +744,7 @@ def bgc_boundary_forcing_from_unified_density(use_dask: bool) -> BoundaryForcing
         use_dask=use_dask,
     )
 
-    return BoundaryForcing(
+    return BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 1, 2),

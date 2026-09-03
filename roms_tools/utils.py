@@ -1,7 +1,9 @@
+import contextlib
 import glob
 import logging
 import re
 import textwrap
+import time
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -15,6 +17,69 @@ import pandas as pd
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
+
+
+@contextlib.contextmanager
+def serialize_dask_and_boost_threads(serialize: bool):
+    """If ``serialize``, force dask onto its ``"synchronous"`` scheduler (one
+    task at a time, in this thread) for the duration of the block, while
+    boosting BLAS/numba to every visible core for that same one-task-at-a-time
+    execution -- restored to whatever they were on exit, regardless of success
+    or failure. If not ``serialize``, this is a no-op: the ambient dask/BLAS/
+    numba configuration (typically several concurrent dask workers) applies
+    unchanged.
+
+    This is a **manual** tool -- nothing enables it automatically. It exists
+    because an earlier PyESPER (one without ``PyESPER.concurrency``) multiplied its
+    already-large per-chunk memory cost (~10 KB/point, tens of GB per chunk at
+    production grid scale) by however many dask workers ran its chunks
+    concurrently -- confirmed via a kernel OOM-kill log to exhaust all memory
+    on a 251 GB machine -- and could deadlock outright under concurrent kernel
+    entry. Serializing bounds peak memory to ONE chunk's own cost regardless of
+    the ambient worker count; the thread boost compensates for the lost
+    cross-chunk parallelism (nothing else competes for cores while dask has
+    only one task in flight).
+
+    PyESPER now serialises its own kernels, budgets its own chunk memory, and
+    does not use BLAS on the hot path, so none of this is *required* any more
+    and nothing turns it on automatically. It remains available as a manual
+    tool: on a low-memory machine it bounds peak memory to a single task's
+    footprint (a guarantee plain dask's threaded scheduler cannot make), and
+    when troubleshooting it answers "does this still fail with all concurrency
+    removed?". Bear in mind the cost: it also serialises every physics/regrid/
+    write task sharing the graph (measured 1.57x slower end-to-end on a
+    production initial-conditions save).
+
+    Shared by :func:`save_datasets` (the actual netCDF4 write),
+    ``roms_tools.setup.utils.nan_check_batch`` and
+    ``roms_tools.setup.utils.materialize_before_check`` -- whose own ``dask.compute()``
+    can run during a high-memory source's object *construction* (via that
+    source's own ``_validate()``), well before ``.save()`` is ever called, and
+    needs exactly the same protection: a real production crash was traced via a
+    full thread-stack dump to `_validate()`'s NaN check, not the write, running
+    unprotected under the ambient concurrent scheduler.
+    """
+    if not serialize:
+        yield
+        return
+    import os
+
+    import dask
+    import numba
+    import threadpoolctl
+
+    cpu_count = os.cpu_count() or 1
+    prev_numba_threads = numba.get_num_threads()
+    numba.set_num_threads(cpu_count)
+    try:
+        with (
+            threadpoolctl.threadpool_limits(limits=cpu_count, user_api="blas"),
+            dask.config.set(scheduler="synchronous"),
+        ):
+            yield
+    finally:
+        numba.set_num_threads(prev_numba_threads)
+
 
 FilePaths: TypeAlias = str | Path | list[Path | str]
 
@@ -881,12 +946,22 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Format a duration as e.g. ``"17m 46.2s"`` or ``"8.1s"`` (no minutes)."""
+    minutes, secs = divmod(seconds, 60)
+    if minutes:
+        return f"{int(minutes)}m {secs:.1f}s"
+    return f"{secs:.1f}s"
+
+
 def save_datasets(
     dataset_list,
     output_filenames,
     use_dask=False,
     verbose=True,
     format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+    serialize_dask: bool = False,
+    show_progress: bool = True,
 ):
     """Save the list of datasets to NetCDF files.
 
@@ -898,11 +973,48 @@ def save_datasets(
         List of filenames for the output files.
     use_dask : bool, optional
         Whether to use Dask diagnostics (e.g., progress bars) when saving the datasets, by default False.
+        The progress bar itself is only shown when ``serialize_dask`` resolves to ``False``; see that
+        parameter below for why it's skipped otherwise.
     verbose : bool, optional
         Whether to log information about the files being written. If True, logs the output filenames.
         Defaults to True.
     format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
         NetCDF file format passed to ``xarray.save_mfdataset``. Defaults to ``"NETCDF4"``.
+    serialize_dask : bool, optional
+        Only meaningful when ``use_dask=True``. Defaults to ``False`` -- the
+        ordinary concurrent write. Controls how any dataset in ``dataset_list``
+        that's still lazy gets computed/written:
+
+        - ``True``: force the actual ``xarray.save_mfdataset`` call onto
+          dask's ``"synchronous"`` scheduler -- every remaining lazy read and every
+          write happens one task at a time, in this one thread -- while boosting
+          BLAS/numba to every visible core for the same call, so that one-at-a-time
+          execution still uses the whole machine rather than one core. This is the
+          **legacy-PyESPER** protection (see
+          :func:`serialize_dask_and_boost_threads`): safe regardless of how
+          memory-hungry a single chunk's own computation is, since peak memory is
+          bounded by ONE chunk's own footprint, never multiplied by the ambient
+          worker count, and no concurrent netCDF4/HDF5 library calls can race each
+          other either. Nothing turns this on automatically any more -- it runs
+          only on explicit request (a manual low-memory / troubleshooting tool).
+        - ``False``: no intervention at all -- ``xarray.save_mfdataset`` runs under
+          whatever the ambient dask scheduler/thread configuration already is
+          (typically several concurrent workers). This is the normal path: plain
+          regrid-only forcing has always been saved this way, and ESPER sources
+          are saved this way too -- PyESPER's own kernel lock keeps its chunks
+          one-at-a-time and its memory budgeted while every other task in the
+          graph runs concurrently. (Historically a pre-lock PyESPER could not be
+          run like this: its chunks' concurrent memory cost exhausted a 251 GB
+          machine, confirmed via a kernel OOM-kill log -- the reason the
+          serialized option exists.)
+
+    show_progress : bool, optional
+        Only meaningful when ``use_dask=True`` and ``serialize_dask`` is False
+        (the serialized write never draws a bar). Defaults to True. Pass False
+        for a source whose chunks are few, large and uneven -- an ESPER/PyESPER
+        write -- where the dask bar is misleading and collides with the source's
+        own per-chunk prints. Purely cosmetic: it decides whether a bar is drawn,
+        never how the write is scheduled.
 
     Returns
     -------
@@ -955,9 +1067,55 @@ def save_datasets(
         )
 
     if use_dask:
-        from dask.diagnostics import ProgressBar
+        # `save_mfdataset` both finishes computing whatever's still lazy in
+        # `dataset_list` (e.g. any not-yet-materialised source regrid) AND writes
+        # the result to `output_filenames`, in one `.store(compute=True)` call.
+        # Under the ambient threaded scheduler, that means several dask workers
+        # run concurrently -- fine for an ordinary (regrid-only) per-chunk memory
+        # cost, but dangerous for a high-memory source; see
+        # `serialize_dask_and_boost_threads`'s docstring for the full mechanism
+        # and the confirmed real-world failures (a kernel OOM-kill, and a
+        # separate netCDF4-lock hang) this guards against.
+        #
+        # A dask `ProgressBar` is skipped when `serialize_dask` forces the
+        # synchronous scheduler, and independently whenever `show_progress` is
+        # False. Both cases are the same pathology: with only a handful of large,
+        # uneven-duration chunks (e.g. one PyESPER call per chunk, tens of
+        # seconds each), the percentage barely moves for minutes at a time then
+        # jumps -- and the bar's background redraw interleaves with each chunk's
+        # own print()s on the same terminal line, garbling both. It looks broken
+        # rather than informative.
+        #
+        # That chunk profile comes from the *source*, not from the scheduler, so
+        # it shows up on the ordinary concurrent write too -- which is why
+        # `show_progress` exists rather than this keying off `serialize_dask`
+        # alone. Callers that know they are writing such a source pass
+        # `show_progress=False` (see `BoundaryForcingSource.save` /
+        # `InitialConditions.save`, which key it off `_is_esper_source`); the
+        # per-chunk progress is already visible via whatever the source itself
+        # prints, e.g. PyESPER's "PyESPER_NN took ... to run".
+        #
+        # Left on for every ordinary regrid-backed write, where many small,
+        # evenly-sized chunks make the dask bar an accurate, useful signal. Note
+        # this only decides whether to *draw* a bar -- it never influences how
+        # the write is scheduled.
+        if serialize_dask:
+            if verbose:
+                logging.info("Writing NetCDF file(s)...")
+            _start = time.perf_counter()
+            with serialize_dask_and_boost_threads(serialize_dask):
+                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+            if verbose:
+                logging.info(
+                    "Finished writing NetCDF file(s) in %s",
+                    _format_elapsed(time.perf_counter() - _start),
+                )
+        elif show_progress:
+            from dask.diagnostics import ProgressBar
 
-        with ProgressBar():
+            with ProgressBar():
+                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        else:
             xr.save_mfdataset(dataset_list, output_filenames, format=format)
     else:
         xr.save_mfdataset(dataset_list, output_filenames, format=format)

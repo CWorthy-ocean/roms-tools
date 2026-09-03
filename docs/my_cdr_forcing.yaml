@@ -1,0 +1,991 @@
+---
+roms_tools_version: 4.1.2.dev5+g288687ad2.d20260901
+---
+Grid:
+  nx: 250
+  ny: 250
+  size_x: 2500
+  size_y: 2500
+  center_lon: -15
+  center_lat: 65
+  rot: -30
+  N: 100
+  theta_s: 5.0
+  theta_b: 2.0
+  hc: 300.0
+  topography_source:
+    name: SRTM15
+    path: /anvil/projects/x-ees250129/Datasets/SRTM15/SRTM15_V2.6.nc
+  mask_shapefile: null
+  close_narrow_channels: false
+  hmin: 5.0
+  filename: null
+CDRForcing:
+  start_time: '2010-01-01T00:00:00'
+  end_time: '2012-12-31T00:00:00'
+  model_reference_date: '2000-01-01T00:00:00'
+  releases:
+  - name: iceland_release
+    lat: 65.0
+    lon: -10.0
+    depth: 100.0
+    hsc: 0.0
+    vsc: 0.0
+    times:
+    - 2010-01-01 00:00:00
+    - 2012-12-31 00:00:00
+    time_interpolation: false
+    tracer_set: marbl
+    release_type: volume
+    fill_values: auto
+    volume_fluxes:
+    - 1000.0
+    - 1000.0
+    tracer_concentrations:
+      temp:
+      - 20.0
+      - 20.0
+      salt:
+      - 1.0
+      - 1.0
+      PO4:
+      - 4.2453
+      - 4.2453
+      NO3:
+      - 57.3565
+      - 57.3565
+      SiO3:
+      - 131.2429
+      - 131.2429
+      NH4:
+      - 0.0
+      - 0.0
+      Fe:
+      - 0.07027027027027026
+      - 0.07027027027027026
+      Lig:
+      - 0.21081081081081077
+      - 0.21081081081081077
+      O2:
+      - 270.8750648003977
+      - 270.8750648003977
+      DIC:
+      - 1640.071
+      - 1640.071
+      DIC_ALT_CO2:
+      - 1640.071
+      - 1640.071
+      ALK:
+      - 2000.0
+      - 2000.0
+      ALK_ALT_CO2:
+      - 1173.693
+      - 1173.693
+      DOC:
+      - 460.476
+      - 460.476
+      DON:
+      - 31.61635
+      - 31.61635
+      DOP:
+      - 1.0242011
+      - 1.0242011
+      DOPr:
+      - 0.0
+      - 0.0
+      DONr:
+      - 0.0
+      - 0.0
+      DOCr:
+      - 0.0
+      - 0.0
+      zooC:
+      - 0.0
+      - 0.0
+      spChl:
+      - 0.0
+      - 0.0
+      spC:
+      - 0.0
+      - 0.0
+      spP:
+      - 0.0
+      - 0.0
+      spFe:
+      - 0.0
+      - 0.0
+      spCaCO3:
+      - 0.0
+      - 0.0
+      diatChl:
+      - 0.0
+      - 0.0
+      diatC:
+      - 0.0
+      - 0.0
+      diatP:
+      - 0.0
+      - 0.0
+      diatFe:
+      - 0.0
+      - 0.0
+      diatSi:
+      - 0.0
+      - 0.0
+      diazChl:
+      - 0.0
+      - 0.0
+      diazC:
+      - 0.0
+      - 0.0
+      diazP:
+      - 0.0
+      - 0.0
+      diazFe:
+      - 0.0
+      - 0.0
+  - name: greenland_release
+    lat: 70.0
+    lon: -20.0
+    depth: 100.0
+    hsc: 0.0
+    vsc: 0.0
+    times:
+    - 2010-01-01 00:00:00
+    - 2011-01-15 12:00:00
+    - 2011-01-15 15:00:00
+    - 2011-01-15 18:00:00
+    - 2011-01-19 00:00:00
+    - 2011-01-22 06:00:00
+    - 2011-01-22 09:00:00
+    - 2011-01-22 12:00:00
+    - 2012-12-31 00:00:00
+    time_interpolation: false
+    tracer_set: marbl
+    release_type: volume
+    fill_values: auto
+    volume_fluxes:
+    - 0.0
+    - 0.0
+    - 100.0
+    - 500.0
+    - 1000.0
+    - 500.0
+    - 100.0
+    - 0.0
+    - 0.0
+    tracer_concentrations:
+      temp:
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      salt:
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      PO4:
+      - 4.2453
+      - 4.2453
+      - 4.2453
+      - 4.2453
+      - 4.2453
+      - 4.2453
+      - 4.2453
+      - 4.2453
+      - 4.2453
+      NO3:
+      - 57.3565
+      - 57.3565
+      - 57.3565
+      - 57.3565
+      - 57.3565
+      - 57.3565
+      - 57.3565
+      - 57.3565
+      - 57.3565
+      SiO3:
+      - 131.2429
+      - 131.2429
+      - 131.2429
+      - 131.2429
+      - 131.2429
+      - 131.2429
+      - 131.2429
+      - 131.2429
+      - 131.2429
+      NH4:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      Fe:
+      - 0.07027027027027026
+      - 0.07027027027027026
+      - 0.07027027027027026
+      - 0.07027027027027026
+      - 0.07027027027027026
+      - 0.07027027027027026
+      - 0.07027027027027026
+      - 0.07027027027027026
+      - 0.07027027027027026
+      Lig:
+      - 0.21081081081081077
+      - 0.21081081081081077
+      - 0.21081081081081077
+      - 0.21081081081081077
+      - 0.21081081081081077
+      - 0.21081081081081077
+      - 0.21081081081081077
+      - 0.21081081081081077
+      - 0.21081081081081077
+      O2:
+      - 270.8750648003977
+      - 270.8750648003977
+      - 270.8750648003977
+      - 270.8750648003977
+      - 270.8750648003977
+      - 270.8750648003977
+      - 270.8750648003977
+      - 270.8750648003977
+      - 270.8750648003977
+      DIC:
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      DIC_ALT_CO2:
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      - 1640.071
+      ALK:
+      - 1900.0
+      - 1900.0
+      - 2100.0
+      - 2100.0
+      - 2100.0
+      - 2100.0
+      - 2100.0
+      - 1900.0
+      - 1900.0
+      ALK_ALT_CO2:
+      - 1173.693
+      - 1173.693
+      - 1173.693
+      - 1173.693
+      - 1173.693
+      - 1173.693
+      - 1173.693
+      - 1173.693
+      - 1173.693
+      DOC:
+      - 460.476
+      - 460.476
+      - 460.476
+      - 460.476
+      - 460.476
+      - 460.476
+      - 460.476
+      - 460.476
+      - 460.476
+      DON:
+      - 31.61635
+      - 31.61635
+      - 31.61635
+      - 31.61635
+      - 31.61635
+      - 31.61635
+      - 31.61635
+      - 31.61635
+      - 31.61635
+      DOP:
+      - 1.0242011
+      - 1.0242011
+      - 1.0242011
+      - 1.0242011
+      - 1.0242011
+      - 1.0242011
+      - 1.0242011
+      - 1.0242011
+      - 1.0242011
+      DOPr:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DONr:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DOCr:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      zooC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spChl:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spP:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spFe:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spCaCO3:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatChl:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatP:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatFe:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatSi:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazChl:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazP:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazFe:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+  - name: norway_release_zero_fill
+    lat: 65.0
+    lon: 10.0
+    depth: 50.0
+    hsc: 0.0
+    vsc: 0.0
+    times:
+    - 2010-01-01 00:00:00
+    - 2011-01-15 12:00:00
+    - 2011-01-15 15:00:00
+    - 2011-01-15 18:00:00
+    - 2011-01-19 00:00:00
+    - 2011-01-22 06:00:00
+    - 2011-01-22 09:00:00
+    - 2011-01-22 12:00:00
+    - 2012-12-31 00:00:00
+    time_interpolation: false
+    tracer_set: marbl
+    release_type: volume
+    fill_values: zero
+    volume_fluxes:
+    - 0.0
+    - 0.0
+    - 100.0
+    - 500.0
+    - 1000.0
+    - 500.0
+    - 100.0
+    - 0.0
+    - 0.0
+    tracer_concentrations:
+      temp:
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      - 20.0
+      salt:
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      - 1.0
+      PO4:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      NO3:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      SiO3:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      NH4:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      Fe:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      Lig:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      O2:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DIC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DIC_ALT_CO2:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      ALK:
+      - 1900.0
+      - 1900.0
+      - 2100.0
+      - 2100.0
+      - 2100.0
+      - 2100.0
+      - 2100.0
+      - 1900.0
+      - 1900.0
+      ALK_ALT_CO2:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DOC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DON:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DOP:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DOPr:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DONr:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      DOCr:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      zooC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spChl:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spP:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spFe:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      spCaCO3:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatChl:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatP:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatFe:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diatSi:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazChl:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazC:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazP:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      diazFe:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+  _tracer_metadata:
+    temp:
+      units: degrees Celsius
+      long_name: potential temperature
+    salt:
+      units: PSU
+      long_name: salinity
+    PO4:
+      units: mmol/m^3
+      long_name: dissolved inorganic phosphate
+    NO3:
+      units: mmol/m^3
+      long_name: dissolved inorganic nitrate
+    SiO3:
+      units: mmol/m^3
+      long_name: dissolved inorganic silicate
+    NH4:
+      units: mmol/m^3
+      long_name: dissolved ammonia
+    Fe:
+      units: mmol/m^3
+      long_name: dissolved inorganic iron
+    Lig:
+      units: mmol/m^3
+      long_name: iron binding ligand
+    O2:
+      units: mmol/m^3
+      long_name: dissolved oxygen
+    DIC:
+      units: mmol/m^3
+      long_name: dissolved inorganic carbon
+    DIC_ALT_CO2:
+      units: mmol/m^3
+      long_name: dissolved inorganic carbon, alternative CO2
+    ALK:
+      units: meq/m^3
+      long_name: alkalinity
+    ALK_ALT_CO2:
+      units: meq/m^3
+      long_name: alkalinity, alternative CO2
+    DOC:
+      units: mmol/m^3
+      long_name: dissolved organic carbon
+    DON:
+      units: mmol/m^3
+      long_name: dissolved organic nitrogen
+    DOP:
+      units: mmol/m^3
+      long_name: dissolved organic phosphorus
+    DOPr:
+      units: mmol/m^3
+      long_name: refractory dissolved organic phosphorus
+    DONr:
+      units: mmol/m^3
+      long_name: refractory dissolved organic nitrogen
+    DOCr:
+      units: mmol/m^3
+      long_name: refractory dissolved organic carbon
+    zooC:
+      units: mmol/m^3
+      long_name: zooplankton carbon
+    spChl:
+      units: mg/m^3
+      long_name: small phytoplankton chlorophyll
+    spC:
+      units: mmol/m^3
+      long_name: small phytoplankton carbon
+    spP:
+      units: mmol/m^3
+      long_name: small phytoplankton phosphorous
+    spFe:
+      units: mmol/m^3
+      long_name: small phytoplankton iron
+    spCaCO3:
+      units: mmol/m^3
+      long_name: small phytoplankton CaCO3
+    diatChl:
+      units: mg/m^3
+      long_name: diatom chloropyll
+    diatC:
+      units: mmol/m^3
+      long_name: diatom carbon
+    diatP:
+      units: mmol/m^3
+      long_name: diatom phosphorus
+    diatFe:
+      units: mmol/m^3
+      long_name: diatom iron
+    diatSi:
+      units: mmol/m^3
+      long_name: diatom silicate
+    diazChl:
+      units: mg/m^3
+      long_name: diazotroph chloropyll
+    diazC:
+      units: mmol/m^3
+      long_name: diazotroph carbon
+    diazP:
+      units: mmol/m^3
+      long_name: diazotroph phosphorus
+    diazFe:
+      units: mmol/m^3
+      long_name: diazotroph iron

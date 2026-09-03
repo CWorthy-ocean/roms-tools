@@ -1699,6 +1699,11 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
 # keeps that behaviour but persists the compiled machine code next to this
 # file (or under ``NUMBA_CACHE_DIR``), so only the first import in a fresh
 # environment pays the ~1.5 s compile cost instead of every process.
+# Caveat: numba invalidates the cache when *this file* changes (mtime/size)
+# or numba is upgraded, but NOT when a global imported from another module
+# changes -- ``R_EARTH`` is frozen into the cached machine code. If you edit
+# ``roms_tools/constants.py`` in an editable install, delete the ``.nbi``/
+# ``.nbc`` files in ``__pycache__`` (or touch this file) to force a rebuild.
 @nb.vectorize(
     [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)],
     nopython=True,

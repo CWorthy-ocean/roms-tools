@@ -20,10 +20,10 @@ from pydantic_core.core_schema import ValidationInfo
 from scipy.interpolate import interp1d
 
 from roms_tools.setup.utils import (
+    TracerSet,
     convert_to_relative_days,
     get_tracer_defaults_for_set,
     get_tracer_metadata_dict,
-    TracerSet,
 )
 
 NonNegativeFloat = Annotated[float, Ge(0)]

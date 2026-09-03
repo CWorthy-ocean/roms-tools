@@ -1367,7 +1367,9 @@ def add_tracer_metadata_to_ds(
     xarray.Dataset
         The dataset with added tracer metadata.
     """
-    unit_type = "flux" if with_flux_units else "concentration"
+    unit_type: Literal["concentration", "flux", "integrated"] = (
+        "flux" if with_flux_units else "concentration"
+    )
     tracer_dict = get_tracer_metadata_dict(
         include_bgc, unit_type=unit_type, tracer_set=tracer_set
     )

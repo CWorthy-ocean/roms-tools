@@ -2,7 +2,9 @@
 
 The estimation tests need both the PyESPER package and its on-disk data
 (``Mat_fullgrid/`` + ``NeuralNetworks/``); they are skipped unless a PyESPER directory is
-available. Set ``ROMS_TOOLS_PYESPER_PATH`` to point at it (defaults to a local checkout).
+available. Set ``ROMS_TOOLS_PYESPER_PATH`` to point at it -- there is no default, so
+these tests skip (with reason "ROMS_TOOLS_PYESPER_PATH not set") in any environment
+that has not set it.
 
 The dict-shape validation tests run everywhere -- they trip on `method`/`equation`
 before `validate_esper_source` reaches its import check. Anything that expects a
@@ -46,12 +48,12 @@ from roms_tools.setup.esper import (
     validate_esper_source,
 )
 
-_PYESPER_PATH = os.environ.get(
-    "ROMS_TOOLS_PYESPER_PATH", "/Users/blsaenz/Projects/git/PyESPER"
-)
+_PYESPER_PATH = os.environ.get("ROMS_TOOLS_PYESPER_PATH")
 
 
 def _pyesper_available() -> bool:
+    if not _PYESPER_PATH:
+        return False
     if not Path(_PYESPER_PATH, "Mat_fullgrid").is_dir():
         return False
     import sys
@@ -68,7 +70,11 @@ def _pyesper_available() -> bool:
 
 needs_pyesper = pytest.mark.skipif(
     not _pyesper_available(),
-    reason="PyESPER package and its data directory are required for ESPER tests",
+    reason=(
+        "ROMS_TOOLS_PYESPER_PATH not set"
+        if not _PYESPER_PATH
+        else "PyESPER package and its data directory are required for ESPER tests"
+    ),
 )
 
 
@@ -400,9 +406,15 @@ def test_esper_estimates_are_identical_under_time_chunking(monkeypatch):
     source = {"name": "ESPER", "path": _PYESPER_PATH, "method": "nn", "equation": 8}
 
     def run(cap):
-        # Drive _pyesper_chunk_plan's decision from a stubbed budget: the real
-        # 6M-point cap would leave this 90-point fixture as one chunk either way.
-        monkeypatch.setattr(esper_module, "_MAX_POINTS_PER_CHUNK", cap)
+        # Drive _pyesper_chunk_plan's decision from a stubbed budget. Patching
+        # `_pyesper_point_budget` itself (not `_MAX_POINTS_PER_CHUNK`) matters when
+        # the CWorthy fork is present: `_pyesper_point_budget` prefers the fork's
+        # own `PyESPER.xr_methods._max_points_per_chunk` over the module constant,
+        # so patching only the constant would silently no-op and this fixture
+        # (90 points) would never actually get cut.
+        monkeypatch.setattr(
+            esper_module, "_pyesper_point_budget", lambda method, n: cap
+        )
 
         def wrap(values):
             return xr.DataArray(
@@ -1197,6 +1209,28 @@ def test_missing_pyesper_points_at_the_cworthy_fork(monkeypatch):
     assert "No PyESPER is importable" in msg
 
 
+def test_ensure_pyesper_rolls_back_sys_path_insertion_on_failure(monkeypatch):
+    """A failed PyESPER import must not leave a stale `sys.path` entry behind.
+
+    `_ensure_pyesper` inserts `path` on `sys.path` before attempting the import;
+    if the import then fails (no PyESPER there, or an upstream-not-fork
+    PyESPER), that insertion must be rolled back -- otherwise a bad/irrelevant
+    checkout path lingers on `sys.path` for every later import in the process.
+    """
+    from roms_tools.setup.esper import _ensure_pyesper
+
+    _drop_pyesper_modules(monkeypatch)
+    monkeypatch.setattr(sys, "meta_path", [_BlockPyESPER(), *sys.meta_path])
+
+    fake_path = "/definitely/not/a/real/pyesper/checkout/xyz123"
+    assert fake_path not in sys.path
+
+    with pytest.raises(ImportError):
+        _ensure_pyesper(fake_path)
+
+    assert fake_path not in sys.path
+
+
 def test_upstream_pyesper_is_named_as_the_wrong_project(monkeypatch):
     """An importable PyESPER without the `*_xr` methods is upstream, not the fork.
 
@@ -1299,3 +1333,132 @@ def test_mixed_gets_a_smaller_budget_than_nn():
     cannot serve every method.
     """
     assert _pyesper_point_budget("mixed", 6) < _pyesper_point_budget("nn", 6)
+
+
+# --------------------------------------------------------------------------------------
+# `use_vars` must narrow what PyESPER is asked to estimate, not just filter the
+# result afterward. These run with no PyESPER install at all: `estimate_bgc_fields`
+# itself is mocked out, so only the caller's own `roms_variables` selection is
+# under test, not PyESPER.
+# --------------------------------------------------------------------------------------
+
+
+def _mock_estimate_bgc_fields(monkeypatch):
+    """Patch out PyESPER entirely and capture the `roms_variables` it is asked for.
+
+    Patches `esper_module.validate_esper_source` (skips the PyESPER-presence check
+    done at construction time) and `esper_module.estimate_bgc_fields` (the actual
+    per-call estimator). Both call sites (`InitialConditionsSource._process_data`,
+    `BoundaryForcingSource._process_bgc_esper`) re-import these names locally at
+    call time, so patching the `esper_module` attributes is picked up either way.
+    """
+    captured: dict = {}
+
+    def fake_validate(source):
+        return None
+
+    def fake_estimate(
+        temp, salt, lon, lat, depth, *, source, roms_variables, est_dates=None
+    ):
+        captured["roms_variables"] = list(roms_variables)
+        return {name: xr.zeros_like(temp) for name in roms_variables}
+
+    monkeypatch.setattr(esper_module, "validate_esper_source", fake_validate)
+    monkeypatch.setattr(esper_module, "estimate_bgc_fields", fake_estimate)
+    return captured
+
+
+def test_ic_use_vars_narrows_roms_variables_passed_to_the_estimator(monkeypatch):
+    """`InitialConditions`'s `use_vars` must reach `estimate_bgc_fields` filtered.
+
+    Without the fix, every `ESPER_SUPPORTED_VARS` entry is always requested from
+    PyESPER regardless of `use_vars`, and the down-select happens only afterward --
+    wasted estimation work for variables the caller never wanted.
+    """
+    captured = _mock_estimate_bgc_fields(monkeypatch)
+
+    ic = InitialConditions(
+        grid=_small_grid(),
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {
+                "source": {"name": "ESPER", "path": "unused"},
+                "use_vars": ["NO3", "PO4"],
+            }
+        ],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+    )
+
+    assert captured["roms_variables"] == ["NO3", "PO4"]
+    assert "NO3" in ic.ds
+    assert "PO4" in ic.ds
+
+
+def test_bf_use_vars_narrows_roms_variables_passed_to_the_estimator(monkeypatch):
+    """`BoundaryForcingSource`'s `use_vars` must reach `estimate_bgc_fields` filtered."""
+    captured = _mock_estimate_bgc_fields(monkeypatch)
+
+    grid = _small_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    with dask.config.set(scheduler="synchronous"):
+        phys = BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            type="physics",
+            source={"name": "GLORYS", "path": fname},
+            use_dask=False,
+            # Only the variable list reaching the estimator is under test; the
+            # coarse GLORYS fixture can fail the wet-point NaN check depending on
+            # which regrid engine the session picked, as the IC sibling test also
+            # bypasses.
+            bypass_validation=True,
+        )
+        BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            type="bgc",
+            source={"name": "ESPER", "path": "unused"},
+            use_vars=["SiO3", "O2"],
+            physics_forcing=phys,
+            use_dask=False,
+            bypass_validation=True,
+        )
+
+    assert captured["roms_variables"] == ["SiO3", "O2"]
+
+
+def test_use_vars_unsupported_variable_still_raises(monkeypatch):
+    """An unsupported requested variable must still be rejected.
+
+    Filtering `roms_variables` down to only the ESPER-supported subset must not
+    accidentally silence the presence check for a variable ESPER cannot derive at
+    all (e.g. a name valid for some other BGC source but not ESPER).
+    """
+    _mock_estimate_bgc_fields(monkeypatch)
+
+    with pytest.raises(ValueError, match="not present"):
+        InitialConditions(
+            grid=_small_grid(),
+            ini_time=datetime(2021, 6, 29),
+            source={
+                "name": "GLORYS",
+                "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+            },
+            bgc_sources=[
+                {
+                    "source": {"name": "ESPER", "path": "unused"},
+                    "use_vars": ["NO3", "CHL"],  # CHL is not ESPER-supported
+                }
+            ],
+            bgc_model=BGCMarbl,
+            use_dask=False,
+            bypass_validation=True,
+        )

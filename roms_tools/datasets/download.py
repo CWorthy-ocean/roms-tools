@@ -2,6 +2,7 @@ import logging
 import tempfile
 import time
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import pooch
@@ -11,6 +12,15 @@ MAX_DOWNLOAD_ATTEMPTS = 3
 
 #: Seconds to wait before the first retry; doubled for each further attempt.
 RETRY_BACKOFF_SECONDS = 2.0
+
+#: Appended to a 4xx download failure: that class of error will not succeed on
+#: retry (the URL is wrong, or the remote file has moved/been removed), so point
+#: the caller at pre-staged data instead of a doomed retry loop.
+_PRE_STAGED_DATA_HINT = (
+    "This is a client error (4xx) and will not succeed on retry. If you already "
+    "have this file, point the source's `path` at a directory that already holds "
+    "it instead of downloading."
+)
 
 
 def _fetch(manager: pooch.Pooch, filename: str) -> str:
@@ -367,7 +377,18 @@ def _download_one(url: str, path: Path) -> None:
 
     The file is streamed to a temporary file in the destination directory and
     then moved into place, so an interrupted download never leaves a truncated
-    file that a later run would mistake for a complete one.
+    file that a later run would mistake for a complete one; a failed attempt
+    (of any kind, including a 4xx or a size mismatch) always removes that
+    temporary file before this returns or raises, so no ``.part`` file is ever
+    left behind.
+
+    A 4xx response (``HTTPError``, a subclass of ``OSError``) is not retried: it
+    means the request itself is wrong (bad URL, moved/removed file, ...), so
+    retrying identically would only waste the backoff delay before failing the
+    same way. A ``Content-Length`` mismatch between what the server advertised
+    and what was actually written is treated as any other failure -- retried
+    like a transient network error, since a truncated read often succeeds on a
+    subsequent attempt.
     """
     for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
         tmp_path = None
@@ -376,14 +397,34 @@ def _download_one(url: str, path: Path) -> None:
                 delete=False, dir=str(path.parent), suffix=".part"
             ) as tmpfile:
                 tmp_path = Path(tmpfile.name)
-                with urlopen(url) as response:
+                with urlopen(url, timeout=60) as response:
+                    expected_length = response.headers.get("Content-Length")
+                    bytes_written = 0
                     while chunk := response.read(1 << 20):
                         tmpfile.write(chunk)
+                        bytes_written += len(chunk)
+                if expected_length is not None:
+                    try:
+                        expected_bytes = int(expected_length)
+                    except ValueError:
+                        expected_bytes = None
+                    if expected_bytes is not None and expected_bytes != bytes_written:
+                        raise OSError(
+                            f"Incomplete download from {url}: server advertised "
+                            f"Content-Length {expected_bytes}, but {bytes_written} "
+                            "bytes were written."
+                        )
             tmp_path.replace(path)
             return
         except OSError as error:
             if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
+            if isinstance(error, HTTPError) and 400 <= error.code < 500:
+                # Re-raise the original HTTPError (not a wrapping OSError) so a
+                # caller branching on `error.code` still can; attach the hint as
+                # a note rather than losing it in a new exception's message.
+                error.add_note(_PRE_STAGED_DATA_HINT)
+                raise
             if attempt == MAX_DOWNLOAD_ATTEMPTS:
                 raise
             delay = RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1)

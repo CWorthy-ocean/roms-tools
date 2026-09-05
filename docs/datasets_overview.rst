@@ -71,6 +71,10 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - BGC Initial & Boundary Conditions (nutrients and oxygen)
      - No (auto-downloaded)
      - `NCEI <https://www.ncei.noaa.gov/access/world-ocean-atlas-2023/>`_
+   * - GLODAPv2 BGC
+     - BGC Initial & Boundary Conditions (carbon system: DIC, ALK)
+     - Yes
+     - `GLODAP <https://www.glodap.info/index.php/mapped-data-product/>`_
    * - WOA
      - Surface Restoring Forcing, sea surface salinity (`sss`)
      - Yes
@@ -286,9 +290,19 @@ chemistry or iron, so a MARBL run needs a companion source for ``DIC``, ``ALK`` 
 alongside GLODAP or ESPER for the carbon system.
 
 Temperature and salinity are read too, but never written to ROMS output. They serve two
-purposes: converting the tracers from µmol kg⁻¹ to mmol m⁻³ via TEOS-10 sigma-0 density,
-and providing the source density coordinate for ``density`` / ``density_mld`` BGC
+purposes: converting the tracers from µmol kg⁻¹ to mmol m⁻³ via in-situ density, and
+providing the source density coordinate for ``density`` / ``density_mld`` BGC
 interpolation. The monthly T/S fields are paired with the monthly tracer fields.
+
+.. note::
+   **Unit-conversion convention.** Every gridded BGC source that ships tracers in
+   µmol kg⁻¹ (WOA23, GLODAPv2) converts to mmol m⁻³ the same way: in-situ density via
+   TEOS-10 (``gsw.rho``, with pressure derived from depth via ``gsw.p_from_z``),
+   treating practical salinity as Absolute Salinity and in-situ temperature as
+   Conservative Temperature (``SP`` ≈ ``SA``, ``t`` ≈ ``CT`` -- an approximation, but
+   sufficient here). Unlike the potential-density (sigma-0) coordinate used for
+   ``density`` / ``density_mld`` vertical interpolation, this in-situ conversion factor
+   genuinely varies with depth (via pressure), not just with T/S.
 
 .. note::
    In the NCEI path layout, the ``decav`` / ``all`` token is the averaging period *over
@@ -309,10 +323,11 @@ variable is extended onto the full grid without vertical interpolation, controll
 
 ``"annual_blend"`` (default)
     Splices the full-depth annual climatology underneath the monthly data, with a linear
-    taper across the seam. The band is centred on *each variable's own* deepest monthly
-    level, with a half-width of ``deep_blend_halfwidth`` (default 100 m) -- so 700-900 m
-    for the nutrients and 1400-1600 m for oxygen and T/S. Above the band the field is
-    purely monthly; below it, purely annual.
+    taper across the seam. The blend is centred on the deepest monthly level, so monthly
+    values within ``deep_blend_halfwidth`` above the seam are blended toward the annual
+    climatology, with a half-width of ``deep_blend_halfwidth`` (default 100 m) on either
+    side of the seam -- 700-900 m for the nutrients and 1400-1600 m for oxygen and T/S.
+    Only above the band is the field purely monthly; below the band, purely annual.
 
 ``"ffill"``
     Persists the deepest monthly value to the seafloor. Simpler, and it avoids
@@ -341,6 +356,41 @@ climatology.
 
 :Required for: BGC Initial Conditions, BGC Boundary Forcing
 :Available at: `NCEI <https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA/>`_
+
+
+GLODAPv2 BGC Dataset
+~~~~~~~~~~~~~~~~~~~~
+
+The GLODAPv2 2016b mapped data product, as a gridded BGC source for initial conditions
+and boundary forcing. It is a static (no-time) observational climatology on a 1° x 1°
+lat/lon grid.
+
+**File layout.** One netCDF file per variable, named ``GLODAPv2.2016b.{var}.nc``, in the
+directory passed as ``path``. Every file shares the same ``lat``/``lon`` coordinates and
+carries the depth grid as a 1-D ``Depth`` *data variable* (not a dimension coordinate) on
+an otherwise-unlabelled depth dimension; :class:`GLODAPv2BGCDataset` promotes it to a
+proper coordinate on load.
+
+**It supplies** ``PO4``, ``NO3``, ``SiO3`` (``silicate``), ``O2`` (``oxygen``), ``DIC``
+(``TCO2``) and ``ALK`` (``TAlk``) -- the full carbon system plus the shared nutrients, so
+GLODAP alone can complete a MARBL run's ``DIC``/``ALK`` needs (typically alongside WOA or
+ESPER for the other nutrients).
+
+Temperature and salinity are read too (files ``GLODAPv2.2016b.temperature.nc`` and
+``GLODAPv2.2016b.salinity.nc``), but never written to ROMS output. They serve two
+purposes: converting the tracers from µmol kg⁻¹ to mmol m⁻³ via in-situ density (see the
+unit-conversion convention noted under WOA23 above), and providing the source density
+coordinate for ``density`` / ``density_mld`` BGC interpolation. **If the T/S files are
+absent**, the conversion falls back to a uniform density of 1025 kg m⁻³ and logs a
+warning naming the fallback -- present for robustness against incomplete GLODAP
+downloads, not a recommended way to run: without real T/S, the density coordinate is
+also unavailable, so ``density``/``density_mld`` interpolation is not possible either.
+
+**Static source.** GLODAP has no time axis; when used in ``bgc_sources``, its fields are
+broadcast onto the physics initial-condition/boundary-forcing time axis.
+
+:Required for: BGC Initial Conditions, BGC Boundary Forcing
+:Available at: `GLODAPv2 mapped data product <https://www.glodap.info/index.php/mapped-data-product/>`_
 
 
 WOA Salinity Data

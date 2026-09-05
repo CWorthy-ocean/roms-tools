@@ -34,6 +34,7 @@ from roms_tools.setup.bgc_model import (
     bgc_model_from_name,
     bgc_model_to_name,
     bgc_variable_info,
+    validate_bgc_model,
 )
 from roms_tools.setup.utils import (
     _CLIMATOLOGY_ONLY_BGC,
@@ -48,6 +49,7 @@ from roms_tools.setup.utils import (
     check_source_coverage,
     compute_barotropic_velocity,
     deserialize_forcing_data,
+    forwardable_fields,
     from_yaml,
     get_roms_tools_version_info,
     get_target_coords,
@@ -353,12 +355,16 @@ class InitialConditionsSource:
     source."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``. Applies only to lat/lon sources."""
-    ds: xr.Dataset = field(init=False, repr=False)
+    # `compare=False`: `xr.Dataset.__eq__` returns an elementwise Dataset (truthy in
+    # a way that makes `==` comparisons on this dataclass vacuously true/broken)
+    # rather than a bool, so equality between two objects of this class is defined
+    # over their (comparable) parameters, not their computed datasets.
+    ds: xr.Dataset = field(init=False, repr=False, compare=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
     adjust_depth_for_sea_surface_height: bool = field(init=False)
     """Whether to account for sea surface height when computing depth coordinates."""
-    ds_depth_coords: xr.Dataset = field(init=False, repr=False)
+    ds_depth_coords: xr.Dataset = field(init=False, repr=False, compare=False)
     """An xarray Dataset containing the depth coordinates."""
 
     def __post_init__(self):
@@ -509,6 +515,14 @@ class InitialConditionsSource:
             lon = self.grid.ds["lon_rho"]
             lat = self.grid.ds["lat_rho"]
             year = self.ini_time.year + (self.ini_time.timetuple().tm_yday - 1) / 365.25
+            # Only ask PyESPER to estimate what was actually requested; unsupported
+            # requested variables are still caught below by `_apply_use_vars`'s
+            # presence check (which runs against the full, unfiltered `use_vars`).
+            roms_variables = (
+                [v for v in self.use_vars if v in ESPER_SUPPORTED_VARS]
+                if self.use_vars is not None
+                else ESPER_SUPPORTED_VARS
+            )
             fields = estimate_bgc_fields(
                 temp,
                 salt,
@@ -516,7 +530,7 @@ class InitialConditionsSource:
                 lat,
                 depth,
                 source=self.source,
-                roms_variables=ESPER_SUPPORTED_VARS,
+                roms_variables=roms_variables,
                 est_dates=year,
             )
             processed_fields.update(fields)
@@ -920,6 +934,9 @@ class InitialConditionsSource:
                 )
         elif self.physics_forcing is not None:
             raise ValueError("`physics_forcing` only applies when `type='bgc'`.")
+
+        if self.type == "physics" and self.use_vars is not None:
+            raise ValueError("`use_vars` only applies when `type='bgc'`.")
 
         if self.source is None:
             raise ValueError("`source` is required.")
@@ -1327,7 +1344,7 @@ class InitialConditionsSource:
                     mask = self.grid.ds.mask_v
                 checks.append((ds[var_name].squeeze(), mask, None))
 
-        nan_check_batch(checks, serialize_dask=False)
+        nan_check_batch(checks)
 
     def _add_global_metadata(self, ds):
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"
@@ -1337,7 +1354,11 @@ class InitialConditionsSource:
         # git commit that produced this file.
         version_info = get_roms_tools_version_info()
         ds.attrs["roms_tools_version"] = version_info["roms_tools_version"]
-        ds.attrs["roms_tools_git_commit"] = str(version_info["roms_tools_git_commit"])
+        # netCDF attrs cannot hold `None`; omit the attr entirely rather than
+        # writing the misleading string "None" when no git commit is known (e.g.
+        # a real pip/conda install with no `.git` directory).
+        if version_info["roms_tools_git_commit"] is not None:
+            ds.attrs["roms_tools_git_commit"] = version_info["roms_tools_git_commit"]
         ds.attrs["ini_time"] = str(self.ini_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["adjust_depth_for_sea_surface_height"] = str(
@@ -1631,6 +1652,22 @@ class InitialConditionsSource:
             combine_attrs="override",
         )
 
+        # `combine_attrs="override"` above takes the physics object's attrs
+        # wholesale (as documented), which drops each bgc companion's own
+        # `bgc_source` attr (set by its own `_add_global_metadata`) -- record a
+        # summary of every contributing bgc source here instead, without
+        # overriding any physics attr.
+        def _bgc_source_label(b: "InitialConditionsSource") -> str:
+            assert b.source is not None  # `type="bgc"` requires `source`
+            name = str(b.source["name"])
+            if b.use_vars:
+                return f"{name}[use_vars={','.join(b.use_vars)}]"
+            return name
+
+        merged_ds.attrs["bgc_sources"] = ", ".join(
+            _bgc_source_label(b) for b in bgc_list
+        )
+
         if filepath is None:
             return merged_ds
 
@@ -1874,13 +1911,17 @@ class InitialConditions:
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
 
-    physics: InitialConditionsSource = field(init=False, repr=False)
+    # `compare=False` on all three: `physics`/`bgc` hold constituent
+    # `InitialConditionsSource` objects and `ds` is the merged `xr.Dataset` itself
+    # -- see the `ds` field's own comment in `InitialConditionsSource` for why
+    # dataclass equality must exclude computed datasets.
+    physics: InitialConditionsSource = field(init=False, repr=False, compare=False)
     """The internal physics-only InitialConditionsSource object. Exposed for
     advanced use (e.g. ``ic.physics.plot(...)``)."""
-    bgc: list[InitialConditionsSource] = field(init=False, repr=False)
+    bgc: list[InitialConditionsSource] = field(init=False, repr=False, compare=False)
     """The internal bgc-only InitialConditionsSource objects, one per
     ``bgc_sources`` item, in order. Exposed for advanced use."""
-    ds: xr.Dataset = field(init=False, repr=False)
+    ds: xr.Dataset = field(init=False, repr=False, compare=False)
     """The complete (physics + all BGC sources) initial-conditions dataset --
     ``self.physics.ds`` when there are no BGC sources, otherwise
     :meth:`InitialConditionsSource.merge`. Set once in ``__post_init__``; a plain,
@@ -1894,7 +1935,7 @@ class InitialConditions:
                 "Provide at most one of `bgc_source` (legacy single-source) or "
                 "`bgc_sources` (list) -- not both."
             )
-        if self.use_vars is not None and self.bgc_source is None:
+        if self.use_vars and self.bgc_source is None:
             raise ValueError(
                 "`use_vars` only applies alongside `bgc_source` (legacy "
                 "single-source convenience); set it per-item in `bgc_sources` "
@@ -1909,47 +1950,37 @@ class InitialConditions:
         if self.bgc_source is not None:
             bgc_sources = [{"source": self.bgc_source, "use_vars": self.use_vars}]
         bgc_sources = bgc_sources or []
-
-        physics_kwargs = dict(
-            ini_time=self.ini_time,
-            source=self.source,
-            model_reference_date=self.model_reference_date,
-            allow_flex_time=self.allow_flex_time,
-            use_dask=self.use_dask,
-            chunks=self.chunks,
-            initial_slice_bounds=self.initial_slice_bounds,
-            bypass_validation=self.bypass_validation,
-            prefill=self.prefill,
-            prefill_kwargs=self.prefill_kwargs,
-            regrid_method=self.regrid_method,
-            extrap_method=self.extrap_method,
-            extrap_kwargs=self.extrap_kwargs,
-        )
-        self.physics = InitialConditionsSource(
-            grid=self.grid, type="physics", **physics_kwargs
-        )
-
+        # Validate `bgc_model` BEFORE building the physics source: a wrong value
+        # (None, an instance, an unrelated class) should fail here, not after
+        # the physics regrid has already been paid for.
         if bgc_sources:
             if self.bgc_model is None:
                 raise ValueError(
                     "`bgc_model` is required when `bgc_source`/`bgc_sources` is "
                     "provided (e.g. `bgc_model=rt.BGCMarbl`)."
                 )
-            shared_kwargs = dict(
-                ini_time=self.ini_time,
-                model_reference_date=self.model_reference_date,
-                allow_flex_time=self.allow_flex_time,
-                use_dask=self.use_dask,
-                chunks=self.chunks,
-                initial_slice_bounds=self.initial_slice_bounds,
-                bypass_validation=self.bypass_validation,
-                bgc_interpolation_method=self.bgc_interpolation_method,
-                prefill=self.prefill,
-                prefill_kwargs=self.prefill_kwargs,
-                regrid_method=self.regrid_method,
-                extrap_method=self.extrap_method,
-                extrap_kwargs=self.extrap_kwargs,
+            validate_bgc_model(self.bgc_model)
+
+        # Every constructor argument this wrapper shares by name with
+        # InitialConditionsSource is forwarded to the physics object and to each
+        # bgc companion -- derived from the two dataclasses (see
+        # forwardable_fields) instead of hand-listed, so a new shared field
+        # cannot be silently dropped. `use_vars` is the one shared NAME with a
+        # different meaning: on this wrapper it is the legacy single-source
+        # convenience paired with `bgc_source` (already folded into
+        # `bgc_sources` above), on the source it is the per-object down-select
+        # that build_bgc_companions sets per item -- so it must not be forwarded
+        # (the physics source would reject it, and companions without their own
+        # use_vars would inherit it).
+        shared_kwargs = {
+            name: getattr(self, name)
+            for name in forwardable_fields(
+                type(self), InitialConditionsSource, exclude=("use_vars",)
             )
+        }
+        self.physics = InitialConditionsSource(**{**shared_kwargs, "type": "physics"})
+
+        if bgc_sources:
             self.bgc = build_bgc_companions(
                 InitialConditionsSource,
                 self.grid,
@@ -2106,10 +2137,28 @@ class InitialConditions:
         -------
         InitialConditions
             An instance of the InitialConditions class.
+
+        Raises
+        ------
+        ValueError
+            If the loaded block has `bgc_source`/`bgc_sources` but no
+            `bgc_model` -- this file predates roms-tools 5.0's multi-bgc-source
+            support (`bgc_model` did not exist before it).
         """
         filepath = Path(filepath)
         grid = Grid.from_yaml(filepath)
         params = from_yaml(cls, filepath)
+
+        if (params.get("bgc_source") or params.get("bgc_sources")) and not params.get(
+            "bgc_model"
+        ):
+            raise ValueError(
+                "This YAML file predates roms-tools 5.0's multi-bgc-source "
+                "support -- it has `bgc_source`/`bgc_sources` but no `bgc_model`. "
+                "Add `bgc_model: BGCMarbl` (or your BGCModel subclass's registry "
+                "name) to the YAML file before loading it."
+            )
+
         params["bgc_model"] = bgc_model_from_name(params.get("bgc_model"))
 
         # Deserialize nested grids: the top-level source/bgc_source, and each

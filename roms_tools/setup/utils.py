@@ -3,7 +3,7 @@ import logging
 import time
 import typing
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -40,7 +40,7 @@ from roms_tools.processing_methods import (  # noqa: F401
     validate_extrap,
     validate_prefill,
 )
-from roms_tools.utils import serialize_dask_and_boost_threads, transpose_dimensions
+from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -258,7 +258,7 @@ def nan_check(field, mask, error_message=None) -> None:
         raise ValueError(error_message)
 
 
-def nan_check_batch(items, serialize_dask: bool = False) -> None:
+def nan_check_batch(items) -> None:
     """Validate several fields for NaNs at wet points in a single computation.
 
     Parameters
@@ -266,19 +266,14 @@ def nan_check_batch(items, serialize_dask: bool = False) -> None:
     items : iterable of (field, mask, error_message)
         One tuple per field to check. ``error_message`` may be ``None`` to use the
         default message.
-    serialize_dask : bool, optional
-        See :func:`roms_tools.utils.serialize_dask_and_boost_threads`. Defaults
-        to ``False`` -- the compute runs under the ambient dask scheduler.
-        ``True`` is a manual low-memory / troubleshooting tool (one task at a
-        time, peak memory bounded by a single chunk). Note this call happens
-        during object *construction* (via ``_validate()``), not at ``.save()``
-        time.
 
     Notes
     -----
     All NaN-at-wet-point flags are evaluated in one ``dask.compute`` so that a lazy
     subgraph shared across fields (e.g. a density/MLD interpolation coordinate reused
-    across BGC tracers) is computed once rather than once per field.
+    across BGC tracers) is computed once rather than once per field. The compute
+    runs under the ambient dask scheduler (every caller here runs during object
+    *construction*, via ``_validate()``, not at ``.save()`` time).
 
     Raises
     ------
@@ -289,16 +284,13 @@ def nan_check_batch(items, serialize_dask: bool = False) -> None:
     if not items:
         return
     flags = [nan_flag(field, mask) for field, mask, _ in items]
-    with serialize_dask_and_boost_threads(serialize_dask):
-        results = dask.compute(*flags)
+    results = dask.compute(*flags)
     for (_field, _mask, error_message), result in zip(items, results):
         if bool(np.asarray(result)):
             raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
 
 
-def materialize_before_check(
-    ds, var_names, materialize: bool, serialize_dask: bool = False
-) -> None:
+def materialize_before_check(ds, var_names, materialize: bool) -> None:
     """Realize each of ``var_names`` in ``ds`` via one combined ``dask.compute()`` call
     and write the results back into ``ds`` in place, *before* any NaN-check view is
     built from them.
@@ -311,12 +303,8 @@ def materialize_before_check(
     computation to run, but discards the realized values -- so a later ``.save()``
     on this same ``ds`` would recompute them from scratch.
 
-    ``serialize_dask`` additionally wraps the compute in
-    :func:`roms_tools.utils.serialize_dask_and_boost_threads` -- a manual
-    low-memory / troubleshooting tool (PyESPER serialises its own kernels, so it
-    is never *required*). The two concerns are deliberately independent:
-    materialize-and-cache is about avoiding a double compute; serialization is
-    about bounding memory to one task at a time.
+    The compute runs under the ambient dask scheduler -- PyESPER serialises its
+    own kernels, so no serialized/low-memory scheduler is required here.
 
     ``var_names`` should be EVERY variable sharing the source's expensive computation
     (e.g. an ESPER source's full ``use_vars`` list), not just the subset
@@ -340,8 +328,7 @@ def materialize_before_check(
     multi-month boundary runs along *time* -- it has to, see its docstring -- so
     there a single-time-slice check touches only the first block, and
     materializing the full series is real extra work up front. Still cheaper in
-    total compute; it is peak memory, not throughput, that pays for it. Pass
-    ``serialize_dask`` when that peak is the binding constraint.
+    total compute; it is peak memory, not throughput, that pays for it.
 
     A no-op when ``materialize`` is False, or ``var_names`` is empty.
 
@@ -362,8 +349,7 @@ def materialize_before_check(
     names = [v for v in var_names if v in ds]
     if not names:
         return
-    with serialize_dask_and_boost_threads(serialize_dask):
-        realized = dask.compute(*(ds[v] for v in names))
+    realized = dask.compute(*(ds[v] for v in names))
     for v, value in zip(names, realized):
         ds[v] = value
 
@@ -890,6 +876,71 @@ def compute_potential_density(
     density.name = "sigma0"
     density.attrs["long_name"] = "potential density anomaly"
     density.attrs["units"] = "kg/m^3 - 1000"
+    return density
+
+
+def compute_in_situ_density(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth: "xr.DataArray",
+    lat: "xr.DataArray",
+) -> "xr.DataArray":
+    """Compute in-situ seawater density (kg/m³) via TEOS-10 (gsw).
+
+    Pressure is derived from depth via ``gsw.p_from_z`` and density is then
+    computed with ``gsw.rho``, both wrapped in ``apply_ufunc`` for dask
+    compatibility. Like :func:`compute_potential_density`, this treats
+    practical salinity as Absolute Salinity and in-situ temperature as
+    Conservative Temperature -- an approximation carried over from that
+    function for consistency, sufficient for the µmol/kg -> mmol/m³ unit
+    conversions that call this.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        In-situ temperature (°C).
+    salt : xr.DataArray
+        Practical salinity (PSU).
+    depth : xr.DataArray
+        Depth (m), positive down.
+    lat : xr.DataArray
+        Latitude (degrees north).
+
+    Returns
+    -------
+    xr.DataArray
+        In-situ density (kg/m³).
+    """
+    # Broadcast only depth against lat (typically two 1-D coordinates -> one small
+    # 2-D pressure field). temp/salt are NOT materialised to a common shape here:
+    # apply_ufunc aligns dims by name and lets numpy broadcast the small pressure
+    # array against them, so the only full-size array allocated is the result --
+    # the same footprint as the sigma0 conversion this replaced. Broadcasting all
+    # four inputs first would allocate two extra full-size float64 arrays, which
+    # for an eagerly-loaded global WOA23 climatology is several GB.
+    depth_b, lat_b = xr.broadcast(depth, lat)
+    pressure = xr.apply_ufunc(
+        gsw.p_from_z,
+        -depth_b,
+        lat_b,
+        dask="parallelized",
+        output_dtypes=[depth_b.dtype],
+    )
+    density = xr.apply_ufunc(
+        gsw.rho,
+        salt,
+        temp,
+        pressure,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+    # apply_ufunc preserves the input dim order, but normalize to the package's
+    # canonical order so this public function returns a predictable layout to
+    # users who call it directly.
+    density = transpose_dimensions(density)
+    density.name = "rho"
+    density.attrs["long_name"] = "in-situ density"
+    density.attrs["units"] = "kg/m^3"
     return density
 
 
@@ -2148,6 +2199,9 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
+_version_info_cache: dict[str, str | None] | None = None
+
+
 def get_roms_tools_version_info() -> dict[str, str | None]:
     """Return the roms-tools package version, plus (when available) the exact git
     commit of the checkout that produced it.
@@ -2157,17 +2211,31 @@ def get_roms_tools_version_info() -> dict[str, str | None]:
     development, a plain source edit does **not** refresh that metadata, so the
     reported version can silently go stale relative to the code that actually ran.
     Querying git directly at call time catches that: ``roms_tools_git_commit``
-    reflects the *actual* checked-out commit right now (with a ``-dirty`` suffix if
+    reflects the checked-out commit as of this process's first call (with a ``-dirty`` suffix if
     the working tree has uncommitted changes), independent of install-time
     metadata. Returns ``None`` for the commit when not in a git checkout (e.g. a
-    real pip/conda install with no ``.git`` directory) or ``git`` is unavailable --
-    this is a best-effort traceability aid, not a hard requirement.
+    real pip/conda install with no ``.git`` directory), ``git`` is unavailable, or
+    the enclosing git checkout does not actually contain the ``roms_tools``
+    package directory (e.g. an editable install whose source lives outside any
+    git repo, or nested inside an unrelated one) -- this is a best-effort
+    traceability aid, not a hard requirement.
+
+    The result is computed once per process and cached: the code actually
+    running is whatever was imported at process start, so a commit or edit made
+    later in a long-lived session does not change the provenance of files this
+    process writes -- and repeated calls, one per saved file, don't each
+    re-invoke ``git``. A copy is returned each time so a
+    caller mutating the returned dict cannot corrupt the cache.
 
     Returns
     -------
     dict[str, str | None]
         ``{"roms_tools_version": ..., "roms_tools_git_commit": ... | None}``.
     """
+    global _version_info_cache
+    if _version_info_cache is not None:
+        return dict(_version_info_cache)
+
     try:
         roms_tools_version = importlib.metadata.version("roms-tools")
     except importlib.metadata.PackageNotFoundError:
@@ -2178,31 +2246,47 @@ def get_roms_tools_version_info() -> dict[str, str | None]:
         import subprocess
 
         repo_dir = Path(__file__).resolve().parent
-        commit = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+        toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
             cwd=repo_dir,
             capture_output=True,
             text=True,
             timeout=2,
         )
-        if commit.returncode == 0:
-            git_commit = commit.stdout.strip()
-            dirty = subprocess.run(
-                ["git", "status", "--porcelain"],
+        # Only trust this as the roms-tools source checkout when the resolved
+        # toplevel actually contains the `roms_tools` package directory --
+        # otherwise the commit we'd report wouldn't be traceable to the code
+        # that actually produced this file.
+        if (
+            toplevel.returncode == 0
+            and (Path(toplevel.stdout.strip()) / "roms_tools").is_dir()
+        ):
+            commit = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
                 cwd=repo_dir,
                 capture_output=True,
                 text=True,
                 timeout=2,
             )
-            if dirty.returncode == 0 and dirty.stdout.strip():
-                git_commit += "-dirty"
+            if commit.returncode == 0:
+                git_commit = commit.stdout.strip()
+                dirty = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=repo_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if dirty.returncode == 0 and dirty.stdout.strip():
+                    git_commit += "-dirty"
     except (OSError, subprocess.SubprocessError):
         pass
 
-    return {
+    _version_info_cache = {
         "roms_tools_version": roms_tools_version,
         "roms_tools_git_commit": git_commit,
     }
+    return dict(_version_info_cache)
 
 
 def write_to_yaml(yaml_data, filepath: str | Path) -> None:
@@ -2227,11 +2311,16 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     # Convert the filepath to a Path object
     filepath = Path(filepath)
 
-    # Create YAML header with version information
+    # Create YAML header with version information. `roms_tools_git_commit` may be
+    # `None` (see get_roms_tools_version_info); emit the actual YAML `null`
+    # literal for that case rather than the string "None", so it round-trips as
+    # `None` (Python), not the misleading string `"None"`.
     version_info = get_roms_tools_version_info()
+    git_commit = version_info["roms_tools_git_commit"]
+    git_commit_repr = "null" if git_commit is None else git_commit
     header = (
         f"---\nroms_tools_version: {version_info['roms_tools_version']}\n"
-        f"roms_tools_git_commit: {version_info['roms_tools_git_commit']}\n---\n"
+        f"roms_tools_git_commit: {git_commit_repr}\n---\n"
     )
 
     # Write to YAML file
@@ -2422,6 +2511,41 @@ def deserialize_bgc_sources(
     ]
 
 
+def forwardable_fields(
+    wrapper_cls: type, source_cls: type, *, exclude: Iterable[str] = ()
+) -> frozenset[str]:
+    """Names of the ``init`` dataclass fields ``wrapper_cls`` and ``source_cls`` have
+    in common, minus ``exclude``.
+
+    The ``BoundaryForcing``/``InitialConditions`` wrappers forward their own
+    constructor arguments to the physics ``*Source`` object and to every bgc
+    companion. Deriving that set from the two dataclasses -- rather than
+    hand-listing it (four near-identical lists that drift: a field added to the
+    wrapper was silently not forwarded until someone remembered every list) --
+    means a new shared field flows through automatically, a source-only field
+    (``type``/``physics_forcing``) or wrapper-only field (``bgc_sources``/
+    ``bgc_model``) never does, and the only thing left to maintain is
+    ``exclude``: fields that exist on BOTH classes but mean different things
+    (e.g. ``InitialConditions.use_vars`` is a legacy single-source convenience,
+    not the per-object down-select ``InitialConditionsSource.use_vars`` is).
+
+    Parameters
+    ----------
+    wrapper_cls, source_cls : type
+        Dataclasses; only fields with ``init=True`` are considered.
+    exclude : Iterable[str], optional
+        Shared names that must NOT be forwarded; document why at the call site.
+
+    Returns
+    -------
+    frozenset[str]
+        The forwardable field names.
+    """
+    wrapper = {f.name for f in fields(wrapper_cls) if f.init}
+    source = {f.name for f in fields(source_cls) if f.init}
+    return frozenset((wrapper & source) - set(exclude))
+
+
 def build_bgc_companions(
     source_cls: type,
     grid: Any,
@@ -2458,7 +2582,10 @@ def build_bgc_companions(
     bgc_sources : list[dict]
         One dict per bgc source: ``{"source": RawDataSource, "use_vars": ... |
         None, "bgc_interpolation_method": ... | None}``. A per-item
-        ``bgc_interpolation_method`` overrides ``shared_kwargs``'s.
+        ``bgc_interpolation_method`` overrides ``shared_kwargs``'s. An empty
+        ``use_vars`` list (``[]``) is treated the same as ``None`` (unset) rather
+        than as "keep zero variables". Any key other than ``source``, ``use_vars``,
+        or ``bgc_interpolation_method`` raises ``ValueError``.
     shared_kwargs : dict
         The wrapper's own shared kwargs to forward to every constructed object
         (e.g. ``ini_time``/``start_time``+``end_time``, ``model_reference_date``,
@@ -2474,9 +2601,22 @@ def build_bgc_companions(
     -------
     list[source_cls]
         One instance per ``bgc_sources`` item, in order.
+
+    Raises
+    ------
+    ValueError
+        If any ``bgc_sources`` item has a key other than ``source``, ``use_vars``,
+        or ``bgc_interpolation_method``.
     """
+    allowed_keys = {"source", "use_vars", "bgc_interpolation_method"}
     companions = []
     for item in bgc_sources:
+        unknown = set(item) - allowed_keys
+        if unknown:
+            raise ValueError(
+                f"Unknown bgc_sources item key(s) {sorted(unknown)}; valid keys "
+                f"are {sorted(allowed_keys)}."
+            )
         kwargs = {**shared_kwargs, "grid": grid, "physics_forcing": physics_obj}
         if type_ is not None:
             kwargs["type"] = type_

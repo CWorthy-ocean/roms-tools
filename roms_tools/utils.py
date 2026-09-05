@@ -23,11 +23,11 @@ from roms_tools.constants import R_EARTH
 def serialize_dask_and_boost_threads(serialize: bool):
     """If ``serialize``, force dask onto its ``"synchronous"`` scheduler (one
     task at a time, in this thread) for the duration of the block, while
-    boosting BLAS/numba to every visible core for that same one-task-at-a-time
-    execution -- restored to whatever they were on exit, regardless of success
-    or failure. If not ``serialize``, this is a no-op: the ambient dask/BLAS/
-    numba configuration (typically several concurrent dask workers) applies
-    unchanged.
+    raising numba's thread count to every visible core (capped at numba's own
+    ceiling; BLAS is deliberately left alone -- see below) for that same
+    one-task-at-a-time execution -- restored on exit, regardless of success or
+    failure. If not ``serialize``, this is a no-op: the ambient dask/numba
+    configuration (typically several concurrent dask workers) applies unchanged.
 
     This is a **manual** tool -- nothing enables it automatically. It exists
     because an earlier PyESPER (one without ``PyESPER.concurrency``) multiplied its
@@ -50,14 +50,20 @@ def serialize_dask_and_boost_threads(serialize: bool):
     write task sharing the graph (measured 1.57x slower end-to-end on a
     production initial-conditions save).
 
-    Shared by :func:`save_datasets` (the actual netCDF4 write),
-    ``roms_tools.setup.utils.nan_check_batch`` and
-    ``roms_tools.setup.utils.materialize_before_check`` -- whose own ``dask.compute()``
-    can run during a high-memory source's object *construction* (via that
-    source's own ``_validate()``), well before ``.save()`` is ever called, and
-    needs exactly the same protection: a real production crash was traced via a
-    full thread-stack dump to `_validate()`'s NaN check, not the write, running
-    unprotected under the ambient concurrent scheduler.
+    Thread/BLAS boost, precisely: the numba thread count is raised to the
+    number of CPUs visible to *this process* (``os.sched_getaffinity(0)``,
+    which respects cgroup/taskset restrictions unlike ``os.cpu_count()`` --
+    falling back to ``os.cpu_count() or 1`` where affinity queries aren't
+    supported, e.g. macOS/Windows), capped at numba's own configured ceiling
+    (``numba.config.NUMBA_NUM_THREADS``, itself set at import time from the
+    ``NUMBA_NUM_THREADS`` env var or numba's own CPU detection) --
+    ``numba.set_num_threads`` raises if asked for more threads than that
+    ceiling. BLAS is deliberately left alone here: raising its thread limit
+    would require knowing the *current* limit of every active BLAS pool
+    (``threadpoolctl.threadpool_info()`` reports each pool's current setting,
+    not a maximum it's safe to exceed), and getting that wrong risks
+    oversubscription rather than fixing it, so only numba's own thread count is
+    adjusted.
     """
     if not serialize:
         yield
@@ -66,16 +72,19 @@ def serialize_dask_and_boost_threads(serialize: bool):
 
     import dask
     import numba
-    import threadpoolctl
 
-    cpu_count = os.cpu_count() or 1
-    prev_numba_threads = numba.get_num_threads()
-    numba.set_num_threads(cpu_count)
     try:
-        with (
-            threadpoolctl.threadpool_limits(limits=cpu_count, user_api="blas"),
-            dask.config.set(scheduler="synchronous"),
-        ):
+        # Not available on macOS/Windows (AttributeError there); mypy's stubs
+        # mark it Linux-only regardless of the platform actually running.
+        cpu_count = len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        cpu_count = os.cpu_count() or 1
+    n = min(cpu_count, numba.config.NUMBA_NUM_THREADS)
+
+    prev_numba_threads = numba.get_num_threads()
+    numba.set_num_threads(n)
+    try:
+        with dask.config.set(scheduler="synchronous"):
             yield
     finally:
         numba.set_num_threads(prev_numba_threads)

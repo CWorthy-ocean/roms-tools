@@ -12,4 +12,5 @@ dependencies:
   # (SIGTERM -> "exit code 143"), and the MPI hdf5 also collides with the
   # serial hdf5 bundled in the pip-installed netcdf4/h5py wheels.
   - esmf=*=nompi*
+  - threadpoolctl
   - pip

@@ -36,6 +36,7 @@ from roms_tools.setup.bgc_model import (
     bgc_model_from_name,
     bgc_model_to_name,
     bgc_variable_info,
+    validate_bgc_model,
 )
 from roms_tools.setup.utils import (
     _CLIMATOLOGY_ONLY_BGC,
@@ -48,6 +49,7 @@ from roms_tools.setup.utils import (
     check_and_set_boundaries,
     compute_barotropic_velocity,
     deserialize_forcing_data,
+    forwardable_fields,
     from_yaml,
     get_boundary_coords,
     get_roms_tools_version_info,
@@ -371,12 +373,16 @@ class BoundaryForcingSource:
     source). No MARBL derivation is performed here; call
     :meth:`BGCMarbl.process_bgc_fields` on the finished object(s) to complete the set."""
 
-    ds: xr.Dataset = field(init=False, repr=False)
+    # `compare=False`: `xr.Dataset.__eq__` returns an elementwise Dataset (truthy in
+    # a way that makes `==` comparisons on this dataclass vacuously true/broken)
+    # rather than a bool, so equality between two objects of this class is defined
+    # over their (comparable) parameters, not their computed datasets.
+    ds: xr.Dataset = field(init=False, repr=False, compare=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
     adjust_depth_for_sea_surface_height: bool = field(init=False)
     """Whether to account for sea surface height when computing depth coordinates."""
-    ds_depth_coords: xr.Dataset = field(init=False, repr=False)
+    ds_depth_coords: xr.Dataset = field(init=False, repr=False, compare=False)
     """An xarray Dataset containing the depth coordinates."""
 
     def __post_init__(self):
@@ -955,6 +961,15 @@ class BoundaryForcingSource:
         self._set_boundary_info()
         climatology = bool(self.source.get("climatology", False))
 
+        # Only ask PyESPER to estimate what was actually requested; unsupported
+        # requested variables are still caught below by `_apply_use_vars`'s
+        # presence check (which runs against the full, unfiltered `use_vars`).
+        roms_variables = (
+            [v for v in self.use_vars if v in ESPER_SUPPORTED_VARS]
+            if self.use_vars is not None
+            else ESPER_SUPPORTED_VARS
+        )
+
         ds = xr.Dataset()
         for direction, is_enabled in self._active_boundaries.items():
             if not is_enabled:
@@ -988,7 +1003,7 @@ class BoundaryForcingSource:
                 lat,
                 depth,
                 source=self.source,
-                roms_variables=ESPER_SUPPORTED_VARS,
+                roms_variables=roms_variables,
                 est_dates=est_dates,
             )
             fields = self._apply_use_vars(fields)
@@ -1063,6 +1078,9 @@ class BoundaryForcingSource:
         # -------------------------------------------------------
         if self.type not in {"physics", "bgc"}:
             raise ValueError("`type` must be either 'physics' or 'bgc'.")
+
+        if self.type == "physics" and self.use_vars is not None:
+            raise ValueError("`use_vars` only applies when `type='bgc'`.")
 
         if self.bgc_interpolation_method not in BGC_INTERPOLATION_METHODS:
             raise ValueError(
@@ -1410,7 +1428,11 @@ class BoundaryForcingSource:
         # git commit that produced this file.
         version_info = get_roms_tools_version_info()
         ds.attrs["roms_tools_version"] = version_info["roms_tools_version"]
-        ds.attrs["roms_tools_git_commit"] = str(version_info["roms_tools_git_commit"])
+        # netCDF attrs cannot hold `None`; omit the attr entirely rather than
+        # writing the misleading string "None" when no git commit is known (e.g.
+        # a real pip/conda install with no `.git` directory).
+        if version_info["roms_tools_git_commit"] is not None:
+            ds.attrs["roms_tools_git_commit"] = version_info["roms_tools_git_commit"]
         ds.attrs["start_time"] = str(self.start_time)
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["source"] = self.source["name"]
@@ -1515,7 +1537,7 @@ class BoundaryForcingSource:
                             )
                         )
 
-        nan_check_batch(checks, serialize_dask=False)
+        nan_check_batch(checks)
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.
@@ -1926,10 +1948,13 @@ class BoundaryForcing:
     """Wrapper-level default vertical interpolation method for BGC tracers;
     overridden per-source by that source's own entry in ``bgc_sources``."""
 
-    physics: BoundaryForcingSource = field(init=False, repr=False)
+    # `compare=False`: these hold constituent `BoundaryForcingSource` objects,
+    # each carrying a computed `xr.Dataset` -- see the `ds` field's own comment
+    # in `BoundaryForcingSource` for why dataclass equality must exclude them.
+    physics: BoundaryForcingSource = field(init=False, repr=False, compare=False)
     """The internal physics-only BoundaryForcingSource object. Exposed for advanced
     use (e.g. ``bf.physics.plot(...)``)."""
-    bgc: list[BoundaryForcingSource] = field(init=False, repr=False)
+    bgc: list[BoundaryForcingSource] = field(init=False, repr=False, compare=False)
     """The internal bgc-only BoundaryForcingSource objects, one per ``bgc_sources``
     item, in order. Exposed for advanced use."""
 
@@ -1939,29 +1964,9 @@ class BoundaryForcing:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
-        shared_physics_kwargs = dict(
-            start_time=self.start_time,
-            end_time=self.end_time,
-            boundaries=self.boundaries,
-            source=self.source,
-            prefill=self.prefill,
-            prefill_kwargs=self.prefill_kwargs,
-            regrid_method=self.regrid_method,
-            extrap_method=self.extrap_method,
-            extrap_kwargs=self.extrap_kwargs,
-            apply_2d_horizontal_fill=self.apply_2d_horizontal_fill,
-            model_reference_date=self.model_reference_date,
-            use_dask=self.use_dask,
-            chunks=self.chunks,
-            initial_slice_bounds=self.initial_slice_bounds,
-            bypass_validation=self.bypass_validation,
-            start_time_pad=self.start_time_pad,
-            end_time_pad=self.end_time_pad,
-        )
-        self.physics = BoundaryForcingSource(
-            grid=self.grid, type="physics", **shared_physics_kwargs
-        )
-
+        # Validate `bgc_model` BEFORE building the physics source: a wrong value
+        # (None, an instance, an unrelated class) should fail here, not after
+        # the physics regrid has already been paid for.
         bgc_sources = self.bgc_sources or []
         if bgc_sources:
             if self.bgc_model is None:
@@ -1969,24 +1974,21 @@ class BoundaryForcing:
                     "`bgc_model` is required when `bgc_sources` is provided "
                     "(e.g. `bgc_model=rt.BGCMarbl`)."
                 )
-            shared_kwargs = dict(
-                start_time=self.start_time,
-                end_time=self.end_time,
-                boundaries=self.boundaries,
-                model_reference_date=self.model_reference_date,
-                use_dask=self.use_dask,
-                chunks=self.chunks,
-                initial_slice_bounds=self.initial_slice_bounds,
-                bypass_validation=self.bypass_validation,
-                start_time_pad=self.start_time_pad,
-                end_time_pad=self.end_time_pad,
-                bgc_interpolation_method=self.bgc_interpolation_method,
-                prefill=self.prefill,
-                prefill_kwargs=self.prefill_kwargs,
-                regrid_method=self.regrid_method,
-                extrap_method=self.extrap_method,
-                extrap_kwargs=self.extrap_kwargs,
-            )
+            validate_bgc_model(self.bgc_model)
+        # Every constructor argument this wrapper shares by name with
+        # BoundaryForcingSource is forwarded to the physics object and to each bgc
+        # companion -- derived from the two dataclasses (see forwardable_fields)
+        # instead of hand-listed, so a new shared field cannot be silently
+        # dropped. Nothing needs excluding here: `source` is overridden per
+        # companion by build_bgc_companions, and `bgc_interpolation_method` is
+        # validated-but-unused on a physics source.
+        shared_kwargs = {
+            name: getattr(self, name)
+            for name in forwardable_fields(type(self), BoundaryForcingSource)
+        }
+        self.physics = BoundaryForcingSource(**{**shared_kwargs, "type": "physics"})
+
+        if bgc_sources:
             self.bgc = build_bgc_companions(
                 BoundaryForcingSource,
                 self.grid,
@@ -2006,8 +2008,14 @@ class BoundaryForcing:
         group: bool = True,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
         serialize_dask: bool | None = None,
-    ) -> tuple[list[Path], list[str | Path]]:
+    ) -> tuple[list[Path], list[list[Path]]]:
         """Save the physics object and every BGC source to its own file.
+
+        BGC tracer completion (derivation/overlap-check/constant-fill) already
+        happened once, in ``__post_init__`` via ``bgc_model().process_bgc_fields()``
+        -- this method only writes the already-processed objects to disk, honouring
+        ``group``/``format`` exactly as :meth:`BoundaryForcingSource.save` does for
+        the physics object.
 
         Parameters
         ----------
@@ -2032,15 +2040,14 @@ class BoundaryForcing:
 
         Returns
         -------
-        tuple[list[Path], list[str | Path]]
+        tuple[list[Path], list[list[Path]]]
             ``(physics_paths, bgc_paths)``. ``physics_paths`` is the actual saved
-            path(s) for the physics file (as returned by
-            :meth:`BoundaryForcingSource.save`). ``bgc_paths`` echoes back the
-            requested ``bgc_filepaths`` as given -- ``BGCMarbl.process_bgc_fields``'s
-            per-object save (used internally here) does not propagate the actual
-            written filenames back, so if ``group=True`` split any of them into
-            multiple files, discover the real files on disk the same way you would
-            for any grouped roms-tools save.
+            path(s) for the physics file. ``bgc_paths`` is the actual saved path(s)
+            for each bgc source, in the same order as ``self.bgc`` -- one
+            ``list[Path]`` per source (as returned by its own
+            :meth:`BoundaryForcingSource.save`), so a ``group=True`` split into
+            multiple files is reflected directly rather than needing rediscovery on
+            disk.
         """
         physics_paths = self.physics.save(
             physics_filepath,
@@ -2049,21 +2056,20 @@ class BoundaryForcing:
             serialize_dask=serialize_dask,
         )
 
-        bgc_paths: list[str | Path] = list(bgc_filepaths) if bgc_filepaths else []
+        requested_paths: list[str | Path] = list(bgc_filepaths) if bgc_filepaths else []
+        bgc_paths: list[list[Path]] = []
         if self.bgc:
-            if len(bgc_paths) != len(self.bgc):
+            if len(requested_paths) != len(self.bgc):
                 raise ValueError(
                     "`bgc_filepaths` must provide one path per bgc source "
-                    f"(got {len(bgc_paths)} path(s) for {len(self.bgc)} source(s))."
+                    f"(got {len(requested_paths)} path(s) for {len(self.bgc)} "
+                    "source(s))."
                 )
-            if self.bgc_model is None:  # pragma: no cover - set in __post_init__
-                raise ValueError("`bgc_model` is required to save bgc sources.")
-            self.bgc_model().process_bgc_fields(
-                self.bgc,
-                filepath=[str(p) for p in bgc_paths],
-                serialize_dask=serialize_dask,
-            )
-        elif bgc_paths:
+            bgc_paths = [
+                b.save(p, group=group, format=format, serialize_dask=serialize_dask)
+                for b, p in zip(self.bgc, requested_paths)
+            ]
+        elif requested_paths:
             raise ValueError(
                 "`bgc_filepaths` was given but this object has no bgc sources."
             )
@@ -2107,10 +2113,37 @@ class BoundaryForcing:
         -------
         BoundaryForcing
             An instance of the BoundaryForcing class.
+
+        Raises
+        ------
+        ValueError
+            If the YAML file was saved by the pre-5.0 single-source
+            `BoundaryForcingSource` class (identifiable by a `type` or
+            `physics_forcing` key in the loaded block) rather than this wrapper
+            class.
         """
         filepath = Path(filepath)
         grid = Grid.from_yaml(filepath)
         params = from_yaml(cls, filepath)
+
+        # `BoundaryForcing`'s own YAML block never carries `type`/`physics_forcing`
+        # -- those are `BoundaryForcingSource` (the pre-5.0, single-source class)
+        # fields. A file saved by that legacy class also keys its block
+        # "BoundaryForcing" (the class was renamed when this wrapper was
+        # introduced), so `from_yaml(cls, filepath)` above finds it and these
+        # keys land in `params` -- which would otherwise fail deep inside the
+        # dataclass constructor as an opaque `TypeError` for an unexpected
+        # keyword argument. Catch it here with a message that names the cause.
+        legacy_keys = {"type", "physics_forcing"} & set(params)
+        if legacy_keys:
+            raise ValueError(
+                f"This YAML file was saved by `BoundaryForcingSource` (the "
+                f"pre-5.0 single-source class), not `BoundaryForcing` -- found "
+                f"legacy key(s) {sorted(legacy_keys)}. Load it with "
+                "`BoundaryForcingSource.from_yaml(...)` instead, or re-save it "
+                "with the current `BoundaryForcing` wrapper class."
+            )
+
         params["bgc_model"] = bgc_model_from_name(params.get("bgc_model"))
 
         # Deserialize nested grids: the top-level source, and each

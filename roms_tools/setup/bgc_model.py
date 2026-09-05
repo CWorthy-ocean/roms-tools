@@ -14,18 +14,22 @@ The public entry point is :meth:`BGCMarbl.process_bgc_fields`, which operates on
 one or more *already-built* ``type="bgc"`` :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource`
 or :class:`~roms_tools.setup.initial_conditions.InitialConditionsSource` objects
 (the ``BoundaryForcing``/``InitialConditions`` wrapper classes call this
-internally on their own ``.bgc`` list). It makes
-**no prioritization decisions**: the caller is responsible for arranging (via each
-object's ``use_vars``) that variables do not overlap across files.  It will (1) derive
-missing tracers from these fields if present in each source (``CHL``/``Fe``/``DIC``/``ALK``),
-(2) fills any tracer still missing across the union with its constant open-ocean
-background and (3) reports what was filled and warns if any tracer had no
-background value to fall back on.
+internally on their own ``.bgc`` list). It **enforces** — rather than merely
+assumes — that variables do not overlap across sources: the caller is
+responsible for arranging (via each object's ``use_vars``) that each tracer
+comes from exactly one source, and an overlap (after derivation) raises
+``ValueError`` naming the tracer and every source that supplies it. It will
+(1) derive missing tracers from these fields if present in each source
+(``CHL``/``Fe``/``DIC``/``ALK``) and not already supplied by another source,
+(2) raise on any post-derivation overlap, (3) fill any tracer still missing
+across the union with its constant open-ocean background, and (4) report what
+was filled and warn if any tracer had no background value to fall back on.
 """
 
 from __future__ import annotations
 
 import logging
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import ClassVar
 
@@ -55,13 +59,21 @@ def bgc_variable_info(var_names) -> dict[str, dict]:
     }
 
 
-class BGCModel:
+class BGCModel(ABC):
     """Abstract description of a ROMS biogeochemical model.
 
     Subclasses describe a particular BGC model (e.g. MARBL) by declaring which
     tracers it writes to ROMS (:meth:`tracer_vars`), which additional input
     variables it can interpret (:meth:`known_vars`), and how to complete a
     partially-specified tracer set (:meth:`process_bgc_fields`).
+
+    Two things are enforced at definition/instantiation time rather than at the
+    first call: :meth:`process_bgc_fields` is abstract (``BGCModel()`` itself
+    raises ``TypeError``), and every *concrete* subclass must declare a
+    non-empty ``_TRACER_VARS`` (checked in ``__init_subclass__``) -- an empty
+    tracer set would make the model silently derive and fill nothing.
+    Intermediate subclasses that leave :meth:`process_bgc_fields` abstract are
+    exempt from the tracer check.
     """
 
     name: str = "generic"
@@ -71,6 +83,20 @@ class BGCModel:
     # Interpretable inputs that are *not* themselves written to output
     # (e.g. total chlorophyll CHL, which is expanded into per-PFT tracers).
     _INTERPRETABLE_INPUTS: frozenset[str] = frozenset()
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        # `__abstractmethods__` is computed by ABCMeta *after* this hook runs, so
+        # test the method itself: a subclass that still inherits the abstract
+        # `process_bgc_fields` is an intermediate abstract class and may leave
+        # the tracer set for its own subclasses to fill in.
+        still_abstract = getattr(cls.process_bgc_fields, "__isabstractmethod__", False)
+        if not still_abstract and not cls._TRACER_VARS:
+            raise TypeError(
+                f"{cls.__name__} must declare a non-empty `_TRACER_VARS` frozenset "
+                "(the tracers it writes to ROMS); an empty set would make "
+                "process_bgc_fields() derive and fill nothing."
+            )
 
     def tracer_vars(self) -> frozenset[str]:
         """Return the set of tracer variables written to ROMS output."""
@@ -110,15 +136,13 @@ class BGCModel:
                 ", ".join(missing),
             )
 
-    def process_bgc_fields(self, forcings, filepath=None, serialize_dask=None):
+    @abstractmethod
+    def process_bgc_fields(self, forcings):
         """Complete the BGC tracer set across one or more forcing objects.
 
         Abstract — implemented by concrete model subclasses such as
         :class:`BGCMarbl`.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} does not implement process_bgc_fields()."
-        )
 
 
 class BGCMarbl(BGCModel):
@@ -340,22 +364,28 @@ class BGCMarbl(BGCModel):
     # ------------------------------------------------------------------
     # Object-level completion across one or more forcing objects.
     # ------------------------------------------------------------------
-    def process_bgc_fields(self, forcings, filepath=None, serialize_dask=None):
+    def process_bgc_fields(self, forcings):
         """Complete the MARBL tracer set across one or more forcing objects.
 
-        Makes **no prioritization decisions** — the caller is responsible (via each
-        object's ``use_vars``) for arranging that variables do not overlap across
-        files.  This method only:
+        Enforces that variables do not overlap across sources — the caller is
+        responsible (via each object's ``use_vars``) for partitioning sources so
+        each tracer comes from exactly one of them; an overlap is a configuration
+        error and raises. This method:
 
         1. **Derives** tracers from the key fields present in each object, in place:
            ``Fe``→``Lig``, ``DIC``→``DIC_ALT_CO2``, ``ALK``→``ALK_ALT_CO2``, and
            ``CHL``→ the phytoplankton/zooplankton set (``CHL`` is then dropped). A
-           derived tracer is only added where it is not already present.
-        2. **Fills** any tracer still missing across the union of objects with its
+           derived tracer is only added where it is not already present *anywhere*
+           across the objects (an explicit tracer supplied by one source suppresses
+           derivation of the same tracer from another source's key field).
+        2. **Checks for overlap**: after derivation, if any tracer is present in more
+           than one object, raises ``ValueError`` naming the tracer and every source
+           that supplies it.
+        3. **Fills** any tracer still missing across the union of objects with its
            constant open-ocean background (:attr:`_OCEAN_FILL`), written into the
-           *first* object (values are spatially uniform, so which file receives them
-           is immaterial). Tracers with no background value defined are set to zero.
-        3. **Reports** every constant fill, and warns for any tracer that fell back
+           first object that can supply a same-shaped template to fill from.
+           Tracers with no background value defined are set to zero.
+        4. **Reports** every constant fill, and warns for any tracer that fell back
            to zero.
 
         Parameters
@@ -363,17 +393,6 @@ class BGCMarbl(BGCModel):
         forcings : forcing object | list of forcing objects
             One or more already-built ``type="bgc"`` forcing objects, modified in
             place.
-        filepath : str | Path | list[str | Path] | None
-            If given, each (modified) object is saved.  Pass a single path when
-            ``forcings`` is a single object, or a list of paths matching the
-            objects (one per object, in order).
-        serialize_dask : bool, optional
-            See :func:`roms_tools.utils.save_datasets`; only relevant when
-            ``filepath`` is given. Defaults to ``None``, which resolves to
-            ``False`` (the ordinary concurrent write) on each object's own
-            :meth:`save` -- pass ``True`` to force the serialized,
-            one-task-at-a-time write, which is slower but can allow writing
-            in low-memory situations.
 
         Returns
         -------
@@ -388,11 +407,21 @@ class BGCMarbl(BGCModel):
 
         adapters = [_ForcingBGCAdapter(o, self) for o in objs]
 
-        # 1. Derive tracers from each object's own key fields (no cross-file priority),
-        #    from the same rule table the public derive_* helpers use.
+        # 0. The union of tracers already present *before* any derivation runs,
+        #    frozen for the derivation step below: an explicit tracer supplied by
+        #    one source suppresses derivation of the same tracer from another
+        #    source's key field (e.g. an explicit Lig in source B means source A's
+        #    Fe does not also derive a Lig).
+        union_present: set[str] = set()
+        for a in adapters:
+            union_present |= a.present_vars()
+
+        # 1. Derive tracers from each object's own key fields (no cross-file priority
+        #    beyond the union check above), from the same rule table the public
+        #    derive_* helpers use.
         for a in adapters:
             for target, source, fn in self.derivation_rules():
-                if a.has(source) and not a.has(target):
+                if a.has(source) and not a.has(target) and target not in union_present:
                     a.assign_derived(target, source, fn)
             # CHL is an input to the phytoplankton split, not a MARBL tracer itself, so
             # it goes once its derivatives exist -- including when they were already
@@ -400,12 +429,31 @@ class BGCMarbl(BGCModel):
             if a.has("CHL"):
                 a.drop("CHL")
 
-        # 2. Fill any tracer still missing across the union with its constant ocean
-        #    background, into the first object (spatially-uniform, so the choice of
-        #    file is arbitrary).
-        present: set[str] = set()
+        # 2. Overlap check, recomputed after derivation/CHL-drop: process_bgc_fields
+        #    makes no prioritization decisions, so a tracer present in more than one
+        #    object is a caller configuration error, not something to resolve
+        #    silently.
+        owners: dict[str, list[str]] = {}
         for a in adapters:
-            present |= a.present_vars()
+            label = a.source_label()
+            for var in a.present_vars():
+                owners.setdefault(var, []).append(label)
+        overlaps = {var: names for var, names in owners.items() if len(names) > 1}
+        if overlaps:
+            detail = "; ".join(
+                f"{var}: {names}" for var, names in sorted(overlaps.items())
+            )
+            raise ValueError(
+                "BGC sourcing overlap -- the following tracer(s) are supplied by "
+                f"more than one source: {detail}. Partition the sources with "
+                "use_vars so each tracer comes from exactly one source."
+            )
+
+        # 3. Fill any tracer still missing across the union with its constant ocean
+        #    background, per boundary suffix, into the first object that can supply
+        #    a same-shaped fill template for that suffix (spatially-uniform values,
+        #    so which object receives them is otherwise immaterial).
+        present: set[str] = set(owners)
         filled: list[tuple[str, float]] = []
         unsourced: list[str] = []
         for var in sorted(self.tracer_vars() - present):
@@ -417,11 +465,11 @@ class BGCMarbl(BGCModel):
                 # modelling decision the caller has to be told about.
                 value = 0.0
                 unsourced.append(var)
-            adapters[0].assign_const(var, float(value))
+            self._fill_constant(adapters, var, float(value))
             filled.append((var, value))
             present.add(var)
 
-        # 3. Report what was filled, then check completeness. A constant fill is a
+        # 4. Report what was filled, then check completeness. A constant fill is a
         #    silent modelling decision otherwise: it produces a valid-looking file
         #    whose tracer is uniform at every depth.
         if filled:
@@ -443,17 +491,33 @@ class BGCMarbl(BGCModel):
             )
         self.warn_missing(present)
 
-        if filepath is not None:
-            paths = [filepath] if single else list(filepath)
-            if len(paths) != len(objs):
-                raise ValueError(
-                    "filepath must provide one path per forcing object "
-                    f"(got {len(paths)} path(s) for {len(objs)} object(s))."
-                )
-            for obj, p in zip(objs, paths):
-                obj.save(p, serialize_dask=serialize_dask)
-
         return objs[0] if single else objs
+
+    @staticmethod
+    def _fill_constant(
+        adapters: list[_ForcingBGCAdapter], var: str, value: float
+    ) -> None:
+        """Write a constant ``var`` field into the first adapter, per active
+        boundary suffix, that can supply a fill template for that suffix.
+
+        Different suffixes of a boundary layout may need to be filled from
+        different adapters (e.g. one source only covers a subset of active
+        boundaries), so this is resolved independently per suffix rather than
+        picking one adapter for the whole call.
+        """
+        suffixes: list = []
+        for a in adapters:
+            for s in a.suffixes:
+                if s not in suffixes:
+                    suffixes.append(s)
+        for suffix in suffixes:
+            if not any(a.try_assign_const(var, suffix, value) for a in adapters):
+                raise ValueError(
+                    f"Cannot constant-fill {var!r}"
+                    f"{f' for the {suffix} boundary' if suffix is not None else ''}"
+                    ": no BGC source has any tracer present to use as a fill "
+                    "template."
+                )
 
 
 # Name -> class registry for the ``BoundaryForcing``/``InitialConditions`` wrapper
@@ -464,10 +528,40 @@ class BGCMarbl(BGCModel):
 _BGC_MODEL_REGISTRY: dict[str, type[BGCModel]] = {"BGCMarbl": BGCMarbl}
 
 
+def validate_bgc_model(bgc_model) -> type[BGCModel]:
+    """Check that ``bgc_model`` is a concrete :class:`BGCModel` *subclass* (the
+    class itself, not an instance) and return it.
+
+    Used by the ``BoundaryForcing``/``InitialConditions`` wrappers before any
+    data is loaded, so a wrong ``bgc_model=`` fails immediately with a message
+    naming the fix rather than after the physics regrid as an opaque
+    ``TypeError`` ("object is not callable" for an instance, or the ABC's own
+    instantiation error for the base class).
+    """
+    if isinstance(bgc_model, BGCModel):
+        raise ValueError(
+            f"`bgc_model` must be the class itself, not an instance -- pass "
+            f"`bgc_model={type(bgc_model).__name__}`, not "
+            f"`bgc_model={type(bgc_model).__name__}()`."
+        )
+    if not (isinstance(bgc_model, type) and issubclass(bgc_model, BGCModel)):
+        raise ValueError(
+            f"`bgc_model` must be a BGCModel subclass (e.g. `bgc_model=rt.BGCMarbl`); "
+            f"got {bgc_model!r}."
+        )
+    if getattr(bgc_model.process_bgc_fields, "__isabstractmethod__", False):
+        raise ValueError(
+            f"`bgc_model={bgc_model.__name__}` is abstract (it does not implement "
+            "process_bgc_fields); pass a concrete model such as `rt.BGCMarbl`."
+        )
+    return bgc_model
+
+
 def bgc_model_to_name(cls: type[BGCModel] | None) -> str | None:
     """Return the registry name for a ``BGCModel`` subclass, for YAML output."""
     if cls is None:
         return None
+    validate_bgc_model(cls)
     for name, registered in _BGC_MODEL_REGISTRY.items():
         if registered is cls:
             return name
@@ -498,7 +592,7 @@ def _is_forcing(x) -> bool:
 class _ForcingBGCAdapter:
     """Hides the per-object dataset layout from :class:`BGCMarbl`.
 
-    This allows a single interface to underlying tracer sources, so such that
+    This allows a single interface to underlying tracer sources, so that
     we do not need bespoke code to process BoundaryForcingSource and InitialConditionsSource
     objects.
     :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource` stores BGC
@@ -550,6 +644,16 @@ class _ForcingBGCAdapter:
             self._ds_name(bare, s) in self.obj.ds.data_vars for s in self.suffixes
         )
 
+    def source_label(self) -> str:
+        """Human-readable identifier for this object's BGC source, for error
+        messages (overlap reporting): its source name, plus ``use_vars`` when set.
+        """
+        label = self.obj.source["name"]
+        use_vars = getattr(self.obj, "use_vars", None)
+        if use_vars:
+            label = f"{label}[use_vars={','.join(use_vars)}]"
+        return label
+
     # -- mutations --
     def assign_derived(self, bare: str, src: str, fn: Callable):
         """Write ``bare = fn(src)`` for each active suffix where ``src`` exists."""
@@ -559,14 +663,19 @@ class _ForcingBGCAdapter:
                 val = fn(self.obj.ds[src_name]).astype(np.float32).fillna(0.0)
                 self._write(bare, s, val)
 
-    def assign_const(self, bare: str, value: float):
-        """Write a constant ``bare`` field for each active suffix."""
-        for s in self.suffixes:
-            template = self._template(s)
-            if template is None:
-                continue
-            val = xr.full_like(template, value).astype(np.float32)
-            self._write(bare, s, val)
+    def try_assign_const(self, bare: str, suffix, value: float) -> bool:
+        """Write a constant ``bare`` field for one ``suffix`` if this adapter has a
+        fill template for it (an existing BGC tracer, of that suffix, to shape the
+        constant field after). Returns whether the write happened.
+        """
+        if suffix not in self.suffixes:
+            return False
+        template = self._template(suffix)
+        if template is None:
+            return False
+        val = xr.full_like(template, value).astype(np.float32)
+        self._write(bare, suffix, val)
+        return True
 
     def drop(self, bare: str):
         names = [

@@ -1451,3 +1451,253 @@ def test_static_bgc_source_without_the_flag_still_brackets():
         bypass_validation=True,
     )
     assert bf.ds.sizes["bry_time"] == 2
+
+
+def test_use_vars_on_physics_type_raises():
+    """`use_vars` only makes sense down-selecting a BGC source; setting it on a
+    `type="physics"` object is a configuration error, not a silent no-op.
+    """
+    from roms_tools import BoundaryForcingSource
+
+    with pytest.raises(ValueError, match="only applies when"):
+        BoundaryForcingSource(
+            grid=_static_bgc_grid(),
+            source={"name": "GLORYS"},
+            type="physics",
+            use_vars=["NO3"],
+            use_dask=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# BoundaryForcing (the multi-source wrapper class), as opposed to
+# BoundaryForcingSource (exercised throughout the rest of this file).
+# ---------------------------------------------------------------------------
+
+
+class TestBoundaryForcingWrapper:
+    """Tests for the ``BoundaryForcing`` wrapper class itself."""
+
+    @staticmethod
+    def _make(small_grid, use_dask, bgc_sources=None, **kwargs):
+        fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+        fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+        if bgc_sources is None:
+            bgc_sources = [
+                {
+                    "source": {
+                        "name": "constants",
+                        "constants": {"NO3": 24.0, "PO4": 1.5},
+                    },
+                },
+                {
+                    "source": {"name": "constants", "constants": {"Fe": 3.0e-3}},
+                    "bgc_interpolation_method": "density",
+                },
+            ]
+        return BoundaryForcing(
+            grid=small_grid,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2012, 1, 2),
+            source={"name": "GLORYS", "path": [fname1, fname2]},
+            regrid_method="scipy",
+            use_dask=use_dask,
+            bgc_sources=bgc_sources,
+            bgc_model=BGCMarbl,
+            **kwargs,
+        )
+
+    def test_save_honours_group_and_format_and_returns_real_paths(
+        self, small_grid, use_dask, tmp_path
+    ):
+        """``save(group=False, format=...)`` must forward both onto every bgc
+        companion (not just the physics object), and return the actual written
+        path(s) per source rather than merely echoing back what was requested.
+        """
+        import netCDF4
+
+        bf = self._make(small_grid, use_dask)
+        physics_paths, bgc_paths = bf.save(
+            tmp_path / "physics.nc",
+            [tmp_path / "bgc0.nc", tmp_path / "bgc1.nc"],
+            group=False,
+            format="NETCDF3_64BIT_OFFSET",
+        )
+
+        assert len(physics_paths) == 1
+        assert len(bgc_paths) == 2
+        for paths in bgc_paths:
+            # group=False: exactly one file per source, none of the "_clim" or
+            # "_YYYYMM" grouping suffixes that group_dataset would add.
+            assert len(paths) == 1
+            p = paths[0]
+            assert p.exists()
+            assert "_clim" not in p.name
+            assert p.name in ("bgc0.nc", "bgc1.nc")
+            with netCDF4.Dataset(p) as ncds:
+                assert ncds.data_model == "NETCDF3_64BIT_OFFSET"
+
+    def test_bgc_filepaths_length_mismatch_raises(self, small_grid, use_dask, tmp_path):
+        bf = self._make(small_grid, use_dask)
+        with pytest.raises(ValueError, match="one path per bgc source"):
+            bf.save(tmp_path / "physics.nc", [tmp_path / "only_one.nc"])
+
+    def test_bgc_model_none_with_bgc_sources_raises(self, small_grid, use_dask):
+        fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+        with pytest.raises(ValueError, match="bgc_model"):
+            BoundaryForcing(
+                grid=small_grid,
+                start_time=datetime(2012, 1, 1),
+                end_time=datetime(2012, 1, 2),
+                source={"name": "GLORYS", "path": fname1},
+                regrid_method="scipy",
+                use_dask=use_dask,
+                bgc_sources=[
+                    {"source": {"name": "constants", "constants": {"NO3": 24.0}}}
+                ],
+                bgc_model=None,
+            )
+
+    def test_bgc_model_instance_rejected_before_physics_is_built(
+        self, small_grid, use_dask, monkeypatch
+    ):
+        """A wrong `bgc_model` (here an instance instead of the class) must fail
+        before the physics source is constructed -- i.e. before any data load.
+        """
+        built = []
+        real_init = BoundaryForcingSource.__post_init__
+
+        def spy(self_):
+            built.append(self_.type)
+            return real_init(self_)
+
+        monkeypatch.setattr(BoundaryForcingSource, "__post_init__", spy)
+        with pytest.raises(ValueError, match="not an instance"):
+            BoundaryForcing(
+                grid=small_grid,
+                start_time=datetime(2012, 1, 1),
+                end_time=datetime(2012, 1, 2),
+                source={"name": "GLORYS", "path": "unused.nc"},
+                use_dask=use_dask,
+                bgc_sources=[
+                    {"source": {"name": "constants", "constants": {"NO3": 24.0}}}
+                ],
+                bgc_model=BGCMarbl(),
+            )
+        assert built == []
+
+    def test_shared_knobs_reach_physics_and_every_companion(self, small_grid, use_dask):
+        """A wrapper-level regrid/prefill knob must land on the physics source AND
+        on each bgc companion (previously two hand-maintained kwargs lists that
+        could -- and did -- diverge).
+        """
+        bf = self._make(small_grid, use_dask, prefill="nearest_neighbor")
+        for obj in (bf.physics, *bf.bgc):
+            assert obj.regrid_method == "scipy"
+            assert obj.prefill == "nearest_neighbor"
+            assert obj.model_reference_date == bf.model_reference_date
+            assert obj.bypass_validation is bf.bypass_validation
+        # Per-companion identity is preserved by build_bgc_companions.
+        assert bf.physics.type == "physics"
+        assert all(b.type == "bgc" and b.physics_forcing is bf.physics for b in bf.bgc)
+
+    def test_yaml_does_not_embed_physics_and_builds_it_once(
+        self, small_grid, use_dask, tmp_path, monkeypatch
+    ):
+        """Wrapper YAML carries bgc_sources as raw item dicts (no embedded
+        `physics_forcing`), so from_yaml builds the physics source once.
+        """
+        built: list[str] = []
+        real_init = BoundaryForcingSource.__post_init__
+
+        def spy(self_):
+            built.append(self_.type)
+            return real_init(self_)
+
+        monkeypatch.setattr(BoundaryForcingSource, "__post_init__", spy)
+        bf = self._make(small_grid, use_dask)
+        assert built == ["physics", "bgc", "bgc"]
+
+        yaml_path = tmp_path / "bf.yaml"
+        bf.to_yaml(yaml_path)
+        assert "physics_forcing" not in yaml_path.read_text()
+
+        built.clear()
+        bf2 = BoundaryForcing.from_yaml(yaml_path, use_dask=use_dask)
+        assert built == ["physics", "bgc", "bgc"]
+        assert all(b.physics_forcing is bf2.physics for b in bf2.bgc)
+
+    def test_per_item_bgc_interpolation_method_override(self, small_grid, use_dask):
+        bf = self._make(small_grid, use_dask)
+        # Item 0 has no override -> the wrapper-level default ("depth").
+        assert bf.bgc[0].bgc_interpolation_method == "depth"
+        # Item 1 set "density" explicitly.
+        assert bf.bgc[1].bgc_interpolation_method == "density"
+
+    def test_overlapping_bgc_sources_raises(self, small_grid, use_dask):
+        """Two bgc sources supplying the same tracer must raise, not silently
+        pick a winner -- the cheapest repro is two "constants" sources with the
+        same key.
+        """
+        with pytest.raises(ValueError, match="NO3"):
+            self._make(
+                small_grid,
+                use_dask,
+                bgc_sources=[
+                    {"source": {"name": "constants", "constants": {"NO3": 24.0}}},
+                    {"source": {"name": "constants", "constants": {"NO3": 30.0}}},
+                ],
+            )
+
+    def test_from_yaml_rejects_legacy_single_source_file(self, tmp_path, use_dask):
+        """A YAML file saved by the pre-5.0 single-source `BoundaryForcingSource`
+        class (identifiable by its `type`/`physics_forcing` keys) must raise a
+        clear migration error, not an opaque `TypeError` from the dataclass
+        constructor.
+
+        Before this PR's refactor, that single-source class was itself named
+        `BoundaryForcing` (only later renamed to `BoundaryForcingSource` when
+        this wrapper class was introduced), so its own ``to_yaml()`` keyed the
+        block "BoundaryForcing:" -- exactly the block name this wrapper's
+        ``from_yaml`` looks for. Simulated here by re-keying a *current*
+        `BoundaryForcingSource.to_yaml()` output the same way.
+        """
+        bf_source = BoundaryForcingSource(
+            grid=_static_bgc_grid(),
+            start_time=datetime(2012, 1, 30),
+            end_time=datetime(2012, 2, 1),
+            boundaries={"south": True, "east": False, "north": False, "west": False},
+            source={"name": "constants", "constants": {"ALK": 2300.0}},
+            type="bgc",
+            use_dask=use_dask,
+            bypass_validation=True,
+        )
+        yaml_path = tmp_path / "legacy.yaml"
+        bf_source.to_yaml(yaml_path)
+        legacy_text = yaml_path.read_text().replace(
+            "BoundaryForcingSource:", "BoundaryForcing:", 1
+        )
+        yaml_path.write_text(legacy_text)
+
+        with pytest.raises(ValueError, match="pre-5.0"):
+            BoundaryForcing.from_yaml(yaml_path, use_dask=use_dask)
+
+    def test_to_yaml_from_yaml_roundtrip_preserves_bgc_sources(
+        self, small_grid, use_dask, tmp_path
+    ):
+        """A round trip through YAML must preserve every bgc source: reloading
+        must not merely produce *an* object, but one whose bgc companions carry
+        the same data -- checked via ``xr.testing.assert_allclose`` (``ds``'s
+        dataclass ``__eq__`` deliberately excludes it, since ``xr.Dataset.__eq__``
+        is not a bool, so ``==`` cannot be used here to check dataset content).
+        """
+        bf = self._make(small_grid, use_dask)
+        yaml_path = tmp_path / "bf.yaml"
+        bf.to_yaml(yaml_path)
+
+        bf_from_file = BoundaryForcing.from_yaml(yaml_path, use_dask=use_dask)
+
+        assert bf == bf_from_file
+        assert len(bf_from_file.bgc) == len(bf.bgc)
+        for original, reloaded in zip(bf.bgc, bf_from_file.bgc):
+            xr.testing.assert_allclose(original.ds, reloaded.ds)

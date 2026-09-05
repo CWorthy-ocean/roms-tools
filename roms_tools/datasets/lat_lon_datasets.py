@@ -19,6 +19,7 @@ import xarray as xr
 
 from roms_tools.constants import R_EARTH
 from roms_tools.datasets.download import (
+    WOA23_BGC_VARIABLES,
     download_correction_data,
     download_sal_data,
     download_topo,
@@ -38,6 +39,7 @@ from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
     climatology_mid_month_days,
+    compute_in_situ_density,
     compute_potential_density,
     get_target_coords,
 )
@@ -1466,13 +1468,13 @@ class WOABGCDataset(WOADataset):
     _default_lateral_dask_chunk: ClassVar[int | None] = None
 
     #: Internal key -> (NCEI directory, decade token, one-letter code, netCDF variable).
+    #: The netCDF variable is always ``{code}_an`` (the objectively-analyzed field);
+    #: derived from :data:`~roms_tools.datasets.download.WOA23_BGC_VARIABLES` so the
+    #: (directory, decade, code) triple has a single source of truth shared with
+    #: :func:`~roms_tools.datasets.download.download_woa23_bgc`.
     _woa_files: ClassVar[dict[str, tuple[str, str, str, str]]] = {
-        "NO3": ("nitrate", "all", "n", "n_an"),
-        "PO4": ("phosphate", "all", "p", "p_an"),
-        "SiO3": ("silicate", "all", "i", "i_an"),
-        "O2": ("oxygen", "all", "o", "o_an"),
-        "temp_bgc": ("temperature", "decav", "t", "t_an"),
-        "salt_bgc": ("salinity", "decav", "s", "s_an"),
+        key: (subdir, decade, code, f"{code}_an")
+        for key, (subdir, decade, code) in WOA23_BGC_VARIABLES.items()
     }
 
     dim_names: dict[str, str] = field(
@@ -1611,7 +1613,14 @@ class WOABGCDataset(WOADataset):
                 "them, or point the source at a directory that already holds them."
             )
 
-        return xr.merge(datasets)
+        merged = xr.merge(datasets)
+        if not self.use_dask:
+            # `xr.open_mfdataset` (via `_open_monthly`) is always dask-backed
+            # regardless of `use_dask` -- unlike every other dataset class here,
+            # which only goes lazy when `use_dask=True`. Materialize eagerly so
+            # this class behaves the same way.
+            merged = merged.load()
+        return merged
 
     def _open_monthly(
         self, paths: list[Path], file_var: str, open_kwargs: dict
@@ -1686,23 +1695,36 @@ class WOABGCDataset(WOADataset):
         high = seam + self.deep_blend_halfwidth
         # 1 above the band (pure monthly), 0 below it (pure annual), linear between.
         weight = ((high - depth) / (high - low)).clip(0.0, 1.0)
+        # NaN in either field would otherwise poison the blend even where its own
+        # weight is 0: `NaN * 0.0` is NaN, not 0, so a NaN annual value corrupts
+        # the result in the pure-monthly region above the seam, and a NaN
+        # ``extended`` value (e.g. an all-NaN monthly column) corrupts the result
+        # in the pure-annual region below it. Filling each field with the other
+        # first guarantees a valid weighted value wherever at least one of them
+        # has data.
+        extended = extended.fillna(annual)
+        annual = annual.fillna(extended)
         return extended * weight + annual * (1.0 - weight)
 
     def post_process(self) -> None:
         """Convert the tracers to mmol/m3 and build the land/ocean mask.
 
         WOA reports nutrients and oxygen in umol/kg, while ROMS expects mmol/m3.
-        The conversion uses TEOS-10 sigma-0 density from the loaded T/S, matching
-        :meth:`GLODAPv2BGCDataset.post_process`. T/S stay in ``self.ds`` so the
-        pipeline can use them as the source density coordinate; it drops them after
-        vertical regridding via ``bgc_source_ts``.
+        The conversion uses in-situ density (TEOS-10 gsw.rho with pressure from
+        depth) from the loaded T/S, matching :meth:`GLODAPv2BGCDataset.post_process`.
+        T/S stay in ``self.ds`` so the pipeline can use them as the source density
+        coordinate; it drops them after vertical regridding via ``bgc_source_ts``.
         """
         temp_var = self.opt_var_names.get("temp_bgc")
         salt_var = self.opt_var_names.get("salt_bgc")
 
         if temp_var in self.ds.data_vars and salt_var in self.ds.data_vars:
-            sigma0 = compute_potential_density(self.ds[temp_var], self.ds[salt_var])
-            density = sigma0 + 1000.0  # kg m-3
+            density = compute_in_situ_density(
+                self.ds[temp_var],
+                self.ds[salt_var],
+                self.ds[self.dim_names["depth"]],
+                self.ds[self.dim_names["latitude"]],
+            )
         else:
             logging.warning(
                 "WOA temperature/salinity unavailable; using a uniform 1025 kg m-3 "
@@ -2405,35 +2427,6 @@ class GLODAPv2Dataset(LatLonDataset):
             surface = self.ds[data_vars[0]].isel(depth=0, drop=True)
             self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
 
-    @staticmethod
-    def _compute_density(
-        temperature: xr.DataArray,
-        salinity: xr.DataArray,
-    ) -> xr.DataArray:
-        """Compute seawater density from temperature and salinity (dask-lazy).
-
-        Parameters
-        ----------
-        temperature : xr.DataArray
-            In-situ temperature (°C), shape (depth, lat, lon).
-        salinity : xr.DataArray
-            Practical salinity (PSU), shape (depth, lat, lon).
-
-        Returns
-        -------
-        xr.DataArray
-            Density in kg m⁻³, same shape as inputs.
-
-        Notes
-        -----
-        **Placeholder implementation** — returns a spatially uniform value of
-        1025 kg m⁻³ regardless of T/S.  Replace the body of this method with a
-        full equation-of-state (e.g. TEOS-10 via ``gsw``) when available.
-        The placeholder uses :func:`xarray.full_like` so the result is dask-lazy
-        and carries the same chunk structure as the inputs.
-        """
-        return xr.full_like(temperature, 1025.0)
-
 
 @dataclass(kw_only=True)
 class GLODAPv2BGCDataset(GLODAPv2Dataset):
@@ -2443,7 +2436,7 @@ class GLODAPv2BGCDataset(GLODAPv2Dataset):
     two roles:
 
     1. **Unit conversion** in :meth:`post_process`: µmol kg⁻¹ → mmol m⁻³ using
-       TEOS-10 sigma-0 density.
+       in-situ density (TEOS-10 gsw.rho with pressure from depth).
     2. **Density coordinate** for density-space vertical interpolation when the
        downstream pipeline uses ``bgc_interpolation_method`` of ``"density"`` /
        ``"density_mld"``.
@@ -2462,7 +2455,8 @@ class GLODAPv2BGCDataset(GLODAPv2Dataset):
     Notes
     -----
     GLODAPv2 values are in **µmol kg⁻¹**.  :meth:`post_process` converts to
-    **mmol m⁻³** using ``val * (sigma0 + 1000) / 1000`` via TEOS-10.
+    **mmol m⁻³** using in-situ density (TEOS-10 ``gsw.rho`` with pressure from
+    depth) divided by 1000.
     """
 
     dim_names: dict[str, str] = field(
@@ -2497,26 +2491,30 @@ class GLODAPv2BGCDataset(GLODAPv2Dataset):
     def post_process(self) -> None:
         """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³.
 
-        Uses TEOS-10 sigma-0 from the loaded T/S to compute density (dask-lazy).
-        T/S remain in ``self.ds`` so the downstream pipeline can use them as the
-        source density coordinate for density-space vertical interpolation; the
+        Uses in-situ density (TEOS-10 gsw.rho with pressure from depth) from
+        the loaded T/S to compute density (dask-lazy). T/S remain in
+        ``self.ds`` so the downstream pipeline can use them as the source
+        density coordinate for density-space vertical interpolation; the
         pipeline drops them after regridding via ``bgc_source_ts``.
 
         If T/S are absent (e.g. the file did not include them), falls back to a
         uniform 1025 kg m⁻³ density.
         """
-        from roms_tools.setup.utils import compute_potential_density
+        from roms_tools.setup.utils import compute_in_situ_density
 
         if "temperature" in self.ds.data_vars and "salinity" in self.ds.data_vars:
-            sigma0 = compute_potential_density(
-                self.ds["temperature"], self.ds["salinity"]
+            density = compute_in_situ_density(
+                self.ds["temperature"],
+                self.ds["salinity"],
+                self.ds[self.dim_names["depth"]],
+                self.ds[self.dim_names["latitude"]],
             )
-            density = sigma0 + 1000.0  # kg m⁻³
         else:
-            density = self._compute_density(
-                next(iter(self.ds.data_vars.values())),
-                next(iter(self.ds.data_vars.values())),
+            logging.warning(
+                "GLODAP temperature/salinity unavailable; using a uniform 1025 "
+                "kg m-3 for the umol/kg -> mmol/m3 conversion."
             )
+            density = 1025.0
 
         conversion_factor = density / 1000.0  # µmol kg⁻¹ → mmol m⁻³
 

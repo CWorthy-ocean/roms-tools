@@ -38,6 +38,7 @@ from roms_tools.setup.bgc_model import (
     bgc_variable_info,
     validate_bgc_model,
 )
+from roms_tools.setup.salinity_merge import apply_salinity_based_merge
 from roms_tools.setup.utils import (
     _CLIMATOLOGY_ONLY_BGC,
     _SELF_DOWNLOADING_BGC,
@@ -1998,6 +1999,20 @@ class BoundaryForcing:
                 bgc_sources,
                 shared_kwargs,
                 type_="bgc",
+            )
+            # Hand low-salinity cells over to a second source across a taper; on by
+            # default for an ESPER source when a WOA source is also configured. See
+            # roms_tools.setup.salinity_merge.
+            #
+            # The weight follows salinity per timestep, taken from the physics boundary
+            # forcing this object already borrows: `salt_<direction>` is on exactly the
+            # same bry_time as the ESPER-derived tracers, since those are derived from
+            # it. A climatological partner is cycled onto that axis by time of year
+            # inside the merge.
+            apply_salinity_based_merge(
+                self.bgc,
+                bgc_sources,
+                lambda name, ds=self.physics.ds: ds[f"salt_{name.rsplit('_', 1)[-1]}"],
             )
             self.bgc_model().process_bgc_fields(self.bgc)
         else:

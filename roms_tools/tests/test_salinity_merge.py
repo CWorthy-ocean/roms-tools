@@ -391,3 +391,43 @@ def test_merge_with_a_climatological_partner_produces_finite_values():
     assert got[0] == pytest.approx(0.0)
     assert got[1] == pytest.approx(2.5)
     assert got[2] == pytest.approx(10.0)
+
+
+def test_partner_time_axis_the_primary_lacks_raises_not_broadcasts():
+    """The failure this guard exists for.
+
+    xarray would broadcast the partner's 12-month axis into the merged variable,
+    turning 2.1 GB of merged tracers into 26 GB on a 12 km Pacific grid -- a write
+    that never finishes rather than an error anyone sees.
+    """
+    primary = xr.DataArray(np.full((3, 4), 10.0), dims=("s_rho", "x"))
+    partner = xr.DataArray(
+        np.zeros((12, 3, 4)),
+        dims=("time", "s_rho", "x"),
+        coords={"time": np.arange(12.0)},
+    )
+    with pytest.raises(ValueError, match="would broadcast"):
+        align_partner_time(partner, primary)
+
+
+def test_degenerate_length_one_partner_time_axis_is_dropped():
+    """A leftover length-1 axis is harmless and squeezed rather than rejected."""
+    primary = xr.DataArray(np.full((3, 4), 10.0), dims=("s_rho", "x"))
+    partner = xr.DataArray(
+        np.zeros((1, 3, 4)), dims=("time", "s_rho", "x"), coords={"time": [0.0]}
+    )
+    got = align_partner_time(partner, primary)
+    assert got.dims == ("s_rho", "x")
+    assert "time" not in got.coords
+
+
+def test_primary_may_carry_a_time_axis_the_partner_lacks():
+    """The converse is legitimate: a time-invariant partner applies at every time."""
+    primary = xr.DataArray(
+        np.full((2, 3), 10.0),
+        dims=("bry_time", "x"),
+        coords={"bry_time": [3653.0, 3654.0]},
+    )
+    partner = xr.DataArray(np.zeros(3), dims="x")
+    got = align_partner_time(partner, primary)
+    assert got.dims == ("x",)

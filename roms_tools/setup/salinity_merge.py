@@ -44,6 +44,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from xarray.core.utils import is_duck_dask_array
 
 #: Key on a ``bgc_sources`` item that requests (or declines) the merge. Unknown keys on
 #: an item are ignored by ``build_bgc_companions`` and round-trip through YAML unchanged,
@@ -193,6 +194,33 @@ def align_partner_time(partner: xr.DataArray, primary: xr.DataArray) -> xr.DataA
     January by padding one record at each end, which is what ROMS itself does at runtime
     with ``cycle_length``. Identical axes are returned untouched.
     """
+    # Guard the asymmetric case before anything else. A time axis the partner carries
+    # and the primary does not is not merely unaligned -- xarray's arithmetic would
+    # broadcast it in silently, giving the merged variable an axis it must never have.
+    # For an initial condition (one time) against a 12-month climatology that is a
+    # twelvefold blow-up of every merged variable: 2.1 GB becomes 26 GB on a 12 km
+    # Pacific grid, which is a write that never finishes rather than an error anyone
+    # sees. roms-tools reduces a climatology to the target time before this runs, so
+    # in practice the axes do line up -- this is here so that if they ever stop lining
+    # up it fails loudly.
+    #
+    # A length-1 axis is a degenerate leftover and is safe to drop. Anything longer
+    # cannot be aligned here, because there is no target time to interpolate onto.
+    for extra in [
+        d for d in partner.dims if "time" in str(d) and d not in primary.dims
+    ]:
+        if partner.sizes[extra] == 1:
+            partner = partner.squeeze(extra, drop=True)
+        else:
+            raise ValueError(
+                f"the partner source carries a {extra!r} axis of length "
+                f"{partner.sizes[extra]} that the primary does not have "
+                f"(primary dims: {tuple(primary.dims)}). Merging them would broadcast "
+                f"that axis into the result. Reduce the partner to the target time "
+                f"first, or give both sources the same time dimension name so it can "
+                "be interpolated by time of year."
+            )
+
     dim = _time_dim(partner, primary)
     if dim is None or dim not in partner.coords or dim not in primary.coords:
         return partner  # nothing indexed to align (e.g. the synthetic test arrays)
@@ -331,11 +359,21 @@ def apply_salinity_based_merge(
                 obj.ds[name] = blended
 
                 if verbose:
-                    frac = float((weight < 1.0).mean()) * 100.0
-                    full = float((weight == 0.0).mean()) * 100.0
+                    # Deliberately no statistics on a lazy weight. Reducing it here
+                    # (a mean, a count) would force the whole salinity chain through
+                    # at construction time -- once per variable per boundary
+                    # direction -- ahead of the caller's own single compute at write
+                    # time, which is exactly the laziness the rest of this pipeline
+                    # is careful to preserve. The share of merged cells is a one-line
+                    # diagnostic afterwards, and the band is in the variable's attrs.
+                    share = ""
+                    if not is_duck_dask_array(getattr(weight, "data", None)):
+                        partly = float((weight < 1.0).mean()) * 100.0
+                        wholly = float((weight == 0.0).mean()) * 100.0
+                        share = f": {partly:.2f}% partly merged, {wholly:.2f}% wholly"
                     print(
-                        f"  salinity merge {name}: {frac:.2f}% of cells partly from "
-                        f"{spec['with']} ({full:.2f}% wholly), band {low:g}-{high:g} PSU"
+                        f"  salinity merge {name} <- {spec['with']} over "
+                        f"{low:g}-{high:g} PSU{share}"
                     )
 
                 # The partner has handed this variable over; drop it so the downstream

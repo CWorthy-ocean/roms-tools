@@ -29,6 +29,7 @@ import xarray as xr
 
 from roms_tools import (
     BGCMarbl,
+    BoundaryForcing,
     BoundaryForcingSource,
     Grid,
     InitialConditions,
@@ -1462,3 +1463,63 @@ def test_use_vars_unsupported_variable_still_raises(monkeypatch):
             use_dask=False,
             bypass_validation=True,
         )
+
+
+class TestWrappersPreflightPyESPER:
+    """An ESPER bgc source with no importable PyESPER must fail at wrapper
+    construction BEFORE the physics source is built, with the install guidance --
+    and only for ESPER: other sources never touch PyESPER.
+    """
+
+    @staticmethod
+    def _block(monkeypatch):
+        _drop_pyesper_modules(monkeypatch)
+        monkeypatch.setattr(sys, "meta_path", [_BlockPyESPER(), *sys.meta_path])
+
+    def test_boundary_forcing_fails_before_physics_build(self, monkeypatch):
+        self._block(monkeypatch)
+        built: list[str] = []
+        real_init = BoundaryForcingSource.__post_init__
+        monkeypatch.setattr(
+            BoundaryForcingSource,
+            "__post_init__",
+            lambda self_: (built.append(self_.type), real_init(self_))[1],
+        )
+        with pytest.raises(ImportError, match="CWorthy's PyESPER fork"):
+            BoundaryForcing(
+                grid=_small_grid(),
+                start_time=datetime(2021, 6, 29),
+                end_time=datetime(2021, 6, 30),
+                source={"name": "GLORYS", "path": "never-opened.nc"},
+                bgc_sources=[{"source": {"name": "ESPER"}, "use_vars": ["ALK", "DIC"]}],
+                bgc_model=BGCMarbl,
+            )
+        assert built == []
+
+    def test_initial_conditions_fails_before_physics_build(self, monkeypatch):
+        self._block(monkeypatch)
+        built: list[str] = []
+        real_init = InitialConditionsSource.__post_init__
+        monkeypatch.setattr(
+            InitialConditionsSource,
+            "__post_init__",
+            lambda self_: (built.append(self_.type), real_init(self_))[1],
+        )
+        with pytest.raises(ImportError, match="CWorthy's PyESPER fork"):
+            InitialConditions(
+                grid=_small_grid(),
+                ini_time=datetime(2021, 6, 29),
+                source={"name": "GLORYS", "path": "never-opened.nc"},
+                bgc_sources=[{"source": {"name": "ESPER"}, "use_vars": ["ALK", "DIC"]}],
+                bgc_model=BGCMarbl,
+            )
+        assert built == []
+
+    def test_non_esper_sources_never_import_pyesper(self, monkeypatch):
+        """Blocking PyESPER must not affect a constants-only configuration."""
+        self._block(monkeypatch)
+        from roms_tools.setup.utils import preflight_esper_sources
+
+        preflight_esper_sources(
+            [{"source": {"name": "constants", "constants": {"NO3": 1.0}}}]
+        )  # no raise

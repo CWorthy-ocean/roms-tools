@@ -2546,6 +2546,28 @@ def forwardable_fields(
     return frozenset((wrapper & source) - set(exclude))
 
 
+def preflight_esper_sources(bgc_sources: Iterable[dict[str, Any]]) -> None:
+    """Validate every ESPER item in ``bgc_sources`` -- including that PyESPER is
+    importable -- BEFORE anything expensive runs.
+
+    The wrapper classes build their physics source first and only then each bgc
+    companion, whose own ``_input_checks`` is where an ESPER source is normally
+    validated. On a production grid that means the whole physics regrid is paid
+    for before a missing PyESPER is reported. Calling this from the wrappers'
+    ``__post_init__`` moves that report to the very start. Non-ESPER items are
+    ignored, so an environment without PyESPER keeps every other BGC source
+    available; the error itself is roms-tools' install guidance (see
+    ``roms_tools.setup.esper._PYESPER_INSTALL_HINT``).
+    """
+    for item in bgc_sources:
+        src = item.get("source") if isinstance(item, dict) else None
+        if isinstance(src, dict) and src.get("name") == "ESPER":
+            # Local import: esper.py imports this module.
+            from roms_tools.setup.esper import validate_esper_source
+
+            validate_esper_source(src)
+
+
 def build_bgc_companions(
     source_cls: type,
     grid: Any,

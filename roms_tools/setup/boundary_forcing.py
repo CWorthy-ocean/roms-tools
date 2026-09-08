@@ -59,6 +59,7 @@ from roms_tools.setup.utils import (
     materialize_before_check,
     nan_check_batch,
     pop_grid_data,
+    preflight_esper_sources,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -1975,6 +1976,7 @@ class BoundaryForcing:
                     "(e.g. `bgc_model=rt.BGCMarbl`)."
                 )
             validate_bgc_model(self.bgc_model)
+            preflight_esper_sources(bgc_sources)
         # Every constructor argument this wrapper shares by name with
         # BoundaryForcingSource is forwarded to the physics object and to each bgc
         # companion -- derived from the two dataclasses (see forwardable_fields)

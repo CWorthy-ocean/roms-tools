@@ -8,6 +8,8 @@
 
 ### Bug Fixes
 
+* `RiverForcing.from_yaml` no longer rejects rivers that auto-discovery placed on a coastal cell along the domain edge, so YAML files written by `RiverForcing` always round-trip. ([#676](https://github.com/CWorthy-ocean/roms-tools/pull/676))
+
 ### Improvements
 
 * Added code so that ETOPO2022 can be used with ROMS-Tools ([#668](https://github.com/CWorthy-ocean/roms-tools/pull/668))

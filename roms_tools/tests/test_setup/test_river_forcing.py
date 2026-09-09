@@ -22,8 +22,9 @@ from roms_tools.setup.river_forcing import (
     _climatological_river_temp,
     _sample_tair_at_river_mouths,
     _smooth_and_floor_air_temp,
+    check_river_locations_are_along_coast,
 )
-from roms_tools.setup.utils import get_tracer_defaults
+from roms_tools.setup.utils import find_coastal_cells, get_tracer_defaults
 from roms_tools.tests.river_test_utils import write_glofas_file
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
@@ -362,14 +363,7 @@ class TestRiverForcingGeneral:
     def test_river_locations_are_along_coast(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
-        mask = river_forcing.grid.ds.mask_rho
-        faces = (
-            mask.shift(eta_rho=1)
-            + mask.shift(eta_rho=-1)
-            + mask.shift(xi_rho=1)
-            + mask.shift(xi_rho=-1)
-        )
-        coast = (1 - mask) * (faces > 0)
+        coast = find_coastal_cells(river_forcing.grid.ds.mask_rho.values)
 
         indices = river_forcing.indices
         for name in indices.keys():
@@ -657,6 +651,52 @@ class TestRiverForcingWithPrescribedIndices:
                 end_time=self.end_time,
                 indices=indices,
             )
+
+
+class TestCheckRiverLocationsAreAlongCoast:
+    """The coast check on the ``from_yaml`` path must agree with the coast
+    definition used by auto-discovery (``find_coastal_cells``), including at
+    the domain edges.
+    """
+
+    @pytest.fixture
+    def mask(self):
+        # Land column along the western edge (xi_rho=0) and a land island
+        # in the interior; everything else is ocean.
+        m = np.ones((6, 6))
+        m[:, 0] = 0
+        m[2:4, 2:4] = 0
+        return xr.DataArray(m, dims=("eta_rho", "xi_rho"))
+
+    def test_accepts_coastal_cell_on_domain_edge(self, mask):
+        # Regression: a river snapped to the domain-edge land column by
+        # auto-discovery used to be rejected when reloaded via from_yaml.
+        check_river_locations_are_along_coast(mask, {"edge_river": [(3, 0)]})
+
+    def test_accepts_interior_coastal_cell(self, mask):
+        check_river_locations_are_along_coast(mask, {"island": [(2, 2)]})
+
+    def test_rejects_ocean_cell(self, mask):
+        with pytest.raises(ValueError, match="not located on the coast"):
+            check_river_locations_are_along_coast(mask, {"ocean": [(0, 5)]})
+
+    def test_rejects_inland_cell(self):
+        m = np.ones((7, 7))
+        m[1:6, 1:6] = 0  # 5x5 land block; (3, 3) is land with no ocean neighbor
+        mask = xr.DataArray(m, dims=("eta_rho", "xi_rho"))
+        with pytest.raises(ValueError, match="not located on the coast"):
+            check_river_locations_are_along_coast(mask, {"inland": [(3, 3)]})
+
+    def test_matches_find_coastal_cells_everywhere(self, mask):
+        coast = find_coastal_cells(mask.values)
+        for eta in range(mask.sizes["eta_rho"]):
+            for xi in range(mask.sizes["xi_rho"]):
+                idx = {"r": [(eta, xi)]}
+                if coast[eta, xi]:
+                    check_river_locations_are_along_coast(mask, idx)
+                else:
+                    with pytest.raises(ValueError):
+                        check_river_locations_are_along_coast(mask, idx)
 
 
 class TestRiverForcingWithOverlappingIndices:

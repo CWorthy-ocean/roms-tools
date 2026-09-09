@@ -496,6 +496,83 @@ class TestRivr2oRiverBGCDataset:
         export_high = (cell_export * weights.isel(river_time=1, nriver=0)).item()
         assert export_high > export_low
 
+    def test_discharge_partition_weights_nan_below_min_volume_threshold(self, tmp_path):
+        # A river whose mean discharge is below MIN_MEANINGFUL_RIVER_VOLUME_M3S
+        # gets NaN weights instead of a (constant but unphysically large)
+        # export-per-volume concentration.
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        write_rivr2o_file(path, lat, lon, tracer_values)
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+        nearest_lat, nearest_lon = dataset.nearest_dic_cell_indices_for_points(
+            lon=[0.1], lat=[0.1]
+        )
+
+        tiny_volume = xr.DataArray(
+            [[0.01], [0.02]],
+            dims=["river_time", "nriver"],
+            coords={"river_time": [0, 1], "nriver": [0]},
+        )
+        assert np.isnan(
+            dataset.discharge_partition_weights(
+                tiny_volume, nearest_lat, nearest_lon
+            ).values
+        ).all()
+
+        normal_volume = xr.DataArray(
+            [[10.0], [20.0]],
+            dims=["river_time", "nriver"],
+            coords={"river_time": [0, 1], "nriver": [0]},
+        )
+        assert np.isfinite(
+            dataset.discharge_partition_weights(
+                normal_volume, nearest_lat, nearest_lon
+            ).values
+        ).all()
+
+    def test_forcing_concentrations_nan_when_mean_volume_too_small(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = self._uniform_tracer_values(100.0, (2, 2))
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        write_rivr2o_file(path, lat, lon, tracer_values)
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+        abs_time = xr.DataArray(
+            [datetime(2000, 1, 15), datetime(2000, 2, 15)], dims=["river_time"]
+        )
+
+        tiny_volume = xr.DataArray(
+            [[0.001], [0.001]],
+            dims=["river_time", "nriver"],
+            coords={"river_time": [0, 1], "nriver": [0]},
+        )
+        concentrations = dataset.forcing_concentrations(
+            tiny_volume,
+            abs_time,
+            lons=np.array([0.1]),
+            lats=np.array([0.1]),
+            straddle=False,
+            river_names=["test"],
+        )
+        assert np.isnan(concentrations["DIC"].values).all()
+
     def test_sample_at_points_ignores_cells_with_only_other_tracers(self, tmp_path):
         """Cell mask uses DIC only; DIP/NO3-only cells are not selected."""
         lat = np.array([0.0, 2.0])

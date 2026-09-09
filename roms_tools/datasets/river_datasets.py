@@ -30,6 +30,9 @@ RIVR2O_TRACER_NAMES = ("DIC", "DOC_l", "DOC_sl", "POC", "NO3", "PO4")
 RIVR2O_MIN_YEAR = 1903
 RIVR2O_MAX_YEAR = 2024
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
+MIN_MEANINGFUL_RIVER_VOLUME_M3S = (
+    0.1  # below this, discharge is too small/unreliable to divide RIVR2O export by
+)
 
 VALUE_OPTION_DIM = "value_option"
 RECOMMENDED_VALUE_INDEX = 0
@@ -1268,6 +1271,12 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         ``export * weight / Q_i`` gives the same concentration for co-located rivers
         at every month, while months with higher discharge receive a larger share of
         the annual export (more carbon flux when ``Q`` is high).
+
+        A river (or cell group) whose mean discharge is below
+        ``MIN_MEANINGFUL_RIVER_VOLUME_M3S`` gets NaN weights instead: dividing
+        RIVR2O's fixed annual export by a near-zero mean discharge produces an
+        implausibly large but constant concentration, so that river's concentration
+        is treated as unavailable (falls back to defaults) rather than reported.
         """
         import warnings
 
@@ -1309,7 +1318,9 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
                 point_idx = point_indices[0]
                 q_series = volume.isel(nriver=point_idx, drop=True)
                 q_mean = q_series.mean(dim=time_dim, skipna=True)
-                cell_weight = (q_series / q_mean).where(q_mean > 0, other=1.0)
+                cell_weight = (q_series / q_mean).where(
+                    q_mean > MIN_MEANINGFUL_RIVER_VOLUME_M3S
+                )
                 _weight_column(cell_weight, point_idx)
                 continue
 
@@ -1319,7 +1330,9 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
             for point_idx in point_indices:
                 q_series = volume.isel(nriver=point_idx, drop=True)
                 cell_weight = q_series / q_sum_mean
-                cell_weight = cell_weight.where(q_sum_mean > 0, other=1.0 / n_shared)
+                cell_weight = cell_weight.where(
+                    q_sum_mean > MIN_MEANINGFUL_RIVER_VOLUME_M3S
+                )
                 _weight_column(cell_weight, point_idx)
             shared_msgs.append(f"({lat_idx},{lon_idx})x{n_shared}")
 

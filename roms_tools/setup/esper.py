@@ -19,7 +19,8 @@ The heavy lifting -- dask-lazy, chunked, uncertainty-free estimation -- lives in
   environment with ``pip install -e <checkout>``, which also lets PyESPER find its
   own data directories (see ``PyESPER.paths.data_root``);
 * maps ROMS/MARBL tracer names to/from ESPER names;
-* converts ESPER's µmol/kg output to MARBL's mmol/m³ using potential density;
+* converts ESPER's µmol/kg output to MARBL's mmol/m³ using in-situ density
+  (TEOS-10 gsw.rho with pressure from depth);
 * clamps physically non-negative tracers at 0.
 
 The returned DataArrays are lazy (dask) when the inputs are, same as any other
@@ -51,7 +52,7 @@ import sys
 import numpy as np
 import xarray as xr
 
-from roms_tools.setup.utils import compute_potential_density, get_variable_metadata
+from roms_tools.setup.utils import compute_in_situ_density, get_variable_metadata
 
 # Fallback ceiling on ESPER chunk size, used only when PyESPER does not expose its
 # own budget helper. Equal to the value PyESPER itself hard-coded before it made the
@@ -146,33 +147,53 @@ def _ensure_pyesper(path=None):
     from the environment -- the recommended setup is an editable install
     (``pip install -e <checkout>``), which also lets PyESPER locate its own data
     directories automatically (``PyESPER.paths.data_root``).
+
+    The ``sys.path`` insertion -- and any ``PyESPER`` module the failed attempt
+    cached in ``sys.modules`` -- are rolled back if this raises: a failed attempt
+    (no PyESPER importable there, or an upstream-not-fork PyESPER) must not leave
+    a stale entry for a later, corrected call in the same process to trip over.
     """
     path = str(path or "")
-    if path and path not in sys.path:
+    inserted = bool(path) and path not in sys.path
+    if inserted:
         sys.path.insert(0, path)
+    success = False
     try:
-        import PyESPER
-    except ImportError as exc:
-        where = f" (nothing importable at `source['path']`: {path})" if path else ""
-        raise ImportError(
-            _PYESPER_INSTALL_HINT.format(
-                problem=f"No PyESPER is importable in this environment{where}."
-            )
-        ) from exc
-    try:
-        from PyESPER import lir_xr, mixed_xr, nn_xr
-    except ImportError as exc:
-        raise ImportError(
-            _PYESPER_INSTALL_HINT.format(
-                problem=(
-                    "A PyESPER was found at "
-                    f"{getattr(PyESPER, '__file__', 'an unknown location')}, but it has "
-                    "no `lir_xr`/`nn_xr`/`mixed_xr` -- so it is upstream PyESPER, not "
-                    "the CWorthy fork."
+        try:
+            import PyESPER
+        except ImportError as exc:
+            where = f" (nothing importable at `source['path']`: {path})" if path else ""
+            raise ImportError(
+                _PYESPER_INSTALL_HINT.format(
+                    problem=f"No PyESPER is importable in this environment{where}."
                 )
-            )
-        ) from exc
-    return {"lir": lir_xr, "nn": nn_xr, "mixed": mixed_xr}
+            ) from exc
+        try:
+            from PyESPER import lir_xr, mixed_xr, nn_xr
+        except ImportError as exc:
+            raise ImportError(
+                _PYESPER_INSTALL_HINT.format(
+                    problem=(
+                        "A PyESPER was found at "
+                        f"{getattr(PyESPER, '__file__', 'an unknown location')}, but it has "
+                        "no `lir_xr`/`nn_xr`/`mixed_xr` -- so it is upstream PyESPER, not "
+                        "the CWorthy fork."
+                    )
+                )
+            ) from exc
+        success = True
+        return {"lir": lir_xr, "nn": nn_xr, "mixed": mixed_xr}
+    finally:
+        if inserted and not success:
+            sys.path.remove(path)
+            # `import PyESPER` above may have cached a wrong/upstream module in
+            # sys.modules; without evicting it a retry with a corrected
+            # `source['path']` in the same process would silently reuse it and
+            # fail again with the same message.
+            for name in [
+                m for m in sys.modules if m == "PyESPER" or m.startswith("PyESPER.")
+            ]:
+                del sys.modules[name]
 
 
 def _time_dim(da: xr.DataArray) -> str | None:
@@ -454,9 +475,10 @@ def estimate_bgc_fields(
     # eventually makes at write time, which also lets every requested variable
     # share this call's per-chunk upstream work (they are all one graph).
 
-    # µmol/kg -> mmol/m³ via potential density (sigma0 + 1000), matching the GLODAP
-    # adapter's convention; then clamp physically non-negative tracers at 0.
-    density = compute_potential_density(temp, salt) + 1000.0
+    # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
+    # depth), matching the GLODAP/WOA adapters' convention; then clamp
+    # physically non-negative tracers at 0.
+    density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()
 

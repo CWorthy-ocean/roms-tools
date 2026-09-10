@@ -5,9 +5,13 @@ for the boundary layout, ``boundaries``) so the completion logic of
 :meth:`BGCMarbl.process_bgc_fields` can be exercised deterministically and
 without building real forcing datasets.
 
-``process_bgc_fields`` makes no prioritization decisions: it derives tracers from
-each object's own key fields, fills whatever is still missing across the union
-into the *first* object, and warns if anything remains absent.
+``process_bgc_fields`` enforces (rather than merely assumes) that variables do
+not overlap across sources: it derives tracers from each object's own key
+fields (an explicit tracer from one source suppresses derivation of the same
+tracer from another), raises if any tracer is present in more than one object
+after derivation, fills whatever is still missing across the union into the
+first object able to supply a fill template, and warns if anything remains
+absent.
 """
 
 import numpy as np
@@ -15,29 +19,26 @@ import pytest
 import xarray as xr
 
 from roms_tools import BGCMarbl, BGCModel
+from roms_tools.setup.utils import build_bgc_companions
 
 
 class _FakeBoundaryForcing:
     """Minimal BoundaryForcing-like object: per-direction variable suffixes."""
 
-    def __init__(self, ds, boundaries):
+    def __init__(self, ds, boundaries, source_name="fake_bgc", use_vars=None):
         self.ds = ds
         self.boundaries = boundaries
-        self.saved_to = None
-
-    def save(self, filepath, serialize_dask=None):
-        self.saved_to = filepath
+        self.source = {"name": source_name}
+        self.use_vars = use_vars
 
 
 class _FakeInitialConditions:
     """Minimal InitialConditions-like object: bare variable names."""
 
-    def __init__(self, ds):
+    def __init__(self, ds, source_name="fake_bgc", use_vars=None):
         self.ds = ds
-        self.saved_to = None
-
-    def save(self, filepath, serialize_dask=None):
-        self.saved_to = filepath
+        self.source = {"name": source_name}
+        self.use_vars = use_vars
 
 
 def _grid_da(value, dims=("s_rho", "xi_rho"), shape=(3, 4)):
@@ -61,9 +62,77 @@ def test_tracer_and_known_vars():
         assert v in m.tracer_vars()
 
 
-def test_base_model_process_is_abstract():
-    with pytest.raises(NotImplementedError):
-        BGCModel().process_bgc_fields([])
+def test_base_model_cannot_be_instantiated():
+    """`BGCModel` is an ABC: `process_bgc_fields` is abstract, so instantiating the
+    base class fails up front (TypeError) rather than at the first call.
+    """
+    with pytest.raises(TypeError, match="process_bgc_fields"):
+        BGCModel()
+
+
+class TestBGCModelSubclassContract:
+    """`__init_subclass__` + ABC: what a concrete model must declare."""
+
+    def test_concrete_subclass_without_tracers_is_rejected_at_definition(self):
+        with pytest.raises(TypeError, match="_TRACER_VARS"):
+
+            class Empty(BGCModel):
+                def process_bgc_fields(self, forcings):
+                    return forcings
+
+    def test_abstract_intermediate_subclass_may_leave_tracers_empty(self):
+        class Intermediate(BGCModel):  # still abstract: no process_bgc_fields
+            name = "intermediate"
+
+        with pytest.raises(TypeError):
+            Intermediate()
+
+        class Concrete(Intermediate):
+            _TRACER_VARS = frozenset({"NO3"})
+
+            def process_bgc_fields(self, forcings):
+                return forcings
+
+        assert Concrete().tracer_vars() == frozenset({"NO3"})
+
+    def test_marbl_subclass_override_still_works(self):
+        class DoubleLigand(BGCMarbl):
+            _FE_TO_LIG = 6.0
+
+        assert DoubleLigand().tracer_vars() == BGCMarbl().tracer_vars()
+
+
+class TestValidateBgcModel:
+    def test_accepts_concrete_class(self):
+        from roms_tools.setup.bgc_model import validate_bgc_model
+
+        assert validate_bgc_model(BGCMarbl) is BGCMarbl
+
+    def test_rejects_instance_with_pointer_to_class(self):
+        from roms_tools.setup.bgc_model import validate_bgc_model
+
+        with pytest.raises(ValueError, match=r"bgc_model=BGCMarbl`, not"):
+            validate_bgc_model(BGCMarbl())
+
+    def test_rejects_unrelated_class_and_non_class(self):
+        from roms_tools.setup.bgc_model import validate_bgc_model
+
+        with pytest.raises(ValueError, match="BGCModel subclass"):
+            validate_bgc_model(dict)
+        with pytest.raises(ValueError, match="BGCModel subclass"):
+            validate_bgc_model("BGCMarbl")
+
+    def test_rejects_abstract_base(self):
+        from roms_tools.setup.bgc_model import validate_bgc_model
+
+        with pytest.raises(ValueError, match="abstract"):
+            validate_bgc_model(BGCModel)
+
+    def test_to_name_validates_too(self):
+        from roms_tools.setup.bgc_model import bgc_model_to_name
+
+        with pytest.raises(ValueError, match="not an instance"):
+            bgc_model_to_name(BGCMarbl())
 
 
 def test_chl_expansion_and_drop():
@@ -152,8 +221,8 @@ def test_derivation_is_per_object_no_prioritization():
 
     CHL in object A → phytoplankton in A; Fe in object B → Lig in B.
     """
-    a = _FakeInitialConditions(_ic_ds({"ALK": 2300.0, "CHL": 2.0}))
-    b = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "NO3": 24.0}))
+    a = _FakeInitialConditions(_ic_ds({"ALK": 2300.0, "CHL": 2.0}), source_name="a")
+    b = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "NO3": 24.0}), source_name="b")
     BGCMarbl().process_bgc_fields([a, b])
 
     assert "spChl" in a.ds and "CHL" not in a.ds
@@ -162,14 +231,48 @@ def test_derivation_is_per_object_no_prioritization():
     assert np.allclose(b.ds["NO3"].values, 24.0)
 
 
+def test_explicit_tracer_in_one_source_suppresses_derivation_in_another():
+    """An explicit Lig in source B suppresses Fe->Lig derivation in source A.
+
+    Regression: derivation used to be decided per object in isolation, so a
+    source that supplied Fe would derive its own Lig even when another source
+    already supplied an explicit Lig -- producing an overlap that the old code
+    never checked for.
+    """
+    a = _FakeInitialConditions(_ic_ds({"Fe": 1.0}), source_name="a")
+    b = _FakeInitialConditions(_ic_ds({"Lig": 42.0}), source_name="b")
+    BGCMarbl().process_bgc_fields([a, b])
+
+    assert "Lig" not in a.ds
+    assert np.allclose(b.ds["Lig"].values, 42.0)
+
+
 def test_missing_filled_into_first_object():
     """Union-missing tracers are filled into the first object only."""
-    a = _FakeInitialConditions(_ic_ds({"PO4": 1.0}))
-    b = _FakeInitialConditions(_ic_ds({"NO3": 24.0}))
+    a = _FakeInitialConditions(_ic_ds({"PO4": 1.0}), source_name="a")
+    b = _FakeInitialConditions(_ic_ds({"NO3": 24.0}), source_name="b")
     BGCMarbl().process_bgc_fields([a, b])
     # DOCr is missing from both; it lands in the first object, not the second.
     assert "DOCr" in a.ds
     assert "DOCr" not in b.ds
+
+
+def test_constant_fill_uses_first_adapter_with_a_template():
+    """When the first object has no BGC tracer at all to use as a fill
+    template, the constant fill lands in the first object that does, rather
+    than being silently dropped.
+
+    Regression: the old code always wrote into ``adapters[0]``, whose own
+    ``assign_const`` silently no-opped when that object had no template --
+    the fill was reported as done (in ``filled``) but never written anywhere.
+    """
+    a = _FakeInitialConditions(xr.Dataset(), source_name="a")  # no BGC vars at all
+    b = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "ALK": 2300.0}), source_name="b")
+    BGCMarbl().process_bgc_fields([a, b])
+
+    assert "DOCr" not in a.ds
+    assert "DOCr" in b.ds
+    assert np.allclose(b.ds["DOCr"].values, BGCMarbl._OCEAN_FILL["DOCr"])
 
 
 def test_boundary_layout_only_touches_active_directions():
@@ -189,33 +292,92 @@ def test_boundary_layout_only_touches_active_directions():
     assert "CHL_north" in bf.ds
 
 
-def test_save_called_with_filepath(tmp_path):
-    a = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "ALK": 2300.0}))
-    b = _FakeInitialConditions(_ic_ds({"PO4": 1.0, "NO3": 24.0}))
-    p1, p2 = tmp_path / "a.nc", tmp_path / "b.nc"
-    BGCMarbl().process_bgc_fields([a, b], filepath=[p1, p2])
-    assert a.saved_to == p1
-    assert b.saved_to == p2
-
-
-def test_save_filepath_length_mismatch_raises(tmp_path):
-    a = _FakeInitialConditions(_ic_ds({"Fe": 1.0}))
-    b = _FakeInitialConditions(_ic_ds({"PO4": 1.0}))
-    with pytest.raises(ValueError, match="one path per forcing object"):
-        BGCMarbl().process_bgc_fields([a, b], filepath=[tmp_path / "only.nc"])
-
-
-def test_single_object_save(tmp_path):
-    ic = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "ALK": 2300.0}))
-    p = tmp_path / "ic.nc"
-    result = BGCMarbl().process_bgc_fields(ic, filepath=p)
-    assert result is ic
-    assert ic.saved_to == p
-
-
 def test_empty_input_raises():
     with pytest.raises(ValueError, match="at least one forcing object"):
         BGCMarbl().process_bgc_fields([])
+
+
+class TestOverlapDetection:
+    """``process_bgc_fields`` must raise, not silently pick a winner, when more
+    than one source supplies the same tracer (after derivation).
+    """
+
+    def test_overlap_raises_for_ic_layout(self):
+        a = _FakeInitialConditions(_ic_ds({"DIC": 2000.0}), source_name="source_a")
+        b = _FakeInitialConditions(_ic_ds({"DIC": 1900.0}), source_name="source_b")
+        with pytest.raises(ValueError, match="DIC") as excinfo:
+            BGCMarbl().process_bgc_fields([a, b])
+        assert "source_a" in str(excinfo.value)
+        assert "source_b" in str(excinfo.value)
+
+    def test_overlap_raises_for_boundary_layout(self):
+        ds = xr.merge(
+            [
+                _boundary_ds({"DIC": 2000.0}, "south"),
+            ]
+        )
+        a = _FakeBoundaryForcing(
+            ds.copy(deep=True), {"south": True}, source_name="source_a"
+        )
+        b = _FakeBoundaryForcing(
+            ds.copy(deep=True), {"south": True}, source_name="source_b"
+        )
+        with pytest.raises(ValueError, match="DIC") as excinfo:
+            BGCMarbl().process_bgc_fields([a, b])
+        assert "source_a" in str(excinfo.value)
+        assert "source_b" in str(excinfo.value)
+
+    def test_two_sources_both_with_dic_raise(self):
+        a = _FakeInitialConditions(_ic_ds({"DIC": 2000.0}), source_name="a")
+        b = _FakeInitialConditions(_ic_ds({"DIC": 1950.0}), source_name="b")
+        with pytest.raises(ValueError, match="use_vars"):
+            BGCMarbl().process_bgc_fields([a, b])
+
+    def test_overlap_message_includes_use_vars_when_set(self):
+        a = _FakeInitialConditions(
+            _ic_ds({"DIC": 2000.0}), source_name="a", use_vars=["DIC"]
+        )
+        b = _FakeInitialConditions(_ic_ds({"DIC": 1950.0}), source_name="b")
+        with pytest.raises(ValueError) as excinfo:
+            BGCMarbl().process_bgc_fields([a, b])
+        assert "use_vars=DIC" in str(excinfo.value)
+
+
+class TestBuildBgcCompanionsValidation:
+    """``build_bgc_companions`` rejects unknown per-item keys before ever
+    constructing a source object.
+    """
+
+    def test_unknown_item_key_raises(self):
+        def _never_call(**_kwargs):
+            raise AssertionError(
+                "source_cls must not be constructed when an item key is invalid"
+            )
+
+        with pytest.raises(ValueError, match="typo_key"):
+            build_bgc_companions(
+                _never_call,
+                grid=object(),
+                physics_obj=object(),
+                bgc_sources=[{"source": {"name": "constants"}, "typo_key": 1}],
+                shared_kwargs={},
+            )
+
+    def test_empty_use_vars_list_treated_as_unset(self):
+        captured = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        build_bgc_companions(
+            _capture,
+            grid=object(),
+            physics_obj=object(),
+            bgc_sources=[{"source": {"name": "constants"}, "use_vars": []}],
+            shared_kwargs={},
+        )
+        assert "use_vars" not in captured
 
 
 class TestDerivationRulesAreTheSingleSourceOfTruth:

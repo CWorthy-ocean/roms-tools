@@ -100,5 +100,9 @@ Utilities
    roms_tools.tiling.join.join_netcdf
    roms_tools.plot.plot
    roms_tools.datasets.lat_lon_datasets.get_glorys_bounds
+   roms_tools.datasets.lat_lon_datasets.WOABGCDataset
+   roms_tools.datasets.lat_lon_datasets.GLODAPv2BGCDataset
+   roms_tools.datasets.download.download_woa23_bgc
    roms_tools.setup.utils.compute_potential_density
+   roms_tools.setup.utils.compute_in_situ_density
    roms_tools.setup.utils.compute_mld

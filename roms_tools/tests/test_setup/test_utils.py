@@ -16,6 +16,7 @@ from roms_tools.setup.utils import (
     build_kdtree_from_latlon,
     calendar_midmonth_dates,
     check_and_set_boundaries,
+    compute_in_situ_density,
     compute_mld,
     compute_potential_density,
     expand_monthly_climatology_time_axis,
@@ -335,6 +336,34 @@ def test_compute_potential_density_dask():
     salt = xr.DataArray(da.from_array([[35.0]], chunks=(1, 1)))
     result = compute_potential_density(temp, salt)
     assert result.chunks is not None
+
+
+# test compute_in_situ_density
+
+
+def test_compute_in_situ_density_exceeds_potential_at_depth():
+    """In-situ density at depth must exceed the surface-referenced sigma-0 value.
+
+    At S=35 PSU, T=2°C, depth=4000 m, lat=30°N, TEOS-10 gives rho ~= 1046.1
+    kg/m^3, well above sigma0 + 1000 ~= 1027.8 kg/m^3 (the pressure effect on
+    density is real and not negligible at depth). At depth=0 the two must
+    agree, since gsw.p_from_z(0, lat) == 0.
+    """
+    temp = xr.DataArray(2.0)
+    salt = xr.DataArray(35.0)
+    depth = xr.DataArray(4000.0)
+    lat = xr.DataArray(30.0)
+
+    result = compute_in_situ_density(temp, salt, depth, lat)
+    sigma0_plus_1000 = compute_potential_density(temp, salt) + 1000.0
+
+    assert float(result.values) == pytest.approx(1046.1, abs=0.2)
+    assert float(result.values) > float(sigma0_plus_1000.values)
+
+    surface_result = compute_in_situ_density(temp, salt, xr.DataArray(0.0), lat)
+    assert float(surface_result.values) == pytest.approx(
+        float(sigma0_plus_1000.values), abs=1e-6
+    )
 
 
 def test_compute_density_coord_constant_TS():
@@ -919,16 +948,16 @@ def test_materialize_before_check_realizes_and_preserves_metadata():
     calls["n"] = 0
 
     # materialize=False is a no-op: the variable stays dask-backed, nothing
-    # computed. (Materialization is driven by `materialize`, not by
-    # `serialize_dask` -- the two were decoupled when PyESPER became
-    # self-serialising; `serialize_dask` now only picks the scheduler regime
-    # for the compute.)
+    # computed. (Materialization is driven solely by `materialize` now --
+    # `serialize_dask` was removed as a dead parameter: every real caller
+    # hard-coded `False`, so the compute always runs under the ambient
+    # scheduler.)
     materialize_before_check(ds, ["foo"], materialize=False)
     assert ds["foo"].chunks is not None
     assert calls["n"] == 0
 
     # The common (current-PyESPER) case: materialize under the ambient scheduler.
-    materialize_before_check(ds, ["foo"], materialize=True, serialize_dask=False)
+    materialize_before_check(ds, ["foo"], materialize=True)
     assert ds["foo"].chunks is None, "foo should be realized (no longer dask-backed)"
     assert calls["n"] == 2, "expensive() should run once per chunk, not be skipped"
     assert ds["foo"].attrs == {"units": "m"}
@@ -936,7 +965,7 @@ def test_materialize_before_check_realizes_and_preserves_metadata():
     np.testing.assert_array_equal(ds["foo"].values, np.arange(10) * 2)
 
     # A second call with the now-realized variable must not recompute it.
-    materialize_before_check(ds, ["foo"], materialize=True, serialize_dask=False)
+    materialize_before_check(ds, ["foo"], materialize=True)
     assert calls["n"] == 2, (
         "materializing an already-concrete variable should be a no-op"
     )
@@ -945,17 +974,6 @@ def test_materialize_before_check_realizes_and_preserves_metadata():
     materialize_before_check(ds, [], materialize=True)
     materialize_before_check(ds, ["not_a_real_var"], materialize=True)
     assert calls["n"] == 2
-
-    # The legacy (serialized) regime still materializes identically.
-    arr2 = da.from_array(np.arange(10).astype("float64"), chunks=5).map_blocks(
-        expensive, dtype="float64"
-    )
-    ds["baz"] = xr.DataArray(arr2, dims=["x"])
-    calls["n"] = 0
-    materialize_before_check(ds, ["baz"], materialize=True, serialize_dask=True)
-    assert ds["baz"].chunks is None
-    assert calls["n"] == 2
-    np.testing.assert_array_equal(ds["baz"].values, np.arange(10) * 2)
 
 
 class TestMonthlyClimatologyExpansion:
@@ -1281,3 +1299,91 @@ def test_group_by_year_preserves_every_step():
     np.testing.assert_array_equal(
         np.concatenate([g["v"].values for g in groups]), values
     )
+
+
+class TestForwardableFields:
+    """The wrapper -> source argument forwarding is derived from the dataclasses
+    (``forwardable_fields``). These snapshots are deliberate: adding a field to
+    either the wrapper or the source must fail here and force the question
+    "should this forward, and does the name mean the same thing on both sides?"
+    rather than letting it silently flow (or silently not).
+    """
+
+    _COMMON = frozenset(
+        {
+            "grid",
+            "source",
+            "model_reference_date",
+            "use_dask",
+            "chunks",
+            "initial_slice_bounds",
+            "bypass_validation",
+            "bgc_interpolation_method",
+            "prefill",
+            "prefill_kwargs",
+            "regrid_method",
+            "extrap_method",
+            "extrap_kwargs",
+        }
+    )
+
+    def test_boundary_forcing_forwards_every_shared_field(self):
+        from roms_tools.setup.boundary_forcing import (
+            BoundaryForcing,
+            BoundaryForcingSource,
+        )
+        from roms_tools.setup.utils import forwardable_fields
+
+        expected = self._COMMON | {
+            "start_time",
+            "end_time",
+            "boundaries",
+            "start_time_pad",
+            "end_time_pad",
+            "apply_2d_horizontal_fill",
+        }
+        assert forwardable_fields(BoundaryForcing, BoundaryForcingSource) == expected
+        # source-only / wrapper-only names never appear
+        assert (
+            not {"type", "physics_forcing", "use_vars", "bgc_sources", "bgc_model"}
+            & expected
+        )
+
+    def test_initial_conditions_forwards_every_shared_field_but_use_vars(self):
+        from roms_tools.setup.initial_conditions import (
+            InitialConditions,
+            InitialConditionsSource,
+        )
+        from roms_tools.setup.utils import forwardable_fields
+
+        expected = self._COMMON | {"ini_time", "allow_flex_time"}
+        got = forwardable_fields(
+            InitialConditions, InitialConditionsSource, exclude=("use_vars",)
+        )
+        assert got == expected
+        # `use_vars` IS shared by name (legacy wrapper convenience vs per-object
+        # down-select) -- the exclusion is what keeps it out, not the intersection.
+        assert "use_vars" in forwardable_fields(
+            InitialConditions, InitialConditionsSource
+        )
+
+    def test_exclude_and_init_false_fields_are_dropped(self):
+        from dataclasses import dataclass, field
+
+        from roms_tools.setup.utils import forwardable_fields
+
+        @dataclass
+        class A:
+            x: int = 0
+            y: int = 0
+            computed: int = field(init=False, default=0)
+
+        @dataclass
+        class B:
+            x: int = 0
+            y: int = 0
+            z: int = 0
+            computed: int = field(init=False, default=0)
+
+        assert forwardable_fields(A, B) == {"x", "y"}
+        assert forwardable_fields(A, B, exclude=("y",)) == {"x"}

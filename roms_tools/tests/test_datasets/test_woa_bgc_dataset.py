@@ -14,7 +14,7 @@ import xarray as xr
 
 from roms_tools.datasets.download import WOA23_BGC_VARIABLES, woa23_filename
 from roms_tools.datasets.lat_lon_datasets import WOABGCDataset
-from roms_tools.setup.utils import compute_potential_density
+from roms_tools.setup.utils import compute_in_situ_density
 
 # The WOA standard depth levels. The 43- and 57-level monthly axes are exact leading
 # slices of the 102-level annual axis, which is what makes the splice interpolation-free.
@@ -108,6 +108,47 @@ def woa_data(woa_dir):
     return WOABGCDataset(filename=woa_dir, use_dask=True)
 
 
+@pytest.fixture(scope="module")
+def woa_dir_annual_nan_at_600m(tmp_path_factory):
+    """A WOA tree where the annual temperature file is deliberately NaN at 600 m.
+
+    600 m is deep within the pure-monthly region for T/S (monthly T/S extends to
+    1500 m; the annual_blend taper only starts at 1400 m), so ``weight`` there is
+    exactly 1. Before the ``annual.fillna(extended)`` fix, ``NaN * 0.0`` still
+    poisons the blend with NaN even at weight 1 -- exercising that fix requires a
+    NaN strictly outside the taper band, not one inside it.
+    """
+    directory = build_woa_directory(tmp_path_factory.mktemp("woa_annual_nan"))
+    path = directory / woa23_filename("t", 0, "decav")
+    ds = xr.open_dataset(path, decode_times=False).load()
+    ds.close()
+    depth_index = int(np.argmin(np.abs(ds["depth"].values - 600.0)))
+    ds["t_an"].values[:, depth_index, :, :] = np.nan
+    ds.to_netcdf(path, mode="w")
+    return directory
+
+
+def test_annual_nan_does_not_poison_a_valid_monthly_value(woa_dir_annual_nan_at_600m):
+    """A NaN in the annual field must not overwrite a valid monthly value.
+
+    Without ``annual.fillna(extended)`` in ``_extend_to_full_depth``, ``NaN *
+    0.0`` is NaN (not 0), so a NaN annual value poisons the blended result even
+    at weight 1 (pure monthly). Post-processing is skipped so the umol/kg ->
+    mmol/m3 factor does not muddy the direct value comparison (T/S themselves
+    are never unit-converted regardless).
+    """
+    data = WOABGCDataset(
+        filename=woa_dir_annual_nan_at_600m,
+        use_dask=True,
+        deep_fill="annual_blend",
+        apply_post_processing=False,
+    )
+    depth_index = int(np.argmin(np.abs(data.ds.depth.values - 600.0)))
+    got = float(data.ds["t_an"].isel(depth=depth_index, time=0, **OCEAN_POINT))
+    assert np.isfinite(got)
+    assert got == pytest.approx(expected_profile("t", 1, 57)[38], rel=1e-5)
+
+
 OCEAN_POINT = {"latitude": 100, "longitude": 200}
 
 
@@ -129,6 +170,21 @@ def test_merges_into_one_twelve_month_climatology(woa_data):
 def test_decoy_statistical_fields_are_not_read(woa_data):
     """Only the objectively-analyzed ``*_an`` field is loaded from each file."""
     assert not [v for v in woa_data.ds.data_vars if v.endswith("_sd")]
+
+
+def test_use_dask_false_produces_numpy_backed_arrays(woa_dir):
+    """`use_dask=False` must behave eagerly, like every other dataset class here.
+
+    `_open_monthly`'s `xr.open_mfdataset` is always dask-backed regardless of
+    `use_dask`, so `load_data` must `.load()` the merged result when
+    `use_dask=False` or this class would silently stay lazy against the caller's
+    request.
+    """
+    data = WOABGCDataset(filename=woa_dir, use_dask=False)
+    for var_name in ("n_an", "p_an", "i_an", "o_an", "t_an", "s_an"):
+        assert not hasattr(data.ds[var_name].data, "chunks"), (
+            f"{var_name} is still dask-backed with use_dask=False"
+        )
 
 
 def test_time_axis_is_the_shared_mid_month_climatology(woa_data):
@@ -156,14 +212,22 @@ def test_monthly_tracers_are_paired_with_monthly_temperature_and_salinity(woa_da
 
 
 def test_tracers_are_converted_to_mmol_per_m3(woa_data):
-    """umol/kg -> mmol/m3 via TEOS-10 sigma-0 from the dataset's own T/S."""
+    """umol/kg -> mmol/m3 via in-situ density (TEOS-10 gsw.rho) from the dataset's T/S.
+
+    Uses a non-zero depth index deliberately: at depth=0 in-situ density and
+    sigma-0 density coincide (pressure is zero at the surface), so asserting
+    there would not distinguish the two formulas.
+    """
     ds = woa_data.ds
-    sigma0 = compute_potential_density(ds["t_an"], ds["s_an"])
-    factor = float(((sigma0 + 1000.0) / 1000.0).isel(depth=0, time=0, **OCEAN_POINT))
+    depth_index = 10
+    density = compute_in_situ_density(
+        ds["t_an"], ds["s_an"], ds["depth"], ds["latitude"]
+    )
+    factor = float((density / 1000.0).isel(depth=depth_index, time=0, **OCEAN_POINT))
     assert factor > 1.0
 
-    raw = expected_profile("n", 1, 1)[0]
-    got = float(ds["n_an"].isel(depth=0, time=0, **OCEAN_POINT))
+    raw = expected_profile("n", 1, depth_index + 1)[-1]
+    got = float(ds["n_an"].isel(depth=depth_index, time=0, **OCEAN_POINT))
     assert got == pytest.approx(raw * factor, rel=1e-5)
 
 

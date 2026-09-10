@@ -808,3 +808,49 @@ def test_save_datasets_defaults_to_concurrent_write(tmp_path, monkeypatch):
         "save_datasets serialized the write without being asked -- the "
         "serialize_dask default is not False"
     )
+
+
+def test_serialize_dask_and_boost_threads_caps_at_numba_ceiling_and_restores(
+    monkeypatch,
+):
+    """The numba thread boost must never ask for more threads than numba's own
+    configured ceiling (``numba.set_num_threads`` raises if it does), and must
+    restore the prior thread count afterward -- both on a clean exit and when
+    the block raises.
+
+    Regression scenario: a process with many visible CPUs (here spoofed via
+    ``os.cpu_count``) but a lower ``NUMBA_NUM_THREADS`` ceiling (e.g. set via
+    the env var, or numba's own detection) used to be asked to raise past that
+    ceiling unconditionally.
+    """
+    import os
+
+    import numba
+
+    import roms_tools.utils as utils_mod
+
+    # Force the os.cpu_count() fallback path deterministically across
+    # platforms: os.sched_getaffinity doesn't exist on macOS/Windows, but does
+    # on Linux, so make it look absent everywhere this test runs.
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 64)
+    monkeypatch.setattr(numba.config, "NUMBA_NUM_THREADS", 2)
+
+    prev = numba.get_num_threads()
+    seen = {}
+    with utils_mod.serialize_dask_and_boost_threads(True):
+        seen["during"] = numba.get_num_threads()
+    assert seen["during"] == 2, (
+        "numba thread count must be capped at NUMBA_NUM_THREADS (2), not "
+        "raised to the spoofed cpu_count (64)"
+    )
+    assert numba.get_num_threads() == prev, (
+        "numba thread count must be restored on clean exit"
+    )
+
+    with pytest.raises(RuntimeError):
+        with utils_mod.serialize_dask_and_boost_threads(True):
+            raise RuntimeError("boom")
+    assert numba.get_num_threads() == prev, (
+        "numba thread count must be restored even when the block raises"
+    )

@@ -86,6 +86,13 @@ Getting Started
    references
    api
 
+How To Cite ROMS-Tools
+----------------------
+
+If you use ROMS-Tools in your work, we would be happy if you cite our paper in the Journal of Open Source Software:
+
+   Loose, N., Nicholas, T., Maticka, S., Eilerman, S., McBride, C., Stephenson, D., Heede, U., Saenz, B., Thyng, K. M., Bachman, S., Damien, P., Karspeck, A., Long, M. C., Molemaker, M. J., & Wyatt, A. (2026). ROMS-Tools: Reproducible Preprocessing and Analysis for Regional Ocean Modeling with ROMS. *Journal of Open Source Software*, *11*(124), 10234. https://doi.org/10.21105/joss.10234
+
 For Developers
 --------------
 

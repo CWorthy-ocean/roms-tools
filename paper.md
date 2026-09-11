@@ -54,7 +54,7 @@ authors:
 affiliations:
  - name: '[C]Worthy LLC, Boulder, CO, United States'
    index: 1
- - name: Earthmover PBC
+ - name: Earthmover PBC, United States
    index: 2
  - name: University of California, Los Angeles, CA, United States
    index: 3

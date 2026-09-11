@@ -8,8 +8,12 @@ on:
 
 jobs:
   update-release-notes:
-    # Only run when the PR was actually merged, not just closed
-    if: github.event.pull_request.merged == true
+    # Only run when the PR was actually merged, not just closed — and never for
+    # the finalize PR itself (from next_release_notes), whose merge is handled by
+    # publish_release.yaml; otherwise this would re-open a fresh Unreleased block.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref != 'next_release_notes'
     runs-on: ubuntu-latest
     permissions:
       contents: write

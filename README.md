@@ -7,6 +7,7 @@
 [![Documentation Status](https://readthedocs.org/projects/roms-tools/badge/?version=latest)](https://roms-tools.readthedocs.io/en/latest/?badge=latest)
 ![Supported Python Versions](https://img.shields.io/pypi/pyversions/roms-tools)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/roms-tools?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/roms-tools)
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.10234/status.svg)](https://doi.org/10.21105/joss.10234)
 
 ## Overview
 
@@ -80,6 +81,33 @@ pip install -e ".[dev,stream]"
 ## Getting Started
 
 To learn how to use `ROMS-Tools`, check out the [documentation](https://roms-tools.readthedocs.io/en/latest/).
+
+## How to cite ROMS-Tools
+
+If you use ROMS-Tools in your work, we would be happy if you cite our paper in the Journal of Open Source Software:
+
+> Loose, N., Nicholas, T., Maticka, S., Eilerman, S., McBride, C., Stephenson, D., Heede, U., Saenz, B., Thyng, K. M., Bachman, S., Damien, P., Karspeck, A., Long, M. C., Molemaker, M. J., & Wyatt, A. (2026). ROMS-Tools: Reproducible Preprocessing and Analysis for Regional Ocean Modeling with ROMS. *Journal of Open Source Software*, *11*(124), 10234. https://doi.org/10.21105/joss.10234
+
+Or use the following BibTeX entry:
+
+```bibtex
+@article{loose2026romstools,
+  author  = {Loose, Nora and Nicholas, Tom and Maticka, Sam and Eilerman, Scott
+             and McBride, Christopher and Stephenson, Dafydd and Heede, Ulla
+             and Saenz, Benjamin and Thyng, Kristen M. and Bachman, Scott
+             and Damien, Pierre and Karspeck, Alicia and Long, Matthew C.
+             and Molemaker, M. Jeroen and Wyatt, Abigale},
+  title   = {{ROMS-Tools}: Reproducible Preprocessing and Analysis for
+             Regional Ocean Modeling with {ROMS}},
+  journal = {Journal of Open Source Software},
+  year    = {2026},
+  volume  = {11},
+  number  = {124},
+  pages   = {10234},
+  doi     = {10.21105/joss.10234},
+  url     = {https://joss.theoj.org/papers/10.21105/joss.10234},
+}
+```
 
 ## Feedback and contributions
 

@@ -284,7 +284,7 @@ The World Ocean Atlas 2023 nutrients and oxygen, as a gridded BGC source for ini
 conditions and boundary forcing. Unlike the unified dataset (which repackages WOA among
 other sources into a single file), this reads the WOA23 files directly from NCEI.
 
-**It supplies only** ``NO3``, ``PO4``, ``SiO3`` and ``O2``. WOA measures no carbon
+**It supplies only** ``NO3``, ``PO4``, ``SiO3`` and ``O2``. WOA carries no carbon
 chemistry or iron, so a MARBL run needs a companion source for ``DIC``, ``ALK`` and
 ``Fe`` -- combine them through the ``bgc_sources`` list, e.g. WOA for the nutrients
 alongside GLODAP or ESPER for the carbon system.
@@ -323,11 +323,11 @@ variable is extended onto the full grid without vertical interpolation, controll
 
 ``"annual_blend"`` (default)
     Splices the full-depth annual climatology underneath the monthly data, with a linear
-    taper across the seam. The blend is centred on the deepest monthly level, so monthly
-    values within ``deep_blend_halfwidth`` above the seam are blended toward the annual
-    climatology, with a half-width of ``deep_blend_halfwidth`` (default 100 m) on either
-    side of the seam -- 700-900 m for the nutrients and 1400-1600 m for oxygen and T/S.
-    Only above the band is the field purely monthly; below the band, purely annual.
+    taper across the seam. The taper is centred on the deepest monthly level and extends
+    ``deep_blend_halfwidth`` (default 100 m) on either side of it -- 700-900 m for the
+    nutrients and 1400-1600 m for oxygen and T/S -- so monthly values within that band
+    above the seam are blended toward the annual climatology. Above the band the field is
+    purely monthly; below it, purely annual.
 
 ``"ffill"``
     Persists the deepest monthly value to the seafloor. Simpler, and it avoids
@@ -373,8 +373,8 @@ proper coordinate on load.
 
 **It supplies** ``PO4``, ``NO3``, ``SiO3`` (``silicate``), ``O2`` (``oxygen``), ``DIC``
 (``TCO2``) and ``ALK`` (``TAlk``) -- the full carbon system plus the shared nutrients, so
-GLODAP alone can complete a MARBL run's ``DIC``/``ALK`` needs (typically alongside WOA or
-ESPER for the other nutrients).
+GLODAP alone covers a MARBL run's ``DIC``/``ALK`` needs; it is typically combined with
+WOA for nutrients and oxygen and UNIFIED for ``Fe`` and ``CHL``.
 
 Temperature and salinity are read too (files ``GLODAPv2.2016b.temperature.nc`` and
 ``GLODAPv2.2016b.salinity.nc``), but never written to ROMS output. They serve two

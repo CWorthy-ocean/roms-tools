@@ -1,3 +1,4 @@
+import copy
 import textwrap
 from datetime import datetime
 from pathlib import Path
@@ -6,9 +7,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
 
 from conftest import calculate_data_hash
-from roms_tools import Grid, InitialConditions
+from roms_tools import BGCMarbl, Grid, InitialConditions, InitialConditionsSource
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
@@ -177,45 +179,161 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
     ],
 )
 def test_initial_condition_creation_with_bgc(ic_fixture, request):
-    """Test the creation of the BoundaryForcing object."""
+    """The IC object's BGC variables are recognised MARBL names and the core
+    nutrients are present.
+
+    The ``InitialConditions`` wrapper auto-completes its bgc companion via
+    :meth:`BGCMarbl.process_bgc_fields` internally, so this may see more than the
+    source's own raw variables (e.g. derived tracers); either way, everything
+    present must be a known MARBL name.
+    """
     ic = request.getfixturevalue(ic_fixture)
-    expected_bgc_variables = [
-        "PO4",
-        "NO3",
-        "SiO3",
-        "NH4",
-        "Fe",
-        "Lig",
-        "O2",
-        "DIC",
-        "DIC_ALT_CO2",
-        "ALK",
-        "ALK_ALT_CO2",
-        "DOC",
-        "DON",
-        "DOP",
-        "DOCr",
-        "DONr",
-        "DOPr",
-        "zooC",
-        "spChl",
-        "spC",
-        "spP",
-        "spFe",
-        "spCaCO3",
-        "diatChl",
-        "diatC",
-        "diatP",
-        "diatFe",
-        "diatSi",
-        "diazChl",
-        "diazC",
-        "diazP",
-        "diazFe",
+    known = BGCMarbl().known_vars()
+    present_bgc = {str(v) for v in ic.ds.data_vars if str(v) in known}
+    assert present_bgc, "no BGC variables present"
+    assert present_bgc <= known
+    assert {"PO4", "NO3", "SiO3", "O2", "DIC", "ALK"} <= present_bgc
+
+
+@pytest.mark.parametrize(
+    "ic_fixture",
+    [
+        "initial_conditions_with_bgc",
+        "initial_conditions_with_unified_bgc_from_climatology",
+    ],
+)
+def test_process_bgc_fields_completes_initial_conditions(ic_fixture, request):
+    """BGCMarbl.process_bgc_fields() fills the full MARBL tracer set and drops CHL.
+
+    The ``InitialConditions`` wrapper already auto-completes its own ``.bgc``
+    objects in ``__post_init__``, so the fixture's own bgc object is not a useful
+    "before" state here. Build a fresh, not-yet-completed
+    ``InitialConditionsSource`` bgc object from the same physics/source that the
+    fixture used, mirroring what the wrapper does internally minus the
+    ``process_bgc_fields()`` call, to exercise completion as a standalone step.
+    """
+    ic = request.getfixturevalue(ic_fixture)
+    raw_bgc = InitialConditionsSource(
+        grid=ic.physics.grid,
+        ini_time=ic.physics.ini_time,
+        type="bgc",
+        source=copy.deepcopy(ic.bgc[0].source),
+        physics_forcing=ic.physics,
+        use_dask=ic.physics.use_dask,
+    )
+
+    result = BGCMarbl().process_bgc_fields(raw_bgc)
+    assert result is raw_bgc
+
+    for var in BGCMarbl().tracer_vars():
+        assert var in raw_bgc.ds, f"{var} missing"
+    assert "CHL" not in raw_bgc.ds
+
+
+def test_wrapper_shared_knobs_reach_physics_and_companions(example_grid, use_dask):
+    """A wrapper-level knob (prefill/regrid_method/...) must land on the physics
+    source AND on each bgc companion; the legacy wrapper-level `use_vars` must NOT
+    be forwarded (it is a different field on the source).
+    """
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    ic = InitialConditions(
+        grid=example_grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        regrid_method="scipy",
+        prefill="nearest_neighbor",
+        use_dask=use_dask,
+        bgc_sources=[
+            {"source": {"name": "constants", "constants": {"NO3": 24.0}}},
+            {"source": {"name": "constants", "constants": {"PO4": 1.5}}},
+        ],
+        bgc_model=BGCMarbl,
+    )
+    for obj in (ic.physics, *ic.bgc):
+        assert obj.regrid_method == "scipy"
+        assert obj.prefill == "nearest_neighbor"
+        assert obj.bgc_interpolation_method == ic.bgc_interpolation_method
+    assert ic.physics.use_vars is None
+    assert all(b.use_vars is None for b in ic.bgc)
+
+
+def test_wrapper_yaml_does_not_embed_physics_and_builds_it_once(
+    example_grid, use_dask, tmp_path, monkeypatch
+):
+    """`InitialConditions.to_yaml` writes the wrapper's own fields (bgc_sources as the
+    raw item dicts), never the companions' embedded `physics_forcing` that the
+    standalone `InitialConditionsSource.to_yaml` needs for solo round-trips -- so
+    `from_yaml` builds the physics source exactly once, not once per companion.
+    """
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    built: list[str] = []
+    real_init = InitialConditionsSource.__post_init__
+
+    def spy(self_):
+        built.append(self_.type)
+        return real_init(self_)
+
+    monkeypatch.setattr(InitialConditionsSource, "__post_init__", spy)
+    ic = InitialConditions(
+        grid=example_grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        regrid_method="scipy",
+        bypass_validation=True,
+        use_dask=use_dask,
+        bgc_sources=[
+            {"source": {"name": "constants", "constants": {"NO3": 24.0}}},
+            {"source": {"name": "constants", "constants": {"PO4": 1.5}}},
+        ],
+        bgc_model=BGCMarbl,
+    )
+    assert built == ["physics", "bgc", "bgc"]
+
+    yaml_path = tmp_path / "ic.yaml"
+    ic.to_yaml(yaml_path)
+    text = yaml_path.read_text()
+    assert "physics_forcing" not in text
+    docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
+    block = next(d for d in docs if "InitialConditions" in d)["InitialConditions"]
+    assert block["bgc_sources"] == [
+        {"source": {"name": "constants", "constants": {"NO3": 24.0}}},
+        {"source": {"name": "constants", "constants": {"PO4": 1.5}}},
     ]
 
-    for var in expected_bgc_variables:
-        assert var in ic.ds
+    built.clear()
+    ic2 = InitialConditions.from_yaml(yaml_path, use_dask=use_dask)
+    assert built == ["physics", "bgc", "bgc"]
+    assert all(b.physics_forcing is ic2.physics for b in ic2.bgc)
+
+    # The standalone Source class still embeds physics for its own solo round-trip;
+    # the wrapper loader refuses such a file rather than misreading it.
+    solo = tmp_path / "solo.yaml"
+    ic.bgc[0].to_yaml(solo)
+    assert "physics_forcing" in solo.read_text()
+    with pytest.raises(ValueError, match="No InitialConditions configuration"):
+        InitialConditions.from_yaml(solo)
+
+
+def test_overlapping_bgc_sources_raises(example_grid, use_dask):
+    """Two bgc sources supplying the same tracer must raise, not silently pick
+    a winner -- the cheapest repro is two "constants" sources with the same
+    key.
+    """
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    with pytest.raises(ValueError, match="NO3"):
+        InitialConditions(
+            grid=example_grid,
+            ini_time=datetime(2021, 6, 29),
+            source={"path": fname, "name": "GLORYS"},
+            prefill="2d_lateral_fill",
+            regrid_method="scipy",
+            use_dask=use_dask,
+            bgc_sources=[
+                {"source": {"name": "constants", "constants": {"NO3": 24.0}}},
+                {"source": {"name": "constants", "constants": {"NO3": 30.0}}},
+            ],
+            bgc_model=BGCMarbl,
+        )
 
 
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -247,6 +365,7 @@ def test_initial_conditions_raises_on_regridded_nans(use_dask):
                 "grid": parent_grid,
                 "path": restart_file,
             },
+            bgc_model=BGCMarbl,
         )
 
 
@@ -311,30 +430,44 @@ def test_initial_conditions_missing_physics_name(example_grid, use_dask):
         )
 
 
-# Test initialization with missing 'name' in bgc_source
+def test_ic_use_vars_on_physics_type_raises(example_grid):
+    """`use_vars` only makes sense down-selecting a BGC source; setting it on a
+    `type="physics"` object is a configuration error, not a silent no-op.
+    """
+    with pytest.raises(ValueError, match="only applies when"):
+        InitialConditionsSource(
+            grid=example_grid,
+            ini_time=datetime(2021, 6, 29),
+            type="physics",
+            source={"name": "GLORYS"},
+            use_vars=["NO3"],
+        )
+
+
+# Test initialization with a bgc_source dict missing its 'name'
 def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    with pytest.raises(ValueError, match="`bgc_source` must include a 'name'"):
+    with pytest.raises(ValueError, match="`source` must include a 'name'"):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"path": "bgc_data.nc"},
+            bgc_model=BGCMarbl,
             use_dask=use_dask,
         )
 
 
-# Test initialization with missing 'path' in bgc_source
-def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
+# Test initialization with an invalid bgc_source name
+def test_initial_conditions_invalid_bgc_name(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    with pytest.raises(
-        ValueError, match="`bgc_source` must include a 'path' if it is provided."
-    ):
+    with pytest.raises(ValueError, match="Unknown BGC source name"):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
-            bgc_source={"name": "CESM_REGRIDDED"},
+            bgc_source={"name": "INVALID_SOURCE", "path": "bgc_data.nc"},
+            bgc_model=BGCMarbl,
             use_dask=use_dask,
         )
 
@@ -365,7 +498,7 @@ def test_initial_conditions_default_climatology(example_grid, use_dask):
         use_dask=use_dask,
     )
 
-    assert initial_conditions.source["climatology"] is False
+    assert initial_conditions.physics.source["climatology"] is False
     assert initial_conditions.bgc_source is None
 
 
@@ -378,10 +511,11 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
         bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
+        bgc_model=BGCMarbl,
         use_dask=use_dask,
     )
 
-    assert initial_conditions.bgc_source["climatology"] is False
+    assert initial_conditions.bgc[0].source["climatology"] is False
 
 
 @pytest.mark.parametrize(
@@ -393,7 +527,9 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
     ],
 )
 def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use_dask):
-    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
+    # Depth-coordinate computation is purely a physics-grid concern (independent of
+    # any bgc companion), so this exercises it on the wrapper's physics object.
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture).physics
 
     # compute interface depth at rho-points and write it into .ds_depth_coords
     initial_conditions._get_depth_coordinates(0, location="rho", depth_type="interface")
@@ -481,7 +617,14 @@ def test_interpolation_from_climatology(use_dask):
 def test_computed_missing_optional_fields(
     initial_conditions_with_unified_bgc_from_climatology,
 ):
-    ds = initial_conditions_with_unified_bgc_from_climatology.ds
+    ic = initial_conditions_with_unified_bgc_from_climatology
+
+    # Missing tracers are filled by BGCMarbl.process_bgc_fields(), not at
+    # construction time.  Work on a copy so the session fixture is not mutated.
+    ic_copy = copy.copy(ic)
+    ic_copy.ds = ic.ds.copy(deep=True)
+    BGCMarbl().process_bgc_fields(ic_copy)
+    ds = ic_copy.ds
 
     # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
 
@@ -708,6 +851,46 @@ def test_from_yaml_missing_initial_conditions(tmp_path, use_dask):
         yaml_filepath.unlink()
 
 
+def test_from_yaml_rejects_pre_5_0_file_missing_bgc_model(
+    example_grid, use_dask, tmp_path
+):
+    """A YAML file with `bgc_source`/`bgc_sources` but no `bgc_model` predates
+    roms-tools 5.0 (`bgc_model` did not exist before it) and must raise a clear
+    migration error rather than silently constructing a BGC-less object or
+    failing deep inside `bgc_model_from_name`/derivation.
+
+    Simulated by saving a real multi-bgc-source `InitialConditions` object and
+    then stripping its `bgc_model:` line, as a legacy file would never have had
+    it.
+    """
+    ic = InitialConditions(
+        grid=example_grid,
+        ini_time=datetime(2021, 6, 29),
+        bgc_sources=[
+            {"source": {"name": "constants", "constants": {"ALK": 2300.0}}},
+        ],
+        bgc_model=BGCMarbl,
+        source={
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+            "name": "GLORYS",
+        },
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    yaml_path = tmp_path / "legacy_ic.yaml"
+    ic.to_yaml(yaml_path)
+    legacy_text = "\n".join(
+        line
+        for line in yaml_path.read_text().splitlines()
+        if not line.strip().startswith("bgc_model:")
+    )
+    yaml_path.write_text(legacy_text + "\n")
+
+    with pytest.raises(ValueError, match="predates roms-tools 5.0"):
+        InitialConditions.from_yaml(yaml_path, use_dask=use_dask)
+
+
 # Test _set_required_vars
 
 
@@ -795,6 +978,7 @@ def test_ic_density_vs_depth_interpolation(use_dask):
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_model=BGCMarbl,
         use_dask=use_dask,
     )
 
@@ -848,6 +1032,116 @@ def test_ic_density_vs_depth_interpolation(use_dask):
         )
 
 
+def test_ic_density_mld_with_physics_forcing_matches_combined(use_dask):
+    """A `physics_forcing`-driven, BGC-only IC object using density_mld interpolation
+    must match the old combined (redundant-regrid) path to float32 precision, and
+    must carry none of the physics variables in its own dataset.
+
+    This is the motivating case: combining multiple BGC sources (e.g. ESPER +
+    UNIFIED) for one initial-condition snapshot without each source paying for its
+    own full physics regrid (u, v, zeta, w, barotropic velocities, ...).
+    """
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+    combined = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_interpolation_method="density_mld",
+        bgc_model=BGCMarbl,
+        use_dask=use_dask,
+    )
+
+    # `physics_forcing` is a `InitialConditionsSource`-only mechanism (the
+    # `InitialConditions` wrapper always builds its own physics companion
+    # internally), so `phys`/`split` are built directly at that level here.
+    phys = InitialConditionsSource(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+    split = InitialConditionsSource(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        type="bgc",
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_interpolation_method="density_mld",
+        physics_forcing=phys,
+        use_dask=use_dask,
+    )
+
+    for var in ("u", "v", "zeta", "w", "ubar", "vbar", "temp", "salt"):
+        assert var not in split.ds
+        assert var in phys.ds
+    # The BGC source's own auxiliary T/S (used for the source density coordinate)
+    # must never leak into the output either.
+    assert not any(str(v).startswith(("temp_", "salt_")) for v in split.ds.data_vars)
+
+    for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+        if var in combined.ds and var in split.ds:
+            xr.testing.assert_allclose(
+                split.ds[var], combined.ds[var], rtol=1e-3, atol=1e-3
+            )
+
+
+def test_ic_bgc_use_vars_subset_does_not_leak_into_validate(use_dask):
+    """Regression: down-selecting a BGC source's variables via ``use_vars`` used to
+    crash in ``_validate`` with e.g. ``KeyError: 'ALK'``.
+
+    ``_apply_use_vars`` correctly pruned ``processed_fields`` (and thus the written
+    ``ds``) down to the requested subset, but never pruned ``self.variable_info_bgc``
+    -- populated earlier by ``_set_variable_info`` from the source's *full* available
+    -variable catalog -- to match. ``_validate`` iterates ``variable_info_bgc``
+    directly and does ``ds[var_name]`` for every entry, so a variable ``use_vars``
+    excluded (still present only in the stale ``variable_info_bgc``) raised ``KeyError``
+    instead of the dataset simply not including it.
+
+    ``BoundaryForcing`` already gets this right (rebuilds ``variable_info`` from the
+    variables actually present *after* ``_apply_use_vars``, see
+    ``_present_bgc_bare_names``) -- this pins ``InitialConditions`` to the same
+    contract.
+
+    Built directly at the ``InitialConditionsSource`` level (bypassing the
+    ``InitialConditions`` wrapper's ``bgc_model``): the wrapper's own
+    ``process_bgc_fields()`` auto-completion would legitimately re-fill an
+    excluded "required" tracer like ``ALK`` from a default, which is a separate
+    (and correct) concern from what's under test here -- whether ``use_vars``
+    down-selection and ``_validate`` agree on a raw, not-yet-completed object.
+    """
+    grid = _ic_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+    phys = InitialConditionsSource(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+    # NO3/DIC is a strict subset of what the UNIFIED source actually provides
+    # (ALK, PO4, O2, ... among others) -- must not raise.
+    ic = InitialConditionsSource(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        type="bgc",
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        physics_forcing=phys,
+        use_vars=["NO3", "DIC"],
+        use_dask=use_dask,
+    )
+    assert "NO3" in ic.ds and "DIC" in ic.ds
+    # The whole point of use_vars: excluded BGC variables are genuinely absent from
+    # the written dataset, not just hidden -- and variable_info_bgc (validation's own
+    # source of truth) must agree, or a future validate() call would KeyError again.
+    for excluded in ("ALK", "PO4", "O2"):
+        assert excluded not in ic.ds
+        assert excluded not in ic.variable_info_bgc
+
+
 def test_ic_invalid_interpolation_method_raises(use_dask):
     """An unknown ``bgc_interpolation_method`` is rejected."""
     grid = _ic_grid()
@@ -869,7 +1163,7 @@ def test_ic_default_regrid_path(use_dask):
     """
     grid = _ic_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    ic = InitialConditions(
+    ic = InitialConditionsSource(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
@@ -888,7 +1182,7 @@ def test_ic_legacy_path(use_dask):
     """The legacy AMG-fill + scipy regrid path remains available via explicit options."""
     grid = _ic_grid()
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    ic = InitialConditions(
+    ic = InitialConditionsSource(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
@@ -1007,3 +1301,157 @@ def test_ic_roms_source_ignores_regrid_options(use_dask, caplog):
         )
     assert "lat/lon sources only" in caplog.text
     assert "temp" in ic.ds
+
+
+# ---------------------------------------------------------------------------
+# A static (no-time) BGC source in initial conditions
+# ---------------------------------------------------------------------------
+
+
+def _write_synthetic_glodap(directory, include_ts: bool = True):
+    """A minimal GLODAP-shaped source: one file per variable, lat/lon/depth, NO time.
+
+    GLODAP's real layout is exactly this -- ``{dir}/GLODAPv2.2016b.{file_var}.nc``, each
+    holding one variable on a 1 degree grid with no time dimension -- so a synthetic one
+    exercises the static-source path without needing the multi-GB download.
+
+    ``include_ts`` writes temperature/salinity files alongside the six BGC tracers
+    (uniform T=2 degC, S=35 PSU), exercising the real in-situ-density unit
+    conversion; set it False to exercise the T/S-missing 1025 kg/m3 fallback path.
+    """
+    import numpy as np
+    import xarray as xr
+
+    directory.mkdir(parents=True, exist_ok=True)
+    # Comfortably covers the test grid (centred at 0E/55N) plus the regrid margin.
+    lat = np.arange(35.0, 76.0, 1.0)
+    lon = np.arange(-30.0, 31.0, 1.0)
+    depth = np.array([0.0, 50.0, 200.0, 1000.0])
+    variables = [
+        ("TAlk", 2300.0),
+        ("TCO2", 2100.0),
+        ("PO4", 1.0),
+        ("NO3", 15.0),
+        ("silicate", 10.0),
+        ("oxygen", 280.0),
+    ]
+    if include_ts:
+        variables += [("temperature", 2.0), ("salinity", 35.0)]
+    for file_var, value in variables:
+        # Mirrors the real files: `Depth` is a 1-D *data variable* on an unlabelled
+        # `depth_surface` dimension, which `GLODAPv2Dataset.clean_up` promotes to a
+        # dimension coordinate. Writing it as a plain coord would not exercise that.
+        xr.Dataset(
+            {
+                file_var: (
+                    ("depth_surface", "lat", "lon"),
+                    np.full((depth.size, lat.size, lon.size), value, dtype="f4"),
+                ),
+                "Depth": (("depth_surface",), depth),
+            },
+            coords={"lat": lat, "lon": lon},
+        ).to_netcdf(directory / f"GLODAPv2.2016b.{file_var}.nc")
+    return directory
+
+
+def test_static_bgc_source_takes_the_physics_time(tmp_path):
+    """A BGC source with no time axis must be broadcast onto the physics time.
+
+    ROMS's ``inifile`` is a single scalar path, so every bgc source is merged into one
+    dataset with one time axis. A static source (GLODAP) has no axis to relabel, and
+    the merge used to fail with `CoordinateValidationError: coordinate time has
+    dimensions ('time',), but these are not a subset of the DataArray dimensions
+    ('depth', 'eta_rho', 'xi_rho')` -- naming neither the source nor the reason.
+    """
+    from datetime import datetime
+    from pathlib import Path
+
+    import numpy as np
+
+    from roms_tools import BGCMarbl, Grid, InitialConditions
+    from roms_tools.datasets.download import download_test_data
+
+    glodap_dir = _write_synthetic_glodap(tmp_path / "glodap")
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {
+                "source": {"name": "GLODAP", "path": str(glodap_dir)},
+                "use_vars": ["ALK", "DIC"],
+            }
+        ],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+    )
+
+    # The static field now carries the physics time axis, and merged cleanly.
+    assert "ocean_time" in ic.ds["ALK"].dims
+    assert ic.ds.sizes["ocean_time"] == 1
+    assert ic.ds["ALK"].dims == ic.ds["temp"].dims
+
+    # Values survive the broadcast intact. Not the raw 2300: GLODAP ships umol/kg and
+    # roms-tools converts to mmol/m3 via in-situ density (TEOS-10 gsw.rho with
+    # pressure from depth), so the scaling now genuinely varies with depth (unlike
+    # the old sigma-0/1025-fallback conversions) -- a spatially-uniform source is
+    # therefore no longer uniform across depth once regridded onto the ROMS grid.
+    alk = ic.ds["ALK"].values
+    assert np.isfinite(alk).all()
+    assert (alk > 2000.0).all()
+    assert (alk < 2600.0).all()
+
+    # Exact check of the unit-conversion formula itself, on GLODAP's own
+    # depth/latitude grid before any ROMS-grid regridding: GLODAP ships uniform
+    # T=2 degC, S=35 PSU, ALK=2300 umol/kg here, and roms-tools converts via
+    # ``2300 * gsw.rho(35, 2, gsw.p_from_z(-depth, lat)) / 1000``.
+    import gsw
+
+    from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
+
+    glodap_ds = GLODAPv2BGCDataset(filename=str(glodap_dir)).ds
+    depth_val = float(glodap_ds["depth"].isel(depth=2))  # 200 m
+    lat_val = float(glodap_ds["latitude"].isel(latitude=10))
+    pressure = gsw.p_from_z(-depth_val, lat_val)
+    expected_alk = 2300.0 * gsw.rho(35.0, 2.0, pressure) / 1000.0
+
+    got_alk = float(glodap_ds["TAlk"].isel(depth=2, latitude=10, longitude=5))
+    assert got_alk == pytest.approx(expected_alk, rel=1e-3)
+
+
+def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, caplog):
+    """When T/S are absent, GLODAP falls back to a uniform 1025 kg/m3 density.
+
+    The fallback is silent no longer: it must log a warning naming the affected
+    conversion, matching :class:`WOABGCDataset`'s behaviour for the same case.
+    """
+    import logging
+
+    from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
+
+    glodap_dir = _write_synthetic_glodap(tmp_path / "glodap_no_ts", include_ts=False)
+
+    with caplog.at_level(logging.WARNING):
+        ds = GLODAPv2BGCDataset(filename=str(glodap_dir)).ds
+
+    assert "temperature/salinity unavailable" in caplog.text
+
+    got_alk = float(ds["TAlk"].isel(depth=2, latitude=10, longitude=5))
+    assert got_alk == pytest.approx(2300.0 * 1025.0 / 1000.0, rel=1e-6)

@@ -1159,6 +1159,29 @@ class TestRiverForcingWithGloFAS:
         assert river_forcing_with_glofas == river_forcing_from_file
         filepath.unlink()
 
+    def test_min_discharge_m3s_override(self, iceland_test_grid, glofas_test_file):
+        """``min_discharge_m3s`` overrides GloFAS's 1.0 m3/s default: a
+        100 m3/s station survives the default floor but not a 250 m3/s one.
+        """
+        rf_default = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+        )
+        assert "GloFAS_64.82N_22.78W" in rf_default.indices
+
+        rf_override = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+            min_discharge_m3s=250.0,
+        )
+        assert "GloFAS_64.82N_22.78W" not in rf_override.indices
+        assert "GloFAS_65.47N_23.62W" in rf_override.indices
+        assert "GloFAS_63.72N_17.53W" in rf_override.indices
+
 
 class TestRiverForcingGloFASClimatology:
     """GloFAS-specific time/climatology behavior, pinned to a daily multi-year case."""

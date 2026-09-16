@@ -386,6 +386,14 @@ class RiverForcing:
 
         The default is the Dai and Trenberth global river dataset (updated in May 2019), which does not require a path.
 
+        When ``source["name"] == "GLOFAS"``, rivers whose final (post-overlap-merge)
+        mean discharge is below ``GloFASRiverDataset.MIN_DISCHARGE_M3S`` (1.0 m³/s
+        by default; see ``min_discharge_m3s`` to override) are dropped entirely
+        rather than kept with a fallback BGC concentration — GloFAS's
+        ~141,000-station catalog includes many near-negligible trickles with
+        nothing physically meaningful to force a ROMS river point with. Not
+        applied to Dai & Trenberth discharge by default.
+
     convert_to_climatology : str, optional
         Determines when to compute climatology for river forcing. Options are:
           - "if_any_missing" (default): Compute climatology for all rivers if any river has missing values.
@@ -411,6 +419,16 @@ class RiverForcing:
         Concentrations come from the primary dataset's
         ``forcing_concentrations()``, then are merged with fill via
         ``fill_river_bgc_concentrations``.
+
+        For ``{"name": "RIVR2O"}``, an additional ``discharge_accounting`` key
+        selects how concentrations are obtained: ``"per_river"`` samples
+        RIVR2O's yearly export files (given via ``path``) by lon/lat, while
+        ``"total_discharge"`` reads concentrations already precomputed per
+        GloFAS station and embedded in the GloFAS discharge file itself (no
+        ``path`` needed). Left unset, this is chosen automatically —
+        ``"total_discharge"`` when ``source["name"] == "GLOFAS"``,
+        ``"per_river"`` otherwise — and ``"total_discharge"`` is only valid
+        when paired with GloFAS discharge.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
     surface_forcing_source : dict, optional
@@ -464,6 +482,13 @@ class RiverForcing:
         searching for relevant rivers. Defaults to 20. For small
         high-resolution domains, a smaller value (e.g. 5) may be more
         appropriate.
+    min_discharge_m3s : float, optional
+        Minimum time-mean discharge (m3/s) a river must have to be kept in
+        the output; rivers below this are dropped entirely. Defaults to
+        ``None``, which uses the source dataset's own default (1.0 m3/s for
+        GloFAS, disabled for Dai). Can be overridden for domains where the
+        default is inappropriate, or set to 0 to disable filtering for
+        GloFAS.
     """
 
     grid: Grid
@@ -521,6 +546,12 @@ class RiverForcing:
     """Number of grid cells to include beyond the domain boundary when
     searching for relevant rivers. Defaults to 20. For small high-resolution
     domains, a smaller value (e.g. 5) may be more appropriate."""
+
+    min_discharge_m3s: float | None = None
+    """Minimum time-mean discharge (m3/s) a river must have to be kept;
+    rivers below this are dropped entirely. ``None`` uses the source
+    dataset's default (1.0 m3/s for GloFAS, disabled for Dai) or it can be
+    overridden by the user, e.g. set to 0 to disable filtering for GloFAS."""
 
     _bgc_dataset: RiverBGCDataset | None = field(
         default=None, init=False, repr=False, compare=False
@@ -601,47 +632,7 @@ class RiverForcing:
             )
         )
 
-        # Drop rivers whose final (post-overlap-merge) mean discharge is
-        # still below the source's MIN_DISCHARGE_M3S threshold (GloFAS only;
-        # None for Dai and the base class, which disables this). Applied
-        # here -- after overlap merging, not before -- so a dropped river
-        # never changes another river's merged location or discharge: this
-        # only ever removes whole rows from the already-final, already-
-        # merged (river_time, nriver) arrays, nothing else depends on which
-        # other rivers are present. Rivers involved in an overlap merge are
-        # exempt (see ``_rivers_exempt_from_discharge_filter``): an absorbed
-        # original's volume is deliberately scaled to exactly 0 as pure
-        # bookkeeping, not a real "negligible river," and self.indices needs
-        # that entry intact for the YAML round-trip to reconstruct the same
-        # merge on reload.
-        min_discharge = getattr(data, "MIN_DISCHARGE_M3S", None)
-        if min_discharge is not None:
-            exempt: set[str] = getattr(
-                self, "_rivers_exempt_from_discharge_filter", set()
-            )
-            mean_discharge = ds["river_volume"].mean(dim="river_time")
-            is_exempt = np.array([str(n) in exempt for n in ds.river_name.values])
-            keep = (mean_discharge.values >= min_discharge) | is_exempt
-            if not keep.all():
-                dropped_names = [str(n) for n in ds.river_name.values[~keep]]
-                logging.info(
-                    "Dropping %d river(s) with mean discharge below %.2f m3/s.",
-                    len(dropped_names),
-                    min_discharge,
-                )
-                ds = ds.isel(nriver=keep)
-                ds = ds.assign_coords(
-                    nriver=xr.DataArray(
-                        np.arange(1, ds.sizes["nriver"] + 1),
-                        dims="nriver",
-                        attrs=ds["nriver"].attrs,
-                    )
-                )
-                self.indices = {
-                    name: idx
-                    for name, idx in self.indices.items()
-                    if name not in dropped_names
-                }
+        ds = self._drop_rivers_below_min_discharge(ds, data)
 
         if self.include_bgc and self.bgc_source is not None:
             ds = self._apply_bgc_tracers(ds)
@@ -1235,15 +1226,11 @@ class RiverForcing:
             fill_defaults = self._get_fill_defaults()
 
         if bgc_data.operates_on_raw_stations:
-            # Dynamic concentrations were already computed externally and
-            # attached per raw station in _create_river_forcing, before
-            # overlap merging -- read the (already correctly merged) values
-            # back out of ds["river_tracer"] instead of resampling by
-            # lon/lat. Reading the full fixed tracer set unconditionally is
-            # safe: any tracer that was never actually attached is still
-            # NaN here, which _mask_invalid_dynamic_bgc_concentrations and
-            # fill_river_bgc_concentrations below correctly treat as
-            # "missing -> use CONSTANTS fallback".
+            # Already attached per station in _create_river_forcing and
+            # merged by _handle_overlapping_rivers -- read back out of
+            # ds["river_tracer"] instead of resampling by lon/lat. Any
+            # tracer never actually attached is still NaN here, which the
+            # fallback logic below correctly treats as "use CONSTANTS".
             tracer_names_arr = ds.tracer_name.values
             dynamic = {
                 tracer_name: ds["river_tracer"]
@@ -1450,15 +1437,11 @@ class RiverForcing:
             if self.bgc_source is not None:
                 bgc = self._get_bgc_dataset()
                 if bgc.operates_on_raw_stations:
-                    # This BGC source's dynamic concentrations are already
-                    # attached to `data.ds` at raw per-station granularity
-                    # (see extract_station_concentrations) -- fill them in
-                    # now, on the pre-merge, per-raw-station river_tracer
-                    # array, so _handle_overlapping_rivers' existing
-                    # volume-weighted merge combines them correctly for any
-                    # stations that land on the same ROMS grid cell. The
-                    # standard sample-by-lon/lat path in _apply_bgc_tracers
-                    # is skipped for these tracers later (see there).
+                    # Fill in now, pre-merge, per raw station, so
+                    # _handle_overlapping_rivers' volume-weighted merge
+                    # combines co-located stations correctly. The
+                    # sample-by-lon/lat path in _apply_bgc_tracers is
+                    # skipped for these tracers later.
                     station_concentrations = bgc.extract_station_concentrations(data)
                     tracer_names_arr = ds.tracer_name.values
                     for tracer_name, values in station_concentrations.items():
@@ -1543,14 +1526,9 @@ class RiverForcing:
         """
         overlapping_rivers = self._get_overlapping_rivers()
 
-        # Rivers involved in an overlap (either as an absorbed original --
-        # whose river_volume gets scaled to exactly 0 by _reduce_river_volumes
-        # below, purely as bookkeeping -- or as the new combined "overlap_*"
-        # entry) must never be dropped by a downstream discharge-threshold
-        # filter: self.indices needs their original entries intact for the
-        # YAML round-trip to reconstruct the same overlap merge on reload,
-        # and dropping the zeroed-out absorbed originals would silently
-        # change nothing physically but break that reconstruction.
+        # Rivers merged here (originals and the new "overlap_*" entry) are
+        # exempt from the downstream min-discharge filter — see
+        # _drop_rivers_below_min_discharge.
         self._rivers_exempt_from_discharge_filter: set[str] = {
             name for names in overlapping_rivers.values() for name in names
         }
@@ -1599,6 +1577,77 @@ class RiverForcing:
         ds_updated = self._reduce_river_volumes(ds_updated, overlapping_rivers)
 
         return ds_updated
+
+    def _drop_rivers_below_min_discharge(
+        self, ds: xr.Dataset, data: RiverDataset
+    ) -> xr.Dataset:
+        """Drop rivers whose final mean discharge is below the min-discharge threshold.
+
+        A no-op unless a threshold applies: ``self.min_discharge_m3s`` if the
+        user set one, else ``data``'s own ``MIN_DISCHARGE_M3S`` default
+        (GloFAS only, currently). Must run after ``_handle_overlapping_rivers``
+        so that a dropped river never changes another river's merged location
+        or discharge — it only ever removes whole rows from the final,
+        already-merged ``(river_time, nriver)`` arrays.
+
+        Rivers involved in an overlap merge (see
+        ``_rivers_exempt_from_discharge_filter``) are exempt: an absorbed
+        original's volume is deliberately scaled to exactly 0 as bookkeeping,
+        not a real "negligible river," and ``self.indices`` needs that entry
+        intact for the YAML round-trip to reconstruct the same merge on
+        reload.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Post-overlap-merge river forcing dataset.
+        data : RiverDataset
+            Source discharge dataset; supplies the default
+            ``MIN_DISCHARGE_M3S`` threshold when ``self.min_discharge_m3s``
+            is unset.
+
+        Returns
+        -------
+        xr.Dataset
+            ``ds`` unchanged, or with below-threshold rivers removed and
+            ``nriver`` IDs reassigned sequentially.
+        """
+        min_discharge = (
+            self.min_discharge_m3s
+            if self.min_discharge_m3s is not None
+            else data.MIN_DISCHARGE_M3S
+        )
+        if min_discharge is None:
+            return ds
+
+        # self.indices is always set (auto-discovered or user-provided) by
+        # this point in __post_init__'s control flow.
+        assert self.indices is not None
+        exempt = self._rivers_exempt_from_discharge_filter
+        mean_discharge = ds["river_volume"].mean(dim="river_time")
+        is_exempt = np.array([str(n) in exempt for n in ds.river_name.values])
+        keep = (mean_discharge.values >= min_discharge) | is_exempt
+        if keep.all():
+            return ds
+
+        dropped_names = [str(n) for n in ds.river_name.values[~keep]]
+        logging.info(
+            "Dropping %d river(s) with mean discharge below %.2f m3/s.",
+            len(dropped_names),
+            min_discharge,
+        )
+        ds = ds.isel(nriver=keep)
+        ds = ds.assign_coords(
+            nriver=xr.DataArray(
+                np.arange(1, ds.sizes["nriver"] + 1),
+                dims="nriver",
+                attrs=ds["nriver"].attrs,
+            )
+        )
+        self.indices = {
+            name: idx for name, idx in self.indices.items() if name not in dropped_names
+        }
+        return ds
 
     def _get_overlapping_rivers(self) -> TRiverIndex:
         """Identify grid cells shared by multiple rivers.

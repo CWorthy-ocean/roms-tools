@@ -51,6 +51,9 @@ RIVR2O_MARBL_TRACER_NAMES = (
     "DIC_ALT_CO2",
     "ALK_ALT_CO2",
 )
+assert set(RIVR2O_MARBL_TRACER_NAMES) <= set(MARBL_TRACER_NAMES), (
+    "RIVR2O_MARBL_TRACER_NAMES must stay a subset of MARBL_TRACER_NAMES."
+)
 
 
 class RiverBGCDataset(Protocol):
@@ -969,6 +972,18 @@ _DOP_FROM_POC = 1 / 276
 class Rivr2oRiverBGCDataset(RiverBGCDataset):
     """River BGC export data from the RIVR2O river inputs product.
 
+    Supports two ``discharge_accounting`` modes:
+
+    - ``"per_river"`` (default): loads the RIVR2O yearly export files from
+      ``filename`` directly and samples them by lon/lat, as described below.
+    - ``"total_discharge"``: concentrations are precomputed externally per
+      GloFAS station/year and already present on the paired GloFAS discharge
+      file; ``filename`` is unused and this class loads nothing itself. See
+      ``extract_station_concentrations``.
+
+    The rest of this docstring (product layout, unit conversions, spatial
+    sampling) describes ``"per_river"`` mode only.
+
     The product is distributed as one NetCDF file per year. Each file contains
     global river export fields on a regular lat/lon grid (typically 0.5°). Raw
     variables are annual mass exports in ``10^6 g element yr-1``.
@@ -996,13 +1011,21 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
 
     Parameters
     ----------
-    filename : str, Path, or list[str | Path]
+    filename : str, Path, or list[str | Path], optional
         Path to one file, a wildcard pattern (e.g.
         ``"/data/rivr2o_riverinputs_*.nc"``), or a list of file paths.
+        Required when ``discharge_accounting="per_river"``; unused when
+        ``discharge_accounting="total_discharge"``.
     start_time : datetime
         Start of the time range to retain.
     end_time : datetime
         End of the time range to retain.
+    discharge_accounting : {"per_river", "total_discharge"}, optional
+        Which accounting mode to use; see above. Defaults to ``"per_river"``.
+        ``RiverForcing`` normally resolves and passes this explicitly based
+        on the paired discharge ``source`` rather than relying on this
+        default — see
+        ``RiverForcing._resolve_and_validate_bgc_discharge_pairing``.
     use_dask : bool, optional
         If True, open files with dask chunking along time. Defaults to False.
 

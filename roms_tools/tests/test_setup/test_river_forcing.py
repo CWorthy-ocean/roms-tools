@@ -25,7 +25,10 @@ from roms_tools.setup.river_forcing import (
     check_river_locations_are_along_coast,
 )
 from roms_tools.setup.utils import find_coastal_cells, get_tracer_defaults
-from roms_tools.tests.river_test_utils import write_glofas_file
+from roms_tools.tests.river_test_utils import (
+    write_glofas_file,
+    write_glofas_file_with_rivr2o,
+)
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 STANDARD_RIVER_FIXTURES = [
@@ -1695,3 +1698,187 @@ def test_river_temperature_from_real_arco_era5(iceland_test_grid):
     default = get_tracer_defaults()["temp"]
     assert not np.allclose(temp.values, default)
     assert (temp.values >= 0.0).all()
+
+
+class TestRiverForcingTotalDischargeMode:
+    """RIVR2O BGC's new 'total_discharge' mode (GloFAS-paired, no runtime
+    lookup -- concentrations are pre-embedded per station on the discharge
+    file and just extracted/merged like any other per-station field).
+    """
+
+    @pytest.fixture
+    def iceland_grid(self):
+        return Grid(
+            nx=18,
+            ny=18,
+            size_x=800,
+            size_y=800,
+            center_lon=-18,
+            center_lat=65,
+            rot=20,
+            N=3,
+        )
+
+    @pytest.fixture
+    def glofas_rivr2o_test_file(self, tmp_path_factory):
+        """Synthetic enriched GloFAS file: two stations share one lat/lon
+        (forcing an overlap-merge onto the same ROMS grid cell, matching
+        `glofas_test_file`'s geometry, already confirmed by
+        `test_overlap_rivers_created` to produce an overlap on this grid),
+        a third station is distinct.
+        """
+        path = tmp_path_factory.mktemp("glofas_rivr2o") / "glofas_rivr2o_test.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        lats = np.array([65.12, 65.12, 63.72], dtype=np.float32)
+        lons = np.array([-20.43, -20.43, -17.53], dtype=np.float32)
+        names = [
+            "GloFAS_65.12N_20.43W",
+            "GloFAS_65.12N_20.43W_b",
+            "GloFAS_63.72N_17.53W",
+        ]
+        flow = np.tile(np.array([500.0, 200.0, 400.0], dtype=np.float32), (2, 1))
+        vol = np.array([500.0, 200.0, 400.0], dtype=np.float32)
+        years = np.array([1998])
+        rivr2o_concentrations = {
+            "DIC": np.array([[10.0, 20.0, 30.0]]),
+            "ALK": np.array([[10.0, 20.0, 30.0]]),
+            "NO3": np.array([[1.0, 2.0, 3.0]]),
+            "PO4": np.array([[0.1, 0.2, 0.3]]),
+        }
+        write_glofas_file_with_rivr2o(
+            path,
+            lats,
+            lons,
+            flow,
+            names,
+            times,
+            years=years,
+            rivr2o_concentrations=rivr2o_concentrations,
+            vol=vol,
+        )
+        return path
+
+    def test_auto_selected_for_glofas(self, iceland_grid, glofas_rivr2o_test_file):
+        rf = RiverForcing(
+            grid=iceland_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+        )
+        assert rf.bgc_source.discharge_accounting == "total_discharge"
+
+        dic = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("DIC")
+        )
+        default_dic = get_tracer_defaults()["DIC"]
+        assert not np.allclose(dic.values, default_dic)
+
+    def test_merges_overlapping_stations_by_volume(
+        self, iceland_grid, glofas_rivr2o_test_file
+    ):
+        """Two stations at the identical location (500 and 200 m3/s, DIC
+        10 and 20 mmol/m3) should merge into one synthetic 'overlap_*'
+        river with volume-weighted DIC = (500*10 + 200*20) / 700.
+        """
+        rf = RiverForcing(
+            grid=iceland_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+        )
+        overlap_names = [
+            n for n in rf.ds.river_name.values if str(n).startswith("overlap_")
+        ]
+        assert len(overlap_names) == 1
+        nriver_idx = list(rf.ds.river_name.values).index(overlap_names[0])
+        dic_idx = rf.ds.tracer_name.values.tolist().index("DIC")
+        dic_val = float(
+            rf.ds["river_tracer"]
+            .isel(nriver=nriver_idx, ntracers=dic_idx)
+            .isel(river_time=0)
+        )
+        expected = (500.0 * 10.0 + 200.0 * 20.0) / (500.0 + 200.0)
+        assert dic_val == pytest.approx(expected, rel=1e-4)
+
+    def test_requires_glofas_when_explicitly_requested(
+        self, iceland_test_grid, single_cell_indices
+    ):
+        with pytest.raises(ValueError, match="GLOFAS"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=single_cell_indices,
+                include_bgc=True,
+                bgc_source={
+                    "name": "RIVR2O",
+                    "discharge_accounting": "total_discharge",
+                },
+            )
+
+    def test_zero_discharge_station_is_dropped(self, tmp_path_factory):
+        """A standalone station (not part of an overlap merge) with zero
+        discharge on every day falls below GloFAS's MIN_DISCHARGE_M3S and
+        must be dropped entirely -- there's nothing physically meaningful to
+        force a ROMS river point with, so it's excluded rather than kept
+        around with a borrowed concentration value. A normally-flowing
+        station must be unaffected.
+        """
+        grid = Grid(
+            nx=18,
+            ny=18,
+            size_x=800,
+            size_y=800,
+            center_lon=-18,
+            center_lat=65,
+            rot=20,
+            N=3,
+        )
+        path = tmp_path_factory.mktemp("glofas_rivr2o_zero") / "glofas_zero.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        lats = np.array([65.12, 63.72], dtype=np.float32)
+        lons = np.array([-20.43, -17.53], dtype=np.float32)
+        names = ["GloFAS_65.12N_20.43W", "GloFAS_63.72N_17.53W"]
+        # Station 0 has zero discharge every day; station 1 flows normally.
+        flow = np.array([[0.0, 400.0], [0.0, 400.0]], dtype=np.float32)
+        vol = np.array([0.0, 400.0], dtype=np.float32)
+        years = np.array([1998])
+        rivr2o_concentrations = {
+            "DIC": np.array([[999.0, 20.0]]),
+            "ALK": np.array([[999.0, 20.0]]),
+            "NO3": np.array([[99.0, 2.0]]),
+            "PO4": np.array([[9.0, 0.2]]),
+        }
+        write_glofas_file_with_rivr2o(
+            path,
+            lats,
+            lons,
+            flow,
+            names,
+            times,
+            years=years,
+            rivr2o_concentrations=rivr2o_concentrations,
+            vol=vol,
+        )
+
+        rf = RiverForcing(
+            grid=grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": path},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+        )
+
+        river_names = [str(n) for n in rf.ds.river_name.values]
+        assert "GloFAS_65.12N_20.43W" not in river_names
+        assert "GloFAS_63.72N_17.53W" in river_names
+
+        dic_idx = rf.ds.tracer_name.values.tolist().index("DIC")
+        dic_vals = rf.ds["river_tracer"].isel(ntracers=dic_idx).values
+        flowing_col = river_names.index("GloFAS_63.72N_17.53W")
+        assert np.allclose(dic_vals[:, flowing_col], 20.0)

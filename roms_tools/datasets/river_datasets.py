@@ -36,6 +36,23 @@ RECOMMENDED_VALUE_INDEX = 0
 RIVER_TRACER_DEFAULTS_FILENAME = "river_tracer_defaults.nc"
 
 
+#: Fixed set of tracers supplied by a ``RiverBGCDataset`` whose
+#: ``operates_on_raw_stations`` is ``True`` (currently only
+#: ``Rivr2oRiverBGCDataset``'s ``"total_discharge"`` mode). Named to match
+#: MARBL river tracer names directly in the external GloFAS+RivR2O processing.
+RIVR2O_MARBL_TRACER_NAMES = (
+    "DIC",
+    "ALK",
+    "DOC",
+    "DON",
+    "DOP",
+    "NO3",
+    "PO4",
+    "DIC_ALT_CO2",
+    "ALK_ALT_CO2",
+)
+
+
 class RiverBGCDataset(Protocol):
     """Protocol for river BGC datasets used by ``RiverForcing``."""
 
@@ -59,6 +76,23 @@ class RiverBGCDataset(Protocol):
         """
         ...
 
+    @property
+    def operates_on_raw_stations(self) -> bool:
+        """Whether dynamic concentrations are supplied pre-computed, per raw
+        discharge station, rather than sampled by lon/lat.
+
+        When ``True``, ``RiverForcing`` calls ``extract_station_concentrations``
+        once, early, on the raw (pre-overlap-merge) discharge dataset, instead
+        of calling ``forcing_concentrations`` with sampled lon/lat coordinates,
+        and reads the resulting ``RIVR2O_MARBL_TRACER_NAMES`` back out of
+        the merged ``river_tracer`` array afterward rather than recomputing
+        them. Every existing ``RiverBGCDataset`` implementation returns
+        ``False`` here; this is a narrow extension for a BGC source whose
+        values are already attached to the discharge dataset itself (see
+        ``Rivr2oRiverBGCDataset``'s ``"total_discharge"`` mode).
+        """
+        ...
+
     def forcing_concentrations(
         self,
         river_volume: xr.DataArray,
@@ -69,7 +103,23 @@ class RiverBGCDataset(Protocol):
         straddle: bool,
         river_names: list[str],
     ) -> dict[str, xr.DataArray]:
-        """Return ROMS tracer concentrations on ``(river_time, nriver)``."""
+        """Return ROMS tracer concentrations on ``(river_time, nriver)``.
+
+        Not called when ``operates_on_raw_stations`` is ``True``.
+        """
+        ...
+
+    def extract_station_concentrations(
+        self, data: "RiverDataset"
+    ) -> dict[str, xr.DataArray]:
+        """Return pre-computed tracer concentrations already present on
+        ``data.ds``, on ``data.ds``'s own native ``(time, station)`` dims.
+
+        Only called when ``operates_on_raw_stations`` is ``True``, once,
+        before overlap merging. Datasets that don't support this
+        (``operates_on_raw_stations`` is ``False``) should raise
+        ``NotImplementedError``, since it is never called for them.
+        """
         ...
 
 
@@ -226,6 +276,18 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
     def fill_value(self) -> float | None:
         return None
 
+    @property
+    def operates_on_raw_stations(self) -> bool:
+        return False
+
+    def extract_station_concentrations(
+        self, data: "RiverDataset"
+    ) -> dict[str, xr.DataArray]:
+        raise NotImplementedError(
+            "RiverTracerDefaultsDataset.operates_on_raw_stations is False; "
+            "extract_station_concentrations is never called."
+        )
+
     def forcing_concentrations(
         self,
         river_volume: xr.DataArray,
@@ -309,6 +371,10 @@ class RiverDataset:
     filename: str | Path | list[str | Path]
     COAST_SNAP_BUFFER_KM: float | None = None
     DOMAIN_EDGE_BUFFER: int = 20
+    MIN_DISCHARGE_M3S: float | None = None
+    """Minimum time-mean discharge (m3/s) a river must have to be kept;
+    below this, the river is dropped entirely (not merely BGC-filled with
+    CONSTANTS). ``None`` disables the filter. Overridden per-subclass."""
     start_time: datetime
     end_time: datetime
     dim_names: dict[str, str]
@@ -749,6 +815,15 @@ class GloFASRiverDataset(RiverDataset):
 
     COAST_SNAP_BUFFER_KM: float = 50.0
     DOMAIN_EDGE_BUFFER: int = 20
+    MIN_DISCHARGE_M3S: float = 1.0
+    """GloFAS's ~141,000-station catalog includes a huge number of
+    near-negligible trickles; below this discharge there's nothing
+    physically meaningful to force a ROMS river point with, and (for
+    ``total_discharge`` BGC mode) no trustworthy per-station concentration
+    either -- carrying such a river along just means it silently gets the
+    generic CONSTANTS BGC fill. Matches the discharge floor already used in
+    the external RivR2O/GloFAS BGC-concentration preprocessing pipeline this
+    was validated against."""
 
     dim_names: dict = field(
         default_factory=lambda: {"station": "station", "time": "time"}
@@ -937,9 +1012,10 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         Processed dataset with MARBL tracer variables on the native lat/lon grid.
     """
 
-    filename: str | Path | list[str | Path]
+    filename: str | Path | list[str | Path] | None = None
     start_time: datetime
     end_time: datetime
+    discharge_accounting: Literal["per_river", "total_discharge"] = "per_river"
     dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "latitude": "lat",
@@ -972,6 +1048,20 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
                 f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
             )
 
+        if self.discharge_accounting == "total_discharge":
+            # "total_discharge" mode reads pre-computed concentrations
+            # straight off the discharge dataset (see
+            # extract_station_concentrations) -- it never loads the RIVR2O
+            # yearly export files itself, so self.ds is intentionally left
+            # empty rather than populated from `filename`.
+            self.ds = xr.Dataset()
+            return
+
+        if self.filename is None:
+            raise ValueError(
+                "Rivr2oRiverBGCDataset(discharge_accounting='per_river') "
+                "requires `filename` (path to RIVR2O yearly export files)."
+            )
         ds = self.load_data()
         ds = self.clean_up(ds)
         self.check_dataset(ds)
@@ -986,6 +1076,10 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         xr.Dataset
             Concatenated dataset with one time step per input file.
         """
+        if self.filename is None:
+            raise ValueError(
+                "load_data() requires `filename` (path to RIVR2O yearly export files)."
+            )
         match_result = _get_file_matches(self.filename)
         if not match_result.matches:
             raise FileNotFoundError(f"No RIVR2O files matched: {self.filename}")
@@ -1334,12 +1428,81 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
 
     @property
     def requires_calendar_discharge_time(self) -> bool:
-        """RIVR2O BGC varies by calendar year and needs a calendar ``river_time`` axis."""
-        return True
+        """RIVR2O BGC varies by calendar year and needs a calendar ``river_time`` axis.
+
+        Only applies to ``"per_river"`` mode's climatology-discharge handling;
+        ``"total_discharge"`` mode reads real (non-climatological) GloFAS
+        discharge and does its own per-year broadcasting in
+        ``extract_station_concentrations``, so no axis expansion is needed.
+        """
+        return self.discharge_accounting == "per_river"
 
     @property
     def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        if self.discharge_accounting == "total_discharge":
+            # extract_station_concentrations already broadcasts each
+            # station's per-year value across every real day in that year --
+            # no further calendar-year gap interpolation applies.
+            return "none"
         return "calendar_year"
+
+    @property
+    def operates_on_raw_stations(self) -> bool:
+        return self.discharge_accounting == "total_discharge"
+
+    def extract_station_concentrations(
+        self, data: "RiverDataset"
+    ) -> dict[str, xr.DataArray]:
+        """Read pre-computed per-station RivR2O concentrations off ``data.ds``.
+
+        ``data`` is the discharge dataset (e.g. a ``GloFASRiverDataset``)
+        already loaded from a GloFAS file enriched with per-station,
+        per-year RivR2O tracer concentration variables (see
+        ``RIVR2O_MARBL_TRACER_NAMES``), produced by the external
+        GloFAS+RivR2O preprocessing pipeline. Each variable has dims
+        ``(year, station)``; this broadcasts each station's per-year value
+        across every real timestep in ``data.ds``'s native time axis that
+        falls in that year, returning NaN for years the enriched file
+        doesn't cover.
+
+        A station with zero discharge of its own still echoes its assigned
+        RivR2O cell's concentration (computed from *other* stations pooled
+        into that cell) -- this is intentional: the value is real,
+        RIVR2O-derived data, never a CONSTANTS default, and is physically
+        inert wherever it lands on its own since flux = volume x
+        concentration is 0 either way. (A zero-volume station also cannot
+        skew a volume-weighted overlap merge with a station that does have
+        flow: ``_create_combined_river`` weights each contributor by its own
+        volume, so a zero-volume contributor's weight -- and therefore its
+        contribution to the merged average -- is exactly zero regardless of
+        its concentration.)
+
+        Returns
+        -------
+        dict[str, xr.DataArray]
+            One array per tracer in ``RIVR2O_MARBL_TRACER_NAMES`` present in
+            ``data.ds``, each on ``data.ds``'s native ``(time, station)``
+            dims (same as ``FLOW``/``river_volume``, before the caller
+            renames those dims to ``(river_time, nriver)``).
+        """
+        if self.discharge_accounting != "total_discharge":
+            raise NotImplementedError(
+                "extract_station_concentrations is only implemented for "
+                "discharge_accounting='total_discharge'."
+            )
+
+        time_dim = data.dim_names["time"]
+        requested_years = np.unique(data.ds[time_dim].dt.year.values)
+
+        result: dict[str, xr.DataArray] = {}
+        for tracer_name in RIVR2O_MARBL_TRACER_NAMES:
+            if tracer_name not in data.ds:
+                continue
+            annual = data.ds[tracer_name]
+            annual = annual.reindex(year=requested_years, fill_value=np.nan)
+            result[tracer_name] = annual.sel(year=data.ds[time_dim].dt.year)
+
+        return result
 
     @staticmethod
     def _align_concentration(

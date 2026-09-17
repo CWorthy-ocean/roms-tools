@@ -1182,6 +1182,31 @@ class TestRiverForcingWithGloFAS:
         assert "GloFAS_65.47N_23.62W" in rf_override.indices
         assert "GloFAS_63.72N_17.53W" in rf_override.indices
 
+    def test_below_floor_overlap_merge_is_dropped(
+        self, iceland_test_grid, tmp_path_factory
+    ):
+        """A merged 'overlap_*' river must still be subject to the min-
+        discharge filter -- two co-located stations whose combined discharge
+        is still below the floor must not survive just because they merged.
+        """
+        path = tmp_path_factory.mktemp("glofas_tiny_overlap") / "glofas_tiny.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        lats = np.array([65.12, 65.12], dtype=np.float32)
+        lons = np.array([-20.43, -20.43], dtype=np.float32)
+        names = ["GloFAS_65.12N_20.43W", "GloFAS_65.12N_20.43W_b"]
+        flow = np.tile(np.array([0.3, 0.4], dtype=np.float32), (2, 1))
+        vol = np.array([0.3, 0.4], dtype=np.float32)
+        write_glofas_file(path, lats, lons, flow, names, times, vol=vol)
+
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": path},
+        )
+        river_names = [str(n) for n in rf.ds.river_name.values]
+        assert not any(n.startswith("overlap_") for n in river_names)
+
 
 class TestRiverForcingGloFASClimatology:
     """GloFAS-specific time/climatology behavior, pinned to a daily multi-year case."""
@@ -1785,6 +1810,30 @@ class TestRiverForcingTotalDischargeMode:
         default_dic = get_tracer_defaults()["DIC"]
         assert not np.allclose(dic.values, default_dic)
 
+    def test_round_trip_yaml(
+        self, iceland_test_grid, glofas_rivr2o_test_file, tmp_path
+    ):
+        """The auto-resolved discharge_accounting and a min_discharge_m3s
+        override must both survive a YAML round-trip unchanged.
+        """
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+            min_discharge_m3s=0.5,
+        )
+        filepath = tmp_path / "test_yaml_total_discharge"
+        rf.to_yaml(filepath)
+        rf_from_file = RiverForcing.from_yaml(filepath)
+
+        assert rf_from_file.bgc_source.discharge_accounting == "total_discharge"
+        assert rf_from_file.min_discharge_m3s == 0.5
+        assert rf == rf_from_file
+        filepath.unlink()
+
     def test_merges_overlapping_stations_by_volume(
         self, iceland_test_grid, glofas_rivr2o_test_file
     ):
@@ -1828,6 +1877,22 @@ class TestRiverForcingTotalDischargeMode:
                     "name": "RIVR2O",
                     "discharge_accounting": "total_discharge",
                 },
+            )
+
+    def test_plain_glofas_file_raises_not_silently_falls_back(
+        self, iceland_test_grid, glofas_test_file
+    ):
+        """A plain (non-enriched) GloFAS file must raise, not silently fall
+        back to CONSTANTS, when total_discharge mode is auto-selected.
+        """
+        with pytest.raises(ValueError, match="enriched"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+                include_bgc=True,
+                bgc_source={"name": "RIVR2O"},
             )
 
     def test_zero_discharge_station_is_dropped(

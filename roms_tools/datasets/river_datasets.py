@@ -1471,6 +1471,12 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
             annual = annual.reindex(year=requested_years, fill_value=np.nan)
             result[tracer_name] = annual.sel(year=data.ds[time_dim].dt.year)
 
+        if not result:
+            raise ValueError(
+                "discharge_accounting='total_discharge' requires a GloFAS "
+                "file enriched with precomputed RivR2O concentrations; none "
+                "were found."
+            )
         return result
 
     @staticmethod

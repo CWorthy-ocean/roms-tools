@@ -1530,7 +1530,6 @@ class RiverForcing:
                 name = "overlap_" + sorted(river_list)[0].replace(
                     self._river_name_prefix, ""
                 )
-                exempt_names.add(name)
                 logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
                 new_nriver = ds.sizes["nriver"] + i + 1
                 (

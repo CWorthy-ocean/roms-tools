@@ -57,6 +57,36 @@ def write_glofas_file(
     _write_river_file(path, lats, lons, flow, river_names, times, ratio=ratio, vol=vol)
 
 
+def write_glofas_file_with_rivr2o(
+    path: str | Path,
+    lats: np.ndarray,
+    lons: np.ndarray,
+    flow: np.ndarray,
+    river_names: list[str],
+    times: np.ndarray,
+    *,
+    years: np.ndarray,
+    rivr2o_concentrations: dict[str, np.ndarray],
+    ratio: np.ndarray | None = None,
+    vol: np.ndarray | None = None,
+) -> None:
+    """Write a synthetic GloFAS file enriched with per-station RIVR2O
+    concentrations, mimicking ``glofas_v4_rivers_daily_w_rivr2o.nc``.
+
+    ``rivr2o_concentrations`` maps tracer name (e.g. ``"DIC"``) to an array
+    of shape ``(len(years), n_stations)`` -- the "total_discharge" mode's
+    ``Rivr2oRiverBGCDataset.extract_station_concentrations`` reads these
+    directly, on a ``(year, station)`` dims, independent of the file's
+    ``FLOW`` time axis.
+    """
+    _write_river_file(path, lats, lons, flow, river_names, times, ratio=ratio, vol=vol)
+    ds = xr.load_dataset(path)
+    for tracer_name, values in rivr2o_concentrations.items():
+        ds[tracer_name] = (["year", "station"], np.asarray(values, dtype=np.float64))
+    ds = ds.assign_coords(year=np.asarray(years))
+    ds.to_netcdf(path)
+
+
 def write_dai_file(
     path: str | Path,
     lats: np.ndarray,

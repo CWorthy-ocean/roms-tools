@@ -80,8 +80,7 @@ def write_glofas_file_with_rivr2o(
     ``FLOW`` time axis.
     """
     _write_river_file(path, lats, lons, flow, river_names, times, ratio=ratio, vol=vol)
-    with xr.open_dataset(path) as ds:
-        ds = ds.load()
+    ds = xr.load_dataset(path)
     for tracer_name, values in rivr2o_concentrations.items():
         ds[tracer_name] = (["year", "station"], np.asarray(values, dtype=np.float64))
     ds = ds.assign_coords(year=np.asarray(years))

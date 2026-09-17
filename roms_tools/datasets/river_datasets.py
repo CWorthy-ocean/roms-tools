@@ -36,10 +36,8 @@ RECOMMENDED_VALUE_INDEX = 0
 RIVER_TRACER_DEFAULTS_FILENAME = "river_tracer_defaults.nc"
 
 
-#: Fixed set of tracers supplied by a ``RiverBGCDataset`` whose
-#: ``operates_on_raw_stations`` is ``True`` (currently only
-#: ``Rivr2oRiverBGCDataset``'s ``"total_discharge"`` mode). Named to match
-#: MARBL river tracer names directly in the external GloFAS+RivR2O processing.
+#: Tracers supplied by a ``precomputed_concentrations=True`` BGC source
+#: (currently only ``Rivr2oRiverBGCDataset``'s ``"total_discharge"`` mode).
 RIVR2O_MARBL_TRACER_NAMES = (
     "DIC",
     "ALK",
@@ -51,9 +49,10 @@ RIVR2O_MARBL_TRACER_NAMES = (
     "DIC_ALT_CO2",
     "ALK_ALT_CO2",
 )
-assert set(RIVR2O_MARBL_TRACER_NAMES) <= set(MARBL_TRACER_NAMES), (
-    "RIVR2O_MARBL_TRACER_NAMES must stay a subset of MARBL_TRACER_NAMES."
-)
+if not set(RIVR2O_MARBL_TRACER_NAMES) <= set(MARBL_TRACER_NAMES):
+    raise ValueError(
+        "RIVR2O_MARBL_TRACER_NAMES must stay a subset of MARBL_TRACER_NAMES."
+    )
 
 
 class RiverBGCDataset(Protocol):
@@ -80,19 +79,10 @@ class RiverBGCDataset(Protocol):
         ...
 
     @property
-    def operates_on_raw_stations(self) -> bool:
-        """Whether dynamic concentrations are supplied pre-computed, per raw
-        discharge station, rather than sampled by lon/lat.
-
-        When ``True``, ``RiverForcing`` calls ``extract_station_concentrations``
-        once, early, on the raw (pre-overlap-merge) discharge dataset, instead
-        of calling ``forcing_concentrations`` with sampled lon/lat coordinates,
-        and reads the resulting ``RIVR2O_MARBL_TRACER_NAMES`` back out of
-        the merged ``river_tracer`` array afterward rather than recomputing
-        them. Every existing ``RiverBGCDataset`` implementation returns
-        ``False`` here; this is a narrow extension for a BGC source whose
-        values are already attached to the discharge dataset itself (see
-        ``Rivr2oRiverBGCDataset``'s ``"total_discharge"`` mode).
+    def precomputed_concentrations(self) -> bool:
+        """Whether concentrations are precomputed per station -- see
+        ``extract_station_concentrations`` -- rather than sampled via
+        ``forcing_concentrations``.
         """
         ...
 
@@ -108,7 +98,7 @@ class RiverBGCDataset(Protocol):
     ) -> dict[str, xr.DataArray]:
         """Return ROMS tracer concentrations on ``(river_time, nriver)``.
 
-        Not called when ``operates_on_raw_stations`` is ``True``.
+        Not called when ``precomputed_concentrations`` is ``True``.
         """
         ...
 
@@ -118,9 +108,9 @@ class RiverBGCDataset(Protocol):
         """Return pre-computed tracer concentrations already present on
         ``data.ds``, on ``data.ds``'s own native ``(time, station)`` dims.
 
-        Only called when ``operates_on_raw_stations`` is ``True``, once,
+        Only called when ``precomputed_concentrations`` is ``True``, once,
         before overlap merging. Datasets that don't support this
-        (``operates_on_raw_stations`` is ``False``) should raise
+        (``precomputed_concentrations`` is ``False``) should raise
         ``NotImplementedError``, since it is never called for them.
         """
         ...
@@ -280,14 +270,14 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
         return None
 
     @property
-    def operates_on_raw_stations(self) -> bool:
+    def precomputed_concentrations(self) -> bool:
         return False
 
     def extract_station_concentrations(
         self, data: "RiverDataset"
     ) -> dict[str, xr.DataArray]:
         raise NotImplementedError(
-            "RiverTracerDefaultsDataset.operates_on_raw_stations is False; "
+            "RiverTracerDefaultsDataset.precomputed_concentrations is False; "
             "extract_station_concentrations is never called."
         )
 
@@ -375,9 +365,8 @@ class RiverDataset:
     COAST_SNAP_BUFFER_KM: float | None = None
     DOMAIN_EDGE_BUFFER: int = 20
     MIN_DISCHARGE_M3S: float | None = None
-    """Minimum time-mean discharge (m3/s) a river must have to be kept;
-    below this, the river is dropped entirely (not merely BGC-filled with
-    CONSTANTS). ``None`` disables the filter. Overridden per-subclass."""
+    """Minimum time-mean discharge (m3/s) required to keep a river; ``None``
+    disables the filter."""
     start_time: datetime
     end_time: datetime
     dim_names: dict[str, str]
@@ -819,14 +808,8 @@ class GloFASRiverDataset(RiverDataset):
     COAST_SNAP_BUFFER_KM: float = 50.0
     DOMAIN_EDGE_BUFFER: int = 20
     MIN_DISCHARGE_M3S: float = 1.0
-    """GloFAS's ~141,000-station catalog includes a huge number of
-    near-negligible trickles; below this discharge there's nothing
-    physically meaningful to force a ROMS river point with, and (for
-    ``total_discharge`` BGC mode) no trustworthy per-station concentration
-    either -- carrying such a river along just means it silently gets the
-    generic CONSTANTS BGC fill. Matches the discharge floor already used in
-    the external RivR2O/GloFAS BGC-concentration preprocessing pipeline this
-    was validated against."""
+    """Rivers below 1 m3/s are small streams not relevant for regional-scale
+    ocean modeling."""
 
     dim_names: dict = field(
         default_factory=lambda: {"station": "station", "time": "time"}
@@ -972,17 +955,11 @@ _DOP_FROM_POC = 1 / 276
 class Rivr2oRiverBGCDataset(RiverBGCDataset):
     """River BGC export data from the RIVR2O river inputs product.
 
-    Supports two ``discharge_accounting`` modes:
-
-    - ``"per_river"`` (default): loads the RIVR2O yearly export files from
-      ``filename`` directly and samples them by lon/lat, as described below.
-    - ``"total_discharge"``: concentrations are precomputed externally per
-      GloFAS station/year and already present on the paired GloFAS discharge
-      file; ``filename`` is unused and this class loads nothing itself. See
-      ``extract_station_concentrations``.
-
-    The rest of this docstring (product layout, unit conversions, spatial
-    sampling) describes ``"per_river"`` mode only.
+    Supports two ``discharge_accounting`` modes: ``"per_river"`` (default)
+    samples RIVR2O's yearly export files by lon/lat, as described below.
+    ``"total_discharge"`` reads concentrations already precomputed per
+    GloFAS station and embedded in the GloFAS discharge file itself
+    (``filename`` unused); see ``extract_station_concentrations``.
 
     The product is distributed as one NetCDF file per year. Each file contains
     global river export fields on a regular lat/lon grid (typically 0.5°). Raw
@@ -1014,18 +991,14 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
     filename : str, Path, or list[str | Path], optional
         Path to one file, a wildcard pattern (e.g.
         ``"/data/rivr2o_riverinputs_*.nc"``), or a list of file paths.
-        Required when ``discharge_accounting="per_river"``; unused when
-        ``discharge_accounting="total_discharge"``.
+        Required for ``"per_river"`` mode; unused for ``"total_discharge"``.
     start_time : datetime
         Start of the time range to retain.
     end_time : datetime
         End of the time range to retain.
     discharge_accounting : {"per_river", "total_discharge"}, optional
-        Which accounting mode to use; see above. Defaults to ``"per_river"``.
-        ``RiverForcing`` normally resolves and passes this explicitly based
-        on the paired discharge ``source`` rather than relying on this
-        default — see
-        ``RiverForcing._resolve_and_validate_bgc_discharge_pairing``.
+        Which accounting mode to use; see above. Defaults to ``"per_river"``;
+        ``RiverForcing`` normally resolves and passes this explicitly.
     use_dask : bool, optional
         If True, open files with dask chunking along time. Defaults to False.
 
@@ -1470,43 +1443,16 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         return "calendar_year"
 
     @property
-    def operates_on_raw_stations(self) -> bool:
+    def precomputed_concentrations(self) -> bool:
         return self.discharge_accounting == "total_discharge"
 
     def extract_station_concentrations(
         self, data: "RiverDataset"
     ) -> dict[str, xr.DataArray]:
-        """Read pre-computed per-station RivR2O concentrations off ``data.ds``.
+        """Read precomputed per-station RivR2O concentrations off ``data.ds``.
 
-        ``data`` is the discharge dataset (e.g. a ``GloFASRiverDataset``)
-        already loaded from a GloFAS file enriched with per-station,
-        per-year RivR2O tracer concentration variables (see
-        ``RIVR2O_MARBL_TRACER_NAMES``), produced by the external
-        GloFAS+RivR2O preprocessing pipeline. Each variable has dims
-        ``(year, station)``; this broadcasts each station's per-year value
-        across every real timestep in ``data.ds``'s native time axis that
-        falls in that year, returning NaN for years the enriched file
-        doesn't cover.
-
-        A station with zero discharge of its own still echoes its assigned
-        RivR2O cell's concentration (computed from *other* stations pooled
-        into that cell) -- this is intentional: the value is real,
-        RIVR2O-derived data, never a CONSTANTS default, and is physically
-        inert wherever it lands on its own since flux = volume x
-        concentration is 0 either way. (A zero-volume station also cannot
-        skew a volume-weighted overlap merge with a station that does have
-        flow: ``_create_combined_river`` weights each contributor by its own
-        volume, so a zero-volume contributor's weight -- and therefore its
-        contribution to the merged average -- is exactly zero regardless of
-        its concentration.)
-
-        Returns
-        -------
-        dict[str, xr.DataArray]
-            One array per tracer in ``RIVR2O_MARBL_TRACER_NAMES`` present in
-            ``data.ds``, each on ``data.ds``'s native ``(time, station)``
-            dims (same as ``FLOW``/``river_volume``, before the caller
-            renames those dims to ``(river_time, nriver)``).
+        Each ``(year, station)`` variable is broadcast across every real day
+        in that year.
         """
         if self.discharge_accounting != "total_discharge":
             raise NotImplementedError(

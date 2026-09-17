@@ -900,7 +900,7 @@ class TestRiverForcingWithOverlappingIndices:
         rf.grid = None  # Not needed for this test
         rf._river_name_prefix = ""  # mock fixtures use unprefixed names
 
-        ds_out = rf._handle_overlapping_rivers(ds)
+        ds_out, _ = rf._handle_overlapping_rivers(ds)
 
         # Assert number of synthetic rivers added
         expected_nriver = ds.sizes["nriver"] + expected_synthetic_count
@@ -946,7 +946,7 @@ class TestRiverForcingWithOverlappingIndices:
         rf.grid = None
         rf._river_name_prefix = ""  # mock fixtures use unprefixed names
 
-        ds_out = rf._handle_overlapping_rivers(ds)
+        ds_out, _ = rf._handle_overlapping_rivers(ds)
 
         # Apply the same re-sort logic __post_init__ uses after overlap handling
         volume_means = ds_out["river_volume"].mean(dim="time")
@@ -1730,19 +1730,6 @@ class TestRiverForcingTotalDischargeMode:
     """
 
     @pytest.fixture
-    def iceland_grid(self):
-        return Grid(
-            nx=18,
-            ny=18,
-            size_x=800,
-            size_y=800,
-            center_lon=-18,
-            center_lat=65,
-            rot=20,
-            N=3,
-        )
-
-    @pytest.fixture
     def glofas_rivr2o_test_file(self, tmp_path_factory):
         """Synthetic enriched GloFAS file: two stations share one lat/lon
         (forcing an overlap-merge onto the same ROMS grid cell, matching
@@ -1781,9 +1768,9 @@ class TestRiverForcingTotalDischargeMode:
         )
         return path
 
-    def test_auto_selected_for_glofas(self, iceland_grid, glofas_rivr2o_test_file):
+    def test_auto_selected_for_glofas(self, iceland_test_grid, glofas_rivr2o_test_file):
         rf = RiverForcing(
-            grid=iceland_grid,
+            grid=iceland_test_grid,
             start_time=datetime(1998, 1, 1),
             end_time=datetime(1998, 3, 1),
             source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
@@ -1799,14 +1786,14 @@ class TestRiverForcingTotalDischargeMode:
         assert not np.allclose(dic.values, default_dic)
 
     def test_merges_overlapping_stations_by_volume(
-        self, iceland_grid, glofas_rivr2o_test_file
+        self, iceland_test_grid, glofas_rivr2o_test_file
     ):
         """Two stations at the identical location (500 and 200 m3/s, DIC
         10 and 20 mmol/m3) should merge into one synthetic 'overlap_*'
         river with volume-weighted DIC = (500*10 + 200*20) / 700.
         """
         rf = RiverForcing(
-            grid=iceland_grid,
+            grid=iceland_test_grid,
             start_time=datetime(1998, 1, 1),
             end_time=datetime(1998, 3, 1),
             source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
@@ -1843,7 +1830,9 @@ class TestRiverForcingTotalDischargeMode:
                 },
             )
 
-    def test_zero_discharge_station_is_dropped(self, tmp_path_factory):
+    def test_zero_discharge_station_is_dropped(
+        self, iceland_test_grid, tmp_path_factory
+    ):
         """A standalone station (not part of an overlap merge) with zero
         discharge on every day falls below GloFAS's MIN_DISCHARGE_M3S and
         must be dropped entirely -- there's nothing physically meaningful to
@@ -1851,16 +1840,6 @@ class TestRiverForcingTotalDischargeMode:
         around with a borrowed concentration value. A normally-flowing
         station must be unaffected.
         """
-        grid = Grid(
-            nx=18,
-            ny=18,
-            size_x=800,
-            size_y=800,
-            center_lon=-18,
-            center_lat=65,
-            rot=20,
-            N=3,
-        )
         path = tmp_path_factory.mktemp("glofas_rivr2o_zero") / "glofas_zero.nc"
         times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
         lats = np.array([65.12, 63.72], dtype=np.float32)
@@ -1889,7 +1868,7 @@ class TestRiverForcingTotalDischargeMode:
         )
 
         rf = RiverForcing(
-            grid=grid,
+            grid=iceland_test_grid,
             start_time=datetime(1998, 1, 1),
             end_time=datetime(1998, 3, 1),
             source={"name": "GLOFAS", "path": path},

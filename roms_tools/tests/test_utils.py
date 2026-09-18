@@ -174,6 +174,70 @@ def test_load_data_open_zarr_without_dask() -> None:
         load_data("foo.zarr", {"a": ""}, use_dask=False, read_zarr=True)
 
 
+@pytest.fixture
+def synthetic_zarr_path(tmp_path) -> Path:
+    """A small local zarr store with 20x20 latitude/longitude dims."""
+    lat = np.arange(-10.0, 10.0)
+    lon = np.arange(0.0, 20.0)
+    ds = xr.Dataset(
+        {"var": (("latitude", "longitude"), np.zeros((lat.size, lon.size)))},
+        coords={"latitude": lat, "longitude": lon},
+    )
+    zarr_path = tmp_path / "synthetic.zarr"
+    ds.to_zarr(zarr_path)
+    return zarr_path
+
+
+def test_load_data_dask_zarr_applies_initial_slice_bounds(synthetic_zarr_path):
+    """Regression: the zarr branch used to ignore `initial_slice_bounds`
+    entirely (unlike the `open_mfdataset` branch), always loading full extent.
+    """
+    loaded = load_data(
+        str(synthetic_zarr_path),
+        {"latitude": "latitude", "longitude": "longitude"},
+        use_dask=True,
+        read_zarr=True,
+        initial_slice_bounds={"latitude": (-2.0, 2.0), "longitude": (5.0, 9.0)},
+    )
+
+    assert loaded.sizes["latitude"] < 20
+    assert loaded.sizes["longitude"] < 20
+    assert loaded["latitude"].min() >= -2.0
+    assert loaded["latitude"].max() <= 2.0
+    assert loaded["longitude"].min() >= 5.0
+    assert loaded["longitude"].max() <= 9.0
+
+
+def test_load_data_dask_zarr_applies_initial_slice_bounds_with_isel(
+    synthetic_zarr_path,
+):
+    """Same regression, via the index-based (`isel`) bounds ROMS grids use."""
+    loaded = load_data(
+        str(synthetic_zarr_path),
+        {"latitude": "latitude", "longitude": "longitude"},
+        use_dask=True,
+        read_zarr=True,
+        initial_slice_bounds={"latitude": (0, 3), "longitude": (0, 4)},
+        initial_slice_bounds_use_isel=True,
+    )
+
+    assert loaded.sizes["latitude"] == 4
+    assert loaded.sizes["longitude"] == 5
+
+
+def test_load_data_dask_zarr_without_bounds_stays_unsliced(synthetic_zarr_path):
+    """Without `initial_slice_bounds`, the zarr branch's behavior is unchanged."""
+    loaded = load_data(
+        str(synthetic_zarr_path),
+        {"latitude": "latitude", "longitude": "longitude"},
+        use_dask=True,
+        read_zarr=True,
+    )
+
+    assert loaded.sizes["latitude"] == 20
+    assert loaded.sizes["longitude"] == 20
+
+
 @pytest.mark.parametrize(
     ("dataset_name", "expected_dim"),
     [

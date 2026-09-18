@@ -44,6 +44,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
 )
 from roms_tools.utils import (
+    _is_remote_gcs_path,
     dataset_using_dask,
     get_dask_chunks,
     get_pkg_error_msg,
@@ -2985,7 +2986,7 @@ def resolve_era5_source(
         ``ERA5ARCODataset`` for cloud paths, ``ERA5Dataset`` otherwise.
     """
     resolved_path = str(path) if path else DEFAULT_ERA5_ARCO_PATH
-    is_arco = resolved_path.startswith("gs://") or resolved_path.startswith("gcs://")
+    is_arco = _is_remote_gcs_path(resolved_path)
     dataset_cls = ERA5ARCODataset if is_arco else ERA5Dataset
     return resolved_path, is_arco, dataset_cls
 

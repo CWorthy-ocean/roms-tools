@@ -943,7 +943,6 @@ class RiverForcing:
 
         tair = data.ds[data.var_names["Tair"]] - 273.15
         tair.attrs["units"] = "degrees C"
-        tair = tair.chunk({"time": -1})
 
         river_tair = _sample_tair_at_river_mouths(
             tair,

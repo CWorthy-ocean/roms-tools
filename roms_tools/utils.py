@@ -158,6 +158,11 @@ def _is_zarr_store(path: str | Path) -> bool:
     return p.suffix == ".zarr" or p.is_dir()
 
 
+def _is_remote_gcs_path(path: str) -> bool:
+    """Whether `path` is a ``gs://`` or ``gcs://`` GCS URI."""
+    return path.startswith(("gs://", "gcs://"))
+
+
 @dataclass
 class FileMatchResult:
     """The result of performing a wildcard search."""
@@ -471,14 +476,24 @@ def _load_data_dask(
             # TODO: Possibly refactor this into defaults for zarr-based datasets; perhaps there is
             # some situation where we want to impose dask chunks on zarr datasets?
 
-            return xr.open_zarr(
+            is_remote = _is_remote_gcs_path(filenames[0])
+            ds = xr.open_zarr(
                 filenames[0],
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
                 chunks={},  # {} is fastest, and indicates that dask should only use on-disk zarr chunking
                 consolidated=None,
-                storage_options={"token": "anon"},
+                # storage_options is only valid for a remote fsspec URI (e.g. ARCO ERA5).
+                storage_options={"token": "anon"} if is_remote else None,
             )
+            # There's no `preprocess` hook here (unlike open_mfdataset below), so
+            # narrow explicitly -- otherwise a zarr-backed global source (e.g.
+            # ARCO ERA5) stays at full extent regardless of the requested bounds.
+            if initial_slice_bounds is not None:
+                ds = _get_ds_preprocessor(
+                    initial_slice_bounds, initial_slice_bounds_use_isel
+                )(ds)
+            return ds
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
 

@@ -158,6 +158,11 @@ def _is_zarr_store(path: str | Path) -> bool:
     return p.suffix == ".zarr" or p.is_dir()
 
 
+def _is_remote_gcs_path(path: str) -> bool:
+    """Whether `path` is a ``gs://`` or ``gcs://`` GCS URI."""
+    return path.startswith(("gs://", "gcs://"))
+
+
 @dataclass
 class FileMatchResult:
     """The result of performing a wildcard search."""
@@ -471,7 +476,7 @@ def _load_data_dask(
             # TODO: Possibly refactor this into defaults for zarr-based datasets; perhaps there is
             # some situation where we want to impose dask chunks on zarr datasets?
 
-            is_remote = filenames[0].startswith(("gs://", "gcs://"))
+            is_remote = _is_remote_gcs_path(filenames[0])
             ds = xr.open_zarr(
                 filenames[0],
                 decode_times=decode_times,

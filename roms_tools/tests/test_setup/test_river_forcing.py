@@ -1278,6 +1278,104 @@ class TestRiverTemperaturePureHelpers:
         expected = values[:, 1, 2]
         np.testing.assert_array_equal(result.values[:, 0], expected)
 
+    def test_sample_tair_at_river_mouths_dask_backed_matches_eager(self):
+        """The dask-chunk-streaming path (`_sample_points_chunkwise`) must
+        return exactly what the plain `.isel()` path returns for the same
+        data -- it's a performance path, not a different algorithm.
+        """
+        lat = np.array([10.0, 20.0, 30.0])
+        lon = np.array([350.0, 355.0, 0.0])
+        time = np.array([np.datetime64("2020-01-01"), np.datetime64("2020-01-02")])
+        values = np.arange(2 * 3 * 3, dtype=np.float64).reshape(2, 3, 3)
+        river_lats = np.array([20.0, 10.0])
+        river_lons = np.array([0.0, 355.0])
+
+        def make_tair(chunk):
+            tair = xr.DataArray(
+                values,
+                dims=("time", "latitude", "longitude"),
+                coords={"time": time, "latitude": lat, "longitude": lon},
+            )
+            return tair.chunk(chunk) if chunk else tair
+
+        eager_result = _sample_tair_at_river_mouths(
+            make_tair(None), "latitude", "longitude", river_lons, river_lats, False
+        )
+        dask_result = _sample_tair_at_river_mouths(
+            make_tair({"time": 1}),
+            "latitude",
+            "longitude",
+            river_lons,
+            river_lats,
+            False,
+        )
+        assert dask_result.chunks is not None
+        np.testing.assert_array_equal(dask_result.values, eager_result.values)
+        assert dask_result.dims == eager_result.dims
+
+    def test_sample_tair_at_river_mouths_dask_many_time_chunks_matches_eager(self):
+        """Regression test for the ERA5 river-temperature OOM: a source
+        chunked one step per time index (like the ARCO archive) used to
+        build a graph that materialized far more than the sampled points
+        needed. Uses enough chunks and rivers to actually exercise
+        `map_blocks` across multiple blocks, not just a single one.
+        """
+        rng = np.random.default_rng(0)
+        n_time, n_lat, n_lon, n_rivers = 12, 5, 6, 8
+        lat = np.linspace(10.0, 30.0, n_lat)
+        lon = np.linspace(300.0, 359.0, n_lon)
+        time = np.arange(
+            np.datetime64("2020-01-01"), np.datetime64("2020-01-01") + n_time
+        )
+        values = rng.random((n_time, n_lat, n_lon))
+        river_lats = rng.uniform(lat.min(), lat.max(), n_rivers)
+        river_lons = rng.uniform(lon.min(), lon.max(), n_rivers)
+
+        def make_tair(chunk):
+            tair = xr.DataArray(
+                values,
+                dims=("time", "latitude", "longitude"),
+                coords={"time": time, "latitude": lat, "longitude": lon},
+            )
+            return tair.chunk(chunk) if chunk else tair
+
+        eager_result = _sample_tair_at_river_mouths(
+            make_tair(None), "latitude", "longitude", river_lons, river_lats, False
+        )
+        dask_result = _sample_tair_at_river_mouths(
+            make_tair({"time": 1}),
+            "latitude",
+            "longitude",
+            river_lons,
+            river_lats,
+            False,
+        )
+        assert len(dask_result.chunks[0]) == n_time  # actually multi-chunk, not merged
+        np.testing.assert_array_equal(dask_result.values, eager_result.values)
+
+    def test_sample_tair_at_river_mouths_dask_backed_raises_no_warnings(self, recwarn):
+        """Regression test: `map_blocks` without an explicit `meta` probes
+        the mapped function with a synthetic zero-sized array to infer the
+        output dtype, and indexing that empty array raised a numpy
+        DeprecationWarning on every call. Passing `meta` explicitly avoids
+        the probe call entirely.
+        """
+        lat = np.array([10.0, 20.0, 30.0])
+        lon = np.array([350.0, 355.0, 0.0])
+        time = np.array([np.datetime64("2020-01-01"), np.datetime64("2020-01-02")])
+        values = np.arange(2 * 3 * 3, dtype=np.float64).reshape(2, 3, 3)
+        tair = xr.DataArray(
+            values,
+            dims=("time", "latitude", "longitude"),
+            coords={"time": time, "latitude": lat, "longitude": lon},
+        ).chunk({"time": 1})
+
+        result = _sample_tair_at_river_mouths(
+            tair, "latitude", "longitude", np.array([0.0]), np.array([20.0]), False
+        )
+        result.compute()
+        assert len(recwarn) == 0
+
     def test_smooth_and_floor_air_temp_floors_negative_values(self):
         time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))
         # Constant -5 degC everywhere: after smoothing it should still be

@@ -326,7 +326,7 @@ def _sample_points_chunkwise(
     because ``apply_ufunc`` needs single-chunked core dims, which isn't guaranteed
     here (``ensure_dimension_is_ascending`` can fragment chunking when it reverses
     a descending-latitude source like ERA5).
-    
+
     Parameters
     ----------
     tair : xr.DataArray
@@ -344,7 +344,7 @@ def _sample_points_chunkwise(
         depending on ``lat_name``/``lon_name`` without being one of them
         (e.g. a 2-D auxiliary coordinate) isn't carried over and will raise.
     """
-    # Output dims may get reordered (``nriver`` moves last) — 
+    # Output dims may get reordered (``nriver`` moves last) —
     # callers must pass ``(time, latitude, longitude)``
     if tair.dims[-2:] != (lat_name, lon_name):
         raise ValueError(

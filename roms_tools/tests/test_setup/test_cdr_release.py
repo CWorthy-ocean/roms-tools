@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from scipy.interpolate import interp1d
 
 from roms_tools.constants import NUM_TRACERS
+from roms_tools.setup.bgc_model import BGCCdrLite
 from roms_tools.setup.cdr_release import (
     Concentration,
     Flux,
@@ -524,34 +525,34 @@ class TestReleaseAccounting:
             vr._do_accounting(roms_stamps, self.start)
 
 
-class TestCDRTracerSet:
+class TestCdrLiteTracerSet:
     """Tests for the non-MARBL CDR tracer schema (role-keyed releases).
 
-    tracer_set="cdr_tracer" is TracerPerturbation-only: CDR tracer experiments
+    tracer_set="cdr_lite" is TracerPerturbation-only: CDR tracer experiments
     require the physics to remain untouched, so volume releases (and temp/salt
     forcing) are rejected.
     """
 
     def setup_method(self):
         self.params = {
-            "name": "cdr_tracer_release",
+            "name": "cdr_lite_release",
             "lat": 0.0,
             "lon": 0.0,
             "depth": 10.0,
-            "tracer_set": "cdr_tracer",
+            "tracer_set": "cdr_lite",
         }
 
     def test_volume_release_rejected(self):
         with pytest.raises(ValidationError, match="not supported on VolumeRelease"):
             VolumeRelease(**self.params, oae_pair=1)
         with pytest.raises(ValueError, match="not supported on VolumeRelease"):
-            VolumeRelease.get_tracer_metadata(tracer_set="cdr_tracer")
+            VolumeRelease.get_tracer_metadata(tracer_set="cdr_lite")
 
     def test_requires_targeting(self):
         with pytest.raises(ValidationError, match="oae_pair"):
             TracerPerturbation(**self.params)
 
-    def test_targeting_requires_cdr_tracer_set(self):
+    def test_targeting_requires_cdr_lite_set(self):
         with pytest.raises(ValidationError, match="only valid with"):
             TracerPerturbation(name="x", lat=0.0, lon=0.0, depth=10.0, oae_pair=1)
 
@@ -636,9 +637,7 @@ class TestCDRTracerSet:
             )
 
     def test_map_tracers_to_schema(self):
-        from roms_tools.setup.utils import CDRTracerSchema
-
-        schema = CDRTracerSchema(n_oae_pairs=3, n_dor=2)
+        schema = BGCCdrLite.TracerSchema(n_oae_pairs=3, n_dor=2)
         tp = TracerPerturbation(
             **self.params,
             oae_pair=3,
@@ -656,12 +655,41 @@ class TestCDRTracerSet:
             oae_pair=1,
             tracer_fluxes={"ALK": 100.0},
         )
-        with pytest.raises(ValueError, match="require a CDRTracerSchema"):
+        with pytest.raises(ValueError, match="require a CdrLiteTracerSchema"):
             tp._map_tracers_to_schema(tp.tracer_fluxes, None)
+
+    def test_release_tracer_models_dispatch(self):
+        from roms_tools import BGCMarbl
+        from roms_tools.setup.bgc_model import RELEASE_TRACER_MODELS
+
+        assert RELEASE_TRACER_MODELS == {"marbl": BGCMarbl, "cdr_lite": BGCCdrLite}
+        # marbl dispatch returns the full MARBL table, cdr_lite the role table
+        assert set(TracerPerturbation.get_tracer_metadata("marbl")) == set(
+            BGCMarbl.release_metadata("flux")
+        )
+        assert TracerPerturbation.get_tracer_metadata(
+            "cdr_lite"
+        ) == BGCCdrLite.release_metadata("flux")
+
+    def test_metadata_property_uses_instance_tracer_set(self):
+        import pandas as pd
+
+        tp = TracerPerturbation(
+            **self.params,
+            oae_pair=1,
+            tracer_fluxes={"ALK": 1.0e6},
+        )
+        assert isinstance(tp.metadata, pd.DataFrame)
+        assert list(tp.metadata.columns) == ["ALK", "DIC", "DOR_DIC"]
+
+        marbl_tp = TracerPerturbation(
+            name="m", lat=0.0, lon=0.0, depth=10.0, tracer_fluxes={"ALK": 1.0}
+        )
+        assert "spChl" in marbl_tp.metadata.columns
 
     def test_get_tracer_metadata(self):
         expected = ["ALK", "DIC", "DOR_DIC"]
-        meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_tracer")
+        meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_lite")
         assert list(meta_flux.keys()) == expected
         assert meta_flux["ALK"]["units"] == "meq/s"
         assert meta_flux["DOR_DIC"]["units"] == "mmol/s"

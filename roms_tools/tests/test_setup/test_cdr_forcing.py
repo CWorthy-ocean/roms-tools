@@ -11,13 +11,14 @@ from pydantic import ValidationError
 from conftest import calculate_file_hash
 from roms_tools import CDRForcing, Grid, TracerPerturbation, VolumeRelease
 from roms_tools.constants import MAX_DISTINCT_COLORS, NUM_TRACERS
+from roms_tools.setup.bgc_model import BGCCdrLite
 from roms_tools.setup.cdr_forcing import (
     CDRForcingDatasetBuilder,
     ReleaseCollector,
     ReleaseSimulationManager,
 )
 from roms_tools.setup.cdr_release import ReleaseType
-from roms_tools.setup.utils import CDRTracerSchema, get_tracer_metadata_dict
+from roms_tools.setup.utils import get_tracer_metadata_dict
 
 try:
     import xesmf  # type: ignore
@@ -330,7 +331,7 @@ class TestReleaseCollector:
             lat=66,
             lon=-25,
             depth=50,
-            tracer_set="cdr_tracer",
+            tracer_set="cdr_lite",
             oae_pair=1,
             tracer_fluxes={"ALK": 100.0},
         )
@@ -346,12 +347,12 @@ class TestReleaseCollector:
             lat=66,
             lon=-25,
             depth=50,
-            tracer_set="cdr_tracer",
+            tracer_set="cdr_lite",
             oae_pair=1,
             tracer_fluxes={"ALK": 100.0},
         )
         collector = ReleaseCollector(releases=[cdr])
-        assert collector.tracer_set == "cdr_tracer"
+        assert collector.tracer_set == "cdr_lite"
 
 
 class TestCDRForcingDatasetBuilder:
@@ -1065,10 +1066,10 @@ class TestCDRForcing:
         )
 
 
-class TestCDRTracerSetForcing:
-    """End-to-end CDRForcing tests for tracer_set='cdr_tracer'.
+class TestCdrLiteForcing:
+    """End-to-end CDRForcing tests for tracer_set='cdr_lite'.
 
-    Only TracerPerturbation supports cdr_tracer: the physics must remain
+    Only TracerPerturbation supports cdr_lite: the physics must remain
     untouched, so volume releases are rejected and the temp/salt rows of the
     forcing file are always zero.
     """
@@ -1076,7 +1077,7 @@ class TestCDRTracerSetForcing:
     def setup_method(self):
         self.start_time = datetime(2022, 1, 1)
         self.end_time = datetime(2022, 1, 31)
-        self.schema = CDRTracerSchema(n_oae_pairs=2, n_dor=1)
+        self.schema = BGCCdrLite.TracerSchema(n_oae_pairs=2, n_dor=1)
 
     def test_volume_release_rejected(self):
         with pytest.raises(ValidationError, match="not supported on VolumeRelease"):
@@ -1085,7 +1086,7 @@ class TestCDRTracerSetForcing:
                 lat=66.0,
                 lon=-25.0,
                 depth=50.0,
-                tracer_set="cdr_tracer",
+                tracer_set="cdr_lite",
                 oae_pair=1,
                 volume_fluxes=10.0,
             )
@@ -1096,7 +1097,7 @@ class TestCDRTracerSetForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_tracer",
+            tracer_set="cdr_lite",
             oae_pair=1,
             tracer_fluxes={"ALK": 2.0e6},
         )
@@ -1106,7 +1107,7 @@ class TestCDRTracerSetForcing:
             releases=[release],
             tracer_schema=self.schema,
         )
-        assert cdr.tracer_set == "cdr_tracer"
+        assert cdr.tracer_set == "cdr_lite"
         assert cdr.ds.sizes["ntracers"] == 7
         assert list(cdr.ds.tracer_name.values) == [
             "temp",
@@ -1130,7 +1131,7 @@ class TestCDRTracerSetForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_tracer",
+            tracer_set="cdr_lite",
             oae_pair=1,
         )
         with pytest.raises(ValidationError, match="require `tracer_schema`"):
@@ -1158,7 +1159,7 @@ class TestCDRTracerSetForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_tracer",
+            tracer_set="cdr_lite",
             oae_pair=3,
         )
         with pytest.raises(ValidationError, match="out of range"):
@@ -1176,7 +1177,7 @@ class TestCDRTracerSetForcing:
                 lat=66.0,
                 lon=-25.0 + k,
                 depth=50.0,
-                tracer_set="cdr_tracer",
+                tracer_set="cdr_lite",
                 oae_pair=k,
                 tracer_fluxes={"ALK": 1.0e6 * k},
             )
@@ -1187,7 +1188,7 @@ class TestCDRTracerSetForcing:
                 lat=66.0,
                 lon=-20.0,
                 depth=50.0,
-                tracer_set="cdr_tracer",
+                tracer_set="cdr_lite",
                 dor_index=1,
                 tracer_fluxes={"DOR_DIC": -5.0e5},
             )
@@ -1219,7 +1220,7 @@ class TestCDRTracerSetForcing:
                 lat=66.0,
                 lon=-25.0 + i,
                 depth=50.0,
-                tracer_set="cdr_tracer",
+                tracer_set="cdr_lite",
                 oae_pair=1,
                 tracer_fluxes={"ALK": 1.0e6},
             )
@@ -1236,7 +1237,7 @@ class TestCDRTracerSetForcing:
         assert np.allclose(alk1.values, 1.0e6)
 
     def test_fifty_pair_schema(self):
-        schema = CDRTracerSchema(n_oae_pairs=50)
+        schema = BGCCdrLite.TracerSchema(n_oae_pairs=50)
         assert schema.ntracers == 102
         expected = ["temp", "salt"]
         for k in range(1, 51):
@@ -1249,7 +1250,7 @@ class TestCDRTracerSetForcing:
                 lat=60.0 + 0.1 * k,
                 lon=-25.0,
                 depth=50.0,
-                tracer_set="cdr_tracer",
+                tracer_set="cdr_lite",
                 oae_pair=k,
                 tracer_fluxes={"ALK": 1.0e6, "DIC": 1.0e3 * k},
             )
@@ -1281,7 +1282,7 @@ class TestCDRTracerSetForcing:
     def test_schema_with_marbl_bgc_appends_bgc_tracers(self):
         from roms_tools.setup.utils import MARBL_TRACER_NAMES
 
-        schema = CDRTracerSchema(n_oae_pairs=1, include_marbl_bgc=True)
+        schema = BGCCdrLite.TracerSchema(n_oae_pairs=1, include_marbl_bgc=True)
         expected_tail = [n for n in MARBL_TRACER_NAMES if n not in ("temp", "salt")]
         assert schema.tracer_names == [
             "temp",
@@ -1294,7 +1295,7 @@ class TestCDRTracerSetForcing:
 
     def test_schema_requires_cdr_tracers(self):
         with pytest.raises(ValidationError, match="at least one CDR tracer"):
-            CDRTracerSchema()
+            BGCCdrLite.TracerSchema()
 
     def test_roundtrip_yaml_preserves_tracer_schema(self, tmp_path):
         grid = Grid(
@@ -1312,7 +1313,7 @@ class TestCDRTracerSetForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_tracer",
+            tracer_set="cdr_lite",
             oae_pair=2,
             tracer_fluxes={"ALK": 1.0e6},
         )
@@ -1323,10 +1324,10 @@ class TestCDRTracerSetForcing:
             releases=[release],
             tracer_schema=self.schema,
         )
-        filepath = tmp_path / "cdr_tracer.yaml"
+        filepath = tmp_path / "cdr_lite.yaml"
         cdr.to_yaml(filepath)
         restored = CDRForcing.from_yaml(filepath)
-        assert restored.tracer_set == "cdr_tracer"
+        assert restored.tracer_set == "cdr_lite"
         assert restored.tracer_schema == self.schema
         assert restored.releases[0].oae_pair == 2
         assert restored.ds.identical(cdr.ds)
@@ -1337,7 +1338,7 @@ class TestCDRTracerSetForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_tracer",
+            tracer_set="cdr_lite",
             oae_pair=1,
             tracer_fluxes={"ALK": 2.0e6},
         )
@@ -1347,7 +1348,7 @@ class TestCDRTracerSetForcing:
             releases=[release],
             tracer_schema=self.schema,
         )
-        saved_paths = cdr.save(tmp_path / "cdr_tracer_frc.nc")
+        saved_paths = cdr.save(tmp_path / "cdr_lite_frc.nc")
         ds = xr.open_dataset(saved_paths[0])
         assert ds.sizes["ntracers"] == 7
         assert ds.sizes["ncdr"] == 1

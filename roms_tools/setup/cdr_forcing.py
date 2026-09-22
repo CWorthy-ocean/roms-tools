@@ -28,6 +28,7 @@ from roms_tools.plot import (
     plot_2d_horizontal_field,
     plot_location,
 )
+from roms_tools.setup.bgc_model import BGCCdrLite, CdrLiteTracerSchema
 from roms_tools.setup.cdr_release import (
     Release,
     ReleaseType,
@@ -35,12 +36,10 @@ from roms_tools.setup.cdr_release import (
     VolumeRelease,
 )
 from roms_tools.setup.utils import (
-    CDRTracerSchema,
     add_tracer_metadata_to_ds,
     convert_to_relative_days,
     from_yaml,
     gc_dist,
-    get_cdr_role_metadata_dict,
     get_target_coords,
     get_tracer_metadata_dict,
     to_dict,
@@ -191,7 +190,7 @@ class ReleaseCollector(RootModel):
             raise ValueError(
                 f"Not all releases have the same `tracer_set`. Received: {set_list}. "
                 "All releases must use either `tracer_set='marbl'` or "
-                "`tracer_set='cdr_tracer'`."
+                "`tracer_set='cdr_lite'`."
             )
         return self
 
@@ -228,7 +227,7 @@ class CDRForcingDatasetBuilder:
         releases: ReleaseCollector,
         model_reference_date: datetime,
         release_type: ReleaseType,
-        tracer_schema: CDRTracerSchema | None = None,
+        tracer_schema: CdrLiteTracerSchema | None = None,
     ):
         """
         Initialize the dataset builder.
@@ -241,9 +240,9 @@ class CDRForcingDatasetBuilder:
             Reference date for relative time conversion.
         release_type : ReleaseType
             Type of release.
-        tracer_schema : CDRTracerSchema, optional
+        tracer_schema : CdrLiteTracerSchema, optional
             Layout of the file's tracer axis; required when the releases use
-            ``tracer_set="cdr_tracer"``.
+            ``tracer_set="cdr_lite"``.
         """
         self.releases = releases
         self.model_reference_date = model_reference_date
@@ -274,7 +273,7 @@ class CDRForcingDatasetBuilder:
                 tracer_key = "cdr_trcflx"
                 tracer_data = release.tracer_fluxes
 
-            # Re-key role-based tracer data (tracer_set="cdr_tracer") onto the
+            # Re-key role-based tracer data (tracer_set="cdr_lite") onto the
             # global tracer names of the file's tracer axis.
             tracer_data = release._map_tracers_to_schema(
                 tracer_data, self.tracer_schema
@@ -427,11 +426,11 @@ class CDRForcing(BaseModel):
     """The reference date for the ROMS simulation."""
     releases: ReleaseCollector
     """A list of one or more CDR release objects."""
-    tracer_schema: CDRTracerSchema | None = None
-    """Layout of the forcing file's tracer axis for ``tracer_set="cdr_tracer"``
+    tracer_schema: CdrLiteTracerSchema | None = None
+    """Layout of the forcing file's tracer axis for ``tracer_set="cdr_lite"``
     releases; must mirror the ROMS namelist counts (``nt_passive``,
     ``nt_cdr_oae``, ``nt_cdr_dor``). Required iff releases use
-    ``tracer_set="cdr_tracer"``."""
+    ``tracer_set="cdr_lite"``."""
 
     # this is defined during init and shouldn't be serialized
     _ds: xr.Dataset = None
@@ -464,11 +463,11 @@ class CDRForcing(BaseModel):
 
     def _validate_tracer_schema(self) -> None:
         """Cross-validate the tracer schema against the releases' targeting."""
-        if self.tracer_set == "cdr_tracer":
+        if self.tracer_set == "cdr_lite":
             if self.tracer_schema is None:
                 raise ValueError(
-                    'Releases with tracer_set="cdr_tracer" require `tracer_schema` '
-                    "(a CDRTracerSchema) on CDRForcing to define the file's tracer axis."
+                    'Releases with tracer_set="cdr_lite" require `tracer_schema` '
+                    "(a BGCCdrLite.TracerSchema) on CDRForcing to define the file's tracer axis."
                 )
             for release in self.releases:
                 # These raise if the release targets a pair/slot outside the schema.
@@ -481,7 +480,7 @@ class CDRForcing(BaseModel):
                     raise ValueError(f"Release '{release.name}': {err}") from err
         elif self.tracer_schema is not None:
             raise ValueError(
-                '`tracer_schema` is only valid when releases use tracer_set="cdr_tracer".'
+                '`tracer_schema` is only valid when releases use tracer_set="cdr_lite".'
             )
 
     @property
@@ -948,8 +947,8 @@ class CDRForcing(BaseModel):
         integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
 
         # Add a row of units only for integrated tracers
-        if self.tracer_set == "cdr_tracer":
-            tracer_meta = get_cdr_role_metadata_dict(unit_type="integrated")
+        if self.tracer_set == "cdr_lite":
+            tracer_meta = BGCCdrLite.release_metadata(unit_type="integrated")
         else:
             tracer_meta = get_tracer_metadata_dict(
                 tracer_set=self.tracer_set, unit_type="integrated"

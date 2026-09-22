@@ -1,5 +1,66 @@
 # Release notes
 
+## 5.0.0
+
+### Breaking Changes
+
+* `BoundaryForcing` is now a wrapper over multiple constituent sources; the previous single-source class is available as `BoundaryForcingSource`. The wrapper takes the physics dataset as `source` plus a list of `bgc_sources`, exposes the constituent objects as `.physics` and `.bgc` (a list), and does **not** accept `type=` or `physics_forcing=` or provide `.ds`/`.plot()` of its own. Existing single-source code keeps working by renaming the class to `BoundaryForcingSource`. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `BoundaryForcing.save()` is now `save(physics_filepath, bgc_filepaths=None, group=True, format=..., serialize_dask=None)` and returns `(physics_paths, bgc_paths)`, where `bgc_paths` is a `list[list[Path]]` of the files actually written, one list per source in `.bgc` order. Each BGC source is written to its own file (ROMS's `frcfiles` accepts a list), so unlike initial conditions there is no merge into one dataset. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `bgc_model` is required whenever `bgc_source` or `bgc_sources` is given, on both `InitialConditions` and `BoundaryForcing`; omitting it raises `ValueError`. Pass `bgc_model=BGCMarbl` to reproduce the previous behaviour. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `InitialConditions` is a smaller change: it keeps `source`, `bgc_source`, `use_vars`, `.ds` and `.plot()`, and gains `bgc_sources`, `bgc_model`, `.physics` and `.bgc`; existing code needs only the `bgc_model` addition. Its single-source class is available as `InitialConditionsSource`. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Two BGC sources supplying the same tracer (after derivation) is now a `ValueError`; partition sources with `use_vars`. Derivation defers to any source that already supplies a tracer (an explicit `Lig` suppresses `Fe -> Lig` elsewhere). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Tracer unit conversion for WOA23, GLODAP and ESPER (µmol kg⁻¹ → mmol m⁻³) uses in-situ density (TEOS-10 `gsw.rho` at the pressure of each depth). Deep values increase by up to ~1.7% at 4000 m relative to a σ₀-based conversion. The density coordinate used for `density`/`density_mld` vertical interpolation is unchanged (σ₀). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `BGCModel` is an ABC: `process_bgc_fields` is abstract, concrete subclasses must declare a non-empty `_TRACER_VARS`, and `process_bgc_fields()` no longer accepts `filepath=`/`serialize_dask=` (saving is the wrapper's job). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Pre-5.0 YAML files fail with an explicit migration message: a `BoundaryForcingSource`-shaped file (carrying `type`/`physics_forcing`) must be loaded with `BoundaryForcingSource.from_yaml`, and an initial-conditions file with `bgc_source(s)` needs `bgc_model: BGCMarbl` added. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Derived tracers are computed after the float32 cast, so existing single-source initial-condition output changes by at most one float32 ULP. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* New runtime dependency: `threadpoolctl`. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+
+### New Features
+
+* `InitialConditions` and `BoundaryForcing` accept **multiple BGC sources** through `bgc_sources`, a list of `{"source": {...}, "use_vars": [...], "bgc_interpolation_method": ...}` entries. Each entry is regridded independently and narrowed with `use_vars`, so a run can draw `NO3`/`PO4`/`SiO3`/`O2` from one dataset and `DIC`/`ALK`/`Fe` from another. `bgc_source` is still accepted for a single source. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `"WOA"`: World Ocean Atlas 2023 nutrients and oxygen (`NO3`, `PO4`, `SiO3`, `O2`) read directly from NCEI as a gridded BGC source, with the matching monthly T/S used for the unit conversion and as the source density coordinate. WOA23 publishes these on the 1° grid only. Monthly fields stop at 800 m (nutrients) and 1500 m (oxygen, T/S), so each variable is extended onto the 102-level annual grid per a new `deep_fill` option: `"annual_blend"` (default) splices the annual climatology underneath with a linear taper centred on each variable's own seam (half-width `deep_blend_halfwidth`, default 100 m), while `"ffill"` persists the deepest monthly value downward. Omitting `path` downloads the files to the `roms-tools` cache via the new `download_woa23_bgc()` helper. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `"GLODAP"`: the GLODAPv2.2016b mapped climatology (`ALK`, `DIC`, `NO3`, `PO4`, `SiO3`, `O2`) as a static gridded BGC source; optional temperature/salinity files drive the unit conversion (a uniform 1025 kg m⁻³ fallback is used, with a warning, when they are absent). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `"constants"`: depth-invariant inline tracer values (`{"name": "constants", "constants": {"NO3": 24.0, ...}}`). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Static sources (GLODAP, constants, ESPER) have no time axis: for boundary forcing two records bracketing the start/end times are written so values stay constant over the run; for initial conditions the fields take the physics time. Passing `climatology=True` for them is rejected at construction. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `"ESPER"` (**experimental**): derives `ALK`, `DIC`, `NO3`, `PO4`, `SiO3`, `O2` from the physics temperature and salinity already on the ROMS grid using PyESPER's empirical routines, with configurable `method` (`lir`/`nn`/`mixed`) and `equation` (8/16). Requires CWorthy's PyESPER fork installed from source; a missing or upstream PyESPER fails up front, before any data is loaded, with install guidance. Only the tracers named in `use_vars` are estimated. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `BGCModel` / `BGCMarbl`: the BGC tracer set is completed by a pluggable model class rather than hard-coded helpers, with every MARBL tracer derived from one rule table (identity copies `DIC -> DIC_ALT_CO2`, `ALK -> ALK_ALT_CO2`; derivations `Fe -> Lig`, `CHL -> the phytoplankton/zooplankton set`; constant open-ocean fills for the rest). Unsourced tracers with no background value are set to zero with a warning. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `roms_tools.utils.save_datasets` gained `serialize_dask` and `show_progress`, and the forcing objects' `save()` methods gained `serialize_dask`: a manual low-memory tool that writes one dask task at a time. Off by default. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* New public exports, all in the API reference: `BoundaryForcingSource`, `InitialConditionsSource`, `BGCModel`, `BGCMarbl`, `compute_potential_density`, `compute_in_situ_density`, `WOABGCDataset`, `GLODAPv2BGCDataset`, `download_woa23_bgc`. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+
+### Bug Fixes
+
+* `RiverForcing.from_yaml` no longer rejects rivers that auto-discovery placed on a coastal cell along the domain edge, so YAML files written by `RiverForcing` always round-trip. ([#676](https://github.com/CWorthy-ocean/roms-tools/pull/676))
+* `BoundaryForcing.save()` ignored `group` and `format` for BGC files (they came out NETCDF4 and monthly-grouped regardless) and returned the requested rather than the written paths. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `serialize_dask=True` raised `ValueError` whenever `NUMBA_NUM_THREADS` was pinned below the core count, i.e. on the HPC allocations it targets; numba threads are now capped at that ceiling and BLAS threads are left alone. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Constant tracer fills silently did nothing when the first BGC object had no tracer to use as a template, while logging that they had filled. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* The WOA `annual_blend` turned a valid monthly value into NaN wherever the annual field was NaN (and vice versa). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `roms_tools_git_commit` provenance could record the *user's* repository commit for installs inside a project-local environment (`.pixi`, `.venv`), and wrote the string `'None'` into YAML headers when unknown; it now runs only inside a checkout containing `roms_tools/`, once per process, and emits `null`. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Unknown `bgc_sources` item keys (e.g. `use_var`) were silently ignored and round-tripped into YAML; they now raise. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `use_vars` on a `type="physics"` source was silently ignored; it now raises. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* A failed PyESPER import left stale entries on `sys.path` and in `sys.modules`, so a corrected `path` could not be retried in the same process. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* WOA downloads had no timeout and retried 4xx responses; they now time out, fail fast on client errors with a pre-staging hint, verify `Content-Length`, and never leave a `.part` file. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Regenerated the stale `initial_conditions_with_bgc_from_climatology` reference store; it had been baked from a dirty working tree and never matched a committed state (differences were ≤1 float32 ULP). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+
+### Improvements
+
+* Added code so that ETOPO2022 can be used with ROMS-Tools ([#668](https://github.com/CWorthy-ocean/roms-tools/pull/668))
+* `import roms_tools` is about 1.5 seconds faster after the first import in a given environment (about 3.4 s to 1.9 s on a laptop), because the great-circle-distance and distance-to-land numba kernels are now loaded from numba's on-disk cache instead of being recompiled in every process. ([#674](https://github.com/CWorthy-ocean/roms-tools/pull/674))
+* Datasets written with `group=True` are split into per-month (or per-year) files by contiguous index slices rather than `xarray.groupby`, whose fancy indexing re-blocked the dask array and cost roughly 2.8× the necessary computation on a year-long boundary write. Time axes that do not form contiguous runs fall back to the previous path. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Merged initial-condition output records the contributing BGC sources (`bgc_sources` global attribute, with each source's `use_vars`). ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Dataclass equality on the forcing classes compares parameters, not the computed datasets, so `from_yaml` round-trip assertions are meaningful. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `WOABGCDataset` loads eagerly when `use_dask=False`, like every other dataset; its file table is derived from `download.WOA23_BGC_VARIABLES`. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* The wrappers derive the constructor arguments they forward to the physics source and each BGC companion from the two dataclasses' fields (`forwardable_fields`) instead of hand-maintained lists; `bgc_model` is validated before the physics source is built. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* Git provenance lookups run once per process instead of twice per saved object. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+
+### Miscellaneous
+
+* Update datasets list to include ETOPO2022 ([#668](https://github.com/CWorthy-ocean/roms-tools/pull/668))
+* The tagged GitHub release is now created automatically when the "Finalize release notes for `<tag>`" PR is merged, using the release notes just finalized in the docs as the release body — instead of the manual tag-and-publish step with GitHub's weaker auto-generated summary. ([#670](https://github.com/CWorthy-ocean/roms-tools/pull/670))
+* Merging the release-notes finalization PR no longer causes the release-notes updater to re-open a spurious "Unreleased" section. ([#670](https://github.com/CWorthy-ocean/roms-tools/pull/670))
+* Docs: `api.rst` gains the source classes, a Biogeochemistry section and the new dataset/utility entries; `datasets_overview.rst` gains WOA23 and GLODAPv2 sections and states the unit-conversion convention; `boundary_forcing.ipynb` and `initial_conditions.ipynb` gain a multi-source Quick Start; `end_to_end.ipynb` and `using_dask.ipynb` are updated for the split classes. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* `ci/environment.yml` lists `threadpoolctl`. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+* ESPER tests are gated behind `ROMS_TOOLS_PYESPER_PATH` (skipped, with that reason, when unset); the previous default pointed at a developer's home directory. ([#672](https://github.com/CWorthy-ocean/roms-tools/pull/672))
+
 ## 4.1.1
 
 ### New Features

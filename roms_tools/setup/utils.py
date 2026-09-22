@@ -1444,13 +1444,14 @@ class CDRTracerSchema(BaseModel):
 
 def get_cdr_role_metadata_dict(
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
-    include_physics: bool = True,
 ) -> dict[str, dict[str, str]]:
     """Metadata for the role keys used by ``tracer_set="cdr_tracer"`` releases.
 
     Releases address their assigned tracers via the role keys ``"ALK"`` /
     ``"DIC"`` (the release's OAE pair) and ``"DOR_DIC"`` (its DOR slot),
-    rather than by global tracer names like ``CDR_OAE_ALK7``.
+    rather than by global tracer names like ``CDR_OAE_ALK7``. Physics tracers
+    (temp, salt) are not roles: CDR tracer experiments leave the physics
+    untouched, so their rows in the forcing file are always zero.
     """
     unit_key = {
         "concentration": "units",
@@ -1459,13 +1460,6 @@ def get_cdr_role_metadata_dict(
     }[unit_type]
 
     role_dict = {}
-    if include_physics:
-        metadata = get_variable_metadata()
-        for name in ("temp", "salt"):
-            role_dict[name] = {
-                "units": metadata[name].get(unit_key),
-                "long_name": metadata[name]["long_name"],
-            }
     role_dict[CDR_ROLE_ALK] = {
         "units": _ALK_UNITS[unit_key],
         "long_name": "alkalinity of the release's OAE tracer pair",

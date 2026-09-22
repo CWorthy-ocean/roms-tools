@@ -322,17 +322,17 @@ class TestReleaseCollector:
         assert collector.release_type == ReleaseType.tracer_perturbation
 
     def test_raises_inconsistent_tracer_set(self):
-        marbl = VolumeRelease(
-            name="marbl", lat=66, lon=-25, depth=50, volume_fluxes=100
+        marbl = TracerPerturbation(
+            name="marbl", lat=66, lon=-25, depth=50, tracer_fluxes={"ALK": 100.0}
         )
-        cdr = VolumeRelease(
+        cdr = TracerPerturbation(
             name="cdr",
             lat=66,
             lon=-25,
             depth=50,
-            volume_fluxes=100,
             tracer_set="cdr_tracer",
             oae_pair=1,
+            tracer_fluxes={"ALK": 100.0},
         )
         with pytest.raises(ValidationError, match="tracer_set"):
             ReleaseCollector(releases=[marbl, cdr])
@@ -341,14 +341,14 @@ class TestReleaseCollector:
         collector = ReleaseCollector(releases=[self.volume_release])
         assert collector.tracer_set == "marbl"
 
-        cdr = VolumeRelease(
+        cdr = TracerPerturbation(
             name="cdr",
             lat=66,
             lon=-25,
             depth=50,
-            volume_fluxes=100,
             tracer_set="cdr_tracer",
             oae_pair=1,
+            tracer_fluxes={"ALK": 100.0},
         )
         collector = ReleaseCollector(releases=[cdr])
         assert collector.tracer_set == "cdr_tracer"
@@ -1066,28 +1066,39 @@ class TestCDRForcing:
 
 
 class TestCDRTracerSetForcing:
-    """End-to-end CDRForcing tests for tracer_set='cdr_tracer'."""
+    """End-to-end CDRForcing tests for tracer_set='cdr_tracer'.
+
+    Only TracerPerturbation supports cdr_tracer: the physics must remain
+    untouched, so volume releases are rejected and the temp/salt rows of the
+    forcing file are always zero.
+    """
 
     def setup_method(self):
         self.start_time = datetime(2022, 1, 1)
         self.end_time = datetime(2022, 1, 31)
         self.schema = CDRTracerSchema(n_oae_pairs=2, n_dor=1)
 
-    def test_volume_release_dataset_has_physics_and_cdr_tracers(self):
-        release = VolumeRelease(
+    def test_volume_release_rejected(self):
+        with pytest.raises(ValidationError, match="not supported on VolumeRelease"):
+            VolumeRelease(
+                name="oae",
+                lat=66.0,
+                lon=-25.0,
+                depth=50.0,
+                tracer_set="cdr_tracer",
+                oae_pair=1,
+                volume_fluxes=10.0,
+            )
+
+    def test_perturbation_dataset_keeps_physics_rows_zero(self):
+        release = TracerPerturbation(
             name="oae",
             lat=66.0,
             lon=-25.0,
             depth=50.0,
             tracer_set="cdr_tracer",
             oae_pair=1,
-            volume_fluxes=10.0,
-            tracer_concentrations={
-                "temp": 20.0,
-                "salt": 1.0,
-                "ALK": 2000.0,
-                "DIC": 0.0,
-            },
+            tracer_fluxes={"ALK": 2.0e6},
         )
         cdr = CDRForcing(
             start_time=self.start_time,
@@ -1106,16 +1117,15 @@ class TestCDRTracerSetForcing:
             "CDR_OAE_DIC2",
             "CDR_DOR_DIC1",
         ]
-        assert "cdr_volume" in cdr.ds
-        assert "cdr_tracer" in cdr.ds
-        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=0).values, 20.0)
-        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=1).values, 1.0)
-        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=2).values, 2000.0)
-        # everything this release does not feed stays zero
-        assert np.allclose(cdr.ds.cdr_tracer.isel(ntracers=slice(3, None)).values, 0.0)
+        assert "cdr_trcflx" in cdr.ds
+        assert "cdr_volume" not in cdr.ds
+        # physics rows (temp, salt) stay zero; only the targeted pair is fed
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=[0, 1]).values, 0.0)
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=2).values, 2.0e6)
+        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=slice(3, None)).values, 0.0)
 
     def test_requires_tracer_schema(self):
-        release = VolumeRelease(
+        release = TracerPerturbation(
             name="oae",
             lat=66.0,
             lon=-25.0,
@@ -1131,8 +1141,8 @@ class TestCDRTracerSetForcing:
             )
 
     def test_rejects_schema_with_marbl_releases(self):
-        release = VolumeRelease(
-            name="marbl", lat=66.0, lon=-25.0, depth=50.0, volume_fluxes=100
+        release = TracerPerturbation(
+            name="marbl", lat=66.0, lon=-25.0, depth=50.0, tracer_fluxes={"ALK": 100.0}
         )
         with pytest.raises(ValidationError, match="only valid when"):
             CDRForcing(
@@ -1143,7 +1153,7 @@ class TestCDRTracerSetForcing:
             )
 
     def test_rejects_out_of_range_pair(self):
-        release = VolumeRelease(
+        release = TracerPerturbation(
             name="oae",
             lat=66.0,
             lon=-25.0,
@@ -1322,15 +1332,14 @@ class TestCDRTracerSetForcing:
         assert restored.ds.identical(cdr.ds)
 
     def test_save(self, tmp_path):
-        release = VolumeRelease(
+        release = TracerPerturbation(
             name="oae",
             lat=66.0,
             lon=-25.0,
             depth=50.0,
             tracer_set="cdr_tracer",
             oae_pair=1,
-            volume_fluxes=10.0,
-            tracer_concentrations={"ALK": 2000.0},
+            tracer_fluxes={"ALK": 2.0e6},
         )
         cdr = CDRForcing(
             start_time=self.start_time,

@@ -524,7 +524,7 @@ class TestReleaseAccounting:
             vr._do_accounting(roms_stamps, self.start)
 
 
-class TestCDRSimpleTracerSet:
+class TestCDRTracerSet:
     """Tests for the non-MARBL two-tracer CDR schema."""
 
     def setup_method(self):
@@ -533,7 +533,7 @@ class TestCDRSimpleTracerSet:
             "lat": 0.0,
             "lon": 0.0,
             "depth": 10.0,
-            "tracer_set": "cdr_simple",
+            "tracer_set": "cdr_tracer",
         }
 
     def test_volume_release_fills_physics_and_cdr_tracers(self):
@@ -617,9 +617,9 @@ class TestCDRSimpleTracerSet:
 
     def test_get_tracer_metadata(self):
         expected = ["temp", "salt", "CDR_tracer_1", "CDR_tracer_2"]
-        meta = VolumeRelease.get_tracer_metadata(tracer_set="cdr_simple")
+        meta = VolumeRelease.get_tracer_metadata(tracer_set="cdr_tracer")
         assert list(meta.keys()) == expected
-        meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_simple")
+        meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_tracer")
         assert list(meta_flux.keys()) == expected
         assert meta["CDR_tracer_1"]["units"] == "meq/m^3"
         assert meta_flux["CDR_tracer_1"]["units"] == "meq/s"

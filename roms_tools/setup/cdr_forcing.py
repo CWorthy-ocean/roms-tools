@@ -189,7 +189,7 @@ class ReleaseCollector(RootModel):
             raise ValueError(
                 f"Not all releases have the same `tracer_set`. Received: {set_list}. "
                 "All releases must use either `tracer_set='marbl'` or "
-                "`tracer_set='cdr_simple'`."
+                "`tracer_set='cdr_tracer'`."
             )
         return self
 

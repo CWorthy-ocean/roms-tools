@@ -331,7 +331,7 @@ class TestReleaseCollector:
             lon=-25,
             depth=50,
             volume_fluxes=100,
-            tracer_set="cdr_simple",
+            tracer_set="cdr_tracer",
         )
         with pytest.raises(ValidationError, match="tracer_set"):
             ReleaseCollector(releases=[marbl, simple])
@@ -346,10 +346,10 @@ class TestReleaseCollector:
             lon=-25,
             depth=50,
             volume_fluxes=100,
-            tracer_set="cdr_simple",
+            tracer_set="cdr_tracer",
         )
         collector = ReleaseCollector(releases=[simple])
-        assert collector.tracer_set == "cdr_simple"
+        assert collector.tracer_set == "cdr_tracer"
 
 
 class TestCDRForcingDatasetBuilder:
@@ -1063,8 +1063,8 @@ class TestCDRForcing:
         )
 
 
-class TestCDRSimpleForcing:
-    """End-to-end CDRForcing tests for tracer_set='cdr_simple'."""
+class TestCDRTracerSetForcing:
+    """End-to-end CDRForcing tests for tracer_set='cdr_tracer'."""
 
     def setup_method(self):
         self.start_time = datetime(2022, 1, 1)
@@ -1076,7 +1076,7 @@ class TestCDRSimpleForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_simple",
+            tracer_set="cdr_tracer",
             volume_fluxes=10.0,
             tracer_concentrations={
                 "temp": 20.0,
@@ -1090,7 +1090,7 @@ class TestCDRSimpleForcing:
             end_time=self.end_time,
             releases=[release],
         )
-        assert cdr.tracer_set == "cdr_simple"
+        assert cdr.tracer_set == "cdr_tracer"
         assert cdr.ds.sizes["ntracers"] == 4
         assert list(cdr.ds.tracer_name.values) == [
             "temp",
@@ -1111,7 +1111,7 @@ class TestCDRSimpleForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_simple",
+            tracer_set="cdr_tracer",
             tracer_fluxes={"CDR_tracer_2": -1.0e6},
         )
         cdr = CDRForcing(
@@ -1132,7 +1132,7 @@ class TestCDRSimpleForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_simple",
+            tracer_set="cdr_tracer",
             tracer_fluxes={"CDR_tracer_1": 1.0e6, "CDR_tracer_2": -5.0e5},
         )
         cdr = CDRForcing(
@@ -1159,7 +1159,7 @@ class TestCDRSimpleForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            tracer_set="cdr_simple",
+            tracer_set="cdr_tracer",
             tracer_fluxes={"CDR_tracer_1": 1.0e6},
         )
         cdr = CDRForcing(
@@ -1168,11 +1168,11 @@ class TestCDRSimpleForcing:
             end_time=self.end_time,
             releases=[release],
         )
-        filepath = tmp_path / "cdr_simple.yaml"
+        filepath = tmp_path / "cdr_tracer.yaml"
         cdr.to_yaml(filepath)
         restored = CDRForcing.from_yaml(filepath)
-        assert restored.tracer_set == "cdr_simple"
-        assert restored.releases[0].tracer_set == "cdr_simple"
+        assert restored.tracer_set == "cdr_tracer"
+        assert restored.releases[0].tracer_set == "cdr_tracer"
         assert restored.ds.sizes["ntracers"] == 4
         assert list(restored.ds.tracer_name.values) == [
             "temp",

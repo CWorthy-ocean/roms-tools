@@ -230,9 +230,9 @@ class Release(BaseModel):
         Time points of the release events. Must be strictly increasing and within the simulation window.
     time_interpolation : bool, optional
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
-    tracer_set : {"marbl", "cdr_simple"}, optional
+    tracer_set : {"marbl", "cdr_tracer"}, optional
         Tracer schema. ``"marbl"`` (default) uses the full MARBL suite;
-        ``"cdr_simple"`` uses ``temp``, ``salt``, ``CDR_tracer_1`` (alkalinity),
+        ``"cdr_tracer"`` uses ``temp``, ``salt``, ``CDR_tracer_1`` (alkalinity),
         and ``CDR_tracer_2`` (DIC) for non-MARBL OAE/DOR setups. ROMS still
         needs ``temp`` / ``salt`` on volume releases; they are not MARBL-only.
     """
@@ -254,7 +254,7 @@ class Release(BaseModel):
     time_interpolation: bool = False
     """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
     tracer_set: TracerSet = "marbl"
-    """Tracer schema: ``"marbl"`` (full MARBL suite) or ``"cdr_simple"``
+    """Tracer schema: ``"marbl"`` (full MARBL suite) or ``"cdr_tracer"``
     (``temp``, ``salt``, ``CDR_tracer_1``, ``CDR_tracer_2`` for non-MARBL OAE/DOR)."""
 
     # this should be defined by subclasses
@@ -442,7 +442,7 @@ class VolumeRelease(Release):
     """Dictionary of tracer names and their concentration values.
 
     For ``tracer_set="marbl"``, all values must be non-negative.
-    For ``tracer_set="cdr_simple"``, ``CDR_tracer_2`` (DIC) may be negative (DOR);
+    For ``tracer_set="cdr_tracer"``, ``CDR_tracer_2`` (DIC) may be negative (DOR);
     ``CDR_tracer_1`` (alkalinity) must remain non-negative.
     """
 
@@ -460,9 +460,9 @@ class VolumeRelease(Release):
                 filled[tracer_name] = tracer_concentrations[tracer_name]
                 continue
             if tracer_name in ["temp", "salt"]:
-                # Physics tracers always get river/physics defaults (also for cdr_simple).
+                # Physics tracers always get river/physics defaults (also for cdr_tracer).
                 filled[tracer_name] = defaults[tracer_name]
-            elif tracer_set == "cdr_simple":
+            elif tracer_set == "cdr_tracer":
                 filled[tracer_name] = 0.0
             else:
                 fill_values = info.data["fill_values"]
@@ -489,11 +489,11 @@ class VolumeRelease(Release):
 
     @model_validator(mode="after")
     def _check_concentration_signs(self) -> "VolumeRelease":
-        """Enforce non-negativity except for CDR_tracer_2 in cdr_simple mode."""
+        """Enforce non-negativity except for CDR_tracer_2 in cdr_tracer mode."""
         for tracer_name, conc in self.tracer_concentrations.items():
             values = conc.values if isinstance(conc, Concentration) else conc
             vals = values if isinstance(values, list) else [values]
-            if self.tracer_set == "cdr_simple" and tracer_name == "CDR_tracer_2":
+            if self.tracer_set == "cdr_tracer" and tracer_name == "CDR_tracer_2":
                 continue
             if any(v < 0 for v in vals):
                 raise ValueError(

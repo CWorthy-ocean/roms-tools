@@ -1229,14 +1229,14 @@ MARBL_TRACER_NAMES = (
 
 # Non-MARBL CDR suite: ROMS physics tracers (temp, salt) plus two CDR tracers
 # for OAE / DOR with prescribed eta/beta gas exchange.
-CDR_SIMPLE_TRACER_NAMES = (
+CDR_TRACER_SET_NAMES = (
     "temp",
     "salt",
     "CDR_tracer_1",
     "CDR_tracer_2",
 )
 
-TracerSet = Literal["marbl", "cdr_simple"]
+TracerSet = Literal["marbl", "cdr_tracer"]
 
 
 def resolve_tracer_names(
@@ -1251,17 +1251,17 @@ def resolve_tracer_names(
     include_bgc : bool, optional
         Used when ``tracer_set`` is ``None`` or ``"marbl"``. If True (default),
         returns the full MARBL list; if False, returns only ``temp`` and ``salt``.
-    tracer_set : {"marbl", "cdr_simple"}, optional
-        Explicit CDR/river tracer schema. ``"cdr_simple"`` returns ``temp``,
+    tracer_set : {"marbl", "cdr_tracer"}, optional
+        Explicit CDR/river tracer schema. ``"cdr_tracer"`` returns ``temp``,
         ``salt``, and the two non-MARBL CDR tracers. When omitted, ``include_bgc``
         selects the MARBL subset.
     """
-    if tracer_set == "cdr_simple":
-        return list(CDR_SIMPLE_TRACER_NAMES)
+    if tracer_set == "cdr_tracer":
+        return list(CDR_TRACER_SET_NAMES)
     if tracer_set == "marbl" or tracer_set is None:
         return list(MARBL_TRACER_NAMES) if include_bgc else ["temp", "salt"]
     raise ValueError(
-        f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_simple".'
+        f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_tracer".'
     )
 
 
@@ -1269,10 +1269,10 @@ def get_tracer_defaults_for_set(tracer_set: TracerSet = "marbl") -> dict[str, fl
     """Return default concentrations for the requested tracer schema.
 
     For ``"marbl"``, values come from ``river_tracer_defaults.nc``.
-    For ``"cdr_simple"``, ``temp`` / ``salt`` use the same physics defaults as
+    For ``"cdr_tracer"``, ``temp`` / ``salt`` use the same physics defaults as
     MARBL; ``CDR_tracer_1`` / ``CDR_tracer_2`` default to ``0.0``.
     """
-    if tracer_set == "cdr_simple":
+    if tracer_set == "cdr_tracer":
         marbl_defaults = get_tracer_defaults()
         return {
             "temp": marbl_defaults["temp"],
@@ -1283,7 +1283,7 @@ def get_tracer_defaults_for_set(tracer_set: TracerSet = "marbl") -> dict[str, fl
     if tracer_set == "marbl":
         return get_tracer_defaults()
     raise ValueError(
-        f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_simple".'
+        f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_tracer".'
     )
 
 
@@ -1302,12 +1302,12 @@ def get_tracer_metadata_dict(
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
-        Ignored when ``tracer_set="cdr_simple"``.
+        Ignored when ``tracer_set="cdr_tracer"``.
 
     unit_type : str
         One of "concentration" (default), "flux", or "integrated".
 
-    tracer_set : {"marbl", "cdr_simple"}, optional
+    tracer_set : {"marbl", "cdr_tracer"}, optional
         Tracer schema. Defaults to MARBL behavior via ``include_bgc``.
 
     Returns
@@ -1355,11 +1355,11 @@ def add_tracer_metadata_to_ds(
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
-        Ignored when ``tracer_set="cdr_simple"``.
+        Ignored when ``tracer_set="cdr_tracer"``.
     with_flux_units : bool, optional
         If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
         If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
-    tracer_set : {"marbl", "cdr_simple"}, optional
+    tracer_set : {"marbl", "cdr_tracer"}, optional
         Tracer schema. Defaults to MARBL behavior via ``include_bgc``.
 
     Returns

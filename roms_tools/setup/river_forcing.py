@@ -315,30 +315,18 @@ def _sample_points_chunkwise(
     nearest_row: np.ndarray,
     nearest_col: np.ndarray,
 ) -> xr.DataArray:
-    """Dask-chunk-streaming point sample used by `_sample_tair_at_river_mouths`
-    whenever `tair` is dask-backed.
+    """Point-samples air temperature at river mouths, streaming one Dask chunk at a time.
 
-    Plain vectorized ``.isel()`` materializes far more of the source than
-    needed, for a source chunked one full lat/lon slab per time step (e.g.
-    ARCO ERA5, ``(1, 721, 1440)``): a 5-year sample OOMs past 230GB with
-    ``.isel()``, but completes in ~6 min under 21GB here. Reducing each
-    chunk to its sampled points immediately, rather than gathering them all
-    first, bounds peak memory to a handful of in-flight chunks, not the
-    full time range requested.
+    Assumes ``tair`` is chunked only along dims other than ``lat_name``/``lon_name``
+    (e.g. one chunk per time step, each holding the full lat/lon slab) — sampling
+    each chunk as it arrives then bounds memory to a handful of in-flight chunks,
+    regardless of the time range requested.
 
-    Uses ``dask.array.map_blocks`` rather than the package's usual
-    ``xr.apply_ufunc(dask="parallelized")`` idiom (see e.g.
-    ``fill.nearest_neighbor_fill``): ``apply_ufunc`` requires its core dims
-    (here ``lat_name``/``lon_name``) to already be single-chunked, and
-    errors otherwise -- true for ARCO, not guaranteed for every ERA5 source
-    this is called on. ``map_blocks`` auto-consolidates a multi-chunked axis
-    listed in ``drop_axis`` instead of erroring.
-
-    Sampled values match ``.isel()``; dimension *order* may not, since
-    ``lat_name``/``lon_name`` always move to the end before sampling.
-    Harmless here: ``tair`` is always ``(time, latitude, longitude)`` and
-    downstream code accesses dims by name.
-
+    Uses ``map_blocks`` instead of the usual ``apply_ufunc(dask="parallelized")``
+    because ``apply_ufunc`` needs single-chunked core dims, which isn't guaranteed
+    here (``ensure_dimension_is_ascending`` can fragment chunking when it reverses
+    a descending-latitude source like ERA5).
+    
     Parameters
     ----------
     tair : xr.DataArray
@@ -356,6 +344,14 @@ def _sample_points_chunkwise(
         depending on ``lat_name``/``lon_name`` without being one of them
         (e.g. a 2-D auxiliary coordinate) isn't carried over and will raise.
     """
+    # Output dims may get reordered (``nriver`` moves last) — 
+    # callers must pass ``(time, latitude, longitude)``
+    if tair.dims[-2:] != (lat_name, lon_name):
+        raise ValueError(
+            f"_sample_points_chunkwise assumes {lat_name!r}/{lon_name!r} are already "
+            f"the trailing dims of `tair`; got dims={tair.dims!r}"
+        )
+
     other_dims = [d for d in tair.dims if d not in (lat_name, lon_name)]
     tair = tair.transpose(*other_dims, lat_name, lon_name)
     darr = tair.data

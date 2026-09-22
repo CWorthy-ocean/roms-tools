@@ -38,6 +38,9 @@ import xarray as xr
 
 from roms_tools.setup.utils import get_variable_metadata
 
+#: Physical (non-BGC) tracers that lead every ROMS tracer axis.
+PHYSICS_TRACER_NAMES: tuple[str, str] = ("temp", "salt")
+
 
 def bgc_variable_info(var_names) -> dict[str, dict]:
     """Generic per-variable metadata for a set of BGC variable names.
@@ -78,7 +81,14 @@ class BGCModel(ABC):
 
     name: str = "generic"
 
-    # Tracers written to ROMS output. Subclasses override.
+    #: Canonical ordered ROMS tracer axis for this model: PHYSICS_TRACER_NAMES
+    #: first, then the model's BGC tracers in on-disk ``ntracers`` order.
+    #: LOAD-BEARING: river/CDR forcing files encode this order positionally
+    #: against the ROMS build's tracer index space. Subclasses override.
+    TRACER_NAMES: ClassVar[tuple[str, ...]] = PHYSICS_TRACER_NAMES
+
+    # Tracers written to ROMS output. Subclasses override (typically derived
+    # from TRACER_NAMES).
     _TRACER_VARS: frozenset[str] = frozenset()
     # Interpretable inputs that are *not* themselves written to output
     # (e.g. total chlorophyll CHL, which is expanded into per-PFT tracers).
@@ -91,12 +101,29 @@ class BGCModel(ABC):
         # `process_bgc_fields` is an intermediate abstract class and may leave
         # the tracer set for its own subclasses to fill in.
         still_abstract = getattr(cls.process_bgc_fields, "__isabstractmethod__", False)
-        if not still_abstract and not cls._TRACER_VARS:
-            raise TypeError(
-                f"{cls.__name__} must declare a non-empty `_TRACER_VARS` frozenset "
-                "(the tracers it writes to ROMS); an empty set would make "
-                "process_bgc_fields() derive and fill nothing."
-            )
+        if not still_abstract:
+            if not cls._TRACER_VARS:
+                raise TypeError(
+                    f"{cls.__name__} must declare a non-empty `_TRACER_VARS` frozenset "
+                    "(the tracers it writes to ROMS); an empty set would make "
+                    "process_bgc_fields() derive and fill nothing."
+                )
+            if (
+                tuple(cls.TRACER_NAMES[: len(PHYSICS_TRACER_NAMES)])
+                != PHYSICS_TRACER_NAMES
+            ):
+                raise TypeError(
+                    f"{cls.__name__}.TRACER_NAMES must start with "
+                    f"{PHYSICS_TRACER_NAMES}."
+                )
+            if frozenset(cls.TRACER_NAMES) - set(PHYSICS_TRACER_NAMES) != (
+                cls._TRACER_VARS
+            ):
+                raise TypeError(
+                    f"{cls.__name__}.TRACER_NAMES and _TRACER_VARS disagree: the "
+                    "ordered axis must contain exactly the physics tracers plus "
+                    "the model's tracer set."
+                )
 
     def tracer_vars(self) -> frozenset[str]:
         """Return the set of tracer variables written to ROMS output."""
@@ -197,42 +224,47 @@ class BGCMarbl(BGCModel):
 
     name = "MARBL"
 
-    _TRACER_VARS = frozenset(
-        {
-            "PO4",
-            "NO3",
-            "SiO3",
-            "NH4",
-            "Fe",
-            "Lig",
-            "O2",
-            "DIC",
-            "DIC_ALT_CO2",
-            "ALK",
-            "ALK_ALT_CO2",
-            "DOC",
-            "DON",
-            "DOP",
-            "DOPr",
-            "DONr",
-            "DOCr",
-            "spChl",
-            "spC",
-            "spP",
-            "spFe",
-            "spCaCO3",
-            "diatChl",
-            "diatC",
-            "diatP",
-            "diatFe",
-            "diatSi",
-            "diazChl",
-            "diazC",
-            "diazP",
-            "diazFe",
-            "zooC",
-        }
+    #: Canonical ordered ROMS-MARBL tracer axis (physics first, then MARBL
+    #: BGC tracers). The order is load-bearing: it defines the ``ntracers``
+    #: axis of river/CDR forcing files and the layout of
+    #: ``river_tracer_defaults.nc`` — do not reorder.
+    TRACER_NAMES: ClassVar[tuple[str, ...]] = (
+        "temp",
+        "salt",
+        "PO4",
+        "NO3",
+        "SiO3",
+        "NH4",
+        "Fe",
+        "Lig",
+        "O2",
+        "DIC",
+        "DIC_ALT_CO2",
+        "ALK",
+        "ALK_ALT_CO2",
+        "DOC",
+        "DON",
+        "DOP",
+        "DOPr",
+        "DONr",
+        "DOCr",
+        "zooC",
+        "spChl",
+        "spC",
+        "spP",
+        "spFe",
+        "spCaCO3",
+        "diatChl",
+        "diatC",
+        "diatP",
+        "diatFe",
+        "diatSi",
+        "diazChl",
+        "diazC",
+        "diazP",
+        "diazFe",
     )
+    _TRACER_VARS = frozenset(TRACER_NAMES) - set(PHYSICS_TRACER_NAMES)
     _INTERPRETABLE_INPUTS = frozenset({"CHL"})
 
     # CHL → per-PFT tracer stoichiometric factors (multiplicative on total CHL).

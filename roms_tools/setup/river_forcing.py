@@ -19,7 +19,6 @@ from roms_tools.datasets.lat_lon_datasets import (
     resolve_era5_source,
 )
 from roms_tools.datasets.river_datasets import (
-    RIVR2O_MARBL_TRACER_NAMES,
     DaiRiverDataset,
     GloFASRiverDataset,
     RiverBGCDataset,
@@ -1213,7 +1212,7 @@ class RiverForcing:
                 tracer_name: ds["river_tracer"]
                 .isel(ntracers=int(np.where(tracer_names_arr == tracer_name)[0][0]))
                 .drop_vars(["tracer_name", "tracer_unit", "tracer_long_name"])
-                for tracer_name in RIVR2O_MARBL_TRACER_NAMES
+                for tracer_name in bgc_data.provided_tracers
                 if tracer_name in tracer_names_arr
             }
         else:

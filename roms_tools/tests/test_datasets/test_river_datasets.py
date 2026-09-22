@@ -111,6 +111,14 @@ class TestFillRiverBGCConcentrations:
         assert np.isnan(merged["DIC"].values[0, 1])
 
 
+def test_rivr2o_provided_tracers_subset_of_marbl():
+    # Test-time replacement for the former import-time subset guard: the
+    # tracers RIVR2O supplies must exist in the MARBL model's tracer set.
+    from roms_tools import BGCMarbl
+
+    assert set(Rivr2oRiverBGCDataset.PROVIDED_TRACERS) <= BGCMarbl().tracer_vars()
+
+
 class TestRivr2oRiverBGCDataset:
     @staticmethod
     def _make_files(tmp_path, years=(2000, 2001)):
@@ -601,17 +609,8 @@ class TestRivr2oRiverBGCDataset:
             river_names=["test_river"],
         )
 
-        assert set(concentrations) >= {
-            "DIC",
-            "DOC",
-            "DON",
-            "DOP",
-            "ALK",
-            "DIC_ALT_CO2",
-            "ALK_ALT_CO2",
-            "NO3",
-            "PO4",
-        }
+        # forcing_concentrations must supply exactly the advertised tracers
+        assert set(concentrations) == set(Rivr2oRiverBGCDataset.PROVIDED_TRACERS)
         for values in concentrations.values():
             assert values.dims == ("river_time", "nriver")
             assert values.shape == (3, 1)

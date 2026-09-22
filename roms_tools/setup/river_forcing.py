@@ -33,6 +33,13 @@ from roms_tools.plot import (
     plot_2d_horizontal_field,
     plot_location,
 )
+from roms_tools.setup.bgc_model import (
+    BGCMarbl,
+    BGCModel,
+    bgc_model_from_name,
+    bgc_model_to_name,
+    validate_bgc_model,
+)
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
@@ -83,10 +90,16 @@ class BgcSourceModel(BaseModel, ABC):
 
     @abstractmethod
     def build_dataset(
-        self, *, start_time: datetime, end_time: datetime
+        self, *, start_time: datetime, end_time: datetime, bgc_model: type[BGCModel]
     ) -> RiverBGCDataset:
         """Instantiate the BGC dataset this source describes."""
         ...
+
+    def resolve_discharge_pairing(self, discharge_source_name: str | None) -> None:
+        """Resolve/validate this source's pairing with the discharge source.
+
+        Called once by ``RiverForcing`` during input checks. Default: no-op.
+        """
 
 
 class ConstantsBgcSource(BgcSourceModel):
@@ -95,9 +108,9 @@ class ConstantsBgcSource(BgcSourceModel):
     name: Literal["CONSTANTS"] = "CONSTANTS"
 
     def build_dataset(
-        self, *, start_time: datetime, end_time: datetime
+        self, *, start_time: datetime, end_time: datetime, bgc_model: type[BGCModel]
     ) -> RiverBGCDataset:
-        return RiverTracerDefaultsDataset()
+        return RiverTracerDefaultsDataset(bgc_model=bgc_model)
 
 
 class Rivr2oBgcSource(BgcSourceModel):
@@ -108,20 +121,51 @@ class Rivr2oBgcSource(BgcSourceModel):
     (reads concentrations precomputed per GloFAS station, already on the
     GloFAS discharge file; ``path`` unused). Left unset, it auto-selects
     based on the paired discharge ``source`` -- see
-    ``RiverForcing._resolve_and_validate_bgc_discharge_pairing``.
+    ``resolve_discharge_pairing``.
     """
 
     name: Literal["RIVR2O"] = "RIVR2O"
     path: str | Path | list[str | Path] | None = None
     discharge_accounting: Literal["per_river", "total_discharge"] | None = None
 
+    def resolve_discharge_pairing(self, discharge_source_name: str | None) -> None:
+        """Auto-select ``discharge_accounting`` ("total_discharge" for GloFAS,
+        "per_river" otherwise) and validate the pairing.
+        """
+        if self.discharge_accounting is None:
+            self.discharge_accounting = (
+                "total_discharge" if discharge_source_name == "GLOFAS" else "per_river"
+            )
+
+        if (
+            self.discharge_accounting == "total_discharge"
+            and discharge_source_name != "GLOFAS"
+        ):
+            raise ValueError(
+                "bgc_source={'name': 'RIVR2O', 'discharge_accounting': "
+                "'total_discharge', ...} requires source={'name': 'GLOFAS', "
+                f"...}}; got source name {discharge_source_name!r}. "
+                "'total_discharge' mode needs concentrations precomputed from "
+                "GloFAS's full station catalog and is not available for other "
+                "discharge sources."
+            )
+
+        if self.discharge_accounting == "per_river" and self.path is None:
+            raise ValueError(
+                "bgc_source={'name': 'RIVR2O', ...} in 'per_river' mode "
+                "requires 'path' (pointing to RIVR2O yearly export files)."
+            )
+
     def build_dataset(
-        self, *, start_time: datetime, end_time: datetime
+        self, *, start_time: datetime, end_time: datetime, bgc_model: type[BGCModel]
     ) -> RiverBGCDataset:
-        # RiverForcing._resolve_and_validate_bgc_discharge_pairing() always
-        # resolves discharge_accounting to a concrete value before
-        # build_dataset() is called; "per_river" here is just a defensive
-        # fallback, not the real default-resolution logic.
+        # The RIVR2O file->tracer mapping (DOC/DON/DOP stoichiometry, ALK=DIC)
+        # is intrinsically MARBL-targeted; PROVIDED_TRACERS is validated
+        # against BGCMarbl in tests.
+        del bgc_model
+        # resolve_discharge_pairing() always resolves discharge_accounting to
+        # a concrete value before build_dataset() is called; "per_river" here
+        # is just a defensive fallback, not the real default-resolution logic.
         mode = self.discharge_accounting or "per_river"
         return Rivr2oRiverBGCDataset(
             filename=self.path,
@@ -414,6 +458,11 @@ class RiverForcing:
         ``path``) or ``"total_discharge"`` (reads concentrations already
         precomputed per GloFAS station, no ``path`` needed). Left unset,
         this auto-selects based on ``source["name"]``.
+    bgc_model : type[BGCModel], optional
+        The BGC model class defining the ordered tracer axis and tracer
+        metadata of the output when ``include_bgc=True``. Defaults to
+        :class:`BGCMarbl`. Ignored when ``include_bgc=False`` (the axis is
+        then just ``temp`` / ``salt``).
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
     surface_forcing_source : dict, optional
@@ -492,6 +541,13 @@ class RiverForcing:
     Accepts a plain dict on input; normalized to a validated ``BgcSource`` model
     (or ``None`` when ``include_bgc`` is False) during initialization.
     """
+    bgc_model: type[BGCModel] = BGCMarbl
+    """The BGCModel subclass defining the ordered ``ntracers`` axis and tracer
+    metadata when ``include_bgc=True``. Inert when ``include_bgc=False`` (the
+    axis is then just temp/salt). Unlike ``BoundaryForcing`` /
+    ``InitialConditions`` this is non-Optional: rivers always have a working
+    default (constant fill values), so there is no "BGC requested but no
+    model" error state for ``None`` to represent."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
@@ -637,48 +693,15 @@ class RiverForcing:
                 f'Invalid convert_to_climatology "{self.convert_to_climatology}". '
                 f"Valid options: {', '.join(VALID_CONVERT_TO_CLIMATOLOGY)}."
             )
+        self.bgc_model = validate_bgc_model(self.bgc_model)
         self.source = self._normalized_source()
         self.bgc_source = self._normalized_bgc_source()
-        self._resolve_and_validate_bgc_discharge_pairing()
+        if self.bgc_source is not None:
+            self.bgc_source.resolve_discharge_pairing(
+                self.source["name"] if self.source is not None else None
+            )
         self._validate_indices()
         self.surface_forcing_source = self._normalized_surface_forcing_source()
-
-    def _resolve_and_validate_bgc_discharge_pairing(self) -> None:
-        """Resolve ``Rivr2oBgcSource.discharge_accounting`` (auto-select
-        ``"total_discharge"`` for GloFAS, ``"per_river"`` otherwise) and
-        validate the pairing. No-op for any other ``bgc_source``.
-        """
-        if not isinstance(self.bgc_source, Rivr2oBgcSource):
-            return
-
-        discharge_name = self.source["name"] if self.source is not None else None
-
-        if self.bgc_source.discharge_accounting is None:
-            self.bgc_source.discharge_accounting = (
-                "total_discharge" if discharge_name == "GLOFAS" else "per_river"
-            )
-
-        if (
-            self.bgc_source.discharge_accounting == "total_discharge"
-            and discharge_name != "GLOFAS"
-        ):
-            raise ValueError(
-                "bgc_source={'name': 'RIVR2O', 'discharge_accounting': "
-                "'total_discharge', ...} requires source={'name': 'GLOFAS', "
-                f"...}}; got source name {discharge_name!r}. 'total_discharge' "
-                "mode needs concentrations precomputed from GloFAS's full "
-                "station catalog and is not available for other discharge "
-                "sources."
-            )
-
-        if (
-            self.bgc_source.discharge_accounting == "per_river"
-            and self.bgc_source.path is None
-        ):
-            raise ValueError(
-                "bgc_source={'name': 'RIVR2O', ...} in 'per_river' mode "
-                "requires 'path' (pointing to RIVR2O yearly export files)."
-            )
 
     def _normalized_source(self) -> RawDataSource:
         """Apply defaults to ``source`` and validate its required keys.
@@ -892,7 +915,9 @@ class RiverForcing:
         if not isinstance(bgc_source, BgcSourceModel):
             raise RuntimeError("bgc_source must be a validated BgcSource model.")
         self._bgc_dataset = bgc_source.build_dataset(
-            start_time=self.start_time, end_time=self.end_time
+            start_time=self.start_time,
+            end_time=self.end_time,
+            bgc_model=self.bgc_model,
         )
         return self._bgc_dataset
 
@@ -901,7 +926,9 @@ class RiverForcing:
         bgc_source = self.bgc_source
         if not isinstance(bgc_source, BgcSourceModel):
             raise RuntimeError("bgc_source must be a validated BgcSource model.")
-        return _FILL_DATASET_MAP[bgc_source.fill.name]().defaults
+        return _FILL_DATASET_MAP[bgc_source.fill.name](
+            bgc_model=self.bgc_model
+        ).defaults
 
     def _get_river_sample_coords(
         self, river_names: list[str]
@@ -1381,7 +1408,15 @@ class RiverForcing:
         ds = xr.Dataset()
 
         # Tracer metadata
-        ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
+        # The single seam defining the file's ordered ntracers axis. A future
+        # schema-driven axis (e.g. PR #673's CDRTracerSchema for CDR_TRACER
+        # runs, where rivers would carry zero for every CDR tracer) plugs in
+        # here by passing its own ordered name list via `tracer_names=`.
+        ds = add_tracer_metadata_to_ds(
+            ds,
+            self.include_bgc,
+            tracer_names=self.bgc_model.TRACER_NAMES if self.include_bgc else None,
+        )
 
         # River volume
         river_volume = (
@@ -2075,7 +2110,10 @@ class RiverForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        forcing_dict = to_dict(self, exclude=["climatology"])
+        forcing_dict = to_dict(self, exclude=["climatology", "bgc_model"])
+        # A class object is not YAML-serializable; store its registered name
+        # (mirrors BoundaryForcing / InitialConditions).
+        forcing_dict["RiverForcing"]["bgc_model"] = bgc_model_to_name(self.bgc_model)
 
         indices_data = forcing_dict.get("RiverForcing", {}).get("indices")
         if not indices_data:
@@ -2118,6 +2156,12 @@ class RiverForcing:
 
         grid = Grid.from_yaml(filepath)
         params = from_yaml(cls, filepath)
+
+        # pop-if-present: YAML files written before the bgc_model field (e.g.
+        # physics-only configs) resolve to the field default.
+        bgc_model_name = params.pop("bgc_model", None)
+        if bgc_model_name is not None:
+            params["bgc_model"] = bgc_model_from_name(bgc_model_name)
 
         def convert_indices_format(indices):
             indices = {

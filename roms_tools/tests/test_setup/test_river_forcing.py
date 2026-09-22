@@ -1096,6 +1096,76 @@ class TestRiverForcingBGCSource:
         assert alk_jan_first != alk_jan_last
 
 
+class TestRiverForcingBGCModel:
+    """The bgc_model field: axis definition, validation, YAML round-trip."""
+
+    def _make(self, iceland_test_grid, single_cell_indices, **kwargs):
+        return RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            **kwargs,
+        )
+
+    def test_physics_only_two_tracer_axis(self, iceland_test_grid, single_cell_indices):
+        # Invariant: include_bgc=False (the default) produces a physics-only
+        # file regardless of bgc_model; the field is inert.
+        rf = self._make(iceland_test_grid, single_cell_indices)
+        assert rf.ds.sizes["ntracers"] == 2
+        assert list(rf.ds.tracer_name.values) == ["temp", "salt"]
+
+    def test_bgc_axis_follows_model(self, iceland_test_grid, single_cell_indices):
+        from roms_tools import BGCMarbl
+
+        rf = self._make(iceland_test_grid, single_cell_indices, include_bgc=True)
+        assert rf.bgc_model is BGCMarbl
+        assert tuple(rf.ds.tracer_name.values) == BGCMarbl.TRACER_NAMES
+
+    def test_bgc_model_instance_rejected(self, iceland_test_grid, single_cell_indices):
+        from roms_tools import BGCMarbl
+
+        with pytest.raises(ValueError, match="class"):
+            self._make(
+                iceland_test_grid,
+                single_cell_indices,
+                include_bgc=True,
+                bgc_model=BGCMarbl(),
+            )
+
+    def test_bgc_model_yaml_round_trip(
+        self, iceland_test_grid, single_cell_indices, tmp_path
+    ):
+        from roms_tools import BGCMarbl
+
+        rf = self._make(iceland_test_grid, single_cell_indices, include_bgc=True)
+        filepath = tmp_path / "test_bgc_model_yaml"
+        rf.to_yaml(filepath)
+        assert "bgc_model: BGCMarbl" in filepath.read_text()
+        restored = RiverForcing.from_yaml(filepath)
+        assert restored.bgc_model is BGCMarbl
+        assert restored == rf
+
+    def test_yaml_without_bgc_model_key_uses_default(
+        self, iceland_test_grid, single_cell_indices, tmp_path
+    ):
+        from roms_tools import BGCMarbl
+
+        # YAML files written before the bgc_model field existed must load
+        # with the default model.
+        rf = self._make(iceland_test_grid, single_cell_indices)
+        filepath = tmp_path / "test_no_bgc_model_key"
+        rf.to_yaml(filepath)
+        stripped = "\n".join(
+            line
+            for line in filepath.read_text().splitlines()
+            if not line.strip().startswith("bgc_model:")
+        )
+        filepath.write_text(stripped)
+        restored = RiverForcing.from_yaml(filepath)
+        assert restored.bgc_model is BGCMarbl
+
+
 class TestRiverForcingRivr2oFromTestData:
     def test_dynamic_tracers_differ_from_defaults(self, river_forcing_with_rivr2o_bgc):
         defaults = get_tracer_defaults()

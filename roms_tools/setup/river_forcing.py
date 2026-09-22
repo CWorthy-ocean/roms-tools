@@ -241,37 +241,6 @@ def _smooth_and_floor_air_temp(
     return smoothed.clip(min=0.0)
 
 
-def _bounding_box_with_buffer(
-    lat: np.ndarray, lon: np.ndarray, buffer_deg: float = 1.0
-) -> dict[str, tuple[float, float]]:
-    """Build a lat/lon bounding box around a set of points, with a buffer.
-
-    Used as ``initial_slice_bounds`` for a ``LatLonDataset``, to narrow a
-    read to a small bounding box around a handful of points (e.g. river
-    locations) instead of the full source domain.
-
-    Parameters
-    ----------
-    lat : np.ndarray
-        Latitudes of the points to bound.
-    lon : np.ndarray
-        Longitudes of the points to bound, in the source's native longitude
-        convention.
-    buffer_deg : float, optional
-        Degrees of slack added on each side of the box (e.g. a couple of
-        source grid cells' worth). Defaults to 1.0.
-
-    Returns
-    -------
-    dict[str, tuple[float, float]]
-        ``{"latitude": (min, max), "longitude": (min, max)}``, in degrees.
-    """
-    return {
-        "latitude": (float(lat.min()) - buffer_deg, float(lat.max()) + buffer_deg),
-        "longitude": (float(lon.min()) - buffer_deg, float(lon.max()) + buffer_deg),
-    }
-
-
 def _sample_tair_at_river_mouths(
     tair: xr.DataArray,
     lat_name: str,
@@ -349,15 +318,43 @@ def _sample_points_chunkwise(
     """Dask-chunk-streaming point sample used by `_sample_tair_at_river_mouths`
     whenever `tair` is dask-backed.
 
-    Plain vectorized ``.isel()`` builds a graph that, for a source chunked
-    one full lat/lon slab per time step (e.g. the ARCO ERA5 archive, chunked
-    ``(1, 721, 1440)``), ends up materializing far more of the source array
-    per chunk than the sampled points alone need -- confirmed empirically: a
-    5-year request that OOMs past 230GB with ``.isel()`` completes in ~6
-    minutes at under 21GB via this path, for the same ~1000-point sample.
-    Sampling each chunk as it arrives (rather than after gathering them all)
-    keeps peak memory bounded by a handful of in-flight chunks rather than
-    however many time steps were requested.
+    Plain vectorized ``.isel()`` materializes far more of the source than
+    needed, for a source chunked one full lat/lon slab per time step (e.g.
+    ARCO ERA5, ``(1, 721, 1440)``): a 5-year sample OOMs past 230GB with
+    ``.isel()``, but completes in ~6 min under 21GB here. Reducing each
+    chunk to its sampled points immediately, rather than gathering them all
+    first, bounds peak memory to a handful of in-flight chunks, not the
+    full time range requested.
+
+    Uses ``dask.array.map_blocks`` rather than the package's usual
+    ``xr.apply_ufunc(dask="parallelized")`` idiom (see e.g.
+    ``fill.nearest_neighbor_fill``): ``apply_ufunc`` requires its core dims
+    (here ``lat_name``/``lon_name``) to already be single-chunked, and
+    errors otherwise -- true for ARCO, not guaranteed for every ERA5 source
+    this is called on. ``map_blocks`` auto-consolidates a multi-chunked axis
+    listed in ``drop_axis`` instead of erroring.
+
+    Sampled values match ``.isel()``; dimension *order* may not, since
+    ``lat_name``/``lon_name`` always move to the end before sampling.
+    Harmless here: ``tair`` is always ``(time, latitude, longitude)`` and
+    downstream code accesses dims by name.
+
+    Parameters
+    ----------
+    tair : xr.DataArray
+        Dask-backed source array with ``lat_name``/``lon_name`` dims.
+    lat_name, lon_name : str
+        Names of ``tair``'s latitude/longitude dimensions.
+    nearest_row, nearest_col : np.ndarray
+        Per-river nearest-neighbor grid indices into ``tair``'s native
+        (raveled) lat/lon grid, as returned by ``query_kdtree_nearest``.
+
+    Returns
+    -------
+    xr.DataArray
+        Per-river ``tair``, dims ``(*other_dims, "nriver")``. A coordinate
+        depending on ``lat_name``/``lon_name`` without being one of them
+        (e.g. a 2-D auxiliary coordinate) isn't carried over and will raise.
     """
     other_dims = [d for d in tair.dims if d not in (lat_name, lon_name)]
     tair = tair.transpose(*other_dims, lat_name, lon_name)
@@ -367,10 +364,9 @@ def _sample_points_chunkwise(
     def _sample_block(block: np.ndarray) -> np.ndarray:
         return block[..., nearest_row, nearest_col]
 
-    # Explicit `meta` skips dask's own probe call, which otherwise runs
-    # `_sample_block` once on a synthetic zero-sized array to infer the
-    # output dtype -- indexing that empty array with real (in-bounds, for
-    # any actual chunk) row/col values is exactly what numpy warns about.
+    # Explicit `meta` skips dask's own probe call (running `_sample_block`
+    # on a synthetic zero-sized array to infer dtype), which otherwise warns
+    # about indexing an empty array.
     meta = np.empty((0,) * (n_lead + 1), dtype=darr.dtype)
     sampled = darr.map_blocks(
         _sample_block,
@@ -976,12 +972,10 @@ class RiverForcing:
         # file's native convention isn't guessed.
         logging.info("Opening ERA5 source for river temperatures...")
 
-        # No initial_slice_bounds: for a zarr source chunked one full lat/lon
-        # slab per time step (e.g. ARCO ERA5), a spatial crop narrows the
-        # logical shape but not what actually gets fetched per chunk, so it
-        # buys nothing here -- `_sample_points_chunkwise` gets its memory
-        # bound from processing chunks one at a time, not from the source
-        # being pre-cropped.
+        # No initial_slice_bounds: ARCO's chunks are one full lat/lon slab
+        # per time step, so cropping shrinks the logical shape but not what
+        # gets fetched. `_sample_points_chunkwise` bounds memory by
+        # streaming chunks, not by pre-cropping the source.
         data = dataset_cls(
             filename=resolved_path,
             start_time=self.start_time,
@@ -1097,10 +1091,9 @@ class RiverForcing:
             path_value = cast("str | Path | None", surface_forcing_source.get("path"))
             resolved_path, is_arco, dataset_cls = resolve_era5_source(path_value)
             if is_arco:
-                # ARCO's native longitude convention is known to be 0-360.
-                # A local ERA5 extract's convention isn't known in advance
-                # (a regional file may already be -180-180), so only convert
-                # for the known-0-360 ARCO case.
+                # ARCO's convention is known to be 0-360; a local extract's
+                # isn't known in advance (may already be -180-180), so only
+                # convert for ARCO.
                 cell_lon = np.where(cell_lon < 0, cell_lon + 360, cell_lon)
 
             default_factory = next(

@@ -18,7 +18,6 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.setup.river_forcing import (
     AIR_TEMP_COVERAGE_TOLERANCE_DAYS,
-    _bounding_box_with_buffer,
     _climatological_river_temp,
     _sample_tair_at_river_mouths,
     _smooth_and_floor_air_temp,
@@ -1234,22 +1233,6 @@ class TestRiverForcingGloFASClimatology:
 class TestRiverTemperaturePureHelpers:
     """Unit tests for the free-function helpers, using small synthetic data."""
 
-    def test_bounding_box_with_buffer(self):
-        lat = np.array([10.0, 12.0, 11.0])
-        lon = np.array([100.0, 105.0, 102.0])
-        bounds = _bounding_box_with_buffer(lat, lon, buffer_deg=2.0)
-        assert bounds == {
-            "latitude": (8.0, 14.0),
-            "longitude": (98.0, 107.0),
-        }
-
-    def test_bounding_box_default_buffer(self):
-        lat = np.array([0.0, 1.0])
-        lon = np.array([0.0, 1.0])
-        bounds = _bounding_box_with_buffer(lat, lon)
-        assert bounds["latitude"] == (-1.0, 2.0)
-        assert bounds["longitude"] == (-1.0, 2.0)
-
     @pytest.mark.parametrize("straddle", [False, True])
     def test_sample_tair_at_river_mouths_picks_nearest_cell(self, straddle):
         # A 3x3 native grid in 0-360 convention; each cell has a distinct value
@@ -1279,9 +1262,10 @@ class TestRiverTemperaturePureHelpers:
         np.testing.assert_array_equal(result.values[:, 0], expected)
 
     def test_sample_tair_at_river_mouths_dask_backed_matches_eager(self):
-        """The dask-chunk-streaming path (`_sample_points_chunkwise`) must
-        return exactly what the plain `.isel()` path returns for the same
-        data -- it's a performance path, not a different algorithm.
+        """Chunkwise sampling matches plain `.isel()` exactly for real-world
+        `(time, latitude, longitude)` input -- a performance path, not a
+        different algorithm. Dim order can differ for other orderings; see
+        `_sample_points_chunkwise`.
         """
         lat = np.array([10.0, 20.0, 30.0])
         lon = np.array([350.0, 355.0, 0.0])
@@ -1314,11 +1298,10 @@ class TestRiverTemperaturePureHelpers:
         assert dask_result.dims == eager_result.dims
 
     def test_sample_tair_at_river_mouths_dask_many_time_chunks_matches_eager(self):
-        """Regression test for the ERA5 river-temperature OOM: a source
-        chunked one step per time index (like the ARCO archive) used to
-        build a graph that materialized far more than the sampled points
-        needed. Uses enough chunks and rivers to actually exercise
-        `map_blocks` across multiple blocks, not just a single one.
+        """Regression test for the ERA5 OOM: a source chunked one step per
+        time index (like ARCO) used to materialize far more than the
+        sampled points needed. Uses enough chunks/rivers to actually
+        exercise multiple blocks, not just one.
         """
         rng = np.random.default_rng(0)
         n_time, n_lat, n_lon, n_rivers = 12, 5, 6, 8
@@ -1353,12 +1336,15 @@ class TestRiverTemperaturePureHelpers:
         assert len(dask_result.chunks[0]) == n_time  # actually multi-chunk, not merged
         np.testing.assert_array_equal(dask_result.values, eager_result.values)
 
-    def test_sample_tair_at_river_mouths_dask_backed_raises_no_warnings(self, recwarn):
-        """Regression test: `map_blocks` without an explicit `meta` probes
-        the mapped function with a synthetic zero-sized array to infer the
-        output dtype, and indexing that empty array raised a numpy
-        DeprecationWarning on every call. Passing `meta` explicitly avoids
-        the probe call entirely.
+    def test_sample_tair_at_river_mouths_dask_backed_raises_no_deprecation_warning(
+        self, recwarn
+    ):
+        """Regression test: without explicit `meta`, `map_blocks` probes the
+        function on a synthetic zero-sized array to infer dtype, and
+        indexing that empty array raised a DeprecationWarning on every call.
+        Checks for that warning specifically, not "zero warnings of any
+        kind", so this stays robust if an unrelated library starts warning
+        here.
         """
         lat = np.array([10.0, 20.0, 30.0])
         lon = np.array([350.0, 355.0, 0.0])
@@ -1374,7 +1360,7 @@ class TestRiverTemperaturePureHelpers:
             tair, "latitude", "longitude", np.array([0.0]), np.array([20.0]), False
         )
         result.compute()
-        assert len(recwarn) == 0
+        assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn)
 
     def test_smooth_and_floor_air_temp_floors_negative_values(self):
         time = np.arange(np.datetime64("2020-01-01"), np.datetime64("2020-01-11"))

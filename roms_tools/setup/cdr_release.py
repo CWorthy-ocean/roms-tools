@@ -20,9 +20,14 @@ from pydantic_core.core_schema import ValidationInfo
 from scipy.interpolate import interp1d
 
 from roms_tools.setup.utils import (
+    CDR_ROLE_ALK,
+    CDR_ROLE_DIC,
+    CDR_ROLE_DOR,
+    CDRTracerSchema,
     TracerSet,
     convert_to_relative_days,
-    get_tracer_defaults_for_set,
+    get_cdr_role_metadata_dict,
+    get_tracer_defaults,
     get_tracer_metadata_dict,
 )
 
@@ -30,6 +35,28 @@ NonNegativeFloat = Annotated[float, Ge(0)]
 
 # Show all columns when printing a DataFrame
 pd.set_option("display.max_columns", None)
+
+
+def _allowed_cdr_keys(info: ValidationInfo) -> list[str]:
+    """Tracer keys a tracer_set="cdr_tracer" release may specify, from the
+    targeting fields already validated on the model (`oae_pair`, `dor_index`).
+    """
+    keys = ["temp", "salt"]
+    if info.data.get("oae_pair") is not None:
+        keys += [CDR_ROLE_ALK, CDR_ROLE_DIC]
+    if info.data.get("dor_index") is not None:
+        keys += [CDR_ROLE_DOR]
+    return keys
+
+
+def _raise_on_unknown_tracers(provided, allowed, tracer_set: TracerSet) -> None:
+    """Reject tracer keys that are not part of the release's tracer set."""
+    unknown = sorted(set(provided) - set(allowed))
+    if unknown:
+        raise ValueError(
+            f"Unknown tracer name(s) {unknown} for tracer_set='{tracer_set}'. "
+            f"Valid names: {sorted(allowed)}."
+        )
 
 
 @dataclass
@@ -231,10 +258,19 @@ class Release(BaseModel):
     time_interpolation : bool, optional
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
     tracer_set : {"marbl", "cdr_tracer"}, optional
-        Tracer schema. ``"marbl"`` (default) uses the full MARBL suite;
-        ``"cdr_tracer"`` uses ``temp``, ``salt``, ``CDR_tracer_1`` (alkalinity),
-        and ``CDR_tracer_2`` (DIC) for non-MARBL OAE/DOR setups. ROMS still
-        needs ``temp`` / ``salt`` on volume releases; they are not MARBL-only.
+        Tracer schema. ``"marbl"`` (default) specifies tracer values by MARBL
+        tracer name. ``"cdr_tracer"`` targets the dedicated CDR tracers of a
+        ROMS ``CDR_TRACER`` build: the release addresses its own tracers via
+        the role keys ``"ALK"`` / ``"DIC"`` (its OAE pair, selected with
+        ``oae_pair``) and ``"DOR_DIC"`` (its DOR tracer, selected with
+        ``dor_index``), plus ``temp`` / ``salt`` physics tracers.
+    oae_pair : int, optional
+        1-based index of the OAE (alkalinity, DIC) tracer pair this release
+        feeds (``CDR_OAE_ALK{k}`` / ``CDR_OAE_DIC{k}``). Only valid with
+        ``tracer_set="cdr_tracer"``.
+    dor_index : int, optional
+        1-based index of the DOR tracer this release feeds
+        (``CDR_DOR_DIC{j}``). Only valid with ``tracer_set="cdr_tracer"``.
     """
 
     name: str
@@ -254,14 +290,69 @@ class Release(BaseModel):
     time_interpolation: bool = False
     """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
     tracer_set: TracerSet = "marbl"
-    """Tracer schema: ``"marbl"`` (full MARBL suite) or ``"cdr_tracer"``
-    (``temp``, ``salt``, ``CDR_tracer_1``, ``CDR_tracer_2`` for non-MARBL OAE/DOR)."""
+    """Tracer schema: ``"marbl"`` (values keyed by MARBL tracer name) or
+    ``"cdr_tracer"`` (values keyed by the roles ``"ALK"``/``"DIC"``/``"DOR_DIC"``
+    targeting the release's own CDR tracers, plus ``temp``/``salt``)."""
+    oae_pair: int | None = Field(None, ge=1)
+    """1-based index of the OAE (ALK, DIC) tracer pair this release feeds.
+    Only valid with ``tracer_set="cdr_tracer"``."""
+    dor_index: int | None = Field(None, ge=1)
+    """1-based index of the DOR tracer this release feeds.
+    Only valid with ``tracer_set="cdr_tracer"``."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
     """Type of the release."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _check_tracer_targeting(self) -> "Release":
+        """Validate oae_pair/dor_index against the tracer_set."""
+        if self.tracer_set == "cdr_tracer":
+            if self.oae_pair is None and self.dor_index is None:
+                raise ValueError(
+                    'Releases with tracer_set="cdr_tracer" must set `oae_pair` '
+                    "and/or `dor_index` to select which CDR tracer(s) they feed."
+                )
+        else:
+            if self.oae_pair is not None or self.dor_index is not None:
+                raise ValueError(
+                    "`oae_pair` and `dor_index` are only valid with "
+                    'tracer_set="cdr_tracer".'
+                )
+        return self
+
+    def _map_tracers_to_schema(
+        self, tracer_data: dict, schema: "CDRTracerSchema | None"
+    ) -> dict:
+        """Re-key a role-keyed tracer dict onto the global tracer names of the
+        forcing file's tracer axis.
+
+        For ``tracer_set="marbl"`` the data is already keyed by global names and
+        is returned unchanged. For ``"cdr_tracer"``, the role keys resolve via the
+        release's targeting fields, e.g. ``"ALK"`` -> ``CDR_OAE_ALK{oae_pair}``.
+        """
+        if self.tracer_set != "cdr_tracer":
+            return tracer_data
+        if schema is None:
+            raise ValueError(
+                'Releases with tracer_set="cdr_tracer" require a CDRTracerSchema '
+                "to resolve their tracer names."
+            )
+        mapped = {}
+        for key, value in tracer_data.items():
+            if key in ("temp", "salt"):
+                mapped[key] = value
+            elif key in (CDR_ROLE_ALK, CDR_ROLE_DIC):
+                # These role keys only validate when oae_pair is set.
+                assert self.oae_pair is not None
+                alk_name, dic_name = schema.oae_pair_names(self.oae_pair)
+                mapped[alk_name if key == CDR_ROLE_ALK else dic_name] = value
+            elif key == CDR_ROLE_DOR:
+                assert self.dor_index is not None
+                mapped[schema.dor_name(self.dor_index)] = value
+        return mapped
 
     @model_validator(mode="after")
     def _check_increasing_times(self) -> "Release":
@@ -442,8 +533,10 @@ class VolumeRelease(Release):
     """Dictionary of tracer names and their concentration values.
 
     For ``tracer_set="marbl"``, all values must be non-negative.
-    For ``tracer_set="cdr_tracer"``, ``CDR_tracer_2`` (DIC) may be negative (DOR);
-    ``CDR_tracer_1`` (alkalinity) must remain non-negative.
+    For ``tracer_set="cdr_tracer"``, values are keyed by role: ``"ALK"`` /
+    ``"DIC"`` (the release's OAE pair) and ``"DOR_DIC"`` (its DOR tracer),
+    plus ``temp`` / ``salt``. ``"DOR_DIC"`` may be negative (DIC removal);
+    all other values must be non-negative.
     """
 
     release_type: Literal[ReleaseType.volume] = ReleaseType.volume
@@ -452,24 +545,33 @@ class VolumeRelease(Release):
     @classmethod
     def _create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
         tracer_set: TracerSet = info.data.get("tracer_set", "marbl")
-        defaults = get_tracer_defaults_for_set(tracer_set)
 
-        filled: dict[str, Concentration | float | list[float]] = {}
-        for tracer_name in defaults:
-            if tracer_name in tracer_concentrations:
-                filled[tracer_name] = tracer_concentrations[tracer_name]
-                continue
-            if tracer_name in ["temp", "salt"]:
-                # Physics tracers always get river/physics defaults (also for cdr_tracer).
-                filled[tracer_name] = defaults[tracer_name]
-            elif tracer_set == "cdr_tracer":
-                filled[tracer_name] = 0.0
-            else:
-                fill_values = info.data["fill_values"]
-                if fill_values == "auto":
+        if tracer_set == "cdr_tracer":
+            allowed = _allowed_cdr_keys(info)
+            _raise_on_unknown_tracers(tracer_concentrations, allowed, tracer_set)
+            physics_defaults = get_tracer_defaults()
+            filled = {
+                key: tracer_concentrations.get(
+                    key, physics_defaults[key] if key in ("temp", "salt") else 0.0
+                )
+                for key in allowed
+            }
+        else:
+            defaults = get_tracer_defaults()
+            _raise_on_unknown_tracers(tracer_concentrations, defaults, tracer_set)
+            filled = {}
+            for tracer_name in defaults:
+                if tracer_name in tracer_concentrations:
+                    filled[tracer_name] = tracer_concentrations[tracer_name]
+                elif tracer_name in ["temp", "salt"]:
+                    # Physics tracers always get river/physics defaults.
                     filled[tracer_name] = defaults[tracer_name]
-                elif fill_values == "zero":
-                    filled[tracer_name] = 0.0
+                else:
+                    fill_values = info.data["fill_values"]
+                    if fill_values == "auto":
+                        filled[tracer_name] = defaults[tracer_name]
+                    elif fill_values == "zero":
+                        filled[tracer_name] = 0.0
 
         return {
             tracer: (
@@ -489,11 +591,11 @@ class VolumeRelease(Release):
 
     @model_validator(mode="after")
     def _check_concentration_signs(self) -> "VolumeRelease":
-        """Enforce non-negativity except for CDR_tracer_2 in cdr_tracer mode."""
+        """Enforce non-negativity, except the DOR_DIC role (negative = removal)."""
         for tracer_name, conc in self.tracer_concentrations.items():
             values = conc.values if isinstance(conc, Concentration) else conc
             vals = values if isinstance(values, list) else [values]
-            if self.tracer_set == "cdr_tracer" and tracer_name == "CDR_tracer_2":
+            if self.tracer_set == "cdr_tracer" and tracer_name == CDR_ROLE_DOR:
                 continue
             if any(v < 0 for v in vals):
                 raise ValueError(
@@ -530,6 +632,8 @@ class VolumeRelease(Release):
     @staticmethod
     def get_tracer_metadata(tracer_set: TracerSet = "marbl"):
         """Returns long names and expected units for the tracer concentrations."""
+        if tracer_set == "cdr_tracer":
+            return get_cdr_role_metadata_dict(unit_type="concentration")
         return get_tracer_metadata_dict(
             tracer_set=tracer_set, unit_type="concentration"
         )
@@ -656,14 +760,17 @@ class TracerPerturbation(Release):
     @classmethod
     def _create_fluxes(cls, tracer_fluxes, info: ValidationInfo):
         tracer_set: TracerSet = info.data.get("tracer_set", "marbl")
-        defaults = get_tracer_defaults_for_set(tracer_set)
 
-        filled: dict[str, Flux | float | list[float]] = {}
-        for tracer_name in defaults:
-            if tracer_name in tracer_fluxes:
-                filled[tracer_name] = tracer_fluxes[tracer_name]
-            else:
-                filled[tracer_name] = 0.0
+        if tracer_set == "cdr_tracer":
+            allowed = _allowed_cdr_keys(info)
+        else:
+            allowed = list(get_tracer_defaults())
+        _raise_on_unknown_tracers(tracer_fluxes, allowed, tracer_set)
+
+        # Fill all tracer fluxes that are not provided with zero
+        filled: dict[str, Flux | float | list[float]] = {
+            tracer_name: tracer_fluxes.get(tracer_name, 0.0) for tracer_name in allowed
+        }
 
         return {
             tracer: (flux if isinstance(flux, Flux) else Flux(name=tracer, values=flux))
@@ -692,6 +799,8 @@ class TracerPerturbation(Release):
     @staticmethod
     def get_tracer_metadata(tracer_set: TracerSet = "marbl"):
         """Returns long names and expected units for the tracer fluxes."""
+        if tracer_set == "cdr_tracer":
+            return get_cdr_role_metadata_dict(unit_type="flux")
         return get_tracer_metadata_dict(tracer_set=tracer_set, unit_type="flux")
 
     def _do_accounting(

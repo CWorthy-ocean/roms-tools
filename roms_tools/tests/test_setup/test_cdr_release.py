@@ -525,30 +525,34 @@ class TestReleaseAccounting:
 
 
 class TestCDRTracerSet:
-    """Tests for the non-MARBL two-tracer CDR schema."""
+    """Tests for the non-MARBL CDR tracer schema (role-keyed releases)."""
 
     def setup_method(self):
         self.params = {
-            "name": "simple_release",
+            "name": "cdr_tracer_release",
             "lat": 0.0,
             "lon": 0.0,
             "depth": 10.0,
             "tracer_set": "cdr_tracer",
         }
 
+    def test_requires_targeting(self):
+        with pytest.raises(ValidationError, match="oae_pair"):
+            VolumeRelease(**self.params)
+
+    def test_targeting_requires_cdr_tracer_set(self):
+        with pytest.raises(ValidationError, match="only valid with"):
+            VolumeRelease(name="x", lat=0.0, lon=0.0, depth=10.0, oae_pair=1)
+
     def test_volume_release_fills_physics_and_cdr_tracers(self):
         vr = VolumeRelease(
             **self.params,
-            tracer_concentrations={"CDR_tracer_1": 100.0},
+            oae_pair=1,
+            tracer_concentrations={"ALK": 100.0},
         )
-        assert set(vr.tracer_concentrations) == {
-            "temp",
-            "salt",
-            "CDR_tracer_1",
-            "CDR_tracer_2",
-        }
-        assert vr.tracer_concentrations["CDR_tracer_1"].values == 100.0
-        assert vr.tracer_concentrations["CDR_tracer_2"].values == 0.0
+        assert set(vr.tracer_concentrations) == {"temp", "salt", "ALK", "DIC"}
+        assert vr.tracer_concentrations["ALK"].values == 100.0
+        assert vr.tracer_concentrations["DIC"].values == 0.0
         # temp/salt use physics defaults (not zero)
         assert vr.tracer_concentrations["temp"].values != 0.0
         assert vr.tracer_concentrations["salt"].values != 0.0
@@ -556,71 +560,150 @@ class TestCDRTracerSet:
     def test_volume_release_oae(self):
         vr = VolumeRelease(
             **self.params,
+            oae_pair=2,
             tracer_concentrations={
                 "temp": 20.0,
                 "salt": 1.0,
-                "CDR_tracer_1": 2000.0,
-                "CDR_tracer_2": 0.0,
+                "ALK": 2000.0,
+                "DIC": 0.0,
             },
         )
         assert vr.tracer_concentrations["temp"].values == 20.0
         assert vr.tracer_concentrations["salt"].values == 1.0
-        assert vr.tracer_concentrations["CDR_tracer_1"].values == 2000.0
-        assert vr.tracer_concentrations["CDR_tracer_2"].values == 0.0
+        assert vr.tracer_concentrations["ALK"].values == 2000.0
+        assert vr.tracer_concentrations["DIC"].values == 0.0
 
     def test_volume_release_dor_allows_negative_dic(self):
         vr = VolumeRelease(
             **self.params,
-            tracer_concentrations={"CDR_tracer_2": -50.0},
+            dor_index=1,
+            tracer_concentrations={"DOR_DIC": -50.0},
         )
-        assert vr.tracer_concentrations["CDR_tracer_1"].values == 0.0
-        assert vr.tracer_concentrations["CDR_tracer_2"].values == -50.0
+        assert set(vr.tracer_concentrations) == {"temp", "salt", "DOR_DIC"}
+        assert vr.tracer_concentrations["DOR_DIC"].values == -50.0
 
-    def test_volume_release_combined(self):
+    def test_volume_release_combined_oae_dor(self):
         vr = VolumeRelease(
             **self.params,
-            tracer_concentrations={"CDR_tracer_1": 100.0, "CDR_tracer_2": -20.0},
+            oae_pair=1,
+            dor_index=2,
+            tracer_concentrations={"ALK": 100.0, "DOR_DIC": -20.0},
         )
-        assert vr.tracer_concentrations["CDR_tracer_1"].values == 100.0
-        assert vr.tracer_concentrations["CDR_tracer_2"].values == -20.0
+        assert vr.tracer_concentrations["ALK"].values == 100.0
+        assert vr.tracer_concentrations["DIC"].values == 0.0
+        assert vr.tracer_concentrations["DOR_DIC"].values == -20.0
 
     def test_volume_release_rejects_negative_alkalinity(self):
         with pytest.raises(ValidationError, match="non-negative"):
             VolumeRelease(
                 **self.params,
-                tracer_concentrations={"CDR_tracer_1": -1.0},
+                oae_pair=1,
+                tracer_concentrations={"ALK": -1.0},
+            )
+
+    def test_volume_release_rejects_negative_oae_dic(self):
+        with pytest.raises(ValidationError, match="non-negative"):
+            VolumeRelease(
+                **self.params,
+                oae_pair=1,
+                tracer_concentrations={"DIC": -1.0},
+            )
+
+    def test_rejects_unknown_tracer_names(self):
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            VolumeRelease(
+                **self.params,
+                oae_pair=1,
+                tracer_concentrations={"ALKK": 1.0},
+            )
+        # role keys not enabled by the targeting fields are rejected too
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            VolumeRelease(
+                **self.params,
+                oae_pair=1,
+                tracer_concentrations={"DOR_DIC": -1.0},
+            )
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            TracerPerturbation(
+                **self.params,
+                dor_index=1,
+                tracer_fluxes={"ALK": 1.0e6},
+            )
+
+    def test_marbl_rejects_unknown_tracer_names(self):
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            VolumeRelease(
+                name="x",
+                lat=0.0,
+                lon=0.0,
+                depth=10.0,
+                tracer_concentrations={"NotATracer": 1.0},
+            )
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            TracerPerturbation(
+                name="x",
+                lat=0.0,
+                lon=0.0,
+                depth=10.0,
+                tracer_fluxes={"NotATracer": 1.0},
             )
 
     def test_tracer_perturbation_fills_physics_and_cdr_tracers(self):
         tp = TracerPerturbation(
             **self.params,
-            tracer_fluxes={"CDR_tracer_1": 1.0e6},
+            oae_pair=1,
+            tracer_fluxes={"ALK": 1.0e6},
         )
-        assert set(tp.tracer_fluxes) == {
-            "temp",
-            "salt",
-            "CDR_tracer_1",
-            "CDR_tracer_2",
-        }
-        assert tp.tracer_fluxes["CDR_tracer_1"].values == 1.0e6
-        assert tp.tracer_fluxes["CDR_tracer_2"].values == 0.0
+        assert set(tp.tracer_fluxes) == {"temp", "salt", "ALK", "DIC"}
+        assert tp.tracer_fluxes["ALK"].values == 1.0e6
+        assert tp.tracer_fluxes["DIC"].values == 0.0
         assert tp.tracer_fluxes["temp"].values == 0.0
         assert tp.tracer_fluxes["salt"].values == 0.0
 
     def test_tracer_perturbation_dor(self):
         tp = TracerPerturbation(
             **self.params,
-            tracer_fluxes={"CDR_tracer_2": -1.0e6},
+            dor_index=1,
+            tracer_fluxes={"DOR_DIC": -1.0e6},
         )
-        assert tp.tracer_fluxes["CDR_tracer_1"].values == 0.0
-        assert tp.tracer_fluxes["CDR_tracer_2"].values == -1.0e6
+        assert tp.tracer_fluxes["DOR_DIC"].values == -1.0e6
+
+    def test_map_tracers_to_schema(self):
+        from roms_tools.setup.utils import CDRTracerSchema
+
+        schema = CDRTracerSchema(n_oae_pairs=3, n_dor=2)
+        vr = VolumeRelease(
+            **self.params,
+            oae_pair=3,
+            dor_index=2,
+            tracer_concentrations={"ALK": 100.0, "DOR_DIC": -20.0},
+        )
+        mapped = vr._map_tracers_to_schema(vr.tracer_concentrations, schema)
+        assert set(mapped) == {
+            "temp",
+            "salt",
+            "CDR_OAE_ALK3",
+            "CDR_OAE_DIC3",
+            "CDR_DOR_DIC2",
+        }
+        assert mapped["CDR_OAE_ALK3"].values == 100.0
+        assert mapped["CDR_DOR_DIC2"].values == -20.0
+
+    def test_map_tracers_requires_schema(self):
+        vr = VolumeRelease(
+            **self.params,
+            oae_pair=1,
+            tracer_concentrations={"ALK": 100.0},
+        )
+        with pytest.raises(ValueError, match="require a CDRTracerSchema"):
+            vr._map_tracers_to_schema(vr.tracer_concentrations, None)
 
     def test_get_tracer_metadata(self):
-        expected = ["temp", "salt", "CDR_tracer_1", "CDR_tracer_2"]
+        expected = ["temp", "salt", "ALK", "DIC", "DOR_DIC"]
         meta = VolumeRelease.get_tracer_metadata(tracer_set="cdr_tracer")
         assert list(meta.keys()) == expected
         meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_tracer")
         assert list(meta_flux.keys()) == expected
-        assert meta["CDR_tracer_1"]["units"] == "meq/m^3"
-        assert meta_flux["CDR_tracer_1"]["units"] == "meq/s"
+        assert meta["ALK"]["units"] == "meq/m^3"
+        assert meta_flux["ALK"]["units"] == "meq/s"
         assert meta["temp"]["units"] == "degrees Celsius"

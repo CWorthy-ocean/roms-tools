@@ -35,10 +35,12 @@ from roms_tools.setup.cdr_release import (
     VolumeRelease,
 )
 from roms_tools.setup.utils import (
+    CDRTracerSchema,
     add_tracer_metadata_to_ds,
     convert_to_relative_days,
     from_yaml,
     gc_dist,
+    get_cdr_role_metadata_dict,
     get_target_coords,
     get_tracer_metadata_dict,
     to_dict,
@@ -226,6 +228,7 @@ class CDRForcingDatasetBuilder:
         releases: ReleaseCollector,
         model_reference_date: datetime,
         release_type: ReleaseType,
+        tracer_schema: CDRTracerSchema | None = None,
     ):
         """
         Initialize the dataset builder.
@@ -238,10 +241,14 @@ class CDRForcingDatasetBuilder:
             Reference date for relative time conversion.
         release_type : ReleaseType
             Type of release.
+        tracer_schema : CDRTracerSchema, optional
+            Layout of the file's tracer axis; required when the releases use
+            ``tracer_set="cdr_tracer"``.
         """
         self.releases = releases
         self.model_reference_date = model_reference_date
         self.release_type = release_type
+        self.tracer_schema = tracer_schema
 
     def build(self) -> xr.Dataset:
         """Build the CDR forcing dataset."""
@@ -267,8 +274,17 @@ class CDRForcingDatasetBuilder:
                 tracer_key = "cdr_trcflx"
                 tracer_data = release.tracer_fluxes
 
+            # Re-key role-based tracer data (tracer_set="cdr_tracer") onto the
+            # global tracer names of the file's tracer axis.
+            tracer_data = release._map_tracers_to_schema(
+                tracer_data, self.tracer_schema
+            )
+
             for ntracer in range(ds.ntracers.size):
                 tracer_name = ds.tracer_name[ntracer].item()
+                if tracer_name not in tracer_data:
+                    # Tracers this release does not feed keep their initial zeros.
+                    continue
                 ds[tracer_key].loc[{"ntracers": ntracer, "ncdr": ncdr}] = np.interp(
                     unique_rel_times,
                     rel_times,
@@ -309,6 +325,7 @@ class CDRForcingDatasetBuilder:
                 ds,
                 with_flux_units=False,
                 tracer_set=self.releases[0].tracer_set,
+                schema=self.tracer_schema,
             )  # adds the coordinate "tracer_name"
             ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
             ds["cdr_tracer"] = xr.zeros_like(
@@ -320,6 +337,7 @@ class CDRForcingDatasetBuilder:
                 ds,
                 with_flux_units=True,
                 tracer_set=self.releases[0].tracer_set,
+                schema=self.tracer_schema,
             )  # adds the coordinate "tracer_name"
             ds["cdr_trcflx"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
@@ -409,6 +427,11 @@ class CDRForcing(BaseModel):
     """The reference date for the ROMS simulation."""
     releases: ReleaseCollector
     """A list of one or more CDR release objects."""
+    tracer_schema: CDRTracerSchema | None = None
+    """Layout of the forcing file's tracer axis for ``tracer_set="cdr_tracer"``
+    releases; must mirror the ROMS namelist counts (``nt_passive``,
+    ``nt_cdr_oae``, ``nt_cdr_dor``). Required iff releases use
+    ``tracer_set="cdr_tracer"``."""
 
     # this is defined during init and shouldn't be serialized
     _ds: xr.Dataset = None
@@ -420,6 +443,8 @@ class CDRForcing(BaseModel):
                 f"`start_time` ({self.start_time}) must be earlier than `end_time` ({self.end_time})."
             )
 
+        self._validate_tracer_schema()
+
         for release in self.releases:
             ReleaseSimulationManager(
                 release=release,
@@ -429,10 +454,35 @@ class CDRForcing(BaseModel):
             )
 
         builder = CDRForcingDatasetBuilder(
-            self.releases, self.model_reference_date, self.release_type
+            self.releases,
+            self.model_reference_date,
+            self.release_type,
+            tracer_schema=self.tracer_schema,
         )
         self._ds = builder.build()
         return self
+
+    def _validate_tracer_schema(self) -> None:
+        """Cross-validate the tracer schema against the releases' targeting."""
+        if self.tracer_set == "cdr_tracer":
+            if self.tracer_schema is None:
+                raise ValueError(
+                    'Releases with tracer_set="cdr_tracer" require `tracer_schema` '
+                    "(a CDRTracerSchema) on CDRForcing to define the file's tracer axis."
+                )
+            for release in self.releases:
+                # These raise if the release targets a pair/slot outside the schema.
+                try:
+                    if release.oae_pair is not None:
+                        self.tracer_schema.oae_pair_names(release.oae_pair)
+                    if release.dor_index is not None:
+                        self.tracer_schema.dor_name(release.dor_index)
+                except ValueError as err:
+                    raise ValueError(f"Release '{release.name}': {err}") from err
+        elif self.tracer_schema is not None:
+            raise ValueError(
+                '`tracer_schema` is only valid when releases use tracer_set="cdr_tracer".'
+            )
 
     @property
     def release_type(self) -> ReleaseType:
@@ -898,9 +948,12 @@ class CDRForcing(BaseModel):
         integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
 
         # Add a row of units only for integrated tracers
-        tracer_meta = get_tracer_metadata_dict(
-            tracer_set=self.tracer_set, unit_type="integrated"
-        )
+        if self.tracer_set == "cdr_tracer":
+            tracer_meta = get_cdr_role_metadata_dict(unit_type="integrated")
+        else:
+            tracer_meta = get_tracer_metadata_dict(
+                tracer_set=self.tracer_set, unit_type="integrated"
+            )
         units_row = {
             col: tracer_meta.get(col, {}).get("units", "") for col in integrated_tracers
         }

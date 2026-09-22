@@ -20,7 +20,7 @@ import pandas as pd
 import xarray as xr
 import xgcm
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from scipy.spatial import cKDTree
 
 from roms_tools.constants import R_EARTH
@@ -598,18 +598,6 @@ def get_variable_metadata():
             "units": "meq/m^3",
             "flux_units": "meq/s",
             "integrated_units": "meq",
-        },
-        "CDR_tracer_1": {
-            "long_name": "CDR tracer 1 (alkalinity)",
-            "units": "meq/m^3",
-            "flux_units": "meq/s",
-            "integrated_units": "meq",
-        },
-        "CDR_tracer_2": {
-            "long_name": "CDR tracer 2 (DIC)",
-            "units": "mmol/m^3",
-            "flux_units": "mmol/s",
-            "integrated_units": "mmol",
         },
         "DOC": {
             "long_name": "dissolved organic carbon",
@@ -1227,22 +1215,183 @@ MARBL_TRACER_NAMES = (
     "diazFe",
 )
 
-# Non-MARBL CDR suite: ROMS physics tracers (temp, salt) plus two CDR tracers
-# for OAE / DOR with prescribed eta/beta gas exchange.
-CDR_TRACER_SET_NAMES = (
-    "temp",
-    "salt",
-    "CDR_tracer_1",
-    "CDR_tracer_2",
-)
-
 TracerSet = Literal["marbl", "cdr_tracer"]
+
+# Role keys used by releases with tracer_set="cdr_tracer" to address the
+# tracers of their assigned OAE pair / DOR slot (see CDRTracerSchema).
+CDR_ROLE_ALK = "ALK"
+CDR_ROLE_DIC = "DIC"
+CDR_ROLE_DOR = "DOR_DIC"
+
+# Unit families for generated (non-MARBL) CDR tracer names, by unit_type.
+_ALK_UNITS = {"units": "meq/m^3", "flux_units": "meq/s", "integrated_units": "meq"}
+_MMOL_UNITS = {"units": "mmol/m^3", "flux_units": "mmol/s", "integrated_units": "mmol"}
+
+
+class CDRTracerSchema(BaseModel):
+    """Layout of the non-MARBL CDR tracer suite in the ROMS forcing file.
+
+    ROMS reads the ``ntracers`` axis of the CDR forcing file positionally, so
+    the file must list every model tracer in the model's own order. This
+    schema mirrors the ucla-roms namelist counts (``nt_passive``,
+    ``nt_cdr_oae``, ``nt_cdr_dor`` in ``&PARAM_SETTINGS``) and generates the
+    matching tracer axis:
+
+    ``temp, salt, passive_tracer{1..n_passive},
+    CDR_OAE_ALK1, CDR_OAE_DIC1, ..., CDR_OAE_ALK{n}, CDR_OAE_DIC{n},
+    CDR_DOR_DIC{1..n_dor}[, MARBL BGC tracers]``
+
+    Parameters
+    ----------
+    n_passive : int, optional
+        Number of generic passive tracers (``nt_passive``). Defaults to 0.
+    n_oae_pairs : int, optional
+        Number of OAE (alkalinity, DIC) tracer pairs (``nt_cdr_oae``).
+    n_dor : int, optional
+        Number of DOR DIC tracers (``nt_cdr_dor``).
+    include_marbl_bgc : bool, optional
+        If True, append the MARBL BGC tracers after the CDR tracers, matching
+        a ROMS build with both ``CDR_TRACER`` and ``MARBL`` enabled. Defaults
+        to False.
+    """
+
+    n_passive: int = Field(0, ge=0)
+    n_oae_pairs: int = Field(0, ge=0)
+    n_dor: int = Field(0, ge=0)
+    include_marbl_bgc: bool = False
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _check_has_cdr_tracers(self) -> "CDRTracerSchema":
+        if self.n_oae_pairs == 0 and self.n_dor == 0:
+            raise ValueError(
+                "CDRTracerSchema must declare at least one CDR tracer: "
+                "set n_oae_pairs > 0 and/or n_dor > 0."
+            )
+        return self
+
+    def oae_pair_names(self, pair: int) -> tuple[str, str]:
+        """Return the (ALK, DIC) tracer names of OAE pair ``pair`` (1-based)."""
+        if not 1 <= pair <= self.n_oae_pairs:
+            raise ValueError(
+                f"OAE pair index {pair} out of range: schema declares "
+                f"n_oae_pairs={self.n_oae_pairs}."
+            )
+        return f"CDR_OAE_ALK{pair}", f"CDR_OAE_DIC{pair}"
+
+    def dor_name(self, index: int) -> str:
+        """Return the tracer name of DOR slot ``index`` (1-based)."""
+        if not 1 <= index <= self.n_dor:
+            raise ValueError(
+                f"DOR index {index} out of range: schema declares n_dor={self.n_dor}."
+            )
+        return f"CDR_DOR_DIC{index}"
+
+    @property
+    def tracer_names(self) -> list[str]:
+        """All tracer names, in the ROMS model's tracer index order."""
+        names = ["temp", "salt"]
+        names += [f"passive_tracer{i}" for i in range(1, self.n_passive + 1)]
+        for k in range(1, self.n_oae_pairs + 1):
+            names += [f"CDR_OAE_ALK{k}", f"CDR_OAE_DIC{k}"]
+        names += [f"CDR_DOR_DIC{j}" for j in range(1, self.n_dor + 1)]
+        if self.include_marbl_bgc:
+            names += [n for n in MARBL_TRACER_NAMES if n not in ("temp", "salt")]
+        return names
+
+    @property
+    def ntracers(self) -> int:
+        """Total tracer count; must equal the ROMS build's ``nt``."""
+        return len(self.tracer_names)
+
+    def tracer_metadata(
+        self,
+        unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    ) -> dict[str, dict[str, str]]:
+        """Map each tracer name to its 'units' and 'long_name'."""
+        metadata = get_variable_metadata()
+        unit_key = {
+            "concentration": "units",
+            "flux": "flux_units",
+            "integrated": "integrated_units",
+        }[unit_type]
+
+        tracer_dict = {}
+        for name in self.tracer_names:
+            if name in metadata:
+                entry = metadata[name]
+            elif name.startswith("CDR_OAE_ALK"):
+                entry = {
+                    **_ALK_UNITS,
+                    "long_name": f"CDR OAE alkalinity tracer {name.removeprefix('CDR_OAE_ALK')}",
+                }
+            elif name.startswith("CDR_OAE_DIC"):
+                entry = {
+                    **_MMOL_UNITS,
+                    "long_name": f"CDR OAE DIC tracer {name.removeprefix('CDR_OAE_DIC')}",
+                }
+            elif name.startswith("CDR_DOR_DIC"):
+                entry = {
+                    **_MMOL_UNITS,
+                    "long_name": f"CDR DOR DIC tracer {name.removeprefix('CDR_DOR_DIC')}",
+                }
+            else:  # passive_tracer{i}
+                entry = {
+                    **_MMOL_UNITS,
+                    "long_name": f"passive tracer {name.removeprefix('passive_tracer')}",
+                }
+            tracer_dict[name] = {
+                "units": entry.get(unit_key),
+                "long_name": entry["long_name"],
+            }
+        return tracer_dict
+
+
+def get_cdr_role_metadata_dict(
+    unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    include_physics: bool = True,
+) -> dict[str, dict[str, str]]:
+    """Metadata for the role keys used by ``tracer_set="cdr_tracer"`` releases.
+
+    Releases address their assigned tracers via the role keys ``"ALK"`` /
+    ``"DIC"`` (the release's OAE pair) and ``"DOR_DIC"`` (its DOR slot),
+    rather than by global tracer names like ``CDR_OAE_ALK7``.
+    """
+    unit_key = {
+        "concentration": "units",
+        "flux": "flux_units",
+        "integrated": "integrated_units",
+    }[unit_type]
+
+    role_dict = {}
+    if include_physics:
+        metadata = get_variable_metadata()
+        for name in ("temp", "salt"):
+            role_dict[name] = {
+                "units": metadata[name].get(unit_key),
+                "long_name": metadata[name]["long_name"],
+            }
+    role_dict[CDR_ROLE_ALK] = {
+        "units": _ALK_UNITS[unit_key],
+        "long_name": "alkalinity of the release's OAE tracer pair",
+    }
+    role_dict[CDR_ROLE_DIC] = {
+        "units": _MMOL_UNITS[unit_key],
+        "long_name": "DIC of the release's OAE tracer pair",
+    }
+    role_dict[CDR_ROLE_DOR] = {
+        "units": _MMOL_UNITS[unit_key],
+        "long_name": "DIC of the release's DOR tracer (negative = removal)",
+    }
+    return role_dict
 
 
 def resolve_tracer_names(
     *,
     include_bgc: bool = True,
     tracer_set: TracerSet | None = None,
+    schema: "CDRTracerSchema | None" = None,
 ) -> list[str]:
     """Return tracer names for a schema.
 
@@ -1252,36 +1401,18 @@ def resolve_tracer_names(
         Used when ``tracer_set`` is ``None`` or ``"marbl"``. If True (default),
         returns the full MARBL list; if False, returns only ``temp`` and ``salt``.
     tracer_set : {"marbl", "cdr_tracer"}, optional
-        Explicit CDR/river tracer schema. ``"cdr_tracer"`` returns ``temp``,
-        ``salt``, and the two non-MARBL CDR tracers. When omitted, ``include_bgc``
+        Explicit CDR/river tracer schema. ``"cdr_tracer"`` requires ``schema``
+        and returns its generated tracer names. When omitted, ``include_bgc``
         selects the MARBL subset.
+    schema : CDRTracerSchema, optional
+        Tracer layout; required when ``tracer_set="cdr_tracer"``.
     """
     if tracer_set == "cdr_tracer":
-        return list(CDR_TRACER_SET_NAMES)
+        if schema is None:
+            raise ValueError('tracer_set="cdr_tracer" requires a CDRTracerSchema.')
+        return schema.tracer_names
     if tracer_set == "marbl" or tracer_set is None:
         return list(MARBL_TRACER_NAMES) if include_bgc else ["temp", "salt"]
-    raise ValueError(
-        f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_tracer".'
-    )
-
-
-def get_tracer_defaults_for_set(tracer_set: TracerSet = "marbl") -> dict[str, float]:
-    """Return default concentrations for the requested tracer schema.
-
-    For ``"marbl"``, values come from ``river_tracer_defaults.nc``.
-    For ``"cdr_tracer"``, ``temp`` / ``salt`` use the same physics defaults as
-    MARBL; ``CDR_tracer_1`` / ``CDR_tracer_2`` default to ``0.0``.
-    """
-    if tracer_set == "cdr_tracer":
-        marbl_defaults = get_tracer_defaults()
-        return {
-            "temp": marbl_defaults["temp"],
-            "salt": marbl_defaults["salt"],
-            "CDR_tracer_1": 0.0,
-            "CDR_tracer_2": 0.0,
-        }
-    if tracer_set == "marbl":
-        return get_tracer_defaults()
     raise ValueError(
         f'Invalid tracer_set "{tracer_set}". Valid options: "marbl", "cdr_tracer".'
     )
@@ -1291,6 +1422,7 @@ def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
     tracer_set: TracerSet | None = None,
+    schema: CDRTracerSchema | None = None,
 ):
     """Generate a dictionary containing metadata for model tracers.
 
@@ -1310,12 +1442,20 @@ def get_tracer_metadata_dict(
     tracer_set : {"marbl", "cdr_tracer"}, optional
         Tracer schema. Defaults to MARBL behavior via ``include_bgc``.
 
+    schema : CDRTracerSchema, optional
+        Tracer layout; required when ``tracer_set="cdr_tracer"``.
+
     Returns
     -------
     dict
         A dictionary where keys are tracer names and values are dictionaries
         containing 'units' and 'long_name' for each tracer.
     """
+    if tracer_set == "cdr_tracer":
+        if schema is None:
+            raise ValueError('tracer_set="cdr_tracer" requires a CDRTracerSchema.')
+        return schema.tracer_metadata(unit_type)
+
     tracer_names = resolve_tracer_names(include_bgc=include_bgc, tracer_set=tracer_set)
 
     metadata = get_variable_metadata()
@@ -1342,6 +1482,7 @@ def add_tracer_metadata_to_ds(
     include_bgc=True,
     with_flux_units=False,
     tracer_set: TracerSet | None = None,
+    schema: CDRTracerSchema | None = None,
 ):
     """Adds tracer metadata to a dataset.
 
@@ -1371,7 +1512,7 @@ def add_tracer_metadata_to_ds(
         "flux" if with_flux_units else "concentration"
     )
     tracer_dict = get_tracer_metadata_dict(
-        include_bgc, unit_type=unit_type, tracer_set=tracer_set
+        include_bgc, unit_type=unit_type, tracer_set=tracer_set, schema=schema
     )
 
     tracer_names = list(tracer_dict.keys())

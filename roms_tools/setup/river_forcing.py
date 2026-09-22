@@ -38,6 +38,7 @@ from roms_tools.setup.utils import (
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
     expand_monthly_climatology_time_axis,
+    find_coastal_cells,
     from_yaml,
     get_target_coords,
     get_tracer_defaults,
@@ -1204,14 +1205,10 @@ class RiverForcing:
         else:
             river_lon = np.where(river_lon < 0, river_lon + 360, river_lon)
 
-        # Identify coastal grid cells — land cells adjacent to ocean.
-        mask = self.grid.ds.mask_rho.values  # (eta_rho, xi_rho)
-        faces = np.zeros_like(mask)
-        faces[1:, :] += mask[:-1, :]  # south neighbor
-        faces[:-1, :] += mask[1:, :]  # north neighbor
-        faces[:, 1:] += mask[:, :-1]  # west neighbor
-        faces[:, :-1] += mask[:, 1:]  # east neighbor
-        coast = (1 - mask) * (faces > 0)
+        # Identify coastal grid cells — land cells adjacent to ocean. Must use the
+        # same definition as check_river_locations_are_along_coast so that a
+        # YAML round-trip accepts every location chosen here.
+        coast = find_coastal_cells(self.grid.ds.mask_rho.values)
 
         # Get eta, xi indices and lat/lon of coastal cells
         coast_eta, coast_xi = np.where(coast)
@@ -1988,13 +1985,12 @@ def check_river_locations_are_along_coast(mask, indices):
     ValueError
         If any river is not located on the coast.
     """
-    faces = (
-        mask.shift(eta_rho=1)
-        + mask.shift(eta_rho=-1)
-        + mask.shift(xi_rho=1)
-        + mask.shift(xi_rho=-1)
-    )
-    coast = (1 - mask) * (faces > 0)
+    # Use the same coast definition as the auto-discovery path
+    # (find_coastal_cells). The previous xarray ``shift``-based implementation
+    # produced NaN along the domain edges, so edge cells were never counted as
+    # coast and RiverForcing.from_yaml rejected rivers that the auto-discovery
+    # path had legitimately placed there.
+    coast = find_coastal_cells(np.asarray(mask))
 
     for key, river_data in indices.items():
         for idx_pair in river_data:

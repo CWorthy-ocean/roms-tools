@@ -9,9 +9,9 @@
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        1,
+        12,
         3,
-        3
+        5
       ]
     }
   },

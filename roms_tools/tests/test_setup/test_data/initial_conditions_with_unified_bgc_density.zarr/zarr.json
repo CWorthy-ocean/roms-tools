@@ -1,12 +1,15 @@
 {
   "attributes": {
     "title": "ROMS initial conditions file created by ROMS-Tools",
-    "roms_tools_version": "10000.dev364+g785fa77b7.d20260612",
+    "roms_tools_version": "4.0.0",
+    "roms_tools_git_commit": "a203bfab-dirty",
     "ini_time": "2021-06-29 00:00:00",
     "model_reference_date": "2000-01-01 00:00:00",
     "adjust_depth_for_sea_surface_height": "False",
     "source": "GLORYS",
-    "bgc_source": "UNIFIED",
+    "prefill": "2d_lateral_fill",
+    "regrid_method": "scipy",
+    "extrap_method": "inverse_dist",
     "theta_s": 5.0,
     "theta_b": 2.0,
     "hc": 250.0

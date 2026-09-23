@@ -7,18 +7,15 @@ from roms_tools.datasets.river_datasets import (
     VALUE_OPTION_DIM,
     RiverTracerDefaultsDataset,
 )
-from roms_tools.setup.utils import (
-    MARBL_TRACER_NAMES,
-    _load_tracer_defaults,
-    get_tracer_defaults,
-)
+from roms_tools.setup.bgc_model import BGCMarbl, _load_river_defaults
+from roms_tools.setup.utils import MARBL_TRACER_NAMES
 
 
 @pytest.fixture(autouse=True)
 def clear_tracer_defaults_cache():
-    _load_tracer_defaults.cache_clear()
+    _load_river_defaults.cache_clear()
     yield
-    _load_tracer_defaults.cache_clear()
+    _load_river_defaults.cache_clear()
 
 
 @pytest.fixture
@@ -29,7 +26,7 @@ def tracer_defaults_path():
 
 class TestTracerDefaults:
     def test_reads_recommended_values_from_netcdf(self):
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
 
         assert defaults["DIC"] == pytest.approx(1640.071)
         assert defaults["ALK"] == pytest.approx(1173.693)

@@ -223,18 +223,23 @@ def _release_assignments(
 ) -> dict[str, tuple[str, ...]]:
     """Release name -> assigned global CDR tracer names, in release order.
 
-    The single source of truth for CDR-LiTE tracer assignment: ALK-bearing
-    releases take the next OAE pair, DIC-only releases the next DOR tracer.
+    The single source of truth for generated-tracer assignment: passive
+    releases take the next passive slot; cdr_lite ALK-bearing releases the
+    next OAE pair; cdr_lite DIC-only releases the next DOR tracer.
     Used by the dataset builder, ``CDRForcing.release_tracers``, and
     ``CDRForcing.roms_layout``. Empty for pure-marbl forcings.
     """
     mapping: dict[str, tuple[str, ...]] = {}
     if tracer_schema is None:
         return mapping
+    passive_counter = 0
     oae_counter = 0
     dor_counter = 0
     for release in releases:
-        if release.is_oae:
+        if release.is_passive:
+            passive_counter += 1
+            mapping[release.name] = (tracer_schema.passive_name(passive_counter),)
+        elif release.is_oae:
             oae_counter += 1
             mapping[release.name] = tracer_schema.oae_pair_names(oae_counter)
         elif release.is_dor:
@@ -301,17 +306,27 @@ class CDRForcingDatasetBuilder:
                 tracer_key = "cdr_trcflx"
                 tracer_data = release.tracer_fluxes
 
-            # Re-key role-based tracer data (tracer_set="cdr_lite") onto the
-            # global tracer names of the file's tracer axis.
+            # Re-key role-based tracer data (cdr_lite / passive releases)
+            # onto the global tracer names of the file's tracer axis.
             if release.name in assignments:
                 assigned = assignments[release.name]
-                tracer_data = {
+                if release.is_oae:
+                    roles = ("ALK", "DIC")
+                elif release.is_dor:
+                    roles = ("DIC",)
+                else:  # passive
+                    roles = ("passive_tracer",)
+                mapped = {
                     name: tracer_data[role]
-                    for name, role in zip(
-                        assigned, ("ALK", "DIC") if release.is_oae else ("DIC",)
-                    )
+                    for name, role in zip(assigned, roles)
                     if role in tracer_data
                 }
+                # Passive volume releases also carry the discharged water's
+                # physics; those are already global names.
+                mapped.update(
+                    {k: v for k, v in tracer_data.items() if k in ("temp", "salt")}
+                )
+                tracer_data = mapped
 
             for ntracer in range(ds.ntracers.size):
                 tracer_name = ds.tracer_name[ntracer].item()
@@ -483,9 +498,9 @@ class CDRForcing(BaseModel):
     include_marbl_bgc: bool = False
     """Append the MARBL BGC tracers to the file's tracer axis, matching a ROMS
     build with both ``CDR_TRACER`` and ``MARBL`` enabled. Only valid when
-    cdr_lite releases are present (a pure-marbl forcing already carries the
-    full MARBL axis). Auto-enabled when marbl and cdr_lite releases are
-    mixed."""
+    cdr_lite or passive releases are present (a pure-marbl forcing already
+    carries the full MARBL axis). Auto-enabled when marbl releases are mixed
+    with generated-tracer releases."""
 
     # these are defined during init and shouldn't be serialized
     _ds: xr.Dataset = None
@@ -520,23 +535,25 @@ class CDRForcing(BaseModel):
     def _resolve_tracer_schema(self) -> None:
         """Derive the file's tracer axis from the releases.
 
-        With cdr_lite releases present, the axis is a CDR-LiTE schema with one
-        OAE pair per ALK-bearing release and one DOR tracer per DIC-only
-        release, in release order; the MARBL BGC block is appended when
-        ``include_marbl_bgc=True`` or when marbl releases are mixed in. With
-        only marbl releases, the axis is the plain full-MARBL axis
-        (``tracer_schema`` is None).
+        With cdr_lite and/or passive releases present, the axis is a
+        generated-tracer schema with one passive slot per passive release,
+        one OAE pair per ALK-bearing cdr_lite release, and one DOR tracer per
+        DIC-only cdr_lite release, in release order; the MARBL BGC block is
+        appended when ``include_marbl_bgc=True`` or when marbl releases are
+        mixed in. With only marbl releases, the axis is the plain full-MARBL
+        axis (``tracer_schema`` is None).
         """
+        n_passive = sum(1 for r in self.releases if r.is_passive)
         n_oae = sum(1 for r in self.releases if r.is_oae)
         n_dor = sum(1 for r in self.releases if r.is_dor)
         has_marbl = "marbl" in self.releases.tracer_sets
 
-        if n_oae + n_dor == 0:
+        if n_passive + n_oae + n_dor == 0:
             if self.include_marbl_bgc:
                 raise ValueError(
-                    "`include_marbl_bgc=True` is only valid when cdr_lite "
-                    "releases are present: a pure-marbl CDRForcing already "
-                    "carries the full MARBL tracer axis."
+                    "`include_marbl_bgc=True` is only valid when cdr_lite or "
+                    "passive releases are present: a pure-marbl CDRForcing "
+                    "already carries the full MARBL tracer axis."
                 )
             self._tracer_schema = None
             return
@@ -544,13 +561,17 @@ class CDRForcing(BaseModel):
         include_bgc = self.include_marbl_bgc
         if has_marbl and not include_bgc:
             logging.info(
-                "marbl and cdr_lite releases are mixed: appending the MARBL "
-                "BGC tracers to the file's tracer axis (include_marbl_bgc)."
+                "marbl releases are mixed with generated-tracer releases: "
+                "appending the MARBL BGC tracers to the file's tracer axis "
+                "(include_marbl_bgc)."
             )
             include_bgc = True
 
         self._tracer_schema = BGCCdrLite.TracerSchema(
-            n_oae_pairs=n_oae, n_dor=n_dor, include_marbl_bgc=include_bgc
+            n_passive=n_passive,
+            n_oae_pairs=n_oae,
+            n_dor=n_dor,
+            include_marbl_bgc=include_bgc,
         )
 
     @property
@@ -598,7 +619,8 @@ class CDRForcing(BaseModel):
         build's tracer ``itrc`` receives.
 
         The dataset attrs carry the ROMS namelist correspondence — set the
-        namelist to match the file: ``nt_cdr_oae``, ``nt_cdr_dor`` (from the
+        namelist to match the file: ``nt_passive``, ``nt_cdr_oae``,
+        ``nt_cdr_dor`` (from the
         derived tracer schema), ``cdr_ncdr_parm`` (number of releases), and
         ``include_marbl_bgc`` (whether the MARBL BGC block follows, i.e. a
         MARBL-enabled build).
@@ -625,6 +647,7 @@ class CDRForcing(BaseModel):
             },
             coords={"itrc": np.arange(1, len(tracer_names) + 1)},
             attrs={
+                "nt_passive": schema.n_passive if schema else 0,
                 "nt_cdr_oae": schema.n_oae_pairs if schema else 0,
                 "nt_cdr_dor": schema.n_dor if schema else 0,
                 "cdr_ncdr_parm": len(self.releases),
@@ -645,7 +668,7 @@ class CDRForcing(BaseModel):
                 print(f"{i}\t{name}\t{unit}\t{release}")
             print()
             print("ROMS namelist correspondence (set the namelist to match the file):")
-            for key in ("nt_cdr_oae", "nt_cdr_dor", "cdr_ncdr_parm"):
+            for key in ("nt_passive", "nt_cdr_oae", "nt_cdr_dor", "cdr_ncdr_parm"):
                 print(f"  {key} = {layout.attrs[key]}")
             print(
                 f"  MARBL BGC tracers included: {bool(layout.attrs['include_marbl_bgc'])}"

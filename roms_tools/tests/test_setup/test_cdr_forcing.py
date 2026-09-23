@@ -1335,3 +1335,185 @@ class TestCdrLiteForcing:
         assert set(layout.release.values) == {""}
         assert layout.attrs["nt_cdr_oae"] == 0
         assert layout.attrs["cdr_ncdr_parm"] == 1
+
+
+class TestPassiveForcing:
+    """CDRForcing with tracer_set='passive' releases and three-model mixing."""
+
+    def setup_method(self):
+        self.start_time = datetime(2022, 1, 1)
+        self.end_time = datetime(2022, 1, 31)
+
+    def _dye(self, name, flux, lon=-25.0):
+        return TracerPerturbation(
+            name=name,
+            lat=66.0,
+            lon=lon,
+            depth=50.0,
+            tracer_set="passive",
+            tracer_fluxes={"passive_tracer": flux},
+        )
+
+    def test_passive_only_forcing(self):
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self._dye("dye1", 1.0e5), self._dye("dye2", 2.0e5, lon=-24.0)],
+        )
+        assert list(cdr.ds.tracer_name.values) == [
+            "temp",
+            "salt",
+            "passive_tracer1",
+            "passive_tracer2",
+        ]
+        assert cdr.tracer_schema.n_passive == 2
+        assert cdr.release_tracers == {
+            "dye1": ("passive_tracer1",),
+            "dye2": ("passive_tracer2",),
+        }
+        names = list(cdr.ds.tracer_name.values)
+        flx = cdr.ds.cdr_trcflx
+        assert np.allclose(
+            flx.isel(ntracers=names.index("passive_tracer1"), ncdr=0).values, 1.0e5
+        )
+        assert np.allclose(
+            flx.isel(ntracers=names.index("passive_tracer1"), ncdr=1).values, 0.0
+        )
+
+    def test_three_model_perturbation_mix(self):
+        releases = [
+            TracerPerturbation(
+                name="marbl_alk",
+                lat=63.0,
+                lon=-22.0,
+                depth=50.0,
+                tracer_fluxes={"ALK": 3.0e6},
+            ),
+            TracerPerturbation(
+                name="oae1",
+                lat=66.0,
+                lon=-25.0,
+                depth=50.0,
+                tracer_set="cdr_lite",
+                tracer_fluxes={"ALK": 1.0e6},
+            ),
+            self._dye("dye1", 1.0e5, lon=-24.0),
+        ]
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=releases,
+        )
+        names = list(cdr.ds.tracer_name.values)
+        # generated blocks in ROMS order: passive, OAE pair, then MARBL BGC
+        assert names[:5] == [
+            "temp",
+            "salt",
+            "passive_tracer1",
+            "CDR_OAE_ALK1",
+            "CDR_OAE_DIC1",
+        ]
+        assert "ALK" in names  # MARBL block appended (auto include_marbl_bgc)
+        tracer_release = list(cdr.ds.tracer_release.values)
+        assert tracer_release[names.index("passive_tracer1")] == "dye1"
+        assert tracer_release[names.index("CDR_OAE_ALK1")] == "oae1"
+        assert tracer_release[names.index("ALK")] == ""
+        flx = cdr.ds.cdr_trcflx
+        assert np.allclose(
+            flx.isel(ntracers=names.index("passive_tracer1"), ncdr=2).values, 1.0e5
+        )
+        assert np.allclose(flx.isel(ntracers=names.index("ALK"), ncdr=0).values, 3.0e6)
+
+    def test_passive_volume_mixes_with_marbl_volume(self):
+        releases = [
+            VolumeRelease(
+                name="mv",
+                lat=66.0,
+                lon=-25.0,
+                depth=50.0,
+                volume_fluxes=100.0,
+                tracer_concentrations={"ALK": 2000.0},
+            ),
+            VolumeRelease(
+                name="dye_v",
+                lat=65.0,
+                lon=-24.0,
+                depth=50.0,
+                tracer_set="passive",
+                volume_fluxes=50.0,
+                tracer_concentrations={"temp": 12.0, "passive_tracer": 10.0},
+            ),
+        ]
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=releases,
+        )
+        names = list(cdr.ds.tracer_name.values)
+        trc = cdr.ds.cdr_tracer
+        assert np.allclose(
+            trc.isel(ntracers=names.index("passive_tracer1"), ncdr=1).values, 10.0
+        )
+        assert np.allclose(trc.isel(ntracers=names.index("temp"), ncdr=1).values, 12.0)
+        assert np.allclose(trc.isel(ntracers=names.index("ALK"), ncdr=0).values, 2000.0)
+
+    def test_passive_volume_with_cdr_lite_perturbation_raises(self):
+        # cdr_lite is perturbation-only, and mixed release types already raise.
+        dye_volume = VolumeRelease(
+            name="dye_v",
+            lat=65.0,
+            lon=-24.0,
+            depth=50.0,
+            tracer_set="passive",
+            volume_fluxes=50.0,
+            tracer_concentrations={"passive_tracer": 10.0},
+        )
+        oae = TracerPerturbation(
+            name="oae",
+            lat=66.0,
+            lon=-25.0,
+            depth=50.0,
+            tracer_set="cdr_lite",
+            tracer_fluxes={"ALK": 1.0e6},
+        )
+        with pytest.raises(ValidationError, match="same type"):
+            CDRForcing(
+                start_time=self.start_time,
+                end_time=self.end_time,
+                releases=[dye_volume, oae],
+            )
+
+    def test_roms_layout_includes_passive(self, capsys):
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self._dye("dye1", 1.0e5)],
+        )
+        layout = cdr.roms_layout()
+        out = capsys.readouterr().out
+        assert list(layout.release.values) == ["", "", "dye1"]
+        assert layout.attrs["nt_passive"] == 1
+        assert "nt_passive = 1" in out
+
+    def test_roundtrip_yaml_passive(self, tmp_path):
+        grid = Grid(
+            nx=10,
+            ny=10,
+            size_x=500,
+            size_y=500,
+            center_lon=-25,
+            center_lat=66,
+            rot=0,
+            N=3,
+        )
+        cdr = CDRForcing(
+            grid=grid,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self._dye("dye1", 1.0e5)],
+        )
+        filepath = tmp_path / "passive.yaml"
+        cdr.to_yaml(filepath)
+        restored = CDRForcing.from_yaml(filepath)
+        assert restored.releases[0].tracer_set == "passive"
+        assert restored.ds.identical(cdr.ds)

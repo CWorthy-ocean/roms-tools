@@ -609,13 +609,22 @@ class CdrLiteTracerSchema(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     @model_validator(mode="after")
-    def _check_has_cdr_tracers(self) -> CdrLiteTracerSchema:
-        if self.n_oae_pairs == 0 and self.n_dor == 0:
+    def _check_has_tracers(self) -> CdrLiteTracerSchema:
+        if self.n_passive == 0 and self.n_oae_pairs == 0 and self.n_dor == 0:
             raise ValueError(
-                "The CDR-LiTE tracer schema must declare at least one CDR "
-                "tracer: set n_oae_pairs > 0 and/or n_dor > 0."
+                "The tracer schema must declare at least one generated tracer: "
+                "set n_passive > 0, n_oae_pairs > 0, and/or n_dor > 0."
             )
         return self
+
+    def passive_name(self, index: int) -> str:
+        """Return the tracer name of passive slot ``index`` (1-based)."""
+        if not 1 <= index <= self.n_passive:
+            raise ValueError(
+                f"Passive index {index} out of range: schema declares "
+                f"n_passive={self.n_passive}."
+            )
+        return f"passive_tracer{index}"
 
     def oae_pair_names(self, pair: int) -> tuple[str, str]:
         """Return the (ALK, DIC) tracer names of OAE pair ``pair`` (1-based)."""
@@ -760,14 +769,52 @@ class BGCCdrLite:
         }
 
 
+class BGCPassive:
+    """Namespace for generic passive (dye) tracers.
+
+    A ROMS build with ``nt_passive > 0`` carries inert tracers named
+    ``passive_tracer{N}`` between temp/salt and the CDR-LiTE block, with no
+    BGC behavior and no air-sea exchange (``t_ana_frc=1``) — useful as
+    plume/dye tracers. Releases with ``tracer_set="passive"`` specify a
+    single ``"passive_tracer"`` flux/concentration and are auto-assigned the
+    next passive slot by ``CDRForcing``.
+    """
+
+    name: ClassVar[str] = "passive"
+
+    #: The flux/concentration key used by tracer_set="passive" releases.
+    ROLE_TRACER: ClassVar[str] = "passive_tracer"
+
+    @classmethod
+    def release_metadata(
+        cls,
+        unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    ) -> dict[str, dict[str, str]]:
+        """Flux key -> units/long_name for passive release inputs."""
+        unit_key = {
+            "concentration": "units",
+            "flux": "flux_units",
+            "integrated": "integrated_units",
+        }[unit_type]
+        return {
+            cls.ROLE_TRACER: {
+                "units": _MMOL_UNITS[unit_key],
+                "long_name": "generic passive (dye) tracer",
+            }
+        }
+
+
 #: Valid values of a CDR release's ``tracer_set`` field — the keys of
 #: :data:`RELEASE_TRACER_MODELS`.
-TracerSet = Literal["marbl", "cdr_lite"]
+TracerSet = Literal["marbl", "cdr_lite", "passive"]
 
 #: Tracer models selectable via a CDR release's ``tracer_set`` field.
-RELEASE_TRACER_MODELS: dict[str, type[BGCMarbl] | type[BGCCdrLite]] = {
+RELEASE_TRACER_MODELS: dict[
+    str, type[BGCMarbl] | type[BGCCdrLite] | type[BGCPassive]
+] = {
     "marbl": BGCMarbl,
     "cdr_lite": BGCCdrLite,
+    "passive": BGCPassive,
 }
 
 

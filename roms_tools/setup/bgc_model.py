@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from functools import lru_cache
 from typing import ClassVar, Literal
 
 import numpy as np
@@ -353,6 +354,21 @@ class BGCMarbl(BGCModel):
         return cls._transform_for("Lig")(fe)
 
     @classmethod
+    def river_defaults(cls) -> dict[str, float]:
+        """Default river-mouth/discharge tracer concentrations for ROMS-MARBL.
+
+        Values come from ``river_tracer_defaults.nc`` (recommended values at
+        ``value_option`` index 0) in the roms-tools-data repository. Used to
+        fill unspecified river tracer concentrations and CDR volume-release
+        concentrations (``fill_values="auto"``).
+
+        Deliberately distinct from :attr:`_OCEAN_FILL`: these are river-mouth
+        values, not open-ocean backgrounds — see the separation guard tests in
+        ``test_bgc_model.py``.
+        """
+        return _load_river_defaults()
+
+    @classmethod
     def release_metadata(
         cls,
         unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
@@ -534,6 +550,19 @@ class BGCMarbl(BGCModel):
 # YAML as a plain string (``to_dict``'s generic serialization would otherwise pass
 # a raw Python class straight to ``yaml.dump()``, which isn't safe to read back with
 # ``yaml.safe_load_all``). Add an entry here for every new `BGCModel` subclass.
+@lru_cache(maxsize=1)
+def _load_river_defaults() -> dict[str, float]:
+    """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
+
+    ``RiverTracerDefaultsDataset`` is imported inside this function because
+    ``bgc_model`` must not import dataset modules at module load time
+    (``river_datasets`` imports from ``setup`` modules).
+    """
+    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
+
+    return RiverTracerDefaultsDataset().defaults
+
+
 # ---------------------------------------------------------------------------
 # CDR-LiTE: dedicated CDR tracers without a full BGC model
 # ---------------------------------------------------------------------------
@@ -728,6 +757,10 @@ class BGCCdrLite:
             },
         }
 
+
+#: Valid values of a CDR release's ``tracer_set`` field — the keys of
+#: :data:`RELEASE_TRACER_MODELS`.
+TracerSet = Literal["marbl", "cdr_lite"]
 
 #: Tracer models selectable via a CDR release's ``tracer_set`` field.
 RELEASE_TRACER_MODELS: dict[str, type[BGCMarbl] | type[BGCCdrLite]] = {

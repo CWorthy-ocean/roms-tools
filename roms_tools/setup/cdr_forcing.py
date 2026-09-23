@@ -28,7 +28,10 @@ from roms_tools.plot import (
     plot_2d_horizontal_field,
     plot_location,
 )
-from roms_tools.setup.bgc_model import BGCCdrLite, CdrLiteTracerSchema
+from roms_tools.setup.bgc_model import (
+    RELEASE_TRACER_MODELS,
+    CdrLiteTracerSchema,
+)
 from roms_tools.setup.cdr_release import (
     Release,
     ReleaseType,
@@ -41,7 +44,6 @@ from roms_tools.setup.utils import (
     from_yaml,
     gc_dist,
     get_target_coords,
-    get_tracer_metadata_dict,
     to_dict,
     validate_names,
     write_to_yaml,
@@ -319,25 +321,27 @@ class CDRForcingDatasetBuilder:
             {"release_name": (["ncdr"], [r.name for r in self.releases])}
         )
 
+        with_flux_units = self.release_type == ReleaseType.tracer_perturbation
+        if self.tracer_schema is not None:
+            # CDR-LiTE: the schema supplies the ordered axis + metadata (its
+            # generated names are not in get_variable_metadata).
+            tracer_metadata = self.tracer_schema.tracer_metadata(
+                "flux" if with_flux_units else "concentration"
+            )
+        else:
+            tracer_metadata = None  # MARBL: full axis via get_tracer_metadata_dict
+
+        # adds the coordinate "tracer_name"
+        ds = add_tracer_metadata_to_ds(
+            ds, with_flux_units=with_flux_units, tracer_metadata=tracer_metadata
+        )
+
         if self.release_type == ReleaseType.volume:
-            ds = add_tracer_metadata_to_ds(
-                ds,
-                with_flux_units=False,
-                tracer_set=self.releases[0].tracer_set,
-                schema=self.tracer_schema,
-            )  # adds the coordinate "tracer_name"
             ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
             ds["cdr_tracer"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
             )
-
         elif self.release_type == ReleaseType.tracer_perturbation:
-            ds = add_tracer_metadata_to_ds(
-                ds,
-                with_flux_units=True,
-                tracer_set=self.releases[0].tracer_set,
-                schema=self.tracer_schema,
-            )  # adds the coordinate "tracer_name"
             ds["cdr_trcflx"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
             )
@@ -947,12 +951,9 @@ class CDRForcing(BaseModel):
         integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
 
         # Add a row of units only for integrated tracers
-        if self.tracer_set == "cdr_lite":
-            tracer_meta = BGCCdrLite.release_metadata(unit_type="integrated")
-        else:
-            tracer_meta = get_tracer_metadata_dict(
-                tracer_set=self.tracer_set, unit_type="integrated"
-            )
+        tracer_meta = RELEASE_TRACER_MODELS[self.tracer_set].release_metadata(
+            unit_type="integrated"
+        )
         units_row = {
             col: tracer_meta.get(col, {}).get("units", "") for col in integrated_tracers
         }

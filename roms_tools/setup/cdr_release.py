@@ -22,13 +22,11 @@ from scipy.interpolate import interp1d
 from roms_tools.setup.bgc_model import (
     RELEASE_TRACER_MODELS,
     BGCCdrLite,
+    BGCMarbl,
     CdrLiteTracerSchema,
-)
-from roms_tools.setup.utils import (
     TracerSet,
-    convert_to_relative_days,
-    get_tracer_defaults,
 )
+from roms_tools.setup.utils import convert_to_relative_days
 
 NonNegativeFloat = Annotated[float, Ge(0)]
 
@@ -564,7 +562,7 @@ class VolumeRelease(Release):
     @field_validator("tracer_concentrations", mode="after")
     @classmethod
     def _create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         _raise_on_unknown_tracers(tracer_concentrations, defaults, "marbl")
         filled = {}
         for tracer_name in defaults:
@@ -778,7 +776,7 @@ class TracerPerturbation(Release):
         if tracer_set == "cdr_lite":
             allowed = _allowed_cdr_keys(info)
         else:
-            allowed = list(get_tracer_defaults())
+            allowed = list(BGCMarbl.river_defaults())
         _raise_on_unknown_tracers(tracer_fluxes, allowed, tracer_set)
 
         # Fill all tracer fluxes that are not provided with zero

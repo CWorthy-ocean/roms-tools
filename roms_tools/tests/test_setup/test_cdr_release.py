@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from scipy.interpolate import interp1d
 
 from roms_tools.constants import NUM_TRACERS
-from roms_tools.setup.bgc_model import BGCCdrLite
+from roms_tools.setup.bgc_model import BGCCdrLite, BGCMarbl
 from roms_tools.setup.cdr_release import (
     Concentration,
     Flux,
@@ -15,7 +15,6 @@ from roms_tools.setup.cdr_release import (
     TracerPerturbation,
     VolumeRelease,
 )
-from roms_tools.setup.utils import get_tracer_defaults
 
 
 class TestValueArray:
@@ -238,7 +237,7 @@ class TestVolumeRelease:
     def test_auto_fill_strategy(self):
         alk_value = 100.0
         vr = VolumeRelease(**self.params, tracer_concentrations={"ALK": alk_value})
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         for tracer in defaults:
             assert tracer in vr.tracer_concentrations
             assert isinstance(vr.tracer_concentrations[tracer], Concentration)
@@ -252,7 +251,7 @@ class TestVolumeRelease:
         vr = VolumeRelease(
             **self.params, tracer_concentrations={"ALK": alk_value}, fill_values="zero"
         )
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         for tracer in defaults:
             assert tracer in vr.tracer_concentrations
             assert isinstance(vr.tracer_concentrations[tracer], Concentration)
@@ -341,7 +340,7 @@ class TestTracerPerturbation:
             **self.params,
             tracer_fluxes={"ALK": alk_value},
         )
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         for tracer in defaults:
             assert tracer in tp.tracer_fluxes
             assert isinstance(tp.tracer_fluxes[tracer], Flux)

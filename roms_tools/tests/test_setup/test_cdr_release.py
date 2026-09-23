@@ -609,33 +609,6 @@ class TestCdrLiteTracerSet:
                 tracer_fluxes={"NotATracer": 1.0},
             )
 
-    def test_map_tracers_to_schema(self):
-        schema = BGCCdrLite.TracerSchema(n_oae_pairs=3, n_dor=2)
-        oae = TracerPerturbation(
-            **self.params, tracer_fluxes={"ALK": 100.0, "DIC": -20.0}
-        )
-        mapped = oae._map_tracers_to_schema(oae.tracer_fluxes, schema, oae_pair=3)
-        assert set(mapped) == {"CDR_OAE_ALK3", "CDR_OAE_DIC3"}
-        assert mapped["CDR_OAE_ALK3"].values == 100.0
-        assert mapped["CDR_OAE_DIC3"].values == -20.0
-
-        dor = TracerPerturbation(
-            name="d",
-            lat=0.0,
-            lon=0.0,
-            depth=10.0,
-            tracer_set="cdr_lite",
-            tracer_fluxes={"DIC": -50.0},
-        )
-        mapped = dor._map_tracers_to_schema(dor.tracer_fluxes, schema, dor_index=2)
-        assert set(mapped) == {"CDR_DOR_DIC2"}
-        assert mapped["CDR_DOR_DIC2"].values == -50.0
-
-    def test_map_tracers_requires_schema(self):
-        tp = TracerPerturbation(**self.params, tracer_fluxes={"ALK": 100.0})
-        with pytest.raises(ValueError, match="require a CDR-LiTE tracer"):
-            tp._map_tracers_to_schema(tp.tracer_fluxes, None, oae_pair=1)
-
     def test_release_tracer_models_dispatch(self):
         from roms_tools import BGCMarbl
         from roms_tools.setup.bgc_model import RELEASE_TRACER_MODELS

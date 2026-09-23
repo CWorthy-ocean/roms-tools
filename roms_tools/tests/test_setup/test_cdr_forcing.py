@@ -1125,6 +1125,16 @@ class TestCdrLiteForcing:
             "dor_a": ("CDR_DOR_DIC1",),
             "combo": ("CDR_OAE_ALK2", "CDR_OAE_DIC2"),
         }
+        # the release <-> tracer linkage is stored on the tracer axis
+        assert list(cdr.ds.tracer_release.values) == [
+            "",
+            "",
+            "oae_a",
+            "oae_a",
+            "combo",
+            "combo",
+            "dor_a",
+        ]
         names = list(cdr.ds.tracer_name.values)
         flx = cdr.ds.cdr_trcflx
 
@@ -1160,6 +1170,7 @@ class TestCdrLiteForcing:
         )
         assert cdr.tracer_schema is None
         assert cdr.release_tracers == {}
+        assert "tracer_release" not in cdr.ds.coords
         assert cdr.ds.sizes["ntracers"] == NUM_TRACERS
 
     def test_include_marbl_bgc_appends_bgc_block(self):
@@ -1209,6 +1220,9 @@ class TestCdrLiteForcing:
             flx.isel(ntracers=names.index("CDR_OAE_ALK1"), ncdr=1).values, 0.0
         )
         assert np.allclose(flx.isel(ntracers=names.index("ALK"), ncdr=0).values, 0.0)
+        tracer_release = list(cdr.ds.tracer_release.values)
+        assert tracer_release[names.index("CDR_OAE_ALK1")] == "oae"
+        assert tracer_release[names.index("ALK")] == ""
 
     def test_fifty_release_auto_assignment(self):
         releases = [
@@ -1280,3 +1294,44 @@ class TestCdrLiteForcing:
         ds = xr.open_dataset(saved_paths[0])
         assert ds.sizes["ntracers"] == 4
         assert ds.sizes["ncdr"] == 1
+        assert list(ds.tracer_release.values) == ["", "", "oae", "oae"]
+
+    def test_roms_layout_cdr_lite(self, capsys):
+        releases = [
+            self._perturbation("oae_a", {"ALK": 1.0e6}),
+            self._perturbation("dor_a", {"DIC": -5.0e5}, lon=-24.0),
+        ]
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=releases,
+        )
+        layout = cdr.roms_layout()
+        out = capsys.readouterr().out
+        assert list(layout.itrc.values) == [1, 2, 3, 4, 5]
+        assert list(layout.tracer_name.values) == [
+            "temp",
+            "salt",
+            "CDR_OAE_ALK1",
+            "CDR_OAE_DIC1",
+            "CDR_DOR_DIC1",
+        ]
+        assert list(layout.release.values) == ["", "", "oae_a", "oae_a", "dor_a"]
+        assert layout.attrs["nt_cdr_oae"] == 1
+        assert layout.attrs["nt_cdr_dor"] == 1
+        assert layout.attrs["cdr_ncdr_parm"] == 2
+        assert "itrc\ttracer_name\tunits\trelease" in out
+        assert "nt_cdr_oae = 1" in out
+
+    def test_roms_layout_pure_marbl(self, capsys):
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self._perturbation("m", {"ALK": 1.0e6}, tracer_set="marbl")],
+        )
+        layout = cdr.roms_layout(print_table=False)
+        assert capsys.readouterr().out == ""
+        assert layout.sizes["itrc"] == NUM_TRACERS
+        assert set(layout.release.values) == {""}
+        assert layout.attrs["nt_cdr_oae"] == 0
+        assert layout.attrs["cdr_ncdr_parm"] == 1

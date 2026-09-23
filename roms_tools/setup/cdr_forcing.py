@@ -218,6 +218,31 @@ class ReleaseCollector(RootModel):
         return interp_values.pop()
 
 
+def _release_assignments(
+    releases, tracer_schema: CdrLiteTracerSchema | None
+) -> dict[str, tuple[str, ...]]:
+    """Release name -> assigned global CDR tracer names, in release order.
+
+    The single source of truth for CDR-LiTE tracer assignment: ALK-bearing
+    releases take the next OAE pair, DIC-only releases the next DOR tracer.
+    Used by the dataset builder, ``CDRForcing.release_tracers``, and
+    ``CDRForcing.roms_layout``. Empty for pure-marbl forcings.
+    """
+    mapping: dict[str, tuple[str, ...]] = {}
+    if tracer_schema is None:
+        return mapping
+    oae_counter = 0
+    dor_counter = 0
+    for release in releases:
+        if release.is_oae:
+            oae_counter += 1
+            mapping[release.name] = tracer_schema.oae_pair_names(oae_counter)
+        elif release.is_dor:
+            dor_counter += 1
+            mapping[release.name] = (tracer_schema.dor_name(dor_counter),)
+    return mapping
+
+
 class CDRForcingDatasetBuilder:
     """Constructs the xarray `Dataset` to be saved as NetCDF."""
 
@@ -261,8 +286,7 @@ class CDRForcingDatasetBuilder:
         # cdr_lite releases are assigned tracers in release order: each
         # ALK-bearing release gets the next OAE pair, each DIC-only release
         # the next DOR tracer.
-        oae_counter = 0
-        dor_counter = 0
+        assignments = _release_assignments(self.releases, self.tracer_schema)
         for ncdr, release in enumerate(self.releases):
             times = np.array(release.times, dtype="datetime64[ns]")
             rel_times = convert_to_relative_days(times, self.model_reference_date)
@@ -279,16 +303,15 @@ class CDRForcingDatasetBuilder:
 
             # Re-key role-based tracer data (tracer_set="cdr_lite") onto the
             # global tracer names of the file's tracer axis.
-            assignment: dict[str, int] = {}
-            if release.is_oae:
-                oae_counter += 1
-                assignment["oae_pair"] = oae_counter
-            elif release.is_dor:
-                dor_counter += 1
-                assignment["dor_index"] = dor_counter
-            tracer_data = release._map_tracers_to_schema(
-                tracer_data, self.tracer_schema, **assignment
-            )
+            if release.name in assignments:
+                assigned = assignments[release.name]
+                tracer_data = {
+                    name: tracer_data[role]
+                    for name, role in zip(
+                        assigned, ("ALK", "DIC") if release.is_oae else ("DIC",)
+                    )
+                    if role in tracer_data
+                }
 
             for ntracer in range(ds.ntracers.size):
                 tracer_name = ds.tracer_name[ntracer].item()
@@ -344,6 +367,24 @@ class CDRForcingDatasetBuilder:
         ds = add_tracer_metadata_to_ds(
             ds, with_flux_units=with_flux_units, tracer_metadata=tracer_metadata
         )
+
+        if self.tracer_schema is not None:
+            # Record which release feeds each CDR tracer ('' for the temp/salt
+            # and MARBL BGC rows). ROMS ignores this coordinate; it exists so
+            # the file self-documents the release <-> tracer assignment.
+            assignments = _release_assignments(self.releases, self.tracer_schema)
+            feeding = {
+                tracer: name
+                for name, tracers in assignments.items()
+                for tracer in tracers
+            }
+            ds = ds.assign_coords(
+                tracer_release=(
+                    "ntracers",
+                    [feeding.get(str(t), "") for t in ds.tracer_name.values],
+                    {"long_name": "Name of the release feeding this tracer"},
+                )
+            )
 
         if self.release_type == ReleaseType.volume:
             ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
@@ -543,19 +584,74 @@ class CDRForcing(BaseModel):
         their DOR tracer). marbl releases are omitted — they address the
         MARBL tracers by name.
         """
-        mapping: dict[str, tuple[str, ...]] = {}
-        if self._tracer_schema is None:
-            return mapping
-        oae_counter = 0
-        dor_counter = 0
-        for release in self.releases:
-            if release.is_oae:
-                oae_counter += 1
-                mapping[release.name] = self._tracer_schema.oae_pair_names(oae_counter)
-            elif release.is_dor:
-                dor_counter += 1
-                mapping[release.name] = (self._tracer_schema.dor_name(dor_counter),)
-        return mapping
+        return _release_assignments(self.releases, self._tracer_schema)
+
+    def roms_layout(self, print_table: bool = True) -> xr.Dataset:
+        """The forcing file's tracer layout, as ROMS will interpret it.
+
+        Returns a small dataset derived from :attr:`ds`, with variables
+        ``tracer_name``, ``units``, and ``release`` (the name of the feeding
+        release; ``''`` for physics/BGC rows and throughout for pure-marbl
+        forcings) on a 1-based ``itrc`` dimension — the ROMS Fortran tracer
+        index (``itemp=1``, ``isalt=2``, ...). ROMS reads the ``ntracers``
+        axis positionally, so row ``itrc`` of this table is what the ROMS
+        build's tracer ``itrc`` receives.
+
+        The dataset attrs carry the ROMS namelist correspondence — set the
+        namelist to match the file: ``nt_cdr_oae``, ``nt_cdr_dor`` (from the
+        derived tracer schema), ``cdr_ncdr_parm`` (number of releases), and
+        ``include_marbl_bgc`` (whether the MARBL BGC block follows, i.e. a
+        MARBL-enabled build).
+
+        Parameters
+        ----------
+        print_table : bool, optional
+            If True (default), also print the layout as a tab-separated
+            table followed by the namelist lines.
+        """
+        tracer_names = [str(t) for t in self.ds.tracer_name.values]
+        units = [str(u) for u in self.ds.tracer_unit.values]
+        if "tracer_release" in self.ds.coords:
+            releases = [str(r) for r in self.ds.tracer_release.values]
+        else:
+            releases = [""] * len(tracer_names)
+
+        schema = self._tracer_schema
+        layout = xr.Dataset(
+            {
+                "tracer_name": ("itrc", tracer_names),
+                "units": ("itrc", units),
+                "release": ("itrc", releases),
+            },
+            coords={"itrc": np.arange(1, len(tracer_names) + 1)},
+            attrs={
+                "nt_cdr_oae": schema.n_oae_pairs if schema else 0,
+                "nt_cdr_dor": schema.n_dor if schema else 0,
+                "cdr_ncdr_parm": len(self.releases),
+                "include_marbl_bgc": int(
+                    schema.include_marbl_bgc
+                    if schema
+                    else self.tracer_set != "cdr_lite"
+                ),
+            },
+        )
+        layout["itrc"].attrs["long_name"] = "1-based ROMS tracer index"
+
+        if print_table:
+            print("itrc\ttracer_name\tunits\trelease")
+            for i, (name, unit, release) in enumerate(
+                zip(tracer_names, units, releases), start=1
+            ):
+                print(f"{i}\t{name}\t{unit}\t{release}")
+            print()
+            print("ROMS namelist correspondence (set the namelist to match the file):")
+            for key in ("nt_cdr_oae", "nt_cdr_dor", "cdr_ncdr_parm"):
+                print(f"  {key} = {layout.attrs[key]}")
+            print(
+                f"  MARBL BGC tracers included: {bool(layout.attrs['include_marbl_bgc'])}"
+            )
+
+        return layout
 
     @property
     def ds(self) -> xr.Dataset:

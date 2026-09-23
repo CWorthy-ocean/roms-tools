@@ -23,7 +23,6 @@ from roms_tools.setup.bgc_model import (
     RELEASE_TRACER_MODELS,
     BGCCdrLite,
     BGCMarbl,
-    CdrLiteTracerSchema,
     TracerSet,
 )
 from roms_tools.setup.utils import convert_to_relative_days
@@ -309,41 +308,6 @@ class Release(BaseModel):
         False for marbl releases.
         """
         return self.tracer_set == "cdr_lite" and not self.is_oae
-
-    def _map_tracers_to_schema(
-        self,
-        tracer_data: dict,
-        schema: "CdrLiteTracerSchema | None",
-        *,
-        oae_pair: int | None = None,
-        dor_index: int | None = None,
-    ) -> dict:
-        """Re-key a role-keyed tracer dict onto the global tracer names of the
-        forcing file's tracer axis.
-
-        For ``tracer_set="marbl"`` the data is already keyed by global names and
-        is returned unchanged. For ``"cdr_lite"``, the assigned pair/slot index
-        is supplied by the ``CDRForcing`` builder, e.g. ``"ALK"`` ->
-        ``CDR_OAE_ALK{oae_pair}`` or (DOR release) ``"DIC"`` ->
-        ``CDR_DOR_DIC{dor_index}``.
-        """
-        if self.tracer_set != "cdr_lite":
-            return tracer_data
-        if schema is None:
-            raise ValueError(
-                'Releases with tracer_set="cdr_lite" require a CDR-LiTE tracer '
-                "schema to resolve their tracer names."
-            )
-        mapped = {}
-        if self.is_oae:
-            assert oae_pair is not None
-            alk_name, dic_name = schema.oae_pair_names(oae_pair)
-            for key, value in tracer_data.items():
-                mapped[alk_name if key == BGCCdrLite.ROLE_ALK else dic_name] = value
-        else:
-            assert dor_index is not None
-            mapped[schema.dor_name(dor_index)] = tracer_data[BGCCdrLite.ROLE_DIC]
-        return mapped
 
     @model_validator(mode="after")
     def _check_increasing_times(self) -> "Release":

@@ -253,7 +253,7 @@ class Release(BaseModel):
         Time points of the release events. Must be strictly increasing and within the simulation window.
     time_interpolation : bool, optional
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
-    tracer_set : {"marbl", "cdr_lite"}, optional
+    tracer_set : {"marbl", "cdr_lite", "passive"}, optional
         Tracer schema. ``"marbl"`` (default) specifies tracer values by MARBL
         tracer name. ``"cdr_lite"`` targets the dedicated CDR tracers of a
         ROMS ``CDR_TRACER`` build: the release specifies ``"ALK"`` and/or
@@ -261,9 +261,14 @@ class Release(BaseModel):
         a release with ``"ALK"`` (an OAE or combined OAE+DOR intervention)
         gets the next ``CDR_OAE_ALK{k}``/``CDR_OAE_DIC{k}`` pair; a release
         with only ``"DIC"`` (a DOR intervention) gets the next
-        ``CDR_DOR_DIC{j}`` tracer. Only supported on ``TracerPerturbation`` —
-        CDR tracer experiments require the physics to remain untouched, so
-        volume releases and ``temp`` / ``salt`` forcing are not allowed.
+        ``CDR_DOR_DIC{j}`` tracer. cdr_lite is only supported on
+        ``TracerPerturbation`` — CDR tracer experiments require the physics
+        to remain untouched, so volume releases and ``temp`` / ``salt``
+        forcing are not allowed. ``"passive"`` targets a generic passive
+        (dye) tracer via a single ``"passive_tracer"`` flux (or, on
+        ``VolumeRelease``, concentration together with the discharged
+        water's ``temp``/``salt``), assigned the next ``passive_tracer{i}``
+        slot.
     """
 
     name: str
@@ -283,12 +288,13 @@ class Release(BaseModel):
     time_interpolation: bool = False
     """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
     tracer_set: TracerSet = "marbl"
-    """Tracer schema: ``"marbl"`` (values keyed by MARBL tracer name) or
+    """Tracer schema: ``"marbl"`` (values keyed by MARBL tracer name),
     ``"cdr_lite"`` (values keyed by ``"ALK"``/``"DIC"``; ``CDRForcing``
-    auto-assigns the release's own CDR tracer(s)). ``"cdr_lite"`` is only
-    supported on :class:`TracerPerturbation`: CDR tracer experiments require
-    the physics to remain untouched, which rules out volume releases (and
-    temp/salt forcing)."""
+    auto-assigns the release's own CDR tracer(s)), or ``"passive"`` (a single
+    ``"passive_tracer"`` value; auto-assigned passive slot). ``"cdr_lite"``
+    is only supported on :class:`TracerPerturbation`: CDR tracer experiments
+    require the physics to remain untouched, which rules out volume releases
+    (and temp/salt forcing)."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
@@ -496,7 +502,12 @@ class VolumeRelease(Release):
 
     times: list[datetime] = Field([])
     fill_values: Literal["auto", "zero"] = "auto"
-    """Strategy for filling missing tracer concentration values."""
+    """Strategy for filling missing tracer concentration values. For
+    ``tracer_set="passive"`` releases this governs the MARBL BGC rows of the
+    forcing file when the MARBL block is on the tracer axis (mixed with marbl
+    releases or ``include_marbl_bgc=True``): "auto" fills them with river
+    defaults, "zero" with 0 — a volume release adds water, so a zero
+    concentration means the added water contains none of that tracer."""
     volume_fluxes: Flux | NonNegativeFloat | list[NonNegativeFloat] = Field(
         default=0.0, validate_default=True
     )
@@ -594,7 +605,13 @@ class VolumeRelease(Release):
 
     @model_validator(mode="after")
     def _check_concentration_signs(self) -> "VolumeRelease":
-        """Enforce non-negative tracer concentrations."""
+        """Enforce non-negative tracer concentrations.
+
+        Replaces the former ``NonNegativeFloat`` field typing: the rule is the
+        same, but because values are heterogeneous (``Concentration`` | float
+        | list) the check runs at model validation rather than field coercion,
+        so the error surfaces at a different stage.
+        """
         for tracer_name, conc in self.tracer_concentrations.items():
             values = conc.values if isinstance(conc, Concentration) else conc
             vals = values if isinstance(values, list) else [values]
@@ -760,9 +777,13 @@ class TracerPerturbation(Release):
         - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
 
         With ``tracer_set="marbl"`` keys are MARBL tracer names. With
-        ``tracer_set="cdr_lite"`` keys are the role keys ``"ALK"`` / ``"DIC"``
-        (the release's OAE pair) and ``"DOR_DIC"`` (its DOR tracer, negative =
-        removal); ``temp`` / ``salt`` may not be forced.
+        ``tracer_set="cdr_lite"`` the only keys are ``"ALK"`` and ``"DIC"``:
+        a release providing ``"ALK"`` is an OAE (or, with negative ``"DIC"``,
+        combined OAE+DOR) intervention assigned an OAE tracer pair; a release
+        providing only ``"DIC"`` (negative = removal) is a DOR intervention
+        assigned a standalone DOR tracer. With ``tracer_set="passive"`` the
+        only key is ``"passive_tracer"``. ``temp`` / ``salt`` may not be
+        forced by cdr_lite or passive perturbations.
 
     time_interpolation : bool, optional
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.

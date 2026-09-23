@@ -31,6 +31,8 @@ from roms_tools.plot import (
 from roms_tools.setup.bgc_model import (
     RELEASE_TRACER_MODELS,
     BGCCdrLite,
+    BGCMarbl,
+    BGCPassive,
     CdrLiteTracerSchema,
 )
 from roms_tools.setup.cdr_release import (
@@ -220,16 +222,17 @@ class ReleaseCollector(RootModel):
 
 def _release_assignments(
     releases, tracer_schema: CdrLiteTracerSchema | None
-) -> dict[str, tuple[str, ...]]:
-    """Release name -> assigned global CDR tracer names, in release order.
+) -> dict[str, tuple[tuple[str, str], ...]]:
+    """Release name -> ordered ``(global_tracer_name, role_key)`` pairs.
 
-    The single source of truth for generated-tracer assignment: passive
-    releases take the next passive slot; cdr_lite ALK-bearing releases the
-    next OAE pair; cdr_lite DIC-only releases the next DOR tracer.
-    Used by the dataset builder, ``CDRForcing.release_tracers``, and
+    The single source of truth for generated-tracer assignment (and the only
+    place that branches on the intervention type): passive releases take the
+    next passive slot; cdr_lite ALK-bearing releases the next OAE pair;
+    cdr_lite DIC-only releases the next DOR tracer — in release order. Used
+    by the dataset builder, ``CDRForcing.release_tracers``, and
     ``CDRForcing.roms_layout``. Empty for pure-marbl forcings.
     """
-    mapping: dict[str, tuple[str, ...]] = {}
+    mapping: dict[str, tuple[tuple[str, str], ...]] = {}
     if tracer_schema is None:
         return mapping
     passive_counter = 0
@@ -238,13 +241,21 @@ def _release_assignments(
     for release in releases:
         if release.is_passive:
             passive_counter += 1
-            mapping[release.name] = (tracer_schema.passive_name(passive_counter),)
+            mapping[release.name] = (
+                (tracer_schema.passive_name(passive_counter), BGCPassive.ROLE_TRACER),
+            )
         elif release.is_oae:
             oae_counter += 1
-            mapping[release.name] = tracer_schema.oae_pair_names(oae_counter)
+            alk_name, dic_name = tracer_schema.oae_pair_names(oae_counter)
+            mapping[release.name] = (
+                (alk_name, BGCCdrLite.ROLE_ALK),
+                (dic_name, BGCCdrLite.ROLE_DIC),
+            )
         elif release.is_dor:
             dor_counter += 1
-            mapping[release.name] = (tracer_schema.dor_name(dor_counter),)
+            mapping[release.name] = (
+                (tracer_schema.dor_name(dor_counter), BGCCdrLite.ROLE_DIC),
+            )
     return mapping
 
 
@@ -309,17 +320,9 @@ class CDRForcingDatasetBuilder:
             # Re-key role-based tracer data (cdr_lite / passive releases)
             # onto the global tracer names of the file's tracer axis.
             if release.name in assignments:
-                assigned = assignments[release.name]
-                roles: tuple[str, ...]
-                if release.is_oae:
-                    roles = ("ALK", "DIC")
-                elif release.is_dor:
-                    roles = ("DIC",)
-                else:  # passive
-                    roles = ("passive_tracer",)
                 mapped = {
                     name: tracer_data[role]
-                    for name, role in zip(assigned, roles)
+                    for name, role in assignments[release.name]
                     if role in tracer_data
                 }
                 # Passive volume releases also carry the discharged water's
@@ -332,13 +335,39 @@ class CDRForcingDatasetBuilder:
             for ntracer in range(ds.ntracers.size):
                 tracer_name = ds.tracer_name[ntracer].item()
                 if tracer_name not in tracer_data:
-                    # Tracers this release does not feed keep their initial zeros.
+                    # Tracers this release does not feed keep their initial
+                    # zeros. Correct for fluxes (no flux) and for generated
+                    # CDR-LiTE/passive rows of volume releases (anomaly/dye
+                    # tracers: the added water carries none) — but NOT for
+                    # full-field MARBL rows of a volume release, which are
+                    # filled below.
                     continue
                 ds[tracer_key].loc[{"ntracers": ntracer, "ncdr": ncdr}] = np.interp(
                     unique_rel_times,
                     rel_times,
                     tracer_data[tracer_name].values,
                 )
+
+            # A volume release adds water: a zero *concentration* on a
+            # full-field MARBL row would mean "water containing none of this
+            # tracer" and dilute the ambient field. When the MARBL block is on
+            # the axis, fill a passive release's unfed MARBL rows per its
+            # fill_values, matching marbl-release semantics ("auto" -> river
+            # defaults, "zero" -> explicit 0).
+            if (
+                self.release_type == ReleaseType.volume
+                and release.is_passive
+                and self.tracer_schema is not None
+                and self.tracer_schema.include_marbl_bgc
+            ):
+                defaults = BGCMarbl.river_defaults()
+                for ntracer in range(ds.ntracers.size):
+                    tracer_name = ds.tracer_name[ntracer].item()
+                    if tracer_name in tracer_data or tracer_name not in defaults:
+                        continue
+                    ds["cdr_tracer"].loc[{"ntracers": ntracer, "ncdr": ncdr}] = (
+                        defaults[tracer_name] if release.fill_values == "auto" else 0.0
+                    )
 
         return ds
 
@@ -391,8 +420,8 @@ class CDRForcingDatasetBuilder:
             assignments = _release_assignments(self.releases, self.tracer_schema)
             feeding = {
                 tracer: name
-                for name, tracers in assignments.items()
-                for tracer in tracers
+                for name, pairs in assignments.items()
+                for tracer, _role in pairs
             }
             ds = ds.assign_coords(
                 tracer_release=(
@@ -606,7 +635,12 @@ class CDRForcing(BaseModel):
         their DOR tracer). marbl releases are omitted — they address the
         MARBL tracers by name.
         """
-        return _release_assignments(self.releases, self._tracer_schema)
+        return {
+            name: tuple(tracer for tracer, _role in pairs)
+            for name, pairs in _release_assignments(
+                self.releases, self._tracer_schema
+            ).items()
+        }
 
     def roms_layout(self, print_table: bool = True) -> xr.Dataset:
         """The forcing file's tracer layout, as ROMS will interpret it.
@@ -652,11 +686,8 @@ class CDRForcing(BaseModel):
                 "nt_cdr_oae": schema.n_oae_pairs if schema else 0,
                 "nt_cdr_dor": schema.n_dor if schema else 0,
                 "cdr_ncdr_parm": len(self.releases),
-                "include_marbl_bgc": int(
-                    schema.include_marbl_bgc
-                    if schema
-                    else self.tracer_set != "cdr_lite"
-                ),
+                # schema None <=> pure-marbl forcing <=> MARBL block present
+                "include_marbl_bgc": int(schema.include_marbl_bgc) if schema else 1,
             },
         )
         layout["itrc"].attrs["long_name"] = "1-based ROMS tracer index"
@@ -1110,6 +1141,15 @@ class CDRForcing(BaseModel):
         pd.DataFrame
             DataFrame with one row per release and one row of units at the top.
             Columns 'temp' and 'salt' are excluded from integrated totals.
+
+        Note
+        ----
+        In mixed forcings the ``ALK``/``DIC`` columns aggregate per-release
+        meanings: a row's ALK/DIC may be the MARBL tracers (marbl releases),
+        the release's OAE-pair tracers, or its DOR tracer (DIC-only cdr_lite
+        releases). Rows are per-release so no values are conflated, but
+        column-wise sums mix tracer identities.
+
         """
         # Reconstruct ROMS time stamps
         _, rel_seconds = _reconstruct_roms_time_stamps(

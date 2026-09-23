@@ -1517,3 +1517,84 @@ class TestPassiveForcing:
         restored = CDRForcing.from_yaml(filepath)
         assert restored.releases[0].tracer_set == "passive"
         assert restored.ds.identical(cdr.ds)
+
+    def test_passive_volume_marbl_rows_filled_not_diluting(self):
+        """Regression: a passive VolumeRelease sharing a file with the MARBL
+        block must not inject water with zero BGC concentrations (dilution).
+        Its unfed MARBL rows follow fill_values, like marbl releases.
+        """
+        from roms_tools import BGCMarbl
+
+        defaults = BGCMarbl.river_defaults()
+        releases = [
+            VolumeRelease(
+                name="mv",
+                lat=66.0,
+                lon=-25.0,
+                depth=50.0,
+                volume_fluxes=100.0,
+                tracer_concentrations={"ALK": 3000.0},
+            ),
+            VolumeRelease(
+                name="dye_v",
+                lat=65.0,
+                lon=-24.0,
+                depth=50.0,
+                tracer_set="passive",
+                volume_fluxes=50.0,
+                tracer_concentrations={"passive_tracer": 10.0},
+            ),
+        ]
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=releases,
+        )
+        names = list(cdr.ds.tracer_name.values)
+        trc = cdr.ds.cdr_tracer
+        for tracer in ("ALK", "DIC", "PO4"):
+            assert np.allclose(
+                trc.isel(ntracers=names.index(tracer), ncdr=1).values,
+                defaults[tracer],
+            )
+        # the marbl release's own values are untouched, and anomaly/dye rows
+        # of both releases stay zero except the dye's own slot
+        assert np.allclose(trc.isel(ntracers=names.index("ALK"), ncdr=0).values, 3000.0)
+        assert np.allclose(
+            trc.isel(ntracers=names.index("passive_tracer1"), ncdr=0).values, 0.0
+        )
+        assert np.allclose(
+            trc.isel(ntracers=names.index("passive_tracer1"), ncdr=1).values, 10.0
+        )
+
+    def test_passive_volume_fill_values_zero(self):
+        releases = [
+            VolumeRelease(
+                name="mv",
+                lat=66.0,
+                lon=-25.0,
+                depth=50.0,
+                volume_fluxes=100.0,
+                tracer_concentrations={"ALK": 3000.0},
+            ),
+            VolumeRelease(
+                name="dye_v",
+                lat=65.0,
+                lon=-24.0,
+                depth=50.0,
+                tracer_set="passive",
+                fill_values="zero",
+                volume_fluxes=50.0,
+                tracer_concentrations={"passive_tracer": 10.0},
+            ),
+        ]
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=releases,
+        )
+        names = list(cdr.ds.tracer_name.values)
+        trc = cdr.ds.cdr_tracer
+        # explicit user choice: added water carries zero BGC
+        assert np.allclose(trc.isel(ntracers=names.index("ALK"), ncdr=1).values, 0.0)
+        assert np.allclose(trc.isel(ntracers=names.index("DIC"), ncdr=1).values, 0.0)

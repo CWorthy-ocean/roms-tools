@@ -545,11 +545,6 @@ class BGCMarbl(BGCModel):
                 )
 
 
-# Name -> class registry for the ``BoundaryForcing``/``InitialConditions`` wrapper
-# classes' ``bgc_model=`` field: a `BGCModel` subclass has to round-trip through
-# YAML as a plain string (``to_dict``'s generic serialization would otherwise pass
-# a raw Python class straight to ``yaml.dump()``, which isn't safe to read back with
-# ``yaml.safe_load_all``). Add an entry here for every new `BGCModel` subclass.
 @lru_cache(maxsize=1)
 def _load_river_defaults() -> dict[str, float]:
     """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
@@ -561,6 +556,70 @@ def _load_river_defaults() -> dict[str, float]:
     from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
 
     return RiverTracerDefaultsDataset().defaults
+
+
+# Name -> class registry for the ``BoundaryForcing``/``InitialConditions`` wrapper
+# classes' ``bgc_model=`` field: a `BGCModel` subclass has to round-trip through
+# YAML as a plain string (``to_dict``'s generic serialization would otherwise pass
+# a raw Python class straight to ``yaml.dump()``, which isn't safe to read back with
+# ``yaml.safe_load_all``). Add an entry here for every new `BGCModel` subclass.
+_BGC_MODEL_REGISTRY: dict[str, type[BGCModel]] = {"BGCMarbl": BGCMarbl}
+
+
+def validate_bgc_model(bgc_model) -> type[BGCModel]:
+    """Check that ``bgc_model`` is a concrete :class:`BGCModel` *subclass* (the
+    class itself, not an instance) and return it.
+
+    Used by the ``BoundaryForcing``/``InitialConditions`` wrappers before any
+    data is loaded, so a wrong ``bgc_model=`` fails immediately with a message
+    naming the fix rather than after the physics regrid as an opaque
+    ``TypeError`` ("object is not callable" for an instance, or the ABC's own
+    instantiation error for the base class).
+    """
+    if isinstance(bgc_model, BGCModel):
+        raise ValueError(
+            f"`bgc_model` must be the class itself, not an instance -- pass "
+            f"`bgc_model={type(bgc_model).__name__}`, not "
+            f"`bgc_model={type(bgc_model).__name__}()`."
+        )
+    if not (isinstance(bgc_model, type) and issubclass(bgc_model, BGCModel)):
+        raise ValueError(
+            f"`bgc_model` must be a BGCModel subclass (e.g. `bgc_model=rt.BGCMarbl`); "
+            f"got {bgc_model!r}."
+        )
+    if getattr(bgc_model.process_bgc_fields, "__isabstractmethod__", False):
+        raise ValueError(
+            f"`bgc_model={bgc_model.__name__}` is abstract (it does not implement "
+            "process_bgc_fields); pass a concrete model such as `rt.BGCMarbl`."
+        )
+    return bgc_model
+
+
+def bgc_model_to_name(cls: type[BGCModel] | None) -> str | None:
+    """Return the registry name for a ``BGCModel`` subclass, for YAML output."""
+    if cls is None:
+        return None
+    validate_bgc_model(cls)
+    for name, registered in _BGC_MODEL_REGISTRY.items():
+        if registered is cls:
+            return name
+    raise ValueError(
+        f"{cls!r} is not in the BGC model registry ({sorted(_BGC_MODEL_REGISTRY)}) "
+        "-- add it to `_BGC_MODEL_REGISTRY` in bgc_model.py so it can round-trip "
+        "through YAML."
+    )
+
+
+def bgc_model_from_name(name: str | None) -> type[BGCModel] | None:
+    """Look up a ``BGCModel`` subclass by its registry name, for YAML input."""
+    if name is None:
+        return None
+    try:
+        return _BGC_MODEL_REGISTRY[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown bgc_model {name!r}; valid options: {sorted(_BGC_MODEL_REGISTRY)}."
+        ) from None
 
 
 # ---------------------------------------------------------------------------
@@ -816,65 +875,6 @@ RELEASE_TRACER_MODELS: dict[
     "cdr_lite": BGCCdrLite,
     "passive": BGCPassive,
 }
-
-
-_BGC_MODEL_REGISTRY: dict[str, type[BGCModel]] = {"BGCMarbl": BGCMarbl}
-
-
-def validate_bgc_model(bgc_model) -> type[BGCModel]:
-    """Check that ``bgc_model`` is a concrete :class:`BGCModel` *subclass* (the
-    class itself, not an instance) and return it.
-
-    Used by the ``BoundaryForcing``/``InitialConditions`` wrappers before any
-    data is loaded, so a wrong ``bgc_model=`` fails immediately with a message
-    naming the fix rather than after the physics regrid as an opaque
-    ``TypeError`` ("object is not callable" for an instance, or the ABC's own
-    instantiation error for the base class).
-    """
-    if isinstance(bgc_model, BGCModel):
-        raise ValueError(
-            f"`bgc_model` must be the class itself, not an instance -- pass "
-            f"`bgc_model={type(bgc_model).__name__}`, not "
-            f"`bgc_model={type(bgc_model).__name__}()`."
-        )
-    if not (isinstance(bgc_model, type) and issubclass(bgc_model, BGCModel)):
-        raise ValueError(
-            f"`bgc_model` must be a BGCModel subclass (e.g. `bgc_model=rt.BGCMarbl`); "
-            f"got {bgc_model!r}."
-        )
-    if getattr(bgc_model.process_bgc_fields, "__isabstractmethod__", False):
-        raise ValueError(
-            f"`bgc_model={bgc_model.__name__}` is abstract (it does not implement "
-            "process_bgc_fields); pass a concrete model such as `rt.BGCMarbl`."
-        )
-    return bgc_model
-
-
-def bgc_model_to_name(cls: type[BGCModel] | None) -> str | None:
-    """Return the registry name for a ``BGCModel`` subclass, for YAML output."""
-    if cls is None:
-        return None
-    validate_bgc_model(cls)
-    for name, registered in _BGC_MODEL_REGISTRY.items():
-        if registered is cls:
-            return name
-    raise ValueError(
-        f"{cls!r} is not in the BGC model registry ({sorted(_BGC_MODEL_REGISTRY)}) "
-        "-- add it to `_BGC_MODEL_REGISTRY` in bgc_model.py so it can round-trip "
-        "through YAML."
-    )
-
-
-def bgc_model_from_name(name: str | None) -> type[BGCModel] | None:
-    """Look up a ``BGCModel`` subclass by its registry name, for YAML input."""
-    if name is None:
-        return None
-    try:
-        return _BGC_MODEL_REGISTRY[name]
-    except KeyError:
-        raise ValueError(
-            f"Unknown bgc_model {name!r}; valid options: {sorted(_BGC_MODEL_REGISTRY)}."
-        ) from None
 
 
 def _is_forcing(x) -> bool:

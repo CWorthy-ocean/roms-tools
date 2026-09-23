@@ -1,5 +1,22 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+* N/A (`tracer_set="marbl"` remains the default) ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
+
+### New Features
+
+* In CDR releases `tracer_set="cdr_lite"` corresponds to either a 2-tracer (OAE) or single tracer (DOR)  in ROMS, which requires CDR-LiTE forcing fields and run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required), and the CDR-LiTE linearized gas-transfer model is computed. ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
+* In In CDR releases `tracer_set="passive"` corresponds to a single tracer addition to ROMS, which requires run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required). ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
 ## 5.0.0
 
 ### Breaking Changes

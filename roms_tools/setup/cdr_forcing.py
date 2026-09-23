@@ -30,6 +30,7 @@ from roms_tools.plot import (
 )
 from roms_tools.setup.bgc_model import (
     RELEASE_TRACER_MODELS,
+    BGCCdrLite,
     CdrLiteTracerSchema,
 )
 from roms_tools.setup.cdr_release import (
@@ -183,24 +184,20 @@ class ReleaseCollector(RootModel):
         release_types = set(r.release_type for r in self.root)
         return release_types.pop()
 
-    @model_validator(mode="after")
-    def check_all_releases_same_tracer_set(self):
-        """Ensure all releases use the same tracer_set."""
-        tracer_sets = set(r.tracer_set for r in self.root)
-        if len(tracer_sets) > 1:
-            set_list = ", ".join(sorted(tracer_sets))
-            raise ValueError(
-                f"Not all releases have the same `tracer_set`. Received: {set_list}. "
-                "All releases must use either `tracer_set='marbl'` or "
-                "`tracer_set='cdr_lite'`."
-            )
-        return self
+    @property
+    def tracer_sets(self) -> set[str]:
+        """The tracer_set values present across the releases."""
+        return set(r.tracer_set for r in self.root)
 
     @property
-    def tracer_set(self):
-        """Common tracer_set across all releases."""
-        tracer_sets = set(r.tracer_set for r in self.root)
-        return tracer_sets.pop()
+    def tracer_set(self) -> str:
+        """Common tracer_set, or ``"mixed"`` when marbl and cdr_lite releases
+        coexist (allowed for TracerPerturbation releases: marbl releases feed
+        the MARBL tracers, cdr_lite releases their own CDR tracers, in one
+        file whose axis carries both blocks).
+        """
+        tracer_sets = self.tracer_sets
+        return tracer_sets.pop() if len(tracer_sets) == 1 else "mixed"
 
     @model_validator(mode="after")
     def check_all_releases_same_time_interpolation(self):
@@ -261,6 +258,11 @@ class CDRForcingDatasetBuilder:
 
         ds = self._initialize_dataset(unique_times, unique_rel_times)
 
+        # cdr_lite releases are assigned tracers in release order: each
+        # ALK-bearing release gets the next OAE pair, each DIC-only release
+        # the next DOR tracer.
+        oae_counter = 0
+        dor_counter = 0
         for ncdr, release in enumerate(self.releases):
             times = np.array(release.times, dtype="datetime64[ns]")
             rel_times = convert_to_relative_days(times, self.model_reference_date)
@@ -277,8 +279,15 @@ class CDRForcingDatasetBuilder:
 
             # Re-key role-based tracer data (tracer_set="cdr_lite") onto the
             # global tracer names of the file's tracer axis.
+            assignment: dict[str, int] = {}
+            if release.is_oae:
+                oae_counter += 1
+                assignment["oae_pair"] = oae_counter
+            elif release.is_dor:
+                dor_counter += 1
+                assignment["dor_index"] = dor_counter
             tracer_data = release._map_tracers_to_schema(
-                tracer_data, self.tracer_schema
+                tracer_data, self.tracer_schema, **assignment
             )
 
             for ntracer in range(ds.ntracers.size):
@@ -430,14 +439,16 @@ class CDRForcing(BaseModel):
     """The reference date for the ROMS simulation."""
     releases: ReleaseCollector
     """A list of one or more CDR release objects."""
-    tracer_schema: CdrLiteTracerSchema | None = None
-    """Layout of the forcing file's tracer axis for ``tracer_set="cdr_lite"``
-    releases; must mirror the ROMS namelist counts (``nt_passive``,
-    ``nt_cdr_oae``, ``nt_cdr_dor``). Required iff releases use
-    ``tracer_set="cdr_lite"``."""
+    include_marbl_bgc: bool = False
+    """Append the MARBL BGC tracers to the file's tracer axis, matching a ROMS
+    build with both ``CDR_TRACER`` and ``MARBL`` enabled. Only valid when
+    cdr_lite releases are present (a pure-marbl forcing already carries the
+    full MARBL axis). Auto-enabled when marbl and cdr_lite releases are
+    mixed."""
 
-    # this is defined during init and shouldn't be serialized
+    # these are defined during init and shouldn't be serialized
     _ds: xr.Dataset = None
+    _tracer_schema: CdrLiteTracerSchema | None = None
 
     @model_validator(mode="after")
     def _validate(self):
@@ -446,7 +457,7 @@ class CDRForcing(BaseModel):
                 f"`start_time` ({self.start_time}) must be earlier than `end_time` ({self.end_time})."
             )
 
-        self._validate_tracer_schema()
+        self._resolve_tracer_schema()
 
         for release in self.releases:
             ReleaseSimulationManager(
@@ -460,32 +471,46 @@ class CDRForcing(BaseModel):
             self.releases,
             self.model_reference_date,
             self.release_type,
-            tracer_schema=self.tracer_schema,
+            tracer_schema=self._tracer_schema,
         )
         self._ds = builder.build()
         return self
 
-    def _validate_tracer_schema(self) -> None:
-        """Cross-validate the tracer schema against the releases' targeting."""
-        if self.tracer_set == "cdr_lite":
-            if self.tracer_schema is None:
+    def _resolve_tracer_schema(self) -> None:
+        """Derive the file's tracer axis from the releases.
+
+        With cdr_lite releases present, the axis is a CDR-LiTE schema with one
+        OAE pair per ALK-bearing release and one DOR tracer per DIC-only
+        release, in release order; the MARBL BGC block is appended when
+        ``include_marbl_bgc=True`` or when marbl releases are mixed in. With
+        only marbl releases, the axis is the plain full-MARBL axis
+        (``tracer_schema`` is None).
+        """
+        n_oae = sum(1 for r in self.releases if r.is_oae)
+        n_dor = sum(1 for r in self.releases if r.is_dor)
+        has_marbl = "marbl" in self.releases.tracer_sets
+
+        if n_oae + n_dor == 0:
+            if self.include_marbl_bgc:
                 raise ValueError(
-                    'Releases with tracer_set="cdr_lite" require `tracer_schema` '
-                    "(a BGCCdrLite.TracerSchema) on CDRForcing to define the file's tracer axis."
+                    "`include_marbl_bgc=True` is only valid when cdr_lite "
+                    "releases are present: a pure-marbl CDRForcing already "
+                    "carries the full MARBL tracer axis."
                 )
-            for release in self.releases:
-                # These raise if the release targets a pair/slot outside the schema.
-                try:
-                    if release.oae_pair is not None:
-                        self.tracer_schema.oae_pair_names(release.oae_pair)
-                    if release.dor_index is not None:
-                        self.tracer_schema.dor_name(release.dor_index)
-                except ValueError as err:
-                    raise ValueError(f"Release '{release.name}': {err}") from err
-        elif self.tracer_schema is not None:
-            raise ValueError(
-                '`tracer_schema` is only valid when releases use tracer_set="cdr_lite".'
+            self._tracer_schema = None
+            return
+
+        include_bgc = self.include_marbl_bgc
+        if has_marbl and not include_bgc:
+            logging.info(
+                "marbl and cdr_lite releases are mixed: appending the MARBL "
+                "BGC tracers to the file's tracer axis (include_marbl_bgc)."
             )
+            include_bgc = True
+
+        self._tracer_schema = BGCCdrLite.TracerSchema(
+            n_oae_pairs=n_oae, n_dor=n_dor, include_marbl_bgc=include_bgc
+        )
 
     @property
     def release_type(self) -> ReleaseType:
@@ -494,8 +519,43 @@ class CDRForcing(BaseModel):
 
     @property
     def tracer_set(self):
-        """Tracer schema shared by all releases."""
+        """Common tracer_set, or "mixed" when marbl and cdr_lite releases
+        coexist.
+        """
         return self.releases.tracer_set
+
+    @property
+    def tracer_schema(self) -> CdrLiteTracerSchema | None:
+        """The derived CDR-LiTE tracer axis (None for a pure-marbl forcing).
+
+        Its counts are what the ROMS namelist must match:
+        ``nt_cdr_oae = tracer_schema.n_oae_pairs``,
+        ``nt_cdr_dor = tracer_schema.n_dor``, and
+        ``cdr_ncdr_parm = len(releases)`` — set the namelist to match the
+        file, not vice versa.
+        """
+        return self._tracer_schema
+
+    @property
+    def release_tracers(self) -> dict[str, tuple[str, ...]]:
+        """Mapping of each cdr_lite release's name to its assigned global
+        tracer names (OAE releases: their (ALK, DIC) pair; DOR releases:
+        their DOR tracer). marbl releases are omitted — they address the
+        MARBL tracers by name.
+        """
+        mapping: dict[str, tuple[str, ...]] = {}
+        if self._tracer_schema is None:
+            return mapping
+        oae_counter = 0
+        dor_counter = 0
+        for release in self.releases:
+            if release.is_oae:
+                oae_counter += 1
+                mapping[release.name] = self._tracer_schema.oae_pair_names(oae_counter)
+            elif release.is_dor:
+                dor_counter += 1
+                mapping[release.name] = (self._tracer_schema.dor_name(dor_counter),)
+        return mapping
 
     @property
     def ds(self) -> xr.Dataset:
@@ -950,10 +1010,16 @@ class CDRForcing(BaseModel):
         # Exclude temp and salt from units row and integrated totals
         integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
 
-        # Add a row of units only for integrated tracers
-        tracer_meta = RELEASE_TRACER_MODELS[self.tracer_set].release_metadata(
-            unit_type="integrated"
-        )
+        # Add a row of units only for integrated tracers. Columns come from
+        # each release's own tracer_set, so merge the models' tables (the
+        # shared ALK/DIC keys carry identical integrated units in both).
+        tracer_meta: dict[str, dict] = {}
+        for tracer_set in self.releases.tracer_sets:
+            tracer_meta.update(
+                RELEASE_TRACER_MODELS[tracer_set].release_metadata(
+                    unit_type="integrated"
+                )
+            )
         units_row = {
             col: tracer_meta.get(col, {}).get("units", "") for col in integrated_tracers
         }

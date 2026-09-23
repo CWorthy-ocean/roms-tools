@@ -11,7 +11,6 @@ from pydantic import ValidationError
 from conftest import calculate_file_hash
 from roms_tools import CDRForcing, Grid, TracerPerturbation, VolumeRelease
 from roms_tools.constants import MAX_DISTINCT_COLORS, NUM_TRACERS
-from roms_tools.setup.bgc_model import BGCCdrLite
 from roms_tools.setup.cdr_forcing import (
     CDRForcingDatasetBuilder,
     ReleaseCollector,
@@ -322,7 +321,23 @@ class TestReleaseCollector:
         )
         assert collector.release_type == ReleaseType.tracer_perturbation
 
-    def test_raises_inconsistent_tracer_set(self):
+    def test_determine_tracer_set(self):
+        collector = ReleaseCollector(releases=[self.volume_release])
+        assert collector.tracer_set == "marbl"
+        assert collector.tracer_sets == {"marbl"}
+
+        cdr = TracerPerturbation(
+            name="cdr",
+            lat=66,
+            lon=-25,
+            depth=50,
+            tracer_set="cdr_lite",
+            tracer_fluxes={"ALK": 100.0},
+        )
+        collector = ReleaseCollector(releases=[cdr])
+        assert collector.tracer_set == "cdr_lite"
+
+    def test_mixed_tracer_sets_allowed(self):
         marbl = TracerPerturbation(
             name="marbl", lat=66, lon=-25, depth=50, tracer_fluxes={"ALK": 100.0}
         )
@@ -332,27 +347,11 @@ class TestReleaseCollector:
             lon=-25,
             depth=50,
             tracer_set="cdr_lite",
-            oae_pair=1,
             tracer_fluxes={"ALK": 100.0},
         )
-        with pytest.raises(ValidationError, match="tracer_set"):
-            ReleaseCollector(releases=[marbl, cdr])
-
-    def test_determine_tracer_set(self):
-        collector = ReleaseCollector(releases=[self.volume_release])
-        assert collector.tracer_set == "marbl"
-
-        cdr = TracerPerturbation(
-            name="cdr",
-            lat=66,
-            lon=-25,
-            depth=50,
-            tracer_set="cdr_lite",
-            oae_pair=1,
-            tracer_fluxes={"ALK": 100.0},
-        )
-        collector = ReleaseCollector(releases=[cdr])
-        assert collector.tracer_set == "cdr_lite"
+        collector = ReleaseCollector(releases=[marbl, cdr])
+        assert collector.tracer_set == "mixed"
+        assert collector.tracer_sets == {"marbl", "cdr_lite"}
 
 
 class TestCDRForcingDatasetBuilder:
@@ -1069,15 +1068,25 @@ class TestCDRForcing:
 class TestCdrLiteForcing:
     """End-to-end CDRForcing tests for tracer_set='cdr_lite'.
 
-    Only TracerPerturbation supports cdr_lite: the physics must remain
-    untouched, so volume releases are rejected and the temp/salt rows of the
-    forcing file are always zero.
+    Targeting is automatic: ALK-bearing releases get OAE pairs, DIC-only
+    releases get DOR tracers, numbered in release order. The tracer schema is
+    derived; include_marbl_bgc appends the MARBL BGC block (auto-enabled when
+    marbl releases are mixed in).
     """
 
     def setup_method(self):
         self.start_time = datetime(2022, 1, 1)
         self.end_time = datetime(2022, 1, 31)
-        self.schema = BGCCdrLite.TracerSchema(n_oae_pairs=2, n_dor=1)
+
+    def _perturbation(self, name, fluxes, tracer_set="cdr_lite", lon=-25.0):
+        return TracerPerturbation(
+            name=name,
+            lat=66.0,
+            lon=lon,
+            depth=50.0,
+            tracer_set=tracer_set,
+            tracer_fluxes=fluxes,
+        )
 
     def test_volume_release_rejected(self):
         with pytest.raises(ValidationError, match="not supported on VolumeRelease"):
@@ -1087,28 +1096,21 @@ class TestCdrLiteForcing:
                 lon=-25.0,
                 depth=50.0,
                 tracer_set="cdr_lite",
-                oae_pair=1,
                 volume_fluxes=10.0,
             )
 
-    def test_perturbation_dataset_keeps_physics_rows_zero(self):
-        release = TracerPerturbation(
-            name="oae",
-            lat=66.0,
-            lon=-25.0,
-            depth=50.0,
-            tracer_set="cdr_lite",
-            oae_pair=1,
-            tracer_fluxes={"ALK": 2.0e6},
-        )
+    def test_auto_assignment_order_and_routing(self):
+        releases = [
+            self._perturbation("oae_a", {"ALK": 1.0e6}),
+            self._perturbation("dor_a", {"DIC": -5.0e5}, lon=-24.0),
+            self._perturbation("combo", {"ALK": 2.0e6, "DIC": -1.0e5}, lon=-23.0),
+        ]
         cdr = CDRForcing(
             start_time=self.start_time,
             end_time=self.end_time,
-            releases=[release],
-            tracer_schema=self.schema,
+            releases=releases,
         )
         assert cdr.tracer_set == "cdr_lite"
-        assert cdr.ds.sizes["ntracers"] == 7
         assert list(cdr.ds.tracer_name.values) == [
             "temp",
             "salt",
@@ -1118,141 +1120,100 @@ class TestCdrLiteForcing:
             "CDR_OAE_DIC2",
             "CDR_DOR_DIC1",
         ]
-        assert "cdr_trcflx" in cdr.ds
-        assert "cdr_volume" not in cdr.ds
-        # physics rows (temp, salt) stay zero; only the targeted pair is fed
-        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=[0, 1]).values, 0.0)
-        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=2).values, 2.0e6)
-        assert np.allclose(cdr.ds.cdr_trcflx.isel(ntracers=slice(3, None)).values, 0.0)
-
-    def test_requires_tracer_schema(self):
-        release = TracerPerturbation(
-            name="oae",
-            lat=66.0,
-            lon=-25.0,
-            depth=50.0,
-            tracer_set="cdr_lite",
-            oae_pair=1,
-        )
-        with pytest.raises(ValidationError, match="require `tracer_schema`"):
-            CDRForcing(
-                start_time=self.start_time,
-                end_time=self.end_time,
-                releases=[release],
-            )
-
-    def test_rejects_schema_with_marbl_releases(self):
-        release = TracerPerturbation(
-            name="marbl", lat=66.0, lon=-25.0, depth=50.0, tracer_fluxes={"ALK": 100.0}
-        )
-        with pytest.raises(ValidationError, match="only valid when"):
-            CDRForcing(
-                start_time=self.start_time,
-                end_time=self.end_time,
-                releases=[release],
-                tracer_schema=self.schema,
-            )
-
-    def test_rejects_out_of_range_pair(self):
-        release = TracerPerturbation(
-            name="oae",
-            lat=66.0,
-            lon=-25.0,
-            depth=50.0,
-            tracer_set="cdr_lite",
-            oae_pair=3,
-        )
-        with pytest.raises(ValidationError, match="out of range"):
-            CDRForcing(
-                start_time=self.start_time,
-                end_time=self.end_time,
-                releases=[release],
-                tracer_schema=self.schema,
-            )
-
-    def test_multiple_releases_feed_their_own_pairs(self):
-        releases = [
-            TracerPerturbation(
-                name=f"oae_{k}",
-                lat=66.0,
-                lon=-25.0 + k,
-                depth=50.0,
-                tracer_set="cdr_lite",
-                oae_pair=k,
-                tracer_fluxes={"ALK": 1.0e6 * k},
-            )
-            for k in (1, 2)
-        ] + [
-            TracerPerturbation(
-                name="dor_1",
-                lat=66.0,
-                lon=-20.0,
-                depth=50.0,
-                tracer_set="cdr_lite",
-                dor_index=1,
-                tracer_fluxes={"DOR_DIC": -5.0e5},
-            )
-        ]
-        cdr = CDRForcing(
-            start_time=self.start_time,
-            end_time=self.end_time,
-            releases=releases,
-            tracer_schema=self.schema,
-        )
+        assert cdr.release_tracers == {
+            "oae_a": ("CDR_OAE_ALK1", "CDR_OAE_DIC1"),
+            "dor_a": ("CDR_DOR_DIC1",),
+            "combo": ("CDR_OAE_ALK2", "CDR_OAE_DIC2"),
+        }
         names = list(cdr.ds.tracer_name.values)
         flx = cdr.ds.cdr_trcflx
 
         def rows(tracer, ncdr):
             return flx.isel(ntracers=names.index(tracer), ncdr=ncdr).values
 
+        # physics rows stay zero; each release feeds only its own tracers
+        assert np.allclose(flx.isel(ntracers=[0, 1]).values, 0.0)
         assert np.allclose(rows("CDR_OAE_ALK1", 0), 1.0e6)
+        assert np.allclose(rows("CDR_OAE_DIC1", 0), 0.0)
+        assert np.allclose(rows("CDR_DOR_DIC1", 1), -5.0e5)
+        assert np.allclose(rows("CDR_OAE_ALK2", 2), 2.0e6)
+        assert np.allclose(rows("CDR_OAE_DIC2", 2), -1.0e5)
         assert np.allclose(rows("CDR_OAE_ALK2", 0), 0.0)
-        assert np.allclose(rows("CDR_OAE_ALK2", 1), 2.0e6)
-        assert np.allclose(rows("CDR_OAE_ALK1", 1), 0.0)
-        assert np.allclose(rows("CDR_DOR_DIC1", 2), -5.0e5)
-        assert np.allclose(rows("CDR_DOR_DIC1", 0), 0.0)
-        assert np.allclose(rows("CDR_OAE_DIC1", 2), 0.0)
 
-    def test_releases_may_share_a_pair(self):
-        releases = [
-            TracerPerturbation(
-                name=f"site_{i}",
-                lat=66.0,
-                lon=-25.0 + i,
-                depth=50.0,
-                tracer_set="cdr_lite",
-                oae_pair=1,
-                tracer_fluxes={"ALK": 1.0e6},
-            )
-            for i in range(3)
-        ]
+    def test_derived_tracer_schema(self):
         cdr = CDRForcing(
             start_time=self.start_time,
             end_time=self.end_time,
-            releases=releases,
-            tracer_schema=self.schema,
+            releases=[self._perturbation("oae", {"ALK": 1.0e6})],
+        )
+        assert cdr.tracer_schema is not None
+        assert cdr.tracer_schema.n_oae_pairs == 1
+        assert cdr.tracer_schema.n_dor == 0
+        assert cdr.tracer_schema.include_marbl_bgc is False
+        assert cdr.ds.sizes["ntracers"] == 4
+
+    def test_pure_marbl_has_no_schema(self):
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self._perturbation("m", {"ALK": 1.0e6}, tracer_set="marbl")],
+        )
+        assert cdr.tracer_schema is None
+        assert cdr.release_tracers == {}
+        assert cdr.ds.sizes["ntracers"] == NUM_TRACERS
+
+    def test_include_marbl_bgc_appends_bgc_block(self):
+        from roms_tools.setup.utils import MARBL_TRACER_NAMES
+
+        cdr = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self._perturbation("oae", {"ALK": 1.0e6})],
+            include_marbl_bgc=True,
         )
         names = list(cdr.ds.tracer_name.values)
-        alk1 = cdr.ds.cdr_trcflx.isel(ntracers=names.index("CDR_OAE_ALK1"))
-        assert np.allclose(alk1.values, 1.0e6)
+        expected_tail = [n for n in MARBL_TRACER_NAMES if n not in ("temp", "salt")]
+        assert names == ["temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1", *expected_tail]
 
-    def test_fifty_pair_schema(self):
-        schema = BGCCdrLite.TracerSchema(n_oae_pairs=50)
-        assert schema.ntracers == 102
-        expected = ["temp", "salt"]
-        for k in range(1, 51):
-            expected += [f"CDR_OAE_ALK{k}", f"CDR_OAE_DIC{k}"]
-        assert schema.tracer_names == expected
+    def test_include_marbl_bgc_rejected_for_pure_marbl(self):
+        with pytest.raises(ValidationError, match="only valid when cdr_lite"):
+            CDRForcing(
+                start_time=self.start_time,
+                end_time=self.end_time,
+                releases=[self._perturbation("m", {"ALK": 1.0e6}, tracer_set="marbl")],
+                include_marbl_bgc=True,
+            )
 
+    def test_mixed_marbl_and_cdr_lite(self, caplog):
         releases = [
-            TracerPerturbation(
-                name=f"release_{k}",
-                lat=60.0 + 0.1 * k,
-                lon=-25.0,
-                depth=50.0,
-                tracer_set="cdr_lite",
-                oae_pair=k,
-                tracer_fluxes={"ALK": 1.0e6, "DIC": 1.0e3 * k},
+            self._perturbation("oae", {"ALK": 1.0e6}),
+            self._perturbation("marbl_alk", {"ALK": 3.0e6}, tracer_set="marbl"),
+        ]
+        with caplog.at_level(logging.INFO):
+            cdr = CDRForcing(
+                start_time=self.start_time,
+                end_time=self.end_time,
+                releases=releases,
+            )
+        assert "appending the MARBL BGC tracers" in caplog.text
+        assert cdr.tracer_set == "mixed"
+        assert cdr.tracer_schema.include_marbl_bgc is True
+        names = list(cdr.ds.tracer_name.values)
+        flx = cdr.ds.cdr_trcflx
+        # cdr_lite release feeds its pair; marbl release feeds the MARBL ALK row
+        assert np.allclose(
+            flx.isel(ntracers=names.index("CDR_OAE_ALK1"), ncdr=0).values, 1.0e6
+        )
+        assert np.allclose(flx.isel(ntracers=names.index("ALK"), ncdr=1).values, 3.0e6)
+        assert np.allclose(
+            flx.isel(ntracers=names.index("CDR_OAE_ALK1"), ncdr=1).values, 0.0
+        )
+        assert np.allclose(flx.isel(ntracers=names.index("ALK"), ncdr=0).values, 0.0)
+
+    def test_fifty_release_auto_assignment(self):
+        releases = [
+            self._perturbation(
+                f"release_{k}", {"ALK": 1.0e6, "DIC": 1.0e3 * k}, lon=-25.0 + 0.1 * k
             )
             for k in range(1, 51)
         ]
@@ -1260,13 +1221,12 @@ class TestCdrLiteForcing:
             start_time=self.start_time,
             end_time=self.end_time,
             releases=releases,
-            tracer_schema=schema,
         )
         assert cdr.ds.sizes["ntracers"] == 102
         assert cdr.ds.sizes["ncdr"] == 50
+        assert cdr.tracer_schema.n_oae_pairs == 50
         names = list(cdr.ds.tracer_name.values)
         flx = cdr.ds.cdr_trcflx
-        # spot-check a release in the middle: feeds only its own pair
         k = 37
         assert np.allclose(
             flx.isel(ntracers=names.index(f"CDR_OAE_DIC{k}"), ncdr=k - 1).values,
@@ -1279,25 +1239,7 @@ class TestCdrLiteForcing:
         nonzero_rows = (np.abs(flx.values) > 0).any(axis=0).sum(axis=0)
         assert np.all(nonzero_rows == 2)
 
-    def test_schema_with_marbl_bgc_appends_bgc_tracers(self):
-        from roms_tools.setup.utils import MARBL_TRACER_NAMES
-
-        schema = BGCCdrLite.TracerSchema(n_oae_pairs=1, include_marbl_bgc=True)
-        expected_tail = [n for n in MARBL_TRACER_NAMES if n not in ("temp", "salt")]
-        assert schema.tracer_names == [
-            "temp",
-            "salt",
-            "CDR_OAE_ALK1",
-            "CDR_OAE_DIC1",
-            *expected_tail,
-        ]
-        assert schema.ntracers == 4 + len(expected_tail)
-
-    def test_schema_requires_cdr_tracers(self):
-        with pytest.raises(ValidationError, match="at least one CDR tracer"):
-            BGCCdrLite.TracerSchema()
-
-    def test_roundtrip_yaml_preserves_tracer_schema(self, tmp_path):
+    def test_roundtrip_yaml(self, tmp_path):
         grid = Grid(
             nx=10,
             ny=10,
@@ -1308,47 +1250,33 @@ class TestCdrLiteForcing:
             rot=0,
             N=3,
         )
-        release = TracerPerturbation(
-            name="oae",
-            lat=66.0,
-            lon=-25.0,
-            depth=50.0,
-            tracer_set="cdr_lite",
-            oae_pair=2,
-            tracer_fluxes={"ALK": 1.0e6},
-        )
+        releases = [
+            self._perturbation("oae", {"ALK": 1.0e6}),
+            self._perturbation("dor", {"DIC": -5.0e5}, lon=-24.0),
+        ]
         cdr = CDRForcing(
             grid=grid,
             start_time=self.start_time,
             end_time=self.end_time,
-            releases=[release],
-            tracer_schema=self.schema,
+            releases=releases,
+            include_marbl_bgc=True,
         )
         filepath = tmp_path / "cdr_lite.yaml"
         cdr.to_yaml(filepath)
         restored = CDRForcing.from_yaml(filepath)
         assert restored.tracer_set == "cdr_lite"
-        assert restored.tracer_schema == self.schema
-        assert restored.releases[0].oae_pair == 2
+        assert restored.include_marbl_bgc is True
+        assert restored.tracer_schema == cdr.tracer_schema
+        assert restored.release_tracers == cdr.release_tracers
         assert restored.ds.identical(cdr.ds)
 
     def test_save(self, tmp_path):
-        release = TracerPerturbation(
-            name="oae",
-            lat=66.0,
-            lon=-25.0,
-            depth=50.0,
-            tracer_set="cdr_lite",
-            oae_pair=1,
-            tracer_fluxes={"ALK": 2.0e6},
-        )
         cdr = CDRForcing(
             start_time=self.start_time,
             end_time=self.end_time,
-            releases=[release],
-            tracer_schema=self.schema,
+            releases=[self._perturbation("oae", {"ALK": 2.0e6})],
         )
         saved_paths = cdr.save(tmp_path / "cdr_lite_frc.nc")
         ds = xr.open_dataset(saved_paths[0])
-        assert ds.sizes["ntracers"] == 7
+        assert ds.sizes["ntracers"] == 4
         assert ds.sizes["ncdr"] == 1

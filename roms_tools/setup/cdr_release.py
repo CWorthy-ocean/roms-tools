@@ -34,20 +34,11 @@ NonNegativeFloat = Annotated[float, Ge(0)]
 pd.set_option("display.max_columns", None)
 
 
-def _allowed_cdr_keys(info: ValidationInfo) -> list[str]:
-    """Tracer keys a tracer_set="cdr_lite" release may specify, from the
-    targeting fields already validated on the model (`oae_pair`, `dor_index`).
-
-    Physics tracers (temp, salt) are deliberately excluded: CDR tracer
-    experiments require the physics to remain untouched by the release, so
-    their rows in the forcing file are always zero.
-    """
-    keys: list[str] = []
-    if info.data.get("oae_pair") is not None:
-        keys += [BGCCdrLite.ROLE_ALK, BGCCdrLite.ROLE_DIC]
-    if info.data.get("dor_index") is not None:
-        keys += [BGCCdrLite.ROLE_DOR]
-    return keys
+#: Flux keys a tracer_set="cdr_lite" release may specify. Physics tracers
+#: (temp, salt) are deliberately excluded: CDR tracer experiments require the
+#: physics to remain untouched by the release, so their rows in the forcing
+#: file are always zero.
+_CDR_LITE_KEYS = (BGCCdrLite.ROLE_ALK, BGCCdrLite.ROLE_DIC)
 
 
 def _raise_on_unknown_tracers(provided, allowed, tracer_set: TracerSet) -> None:
@@ -261,19 +252,14 @@ class Release(BaseModel):
     tracer_set : {"marbl", "cdr_lite"}, optional
         Tracer schema. ``"marbl"`` (default) specifies tracer values by MARBL
         tracer name. ``"cdr_lite"`` targets the dedicated CDR tracers of a
-        ROMS ``CDR_TRACER`` build: the release addresses its own tracers via
-        the role keys ``"ALK"`` / ``"DIC"`` (its OAE pair, selected with
-        ``oae_pair``) and ``"DOR_DIC"`` (its DOR tracer, selected with
-        ``dor_index``). Only supported on ``TracerPerturbation`` — CDR tracer
-        experiments require the physics to remain untouched, so volume
-        releases and ``temp`` / ``salt`` forcing are not allowed.
-    oae_pair : int, optional
-        1-based index of the OAE (alkalinity, DIC) tracer pair this release
-        feeds (``CDR_OAE_ALK{k}`` / ``CDR_OAE_DIC{k}``). Only valid with
-        ``tracer_set="cdr_lite"``.
-    dor_index : int, optional
-        1-based index of the DOR tracer this release feeds
-        (``CDR_DOR_DIC{j}``). Only valid with ``tracer_set="cdr_lite"``.
+        ROMS ``CDR_TRACER`` build: the release specifies ``"ALK"`` and/or
+        ``"DIC"`` fluxes, and ``CDRForcing`` assigns tracers automatically —
+        a release with ``"ALK"`` (an OAE or combined OAE+DOR intervention)
+        gets the next ``CDR_OAE_ALK{k}``/``CDR_OAE_DIC{k}`` pair; a release
+        with only ``"DIC"`` (a DOR intervention) gets the next
+        ``CDR_DOR_DIC{j}`` tracer. Only supported on ``TracerPerturbation`` —
+        CDR tracer experiments require the physics to remain untouched, so
+        volume releases and ``temp`` / ``salt`` forcing are not allowed.
     """
 
     name: str
@@ -294,17 +280,11 @@ class Release(BaseModel):
     """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
     tracer_set: TracerSet = "marbl"
     """Tracer schema: ``"marbl"`` (values keyed by MARBL tracer name) or
-    ``"cdr_lite"`` (values keyed by the roles ``"ALK"``/``"DIC"``/``"DOR_DIC"``
-    targeting the release's own CDR tracers). ``"cdr_lite"`` is only supported
-    on :class:`TracerPerturbation`: CDR tracer experiments require the physics
-    to remain untouched, which rules out volume releases (and temp/salt
-    forcing)."""
-    oae_pair: int | None = Field(None, ge=1)
-    """1-based index of the OAE (ALK, DIC) tracer pair this release feeds.
-    Only valid with ``tracer_set="cdr_lite"``."""
-    dor_index: int | None = Field(None, ge=1)
-    """1-based index of the DOR tracer this release feeds.
-    Only valid with ``tracer_set="cdr_lite"``."""
+    ``"cdr_lite"`` (values keyed by ``"ALK"``/``"DIC"``; ``CDRForcing``
+    auto-assigns the release's own CDR tracer(s)). ``"cdr_lite"`` is only
+    supported on :class:`TracerPerturbation`: CDR tracer experiments require
+    the physics to remain untouched, which rules out volume releases (and
+    temp/salt forcing)."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
@@ -312,50 +292,57 @@ class Release(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    @model_validator(mode="after")
-    def _check_tracer_targeting(self) -> "Release":
-        """Validate oae_pair/dor_index against the tracer_set."""
-        if self.tracer_set == "cdr_lite":
-            if self.oae_pair is None and self.dor_index is None:
-                raise ValueError(
-                    'Releases with tracer_set="cdr_lite" must set `oae_pair` '
-                    "and/or `dor_index` to select which CDR tracer(s) they feed."
-                )
-        else:
-            if self.oae_pair is not None or self.dor_index is not None:
-                raise ValueError(
-                    "`oae_pair` and `dor_index` are only valid with "
-                    'tracer_set="cdr_lite".'
-                )
-        return self
+    @property
+    def is_oae(self) -> bool:
+        """Whether this cdr_lite release is an OAE (or combined OAE+DOR)
+        intervention, i.e. specifies an ``"ALK"`` flux — it is assigned an
+        OAE (ALK, DIC) tracer pair. False for marbl releases.
+        """
+        if self.tracer_set != "cdr_lite":
+            return False
+        return BGCCdrLite.ROLE_ALK in getattr(self, "tracer_fluxes", {})
+
+    @property
+    def is_dor(self) -> bool:
+        """Whether this cdr_lite release is a DOR intervention, i.e. specifies
+        only a ``"DIC"`` flux — it is assigned a standalone DOR tracer.
+        False for marbl releases.
+        """
+        return self.tracer_set == "cdr_lite" and not self.is_oae
 
     def _map_tracers_to_schema(
-        self, tracer_data: dict, schema: "CdrLiteTracerSchema | None"
+        self,
+        tracer_data: dict,
+        schema: "CdrLiteTracerSchema | None",
+        *,
+        oae_pair: int | None = None,
+        dor_index: int | None = None,
     ) -> dict:
         """Re-key a role-keyed tracer dict onto the global tracer names of the
         forcing file's tracer axis.
 
         For ``tracer_set="marbl"`` the data is already keyed by global names and
-        is returned unchanged. For ``"cdr_lite"``, the role keys resolve via the
-        release's targeting fields, e.g. ``"ALK"`` -> ``CDR_OAE_ALK{oae_pair}``.
+        is returned unchanged. For ``"cdr_lite"``, the assigned pair/slot index
+        is supplied by the ``CDRForcing`` builder, e.g. ``"ALK"`` ->
+        ``CDR_OAE_ALK{oae_pair}`` or (DOR release) ``"DIC"`` ->
+        ``CDR_DOR_DIC{dor_index}``.
         """
         if self.tracer_set != "cdr_lite":
             return tracer_data
         if schema is None:
             raise ValueError(
-                'Releases with tracer_set="cdr_lite" require a CdrLiteTracerSchema '
-                "to resolve their tracer names."
+                'Releases with tracer_set="cdr_lite" require a CDR-LiTE tracer '
+                "schema to resolve their tracer names."
             )
         mapped = {}
-        for key, value in tracer_data.items():
-            if key in (BGCCdrLite.ROLE_ALK, BGCCdrLite.ROLE_DIC):
-                # These role keys only validate when oae_pair is set.
-                assert self.oae_pair is not None
-                alk_name, dic_name = schema.oae_pair_names(self.oae_pair)
+        if self.is_oae:
+            assert oae_pair is not None
+            alk_name, dic_name = schema.oae_pair_names(oae_pair)
+            for key, value in tracer_data.items():
                 mapped[alk_name if key == BGCCdrLite.ROLE_ALK else dic_name] = value
-            elif key == BGCCdrLite.ROLE_DOR:
-                assert self.dor_index is not None
-                mapped[schema.dor_name(self.dor_index)] = value
+        else:
+            assert dor_index is not None
+            mapped[schema.dor_name(dor_index)] = tracer_data[BGCCdrLite.ROLE_DIC]
         return mapped
 
     @model_validator(mode="after")
@@ -774,20 +761,36 @@ class TracerPerturbation(Release):
         tracer_set: TracerSet = info.data.get("tracer_set", "marbl")
 
         if tracer_set == "cdr_lite":
-            allowed = _allowed_cdr_keys(info)
+            _raise_on_unknown_tracers(tracer_fluxes, _CDR_LITE_KEYS, tracer_set)
+            # No zero-filling: the provided keys are the intervention-type
+            # signal (ALK present -> OAE pair; DIC only -> DOR tracer).
+            filled: dict[str, Flux | float | list[float]] = dict(tracer_fluxes)
         else:
             allowed = list(BGCMarbl.river_defaults())
-        _raise_on_unknown_tracers(tracer_fluxes, allowed, tracer_set)
-
-        # Fill all tracer fluxes that are not provided with zero
-        filled: dict[str, Flux | float | list[float]] = {
-            tracer_name: tracer_fluxes.get(tracer_name, 0.0) for tracer_name in allowed
-        }
+            _raise_on_unknown_tracers(tracer_fluxes, allowed, tracer_set)
+            # Fill all tracer fluxes that are not provided with zero
+            filled = {
+                tracer_name: tracer_fluxes.get(tracer_name, 0.0)
+                for tracer_name in allowed
+            }
 
         return {
             tracer: (flux if isinstance(flux, Flux) else Flux(name=tracer, values=flux))
             for tracer, flux in filled.items()
         }
+
+    @model_validator(mode="after")
+    def _check_cdr_lite_fluxes_present(self):
+        """A cdr_lite release must specify at least one of 'ALK' / 'DIC' — the
+        provided keys determine whether it is an OAE-pair or DOR intervention.
+        """
+        if self.tracer_set == "cdr_lite" and not self.tracer_fluxes:
+            raise ValueError(
+                'Releases with tracer_set="cdr_lite" must specify tracer_fluxes '
+                "for 'ALK' (OAE; optionally with 'DIC', which may be negative "
+                "for combined OAE+DOR) and/or 'DIC' alone (DOR)."
+            )
+        return self
 
     @model_validator(mode="after")
     def _check_tracer_flux_lengths(self):

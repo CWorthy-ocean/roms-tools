@@ -714,11 +714,12 @@ class BGCCdrLite:
 
     name: ClassVar[str] = "CDR-LiTE"
 
-    #: Role keys used by tracer_set="cdr_lite" releases to address the
-    #: tracers of their assigned OAE pair / DOR slot.
+    #: Flux keys used by tracer_set="cdr_lite" releases. A release providing
+    #: ROLE_ALK is an OAE (or combined OAE+DOR) intervention and is assigned
+    #: an OAE (ALK, DIC) tracer pair; a release providing only ROLE_DIC is a
+    #: DOR intervention and is assigned a standalone DOR tracer.
     ROLE_ALK: ClassVar[str] = "ALK"
     ROLE_DIC: ClassVar[str] = "DIC"
-    ROLE_DOR: ClassVar[str] = "DOR_DIC"
 
     #: Layout of the forcing file's tracer axis (mirrors the ROMS namelist).
     TracerSchema = CdrLiteTracerSchema
@@ -728,13 +729,14 @@ class BGCCdrLite:
         cls,
         unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
     ) -> dict[str, dict[str, str]]:
-        """Role keys -> units/long_name for CDR-LiTE release inputs.
+        """Flux keys -> units/long_name for CDR-LiTE release inputs.
 
-        Releases address their assigned tracers via the role keys ``"ALK"`` /
-        ``"DIC"`` (the release's OAE pair) and ``"DOR_DIC"`` (its DOR slot),
-        rather than by global tracer names like ``CDR_OAE_ALK7``. Physics
-        tracers (temp, salt) are not roles: CDR-LiTE experiments leave the
-        physics untouched, so their rows in the forcing file are always zero.
+        Releases specify fluxes via the keys ``"ALK"`` / ``"DIC"`` rather than
+        by global tracer names like ``CDR_OAE_ALK7`` — ``CDRForcing``
+        auto-assigns each release its own tracer(s) from the keys provided.
+        Physics tracers (temp, salt) are not accepted: CDR-LiTE experiments
+        leave the physics untouched, so their rows in the forcing file are
+        always zero.
         """
         unit_key = {
             "concentration": "units",
@@ -749,11 +751,11 @@ class BGCCdrLite:
             },
             cls.ROLE_DIC: {
                 "units": _MMOL_UNITS[unit_key],
-                "long_name": "DIC of the release's OAE tracer pair",
-            },
-            cls.ROLE_DOR: {
-                "units": _MMOL_UNITS[unit_key],
-                "long_name": "DIC of the release's DOR tracer (negative = removal)",
+                "long_name": (
+                    "DIC of the release's OAE tracer pair (with ALK; may be "
+                    "negative for combined OAE+DOR), or of its standalone DOR "
+                    "tracer when given alone (negative = removal)"
+                ),
             },
         }
 

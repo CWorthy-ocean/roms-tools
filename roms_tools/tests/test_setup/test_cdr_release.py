@@ -525,11 +525,13 @@ class TestReleaseAccounting:
 
 
 class TestCdrLiteTracerSet:
-    """Tests for the non-MARBL CDR tracer schema (role-keyed releases).
+    """Tests for the CDR-LiTE tracer scheme (auto-assigned targeting).
 
     tracer_set="cdr_lite" is TracerPerturbation-only: CDR tracer experiments
     require the physics to remain untouched, so volume releases (and temp/salt
-    forcing) are rejected.
+    forcing) are rejected. Releases specify 'ALK' and/or 'DIC' fluxes; the
+    provided keys determine the intervention type (ALK -> OAE pair, DIC-only
+    -> DOR tracer); CDRForcing assigns tracer indices in release order.
     """
 
     def setup_method(self):
@@ -543,79 +545,51 @@ class TestCdrLiteTracerSet:
 
     def test_volume_release_rejected(self):
         with pytest.raises(ValidationError, match="not supported on VolumeRelease"):
-            VolumeRelease(**self.params, oae_pair=1)
+            VolumeRelease(**self.params)
         with pytest.raises(ValueError, match="not supported on VolumeRelease"):
             VolumeRelease.get_tracer_metadata(tracer_set="cdr_lite")
 
-    def test_requires_targeting(self):
-        with pytest.raises(ValidationError, match="oae_pair"):
-            TracerPerturbation(**self.params)
+    def test_requires_alk_or_dic(self):
+        with pytest.raises(ValidationError, match="must specify tracer_fluxes"):
+            TracerPerturbation(**self.params, tracer_fluxes={})
 
-    def test_targeting_requires_cdr_lite_set(self):
-        with pytest.raises(ValidationError, match="only valid with"):
-            TracerPerturbation(name="x", lat=0.0, lon=0.0, depth=10.0, oae_pair=1)
-
-    def test_fills_untargeted_roles_with_zero(self):
-        tp = TracerPerturbation(
-            **self.params,
-            oae_pair=1,
-            tracer_fluxes={"ALK": 1.0e6},
-        )
-        assert set(tp.tracer_fluxes) == {"ALK", "DIC"}
+    def test_oae_release(self):
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"ALK": 1.0e6})
+        assert tp.is_oae and not tp.is_dor
+        assert set(tp.tracer_fluxes) == {"ALK"}
         assert tp.tracer_fluxes["ALK"].values == 1.0e6
-        assert tp.tracer_fluxes["DIC"].values == 0.0
 
-    def test_dor(self):
-        tp = TracerPerturbation(
-            **self.params,
-            dor_index=1,
-            tracer_fluxes={"DOR_DIC": -1.0e6},
-        )
-        assert set(tp.tracer_fluxes) == {"DOR_DIC"}
-        assert tp.tracer_fluxes["DOR_DIC"].values == -1.0e6
+    def test_dor_release(self):
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"DIC": -1.0e6})
+        assert tp.is_dor and not tp.is_oae
+        assert set(tp.tracer_fluxes) == {"DIC"}
+        assert tp.tracer_fluxes["DIC"].values == -1.0e6
 
-    def test_combined_oae_dor(self):
+    def test_combined_oae_dor_release(self):
+        # Combined OAE+DOR is one intervention: the OAE pair with negative DIC.
         tp = TracerPerturbation(
-            **self.params,
-            oae_pair=1,
-            dor_index=2,
-            tracer_fluxes={"ALK": 1.0e6, "DOR_DIC": -2.0e5},
+            **self.params, tracer_fluxes={"ALK": 1.0e6, "DIC": -2.0e5}
         )
-        assert set(tp.tracer_fluxes) == {"ALK", "DIC", "DOR_DIC"}
+        assert tp.is_oae and not tp.is_dor
         assert tp.tracer_fluxes["ALK"].values == 1.0e6
-        assert tp.tracer_fluxes["DIC"].values == 0.0
-        assert tp.tracer_fluxes["DOR_DIC"].values == -2.0e5
+        assert tp.tracer_fluxes["DIC"].values == -2.0e5
+
+    def test_marbl_release_is_neither(self):
+        tp = TracerPerturbation(
+            name="m", lat=0.0, lon=0.0, depth=10.0, tracer_fluxes={"ALK": 1.0}
+        )
+        assert not tp.is_oae and not tp.is_dor
 
     def test_rejects_physics_tracers(self):
         # Physics must remain untouched: temp/salt cannot be forced.
         for key in ("temp", "salt"):
             with pytest.raises(ValidationError, match="Unknown tracer name"):
-                TracerPerturbation(
-                    **self.params,
-                    oae_pair=1,
-                    tracer_fluxes={key: 1.0},
-                )
+                TracerPerturbation(**self.params, tracer_fluxes={key: 1.0})
 
     def test_rejects_unknown_tracer_names(self):
-        with pytest.raises(ValidationError, match="Unknown tracer name"):
-            TracerPerturbation(
-                **self.params,
-                oae_pair=1,
-                tracer_fluxes={"ALKK": 1.0e6},
-            )
-        # role keys not enabled by the targeting fields are rejected too
-        with pytest.raises(ValidationError, match="Unknown tracer name"):
-            TracerPerturbation(
-                **self.params,
-                oae_pair=1,
-                tracer_fluxes={"DOR_DIC": -1.0},
-            )
-        with pytest.raises(ValidationError, match="Unknown tracer name"):
-            TracerPerturbation(
-                **self.params,
-                dor_index=1,
-                tracer_fluxes={"ALK": 1.0e6},
-            )
+        for bad in ("ALKK", "DOR_DIC", "NO3"):
+            with pytest.raises(ValidationError, match="Unknown tracer name"):
+                TracerPerturbation(**self.params, tracer_fluxes={bad: 1.0e6})
 
     def test_marbl_rejects_unknown_tracer_names(self):
         with pytest.raises(ValidationError, match="Unknown tracer name"):
@@ -637,25 +611,30 @@ class TestCdrLiteTracerSet:
 
     def test_map_tracers_to_schema(self):
         schema = BGCCdrLite.TracerSchema(n_oae_pairs=3, n_dor=2)
-        tp = TracerPerturbation(
-            **self.params,
-            oae_pair=3,
-            dor_index=2,
-            tracer_fluxes={"ALK": 100.0, "DOR_DIC": -20.0},
+        oae = TracerPerturbation(
+            **self.params, tracer_fluxes={"ALK": 100.0, "DIC": -20.0}
         )
-        mapped = tp._map_tracers_to_schema(tp.tracer_fluxes, schema)
-        assert set(mapped) == {"CDR_OAE_ALK3", "CDR_OAE_DIC3", "CDR_DOR_DIC2"}
+        mapped = oae._map_tracers_to_schema(oae.tracer_fluxes, schema, oae_pair=3)
+        assert set(mapped) == {"CDR_OAE_ALK3", "CDR_OAE_DIC3"}
         assert mapped["CDR_OAE_ALK3"].values == 100.0
-        assert mapped["CDR_DOR_DIC2"].values == -20.0
+        assert mapped["CDR_OAE_DIC3"].values == -20.0
+
+        dor = TracerPerturbation(
+            name="d",
+            lat=0.0,
+            lon=0.0,
+            depth=10.0,
+            tracer_set="cdr_lite",
+            tracer_fluxes={"DIC": -50.0},
+        )
+        mapped = dor._map_tracers_to_schema(dor.tracer_fluxes, schema, dor_index=2)
+        assert set(mapped) == {"CDR_DOR_DIC2"}
+        assert mapped["CDR_DOR_DIC2"].values == -50.0
 
     def test_map_tracers_requires_schema(self):
-        tp = TracerPerturbation(
-            **self.params,
-            oae_pair=1,
-            tracer_fluxes={"ALK": 100.0},
-        )
-        with pytest.raises(ValueError, match="require a CdrLiteTracerSchema"):
-            tp._map_tracers_to_schema(tp.tracer_fluxes, None)
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"ALK": 100.0})
+        with pytest.raises(ValueError, match="require a CDR-LiTE tracer"):
+            tp._map_tracers_to_schema(tp.tracer_fluxes, None, oae_pair=1)
 
     def test_release_tracer_models_dispatch(self):
         from roms_tools import BGCMarbl
@@ -673,13 +652,9 @@ class TestCdrLiteTracerSet:
     def test_metadata_property_uses_instance_tracer_set(self):
         import pandas as pd
 
-        tp = TracerPerturbation(
-            **self.params,
-            oae_pair=1,
-            tracer_fluxes={"ALK": 1.0e6},
-        )
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"ALK": 1.0e6})
         assert isinstance(tp.metadata, pd.DataFrame)
-        assert list(tp.metadata.columns) == ["ALK", "DIC", "DOR_DIC"]
+        assert list(tp.metadata.columns) == ["ALK", "DIC"]
 
         marbl_tp = TracerPerturbation(
             name="m", lat=0.0, lon=0.0, depth=10.0, tracer_fluxes={"ALK": 1.0}
@@ -687,8 +662,8 @@ class TestCdrLiteTracerSet:
         assert "spChl" in marbl_tp.metadata.columns
 
     def test_get_tracer_metadata(self):
-        expected = ["ALK", "DIC", "DOR_DIC"]
+        expected = ["ALK", "DIC"]
         meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_lite")
         assert list(meta_flux.keys()) == expected
         assert meta_flux["ALK"]["units"] == "meq/s"
-        assert meta_flux["DOR_DIC"]["units"] == "mmol/s"
+        assert meta_flux["DIC"]["units"] == "mmol/s"

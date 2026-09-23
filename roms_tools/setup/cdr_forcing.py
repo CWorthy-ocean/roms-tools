@@ -310,6 +310,7 @@ class CDRForcingDatasetBuilder:
             # onto the global tracer names of the file's tracer axis.
             if release.name in assignments:
                 assigned = assignments[release.name]
+                roles: tuple[str, ...]
                 if release.is_oae:
                     roles = ("ALK", "DIC")
                 elif release.is_dor:

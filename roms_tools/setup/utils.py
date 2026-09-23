@@ -1269,50 +1269,21 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
-# Canonical ROMS-MARBL tracer list for river forcing and related setup code.
-# Defined here (not in river_datasets) so RiverForcing, BGC dataset classes, and
-# tracer metadata share one schema without circular imports between setup and datasets.
-MARBL_TRACER_NAMES = (
-    "temp",
-    "salt",
-    "PO4",
-    "NO3",
-    "SiO3",
-    "NH4",
-    "Fe",
-    "Lig",
-    "O2",
-    "DIC",
-    "DIC_ALT_CO2",
-    "ALK",
-    "ALK_ALT_CO2",
-    "DOC",
-    "DON",
-    "DOP",
-    "DOPr",
-    "DONr",
-    "DOCr",
-    "zooC",
-    "spChl",
-    "spC",
-    "spP",
-    "spFe",
-    "spCaCO3",
-    "diatChl",
-    "diatC",
-    "diatP",
-    "diatFe",
-    "diatSi",
-    "diazChl",
-    "diazC",
-    "diazP",
-    "diazFe",
-)
+def __getattr__(name: str):
+    # Back-compat: the canonical ordered tracer axis moved to
+    # bgc_model.BGCMarbl.TRACER_NAMES. Served lazily so this module never
+    # imports bgc_model at module level (bgc_model imports setup.utils).
+    if name == "MARBL_TRACER_NAMES":
+        from roms_tools.setup.bgc_model import BGCMarbl
+
+        return BGCMarbl.TRACER_NAMES
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    tracer_names: Sequence[str] | None = None,
 ):
     """Generate a dictionary containing metadata for model tracers.
 
@@ -1324,9 +1295,15 @@ def get_tracer_metadata_dict(
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
+        Ignored when ``tracer_names`` is given.
 
     unit_type : str
         One of "concentration" (default), "flux", or "integrated".
+
+    tracer_names : sequence of str, optional
+        Explicit ordered tracer axis (e.g. a ``BGCModel.TRACER_NAMES``).
+        When omitted, ``include_bgc`` selects the MARBL axis or just
+        temp/salt.
 
     Returns
     -------
@@ -1334,10 +1311,11 @@ def get_tracer_metadata_dict(
         A dictionary where keys are tracer names and values are dictionaries
         containing 'units' and 'long_name' for each tracer.
     """
-    if include_bgc:
-        tracer_names = list(MARBL_TRACER_NAMES)
-    else:
-        tracer_names = ["temp", "salt"]
+    if tracer_names is None:
+        from roms_tools.setup.bgc_model import PHYSICS_TRACER_NAMES, BGCMarbl
+
+        tracer_names = BGCMarbl.TRACER_NAMES if include_bgc else PHYSICS_TRACER_NAMES
+    tracer_names = list(tracer_names)
 
     metadata = get_variable_metadata()
 
@@ -1358,7 +1336,9 @@ def get_tracer_metadata_dict(
     return tracer_dict
 
 
-def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
+def add_tracer_metadata_to_ds(
+    ds, include_bgc=True, with_flux_units=False, tracer_names=None
+):
     """Adds tracer metadata to a dataset.
 
     This function adds tracer metadata (name, unit, long name) as coordinates to
@@ -1371,9 +1351,13 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
+        Ignored when ``tracer_names`` is given.
     with_flux_units : bool, optional
         If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
         If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
+    tracer_names : sequence of str, optional
+        Explicit ordered tracer axis (e.g. a ``BGCModel.TRACER_NAMES``); this
+        order becomes the on-disk ``ntracers`` axis order.
 
     Returns
     -------
@@ -1381,7 +1365,9 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
         The dataset with added tracer metadata.
     """
     unit_type = "flux" if with_flux_units else "concentration"
-    tracer_dict = get_tracer_metadata_dict(include_bgc, unit_type=unit_type)
+    tracer_dict = get_tracer_metadata_dict(
+        include_bgc, unit_type=unit_type, tracer_names=tracer_names
+    )
 
     tracer_names = list(tracer_dict.keys())
     tracer_units = [tracer_dict[tracer]["units"] for tracer in tracer_names]
@@ -1417,9 +1403,9 @@ def get_tracer_defaults() -> dict[str, float]:
     This accessor lives in ``setup.utils`` rather than ``river_datasets`` so
     ``RiverForcing``, fill sources, and other setup code can reuse the same
     defaults without pulling in dataset implementations at import time. The
-    dataset class is loaded lazily in :func:`_load_tracer_defaults` to avoid a
-    circular import: ``river_datasets`` imports :data:`MARBL_TRACER_NAMES` from
-    here for schema validation.
+    dataset class is loaded lazily in :func:`_load_tracer_defaults` because
+    ``setup.utils`` must not import dataset modules at module load time
+    (``river_datasets`` imports helpers from this module).
 
     Returns
     -------
@@ -1433,9 +1419,9 @@ def get_tracer_defaults() -> dict[str, float]:
 def _load_tracer_defaults() -> dict[str, float]:
     """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
 
-    ``RiverTracerDefaultsDataset`` is imported inside this function so
-    ``river_datasets`` can import :data:`MARBL_TRACER_NAMES` from this module
-    without a circular dependency at module load time.
+    ``RiverTracerDefaultsDataset`` is imported inside this function because
+    ``setup.utils`` must not import dataset modules at module load time
+    (``river_datasets`` imports helpers from this module).
     """
     from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
 

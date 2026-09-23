@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 import numpy as np
 import xarray as xr
@@ -14,8 +14,8 @@ from roms_tools.datasets.download import (
     download_river_tracer_defaults,
 )
 from roms_tools.datasets.utils import check_dataset, select_relevant_times
+from roms_tools.setup.bgc_model import BGCMarbl, BGCModel
 from roms_tools.setup.utils import (
-    MARBL_TRACER_NAMES,
     build_kdtree_from_latlon,
     find_coastal_cells,
     latlon_to_xyz,
@@ -36,27 +36,13 @@ RECOMMENDED_VALUE_INDEX = 0
 RIVER_TRACER_DEFAULTS_FILENAME = "river_tracer_defaults.nc"
 
 
-#: Tracers supplied by a ``precomputed_concentrations=True`` BGC source
-#: (currently only ``Rivr2oRiverBGCDataset``'s ``"total_discharge"`` mode).
-RIVR2O_MARBL_TRACER_NAMES = (
-    "DIC",
-    "ALK",
-    "DOC",
-    "DON",
-    "DOP",
-    "NO3",
-    "PO4",
-    "DIC_ALT_CO2",
-    "ALK_ALT_CO2",
-)
-if not set(RIVR2O_MARBL_TRACER_NAMES) <= set(MARBL_TRACER_NAMES):
-    raise ValueError(
-        "RIVR2O_MARBL_TRACER_NAMES must stay a subset of MARBL_TRACER_NAMES."
-    )
-
-
 class RiverBGCDataset(Protocol):
-    """Protocol for river BGC datasets used by ``RiverForcing``."""
+    """Protocol for river BGC datasets used by ``RiverForcing``.
+
+    The precomputed-concentration members carry default implementations
+    (sources implement this Protocol by explicit subclassing), so only sources
+    that actually precompute per-station concentrations need to override them.
+    """
 
     @property
     def requires_calendar_discharge_time(self) -> bool:
@@ -78,14 +64,6 @@ class RiverBGCDataset(Protocol):
         """
         ...
 
-    @property
-    def precomputed_concentrations(self) -> bool:
-        """Whether concentrations are precomputed per station -- see
-        ``extract_station_concentrations`` -- rather than sampled via
-        ``forcing_concentrations``.
-        """
-        ...
-
     def forcing_concentrations(
         self,
         river_volume: xr.DataArray,
@@ -102,6 +80,21 @@ class RiverBGCDataset(Protocol):
         """
         ...
 
+    @property
+    def precomputed_concentrations(self) -> bool:
+        """Whether concentrations are precomputed per station -- see
+        ``extract_station_concentrations`` -- rather than sampled via
+        ``forcing_concentrations``. Default: False.
+        """
+        return False
+
+    @property
+    def provided_tracers(self) -> tuple[str, ...]:
+        """ROMS tracer names this source supplies; ``()`` when the source only
+        provides fill values.
+        """
+        return ()
+
     def extract_station_concentrations(
         self, data: "RiverDataset"
     ) -> dict[str, xr.DataArray]:
@@ -109,11 +102,16 @@ class RiverBGCDataset(Protocol):
         ``data.ds``, on ``data.ds``'s own native ``(time, station)`` dims.
 
         Only called when ``precomputed_concentrations`` is ``True``, once,
-        before overlap merging. Datasets that don't support this
-        (``precomputed_concentrations`` is ``False``) should raise
-        ``NotImplementedError``, since it is never called for them.
+        before overlap merging.
         """
-        ...
+        # A real default implementation (not a stub): sources that don't
+        # precompute inherit this guard, so mypy must not read the body as
+        # trivial/abstract.
+        message = (
+            f"{type(self).__name__} does not precompute station concentrations "
+            "(precomputed_concentrations is False)."
+        )
+        raise NotImplementedError(message)
 
 
 def fill_river_bgc_concentrations(
@@ -192,6 +190,9 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
         Path to the NetCDF file. Defaults to the file from roms-tools-data.
     value_option_index : int, optional
         Index along ``value_option`` to read. Defaults to 0 (recommended values).
+    bgc_model : type[BGCModel], optional
+        The BGC model whose tracer axis the defaults file must cover exactly.
+        Defaults to :class:`BGCMarbl`.
 
     Attributes
     ----------
@@ -203,6 +204,7 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
 
     filename: str | Path = field(default_factory=download_river_tracer_defaults)
     value_option_index: int = RECOMMENDED_VALUE_INDEX
+    bgc_model: type[BGCModel] = BGCMarbl
     defaults: dict[str, float] = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -213,7 +215,7 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
 
     def _read_defaults(self, ds: xr.Dataset) -> dict[str, float]:
         """Extract tracer concentrations for the selected value option."""
-        expected_tracers = set(MARBL_TRACER_NAMES)
+        expected_tracers = set(self.bgc_model.TRACER_NAMES)
 
         if VALUE_OPTION_DIM not in ds.dims:
             raise ValueError(
@@ -268,18 +270,6 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
     @property
     def fill_value(self) -> float | None:
         return None
-
-    @property
-    def precomputed_concentrations(self) -> bool:
-        return False
-
-    def extract_station_concentrations(
-        self, data: "RiverDataset"
-    ) -> dict[str, xr.DataArray]:
-        raise NotImplementedError(
-            "RiverTracerDefaultsDataset.precomputed_concentrations is False; "
-            "extract_station_concentrations is never called."
-        )
 
     def forcing_concentrations(
         self,
@@ -1008,6 +998,21 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         Processed dataset with MARBL tracer variables on the native lat/lon grid.
     """
 
+    #: MARBL tracers this dataset supplies (both accounting modes produce
+    #: exactly these keys). Kept a subset of ``BGCMarbl``'s tracer set —
+    #: validated in tests, not at import time.
+    PROVIDED_TRACERS: ClassVar[tuple[str, ...]] = (
+        "DIC",
+        "ALK",
+        "DOC",
+        "DON",
+        "DOP",
+        "NO3",
+        "PO4",
+        "DIC_ALT_CO2",
+        "ALK_ALT_CO2",
+    )
+
     filename: str | Path | list[str | Path] | None = None
     start_time: datetime
     end_time: datetime
@@ -1446,6 +1451,10 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
     def precomputed_concentrations(self) -> bool:
         return self.discharge_accounting == "total_discharge"
 
+    @property
+    def provided_tracers(self) -> tuple[str, ...]:
+        return self.PROVIDED_TRACERS
+
     def extract_station_concentrations(
         self, data: "RiverDataset"
     ) -> dict[str, xr.DataArray]:
@@ -1464,7 +1473,7 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         requested_years = np.unique(data.ds[time_dim].dt.year.values)
 
         result: dict[str, xr.DataArray] = {}
-        for tracer_name in RIVR2O_MARBL_TRACER_NAMES:
+        for tracer_name in self.PROVIDED_TRACERS:
             if tracer_name not in data.ds:
                 continue
             annual = data.ds[tracer_name]
@@ -1599,14 +1608,12 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         don_forcing = doc_sl_conc * _DON_FROM_DOC_SL + poc_conc * _DON_FROM_POC
         dop_forcing = doc_sl_conc * _DOP_FROM_DOC_SL + poc_conc * _DOP_FROM_POC
 
-        return {
+        concentrations = {
             "DIC": dic_forcing,
             "DOC": doc_forcing,
             "DON": don_forcing.astype(np.float32),
             "DOP": dop_forcing.astype(np.float32),
             "ALK": alk_forcing,
-            "DIC_ALT_CO2": dic_forcing,
-            "ALK_ALT_CO2": alk_forcing,
             "NO3": self._export_to_concentration(
                 sampled["NO3"],
                 _RIVR2O_MOLAR_MASS_G["NO3"],
@@ -1622,6 +1629,10 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
                 **conc_kw,
             ),
         }
+        # The alternative-CO2 tracers mirror DIC/ALK; the rule lives on the
+        # BGC model, not here.
+        concentrations.update(BGCMarbl.derive_alt_co2(dic_forcing, alk_forcing))
+        return concentrations
 
 
 def _decode_string(byte_array):

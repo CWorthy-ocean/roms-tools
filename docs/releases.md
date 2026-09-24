@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
+* Release notes no longer truncate PR-description bullets that are wrapped across several lines, and no longer include `N/A (reason)`-style placeholders. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* The release-notes branch is now deleted when a release is published and recreated from `main`, so a finalize PR can no longer re-include the previous release's notes and conflict with them. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* The release-notes workflows run `main`'s copy of their scripts, so a fix to them applies immediately rather than whenever the notes branch next catches up with `main`. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+
 ## 5.1.0
 
 ### Breaking Changes

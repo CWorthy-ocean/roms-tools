@@ -40,6 +40,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from roms_tools.setup.utils import get_tracer_metadata_dict, get_variable_metadata
 
+#: Physical (non-BGC) tracers that lead every ROMS tracer axis.
+PHYSICS_TRACER_NAMES: tuple[str, str] = ("temp", "salt")
+
 
 def bgc_variable_info(var_names) -> dict[str, dict]:
     """Generic per-variable metadata for a set of BGC variable names.
@@ -80,7 +83,14 @@ class BGCModel(ABC):
 
     name: str = "generic"
 
-    # Tracers written to ROMS output. Subclasses override.
+    #: Canonical ordered ROMS tracer axis for this model: PHYSICS_TRACER_NAMES
+    #: first, then the model's BGC tracers in on-disk ``ntracers`` order.
+    #: LOAD-BEARING: river/CDR forcing files encode this order positionally
+    #: against the ROMS build's tracer index space. Subclasses override.
+    TRACER_NAMES: ClassVar[tuple[str, ...]] = PHYSICS_TRACER_NAMES
+
+    # Tracers written to ROMS output. Subclasses override (typically derived
+    # from TRACER_NAMES).
     _TRACER_VARS: frozenset[str] = frozenset()
     # Interpretable inputs that are *not* themselves written to output
     # (e.g. total chlorophyll CHL, which is expanded into per-PFT tracers).
@@ -93,12 +103,29 @@ class BGCModel(ABC):
         # `process_bgc_fields` is an intermediate abstract class and may leave
         # the tracer set for its own subclasses to fill in.
         still_abstract = getattr(cls.process_bgc_fields, "__isabstractmethod__", False)
-        if not still_abstract and not cls._TRACER_VARS:
-            raise TypeError(
-                f"{cls.__name__} must declare a non-empty `_TRACER_VARS` frozenset "
-                "(the tracers it writes to ROMS); an empty set would make "
-                "process_bgc_fields() derive and fill nothing."
-            )
+        if not still_abstract:
+            if not cls._TRACER_VARS:
+                raise TypeError(
+                    f"{cls.__name__} must declare a non-empty `_TRACER_VARS` frozenset "
+                    "(the tracers it writes to ROMS); an empty set would make "
+                    "process_bgc_fields() derive and fill nothing."
+                )
+            if (
+                tuple(cls.TRACER_NAMES[: len(PHYSICS_TRACER_NAMES)])
+                != PHYSICS_TRACER_NAMES
+            ):
+                raise TypeError(
+                    f"{cls.__name__}.TRACER_NAMES must start with "
+                    f"{PHYSICS_TRACER_NAMES}."
+                )
+            if frozenset(cls.TRACER_NAMES) - set(PHYSICS_TRACER_NAMES) != (
+                cls._TRACER_VARS
+            ):
+                raise TypeError(
+                    f"{cls.__name__}.TRACER_NAMES and _TRACER_VARS disagree: the "
+                    "ordered axis must contain exactly the physics tracers plus "
+                    "the model's tracer set."
+                )
 
     def tracer_vars(self) -> frozenset[str]:
         """Return the set of tracer variables written to ROMS output."""
@@ -199,42 +226,47 @@ class BGCMarbl(BGCModel):
 
     name = "MARBL"
 
-    _TRACER_VARS = frozenset(
-        {
-            "PO4",
-            "NO3",
-            "SiO3",
-            "NH4",
-            "Fe",
-            "Lig",
-            "O2",
-            "DIC",
-            "DIC_ALT_CO2",
-            "ALK",
-            "ALK_ALT_CO2",
-            "DOC",
-            "DON",
-            "DOP",
-            "DOPr",
-            "DONr",
-            "DOCr",
-            "spChl",
-            "spC",
-            "spP",
-            "spFe",
-            "spCaCO3",
-            "diatChl",
-            "diatC",
-            "diatP",
-            "diatFe",
-            "diatSi",
-            "diazChl",
-            "diazC",
-            "diazP",
-            "diazFe",
-            "zooC",
-        }
+    #: Canonical ordered ROMS-MARBL tracer axis (physics first, then MARBL
+    #: BGC tracers). The order is load-bearing: it defines the ``ntracers``
+    #: axis of river/CDR forcing files and the layout of
+    #: ``river_tracer_defaults.nc`` — do not reorder.
+    TRACER_NAMES: ClassVar[tuple[str, ...]] = (
+        "temp",
+        "salt",
+        "PO4",
+        "NO3",
+        "SiO3",
+        "NH4",
+        "Fe",
+        "Lig",
+        "O2",
+        "DIC",
+        "DIC_ALT_CO2",
+        "ALK",
+        "ALK_ALT_CO2",
+        "DOC",
+        "DON",
+        "DOP",
+        "DOPr",
+        "DONr",
+        "DOCr",
+        "zooC",
+        "spChl",
+        "spC",
+        "spP",
+        "spFe",
+        "spCaCO3",
+        "diatChl",
+        "diatC",
+        "diatP",
+        "diatFe",
+        "diatSi",
+        "diazChl",
+        "diazC",
+        "diazP",
+        "diazFe",
     )
+    _TRACER_VARS = frozenset(TRACER_NAMES) - set(PHYSICS_TRACER_NAMES)
     _INTERPRETABLE_INPUTS = frozenset({"CHL"})
 
     # CHL → per-PFT tracer stoichiometric factors (multiplicative on total CHL).
@@ -631,7 +663,7 @@ _ALK_UNITS = {"units": "meq/m^3", "flux_units": "meq/s", "integrated_units": "me
 _MMOL_UNITS = {"units": "mmol/m^3", "flux_units": "mmol/s", "integrated_units": "mmol"}
 
 
-class CdrLiteTracerSchema(BaseModel):
+class ROMSTracerSchema(BaseModel):
     """Layout of the CDR-LiTE tracer suite in the ROMS forcing file.
 
     ROMS reads the ``ntracers`` axis of the CDR forcing file positionally, so
@@ -668,7 +700,7 @@ class CdrLiteTracerSchema(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     @model_validator(mode="after")
-    def _check_has_tracers(self) -> CdrLiteTracerSchema:
+    def _check_has_tracers(self) -> ROMSTracerSchema:
         if self.n_passive == 0 and self.n_oae_pairs == 0 and self.n_dor == 0:
             raise ValueError(
                 "The tracer schema must declare at least one generated tracer: "
@@ -705,15 +737,15 @@ class CdrLiteTracerSchema(BaseModel):
     @property
     def tracer_names(self) -> list[str]:
         """All tracer names, in the ROMS model's tracer index order."""
-        from roms_tools.setup.utils import MARBL_TRACER_NAMES
-
         names = ["temp", "salt"]
         names += [f"passive_tracer{i}" for i in range(1, self.n_passive + 1)]
         for k in range(1, self.n_oae_pairs + 1):
             names += [f"CDR_OAE_ALK{k}", f"CDR_OAE_DIC{k}"]
         names += [f"CDR_DOR_DIC{j}" for j in range(1, self.n_dor + 1)]
         if self.include_marbl_bgc:
-            names += [n for n in MARBL_TRACER_NAMES if n not in ("temp", "salt")]
+            # TRACER_NAMES is guaranteed (BGCModel.__init_subclass__) to be
+            # PHYSICS_TRACER_NAMES followed by the model's BGC tracers.
+            names += list(BGCMarbl.TRACER_NAMES[len(PHYSICS_TRACER_NAMES) :])
         return names
 
     @property
@@ -790,7 +822,7 @@ class BGCCdrLite:
     ROLE_DIC: ClassVar[str] = "DIC"
 
     #: Layout of the forcing file's tracer axis (mirrors the ROMS namelist).
-    TracerSchema = CdrLiteTracerSchema
+    TracerSchema = ROMSTracerSchema
 
     @classmethod
     def release_metadata(

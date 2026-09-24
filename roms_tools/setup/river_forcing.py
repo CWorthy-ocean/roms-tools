@@ -25,6 +25,7 @@ from roms_tools.datasets.river_datasets import (
     RiverDataset,
     RiverTracerDefaultsDataset,
     Rivr2oRiverBGCDataset,
+    Rivr2oTotalDischargeBGCDataset,
     fill_river_bgc_concentrations,
 )
 from roms_tools.plot import (
@@ -33,7 +34,13 @@ from roms_tools.plot import (
     plot_2d_horizontal_field,
     plot_location,
 )
-from roms_tools.setup.bgc_model import BGCMarbl
+from roms_tools.setup.bgc_model import (
+    BGCMarbl,
+    BGCModel,
+    bgc_model_from_name,
+    bgc_model_to_name,
+    validate_bgc_model,
+)
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
@@ -83,10 +90,16 @@ class BgcSourceModel(BaseModel, ABC):
 
     @abstractmethod
     def build_dataset(
-        self, *, start_time: datetime, end_time: datetime
+        self, *, start_time: datetime, end_time: datetime, bgc_model: type[BGCModel]
     ) -> RiverBGCDataset:
         """Instantiate the BGC dataset this source describes."""
         ...
+
+    def resolve_discharge_pairing(self, discharge_source_name: str | None) -> None:
+        """Resolve/validate this source's pairing with the discharge source.
+
+        Called once by ``RiverForcing`` during input checks. Default: no-op.
+        """
 
 
 class ConstantsBgcSource(BgcSourceModel):
@@ -95,22 +108,75 @@ class ConstantsBgcSource(BgcSourceModel):
     name: Literal["CONSTANTS"] = "CONSTANTS"
 
     def build_dataset(
-        self, *, start_time: datetime, end_time: datetime
+        self, *, start_time: datetime, end_time: datetime, bgc_model: type[BGCModel]
     ) -> RiverBGCDataset:
-        return RiverTracerDefaultsDataset()
+        return RiverTracerDefaultsDataset(bgc_model=bgc_model)
 
 
 class Rivr2oBgcSource(BgcSourceModel):
-    """River BGC export from the RIVR2O product (one NetCDF file per year)."""
+    """River BGC export from the RIVR2O product.
+
+    ``discharge_accounting`` selects ``"per_river"`` (samples RIVR2O's
+    yearly files by lon/lat, requires ``path``) or ``"total_discharge"``
+    (reads concentrations precomputed per GloFAS station, already on the
+    GloFAS discharge file; ``path`` unused). Left unset, it auto-selects
+    based on the paired discharge ``source`` -- see
+    ``resolve_discharge_pairing``.
+    """
 
     name: Literal["RIVR2O"] = "RIVR2O"
-    path: str | Path | list[str | Path]
+    path: str | Path | list[str | Path] | None = None
+    discharge_accounting: Literal["per_river", "total_discharge"] | None = None
+
+    def resolve_discharge_pairing(self, discharge_source_name: str | None) -> None:
+        """Auto-select ``discharge_accounting`` ("total_discharge" for GloFAS,
+        "per_river" otherwise) and validate the pairing.
+        """
+        if self.discharge_accounting is None:
+            self.discharge_accounting = (
+                "total_discharge" if discharge_source_name == "GLOFAS" else "per_river"
+            )
+
+        if (
+            self.discharge_accounting == "total_discharge"
+            and discharge_source_name != "GLOFAS"
+        ):
+            raise ValueError(
+                "bgc_source={'name': 'RIVR2O', 'discharge_accounting': "
+                "'total_discharge', ...} requires source={'name': 'GLOFAS', "
+                f"...}}; got source name {discharge_source_name!r}. "
+                "'total_discharge' mode needs concentrations precomputed from "
+                "GloFAS's full station catalog and is not available for other "
+                "discharge sources."
+            )
+
+        if self.discharge_accounting == "per_river" and self.path is None:
+            raise ValueError(
+                "bgc_source={'name': 'RIVR2O', ...} in 'per_river' mode "
+                "requires 'path' (pointing to RIVR2O yearly export files)."
+            )
 
     def build_dataset(
-        self, *, start_time: datetime, end_time: datetime
+        self, *, start_time: datetime, end_time: datetime, bgc_model: type[BGCModel]
     ) -> RiverBGCDataset:
+        # The RIVR2O file->tracer mapping (DOC/DON/DOP stoichiometry, ALK=DIC)
+        # is intrinsically MARBL-targeted.
+        if not issubclass(bgc_model, BGCMarbl):
+            raise ValueError(
+                "bgc_source={'name': 'RIVR2O', ...} supplies MARBL tracers and "
+                f"requires bgc_model=BGCMarbl; got {bgc_model.__name__}."
+            )
+        if self.discharge_accounting is None:
+            raise RuntimeError(
+                "resolve_discharge_pairing() must run before build_dataset()."
+            )
+        if self.discharge_accounting == "total_discharge":
+            return Rivr2oTotalDischargeBGCDataset()
+        assert self.path is not None  # enforced by resolve_discharge_pairing()
         return Rivr2oRiverBGCDataset(
-            filename=self.path, start_time=start_time, end_time=end_time
+            filename=self.path,
+            start_time=start_time,
+            end_time=end_time,
         )
 
 
@@ -127,6 +193,11 @@ _BGC_SOURCE_ADAPTER: TypeAdapter[ConstantsBgcSource | Rivr2oBgcSource] = TypeAda
 _FILL_DATASET_MAP: dict[str, type[RiverTracerDefaultsDataset]] = {
     "CONSTANTS": RiverTracerDefaultsDataset,
 }
+
+
+def _tracer_index(tracer_names_arr: np.ndarray, tracer_name: str) -> int:
+    """Positional index of ``tracer_name`` along the ``ntracers`` axis."""
+    return tracer_names_arr.tolist().index(str(tracer_name))
 
 
 def _mask_invalid_dynamic_bgc_concentrations(
@@ -361,6 +432,10 @@ class RiverForcing:
 
         The default is the Dai and Trenberth global river dataset (updated in May 2019), which does not require a path.
 
+        Rivers whose final mean discharge is below the source's
+        minimum-discharge default are dropped entirely; see
+        ``min_discharge_m3s``.
+
     convert_to_climatology : str, optional
         Determines when to compute climatology for river forcing. Options are:
           - "if_any_missing" (default): Compute climatology for all rivers if any river has missing values.
@@ -386,6 +461,17 @@ class RiverForcing:
         Concentrations come from the primary dataset's
         ``forcing_concentrations()``, then are merged with fill via
         ``fill_river_bgc_concentrations``.
+
+        For ``{"name": "RIVR2O"}``, an additional ``discharge_accounting`` key
+        selects ``"per_river"`` (samples RIVR2O's yearly export files via
+        ``path``) or ``"total_discharge"`` (reads concentrations already
+        precomputed per GloFAS station, no ``path`` needed). Left unset,
+        this auto-selects based on ``source["name"]``.
+    bgc_model : type[BGCModel], optional
+        The BGC model class defining the ordered tracer axis and tracer
+        metadata of the output when ``include_bgc=True``. Defaults to
+        :class:`BGCMarbl`. Ignored when ``include_bgc=False`` (the axis is
+        then just ``temp`` / ``salt``).
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
     surface_forcing_source : dict, optional
@@ -439,6 +525,12 @@ class RiverForcing:
         searching for relevant rivers. Defaults to 20. For small
         high-resolution domains, a smaller value (e.g. 5) may be more
         appropriate.
+    min_discharge_m3s : float, optional
+        Minimum time-mean discharge (m3/s) a river must have to be kept;
+        rivers below this are dropped entirely. Defaults to ``None``, which
+        uses the source dataset's own ``MIN_DISCHARGE_M3S`` class default
+        (currently 1.0 m3/s for GloFAS, matching its station-catalog
+        preprocessing; disabled for Dai). Set to 0 to keep every river.
     """
 
     grid: Grid
@@ -459,6 +551,13 @@ class RiverForcing:
     Accepts a plain dict on input; normalized to a validated ``BgcSource`` model
     (or ``None`` when ``include_bgc`` is False) during initialization.
     """
+    bgc_model: type[BGCModel] = BGCMarbl
+    """The BGCModel subclass defining the ordered ``ntracers`` axis and tracer
+    metadata when ``include_bgc=True``. Inert when ``include_bgc=False`` (the
+    axis is then just temp/salt). Unlike ``BoundaryForcing`` /
+    ``InitialConditions`` this is non-Optional: rivers always have a working
+    default (constant fill values), so there is no "BGC requested but no
+    model" error state for ``None`` to represent."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
@@ -496,6 +595,12 @@ class RiverForcing:
     """Number of grid cells to include beyond the domain boundary when
     searching for relevant rivers. Defaults to 20. For small high-resolution
     domains, a smaller value (e.g. 5) may be more appropriate."""
+
+    min_discharge_m3s: float | None = None
+    """Minimum time-mean discharge (m3/s) a river must have to be kept;
+    rivers below this are dropped entirely. ``None`` uses the source
+    dataset's own ``MIN_DISCHARGE_M3S`` class default; 0 keeps every river.
+    See ``_resolve_min_discharge``."""
 
     _bgc_dataset: RiverBGCDataset | None = field(
         default=None, init=False, repr=False, compare=False
@@ -557,7 +662,7 @@ class RiverForcing:
             data.extract_named_rivers(source_indices)
 
         ds = self._create_river_forcing(data)
-        ds = self._handle_overlapping_rivers(ds)
+        ds, exempt_names = self._handle_overlapping_rivers(ds)
         # Re-sort by final volume after overlap handling — absorbed rivers now have
         # zero discharge so the original sort order is no longer meaningful
         volume_means = ds["river_volume"].mean(dim="river_time")
@@ -568,12 +673,13 @@ class RiverForcing:
         }
         ds = ds.isel(nriver=sorted_nriver)
         # Reassign sequential 1-based IDs in final sorted order
-        ds = ds.assign_coords(
-            nriver=xr.DataArray(
-                np.arange(1, ds.sizes["nriver"] + 1),
-                dims="nriver",
-                attrs=ds["nriver"].attrs,
-            )
+        ds = self._reindex_nriver(ds)
+
+        # Per-river means are unchanged by the nriver reorder -- reuse them
+        # instead of recomputing the reduction over river_time.
+        mean_discharge = volume_means.values[sorted_nriver]
+        ds = self._drop_rivers_below_min_discharge(
+            ds, data, exempt_names, mean_discharge
         )
 
         if self.include_bgc and self.bgc_source is not None:
@@ -596,8 +702,13 @@ class RiverForcing:
                 f'Invalid convert_to_climatology "{self.convert_to_climatology}". '
                 f"Valid options: {', '.join(VALID_CONVERT_TO_CLIMATOLOGY)}."
             )
+        self.bgc_model = validate_bgc_model(self.bgc_model)
         self.source = self._normalized_source()
         self.bgc_source = self._normalized_bgc_source()
+        if self.bgc_source is not None:
+            self.bgc_source.resolve_discharge_pairing(
+                self.source["name"] if self.source is not None else None
+            )
         self._validate_indices()
         self.surface_forcing_source = self._normalized_surface_forcing_source()
 
@@ -813,7 +924,9 @@ class RiverForcing:
         if not isinstance(bgc_source, BgcSourceModel):
             raise RuntimeError("bgc_source must be a validated BgcSource model.")
         self._bgc_dataset = bgc_source.build_dataset(
-            start_time=self.start_time, end_time=self.end_time
+            start_time=self.start_time,
+            end_time=self.end_time,
+            bgc_model=self.bgc_model,
         )
         return self._bgc_dataset
 
@@ -822,7 +935,9 @@ class RiverForcing:
         bgc_source = self.bgc_source
         if not isinstance(bgc_source, BgcSourceModel):
             raise RuntimeError("bgc_source must be a validated BgcSource model.")
-        return _FILL_DATASET_MAP[bgc_source.fill.name]().defaults
+        return _FILL_DATASET_MAP[bgc_source.fill.name](
+            bgc_model=self.bgc_model
+        ).defaults
 
     def _get_river_sample_coords(
         self, river_names: list[str]
@@ -1122,16 +1237,10 @@ class RiverForcing:
         else:
             fill_defaults = self._get_fill_defaults()
 
-        river_names = [str(name) for name in ds.river_name.values]
-        lons, lats = self._get_river_sample_coords(river_names)
-        dynamic = bgc_data.forcing_concentrations(
-            ds["river_volume"],
-            ds["abs_time"],
-            lons,
-            lats,
-            straddle=self.grid.straddle,
-            river_names=river_names,
-        )
+        if bgc_data.precomputed_concentrations:
+            dynamic = self._extract_attached_concentrations(ds, bgc_data)
+        else:
+            dynamic = self._sample_dynamic_concentrations(ds, bgc_data)
         dynamic = _mask_invalid_dynamic_bgc_concentrations(
             dynamic,
             fill_value=bgc_data.fill_value,
@@ -1146,11 +1255,10 @@ class RiverForcing:
         )
         # Build full tracer array at once instead of assigning slice by slice
         tracer_arrays = []
-        for tracer_name in ds.tracer_name.values:
+        for idx, tracer_name in enumerate(ds.tracer_name.values):
             if str(tracer_name) in merged:
                 tracer_arrays.append(merged[str(tracer_name)])
             else:
-                idx = int(np.where(ds.tracer_name.values == tracer_name)[0][0])
                 tracer_arrays.append(ds["river_tracer"].isel(ntracers=idx))
 
         ds["river_tracer"] = (
@@ -1160,6 +1268,42 @@ class RiverForcing:
             .transpose("river_time", "ntracers", "nriver")
         )
         return ds
+
+    def _extract_attached_concentrations(
+        self, ds: xr.Dataset, bgc_data: RiverBGCDataset
+    ) -> dict[str, xr.DataArray]:
+        """Read a precomputed source's tracer values back out of
+        ``ds["river_tracer"]``.
+
+        They were attached per station by
+        ``_attach_precomputed_station_concentrations`` and merged by
+        ``_handle_overlapping_rivers``. Any tracer never actually attached is
+        still NaN here, which the fill logic in ``_apply_bgc_tracers``
+        correctly treats as "use fill defaults".
+        """
+        tracer_names_arr = ds.tracer_name.values
+        return {
+            tracer_name: ds["river_tracer"]
+            .isel(ntracers=_tracer_index(tracer_names_arr, tracer_name))
+            .drop_vars(["tracer_name", "tracer_unit", "tracer_long_name"])
+            for tracer_name in bgc_data.provided_tracers
+            if tracer_name in tracer_names_arr
+        }
+
+    def _sample_dynamic_concentrations(
+        self, ds: xr.Dataset, bgc_data: RiverBGCDataset
+    ) -> dict[str, xr.DataArray]:
+        """Sample the BGC source at each river's coastal injection point(s)."""
+        river_names = [str(name) for name in ds.river_name.values]
+        lons, lats = self._get_river_sample_coords(river_names)
+        return bgc_data.forcing_concentrations(
+            ds["river_volume"],
+            ds["abs_time"],
+            lons,
+            lats,
+            straddle=self.grid.straddle,
+            river_names=river_names,
+        )
 
     def _move_rivers_to_closest_coast(self, target_coords, data):
         """Move river mouths to the closest coastal grid cell.
@@ -1287,7 +1431,15 @@ class RiverForcing:
         ds = xr.Dataset()
 
         # Tracer metadata
-        ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
+        # The single seam defining the file's ordered ntracers axis. A future
+        # schema-driven axis (e.g. PR #673's CDRTracerSchema for CDR_TRACER
+        # runs, where rivers would carry zero for every CDR tracer) plugs in
+        # here by passing its own ordered name list via `tracer_names=`.
+        ds = add_tracer_metadata_to_ds(
+            ds,
+            self.include_bgc,
+            tracer_names=self.bgc_model.TRACER_NAMES if self.include_bgc else None,
+        )
 
         # River volume
         river_volume = (
@@ -1316,6 +1468,10 @@ class RiverForcing:
 
         if self.include_bgc:
             ds["river_tracer"] = ds["river_tracer"] * np.nan
+            if self.bgc_source is not None:
+                bgc = self._get_bgc_dataset()
+                if bgc.precomputed_concentrations:
+                    self._attach_precomputed_station_concentrations(ds, data, bgc)
         else:
             defaults = BGCMarbl.river_defaults()
             for ntracer in range(ds.ntracers.size):
@@ -1361,7 +1517,26 @@ class RiverForcing:
 
         return ds
 
-    def _handle_overlapping_rivers(self, ds: xr.Dataset) -> xr.Dataset:
+    def _attach_precomputed_station_concentrations(
+        self, ds: xr.Dataset, data: RiverDataset, bgc: RiverBGCDataset
+    ) -> None:
+        """Write a ``precomputed_concentrations`` BGC source's per-station
+        values into ``ds["river_tracer"]`` in place, before overlap merging,
+        so ``_handle_overlapping_rivers`` combines co-located stations
+        correctly.
+        """
+        station_concentrations = bgc.extract_station_concentrations(data)
+        tracer_names_arr = ds.tracer_name.values
+        for tracer_name, values in station_concentrations.items():
+            if tracer_name not in tracer_names_arr:
+                continue
+            values = values.transpose(
+                data.dim_names["time"], data.dim_names["station"]
+            ).values.astype(np.float32)
+            ntracer_idx = _tracer_index(tracer_names_arr, tracer_name)
+            ds["river_tracer"].loc[{"ntracers": ntracer_idx}] = values
+
+    def _handle_overlapping_rivers(self, ds: xr.Dataset) -> tuple[xr.Dataset, set[str]]:
         """Detect and resolve overlapping river grid cell assignments.
 
         If multiple rivers are assigned to the same grid cell (i.e., overlapping index pairs),
@@ -1383,10 +1558,18 @@ class RiverForcing:
 
         Returns
         -------
-        xr.Dataset
-            A new dataset with overlapping rivers resolved and new entries added.
+        tuple[xr.Dataset, set[str]]
+            A new dataset with overlapping rivers resolved and new entries
+            added, plus the set of original contributing river names exempt
+            from the downstream min-discharge filter (the synthetic
+            "overlap_*" rivers are not exempt) -- see
+            ``_drop_rivers_below_min_discharge`` for the rationale.
         """
         overlapping_rivers = self._get_overlapping_rivers()
+
+        exempt_names: set[str] = {
+            name for names in overlapping_rivers.values() for name in names
+        }
 
         if len(overlapping_rivers) > 0:
             logging.info(
@@ -1430,7 +1613,75 @@ class RiverForcing:
         # Reduce volume fraction of original rivers by appropriate amount
         ds_updated = self._reduce_river_volumes(ds_updated, overlapping_rivers)
 
-        return ds_updated
+        return ds_updated, exempt_names
+
+    def _resolve_min_discharge(self, data: RiverDataset) -> float | None:
+        """Resolve the min-discharge floor (m3/s), or ``None`` if disabled.
+
+        The user's ``min_discharge_m3s`` override wins when set; otherwise the
+        source dataset's own ``MIN_DISCHARGE_M3S`` class default applies (the
+        per-source value lives on the dataset class, alongside the source's
+        preprocessing conventions -- e.g. 1.0 for GloFAS, ``None`` for Dai).
+        """
+        if self.min_discharge_m3s is not None:
+            return self.min_discharge_m3s
+        return data.MIN_DISCHARGE_M3S
+
+    def _drop_rivers_below_min_discharge(
+        self,
+        ds: xr.Dataset,
+        data: RiverDataset,
+        exempt_names: set[str],
+        mean_discharge: np.ndarray,
+    ) -> xr.Dataset:
+        """Drop rivers whose ``mean_discharge`` is below the resolved
+        min-discharge floor (see ``_resolve_min_discharge``).
+
+        Rivers in ``exempt_names`` (the original participants of an overlap
+        merge, from ``_handle_overlapping_rivers``) are kept regardless:
+        dropping an overlap participant would remove its indices, which would
+        change the recomputed merge on ``from_yaml`` reload and break
+        round-trip equality. Fully-absorbed originals carry zero volume
+        (bookkeeping, not a real low-discharge river); partially-overlapping
+        rivers keep their reduced-but-real volume and are likewise exempt.
+        The synthetic ``overlap_*`` rivers are NOT exempt and are subject to
+        the floor like any other river.
+        """
+        min_discharge = self._resolve_min_discharge(data)
+        if min_discharge is None:
+            return ds
+
+        # self.indices is always set (auto-discovered or user-provided) by
+        # this point in __post_init__'s control flow.
+        assert self.indices is not None
+        is_exempt = np.array([str(n) in exempt_names for n in ds.river_name.values])
+        keep = (mean_discharge >= min_discharge) | is_exempt
+        if keep.all():
+            return ds
+
+        dropped_names = [str(n) for n in ds.river_name.values[~keep]]
+        logging.info(
+            "Dropping %d river(s) with mean discharge below %.2f m3/s.",
+            len(dropped_names),
+            min_discharge,
+        )
+        ds = ds.isel(nriver=keep)
+        ds = self._reindex_nriver(ds)
+        self.indices = {
+            name: idx for name, idx in self.indices.items() if name not in dropped_names
+        }
+        return ds
+
+    @staticmethod
+    def _reindex_nriver(ds: xr.Dataset) -> xr.Dataset:
+        """Reassign sequential 1-based ``nriver`` IDs, preserving attrs."""
+        return ds.assign_coords(
+            nriver=xr.DataArray(
+                np.arange(1, ds.sizes["nriver"] + 1),
+                dims="nriver",
+                attrs=ds["nriver"].attrs,
+            )
+        )
 
     def _get_overlapping_rivers(self) -> TRiverIndex:
         """Identify grid cells shared by multiple rivers.
@@ -1906,7 +2157,10 @@ class RiverForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        forcing_dict = to_dict(self, exclude=["climatology"])
+        forcing_dict = to_dict(self, exclude=["climatology", "bgc_model"])
+        # A class object is not YAML-serializable; store its registered name
+        # (mirrors BoundaryForcing / InitialConditions).
+        forcing_dict["RiverForcing"]["bgc_model"] = bgc_model_to_name(self.bgc_model)
 
         indices_data = forcing_dict.get("RiverForcing", {}).get("indices")
         if not indices_data:
@@ -1949,6 +2203,12 @@ class RiverForcing:
 
         grid = Grid.from_yaml(filepath)
         params = from_yaml(cls, filepath)
+
+        # pop-if-present: YAML files written before the bgc_model field (e.g.
+        # physics-only configs) resolve to the field default.
+        bgc_model_name = params.pop("bgc_model", None)
+        if bgc_model_name is not None:
+            params["bgc_model"] = bgc_model_from_name(bgc_model_name)
 
         def convert_indices_format(indices):
             indices = {

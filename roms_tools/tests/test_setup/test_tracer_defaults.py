@@ -8,7 +8,6 @@ from roms_tools.datasets.river_datasets import (
     RiverTracerDefaultsDataset,
 )
 from roms_tools.setup.bgc_model import BGCMarbl, _load_river_defaults
-from roms_tools.setup.utils import MARBL_TRACER_NAMES
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +35,7 @@ class TestTracerDefaults:
         assert defaults["NH4"] == 0.0
         assert defaults["spC"] == 0.0
         # 32 MARBL tracers plus temperature and salinity
-        assert len(defaults) == len(MARBL_TRACER_NAMES)
+        assert len(defaults) == len(BGCMarbl.TRACER_NAMES)
         assert len(defaults) == 34
 
     def test_dataclass_exposes_dataset(self, tracer_defaults_path):
@@ -51,7 +50,7 @@ class TestTracerDefaults:
             "PO4": (VALUE_OPTION_DIM, [4.2453, 99.9]),
             "NO3": (VALUE_OPTION_DIM, [57.3565, 88.8]),
         }
-        for tracer in MARBL_TRACER_NAMES:
+        for tracer in BGCMarbl.TRACER_NAMES:
             if tracer not in data_vars:
                 data_vars[tracer] = (VALUE_OPTION_DIM, [1.0, 999.0])
 

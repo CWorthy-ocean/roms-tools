@@ -26,7 +26,10 @@ from roms_tools.setup.river_forcing import (
     check_river_locations_are_along_coast,
 )
 from roms_tools.setup.utils import find_coastal_cells
-from roms_tools.tests.river_test_utils import write_glofas_file
+from roms_tools.tests.river_test_utils import (
+    write_glofas_file,
+    write_glofas_file_with_rivr2o,
+)
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 STANDARD_RIVER_FIXTURES = [
@@ -898,7 +901,7 @@ class TestRiverForcingWithOverlappingIndices:
         rf.grid = None  # Not needed for this test
         rf._river_name_prefix = ""  # mock fixtures use unprefixed names
 
-        ds_out = rf._handle_overlapping_rivers(ds)
+        ds_out, _ = rf._handle_overlapping_rivers(ds)
 
         # Assert number of synthetic rivers added
         expected_nriver = ds.sizes["nriver"] + expected_synthetic_count
@@ -944,7 +947,7 @@ class TestRiverForcingWithOverlappingIndices:
         rf.grid = None
         rf._river_name_prefix = ""  # mock fixtures use unprefixed names
 
-        ds_out = rf._handle_overlapping_rivers(ds)
+        ds_out, _ = rf._handle_overlapping_rivers(ds)
 
         # Apply the same re-sort logic __post_init__ uses after overlap handling
         volume_means = ds_out["river_volume"].mean(dim="time")
@@ -1094,6 +1097,76 @@ class TestRiverForcingBGCSource:
         assert alk_jan_first != alk_jan_last
 
 
+class TestRiverForcingBGCModel:
+    """The bgc_model field: axis definition, validation, YAML round-trip."""
+
+    def _make(self, iceland_test_grid, single_cell_indices, **kwargs):
+        return RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            **kwargs,
+        )
+
+    def test_physics_only_two_tracer_axis(self, iceland_test_grid, single_cell_indices):
+        # Invariant: include_bgc=False (the default) produces a physics-only
+        # file regardless of bgc_model; the field is inert.
+        rf = self._make(iceland_test_grid, single_cell_indices)
+        assert rf.ds.sizes["ntracers"] == 2
+        assert list(rf.ds.tracer_name.values) == ["temp", "salt"]
+
+    def test_bgc_axis_follows_model(self, iceland_test_grid, single_cell_indices):
+        from roms_tools import BGCMarbl
+
+        rf = self._make(iceland_test_grid, single_cell_indices, include_bgc=True)
+        assert rf.bgc_model is BGCMarbl
+        assert tuple(rf.ds.tracer_name.values) == BGCMarbl.TRACER_NAMES
+
+    def test_bgc_model_instance_rejected(self, iceland_test_grid, single_cell_indices):
+        from roms_tools import BGCMarbl
+
+        with pytest.raises(ValueError, match="class"):
+            self._make(
+                iceland_test_grid,
+                single_cell_indices,
+                include_bgc=True,
+                bgc_model=BGCMarbl(),
+            )
+
+    def test_bgc_model_yaml_round_trip(
+        self, iceland_test_grid, single_cell_indices, tmp_path
+    ):
+        from roms_tools import BGCMarbl
+
+        rf = self._make(iceland_test_grid, single_cell_indices, include_bgc=True)
+        filepath = tmp_path / "test_bgc_model_yaml"
+        rf.to_yaml(filepath)
+        assert "bgc_model: BGCMarbl" in filepath.read_text()
+        restored = RiverForcing.from_yaml(filepath)
+        assert restored.bgc_model is BGCMarbl
+        assert restored == rf
+
+    def test_yaml_without_bgc_model_key_uses_default(
+        self, iceland_test_grid, single_cell_indices, tmp_path
+    ):
+        from roms_tools import BGCMarbl
+
+        # YAML files written before the bgc_model field existed must load
+        # with the default model.
+        rf = self._make(iceland_test_grid, single_cell_indices)
+        filepath = tmp_path / "test_no_bgc_model_key"
+        rf.to_yaml(filepath)
+        stripped = "\n".join(
+            line
+            for line in filepath.read_text().splitlines()
+            if not line.strip().startswith("bgc_model:")
+        )
+        filepath.write_text(stripped)
+        restored = RiverForcing.from_yaml(filepath)
+        assert restored.bgc_model is BGCMarbl
+
+
 class TestRiverForcingRivr2oFromTestData:
     def test_dynamic_tracers_differ_from_defaults(self, river_forcing_with_rivr2o_bgc):
         defaults = BGCMarbl.river_defaults()
@@ -1156,6 +1229,54 @@ class TestRiverForcingWithGloFAS:
         assert "Use provided river indices." in caplog.text
         assert river_forcing_with_glofas == river_forcing_from_file
         filepath.unlink()
+
+    def test_min_discharge_m3s_override(self, iceland_test_grid, glofas_test_file):
+        """``min_discharge_m3s`` overrides GloFAS's 1.0 m3/s default: a
+        100 m3/s station survives the default floor but not a 250 m3/s one.
+        """
+        rf_default = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+        )
+        assert "GloFAS_64.82N_22.78W" in rf_default.indices
+
+        rf_override = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+            min_discharge_m3s=250.0,
+        )
+        assert "GloFAS_64.82N_22.78W" not in rf_override.indices
+        assert "GloFAS_65.47N_23.62W" in rf_override.indices
+        assert "GloFAS_63.72N_17.53W" in rf_override.indices
+
+    def test_below_floor_overlap_merge_is_dropped(
+        self, iceland_test_grid, tmp_path_factory
+    ):
+        """A merged 'overlap_*' river must still be subject to the min-
+        discharge filter -- two co-located stations whose combined discharge
+        is still below the floor must not survive just because they merged.
+        """
+        path = tmp_path_factory.mktemp("glofas_tiny_overlap") / "glofas_tiny.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        lats = np.array([65.12, 65.12], dtype=np.float32)
+        lons = np.array([-20.43, -20.43], dtype=np.float32)
+        names = ["GloFAS_65.12N_20.43W", "GloFAS_65.12N_20.43W_b"]
+        flow = np.tile(np.array([0.3, 0.4], dtype=np.float32), (2, 1))
+        vol = np.array([0.3, 0.4], dtype=np.float32)
+        write_glofas_file(path, lats, lons, flow, names, times, vol=vol)
+
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": path},
+        )
+        river_names = [str(n) for n in rf.ds.river_name.values]
+        assert not any(n.startswith("overlap_") for n in river_names)
 
 
 class TestRiverForcingGloFASClimatology:
@@ -1696,3 +1817,206 @@ def test_river_temperature_from_real_arco_era5(iceland_test_grid):
     default = BGCMarbl.river_defaults()["temp"]
     assert not np.allclose(temp.values, default)
     assert (temp.values >= 0.0).all()
+
+
+class TestRiverForcingTotalDischargeMode:
+    """RIVR2O BGC's new 'total_discharge' mode (GloFAS-paired, no runtime
+    lookup -- concentrations are pre-embedded per station on the discharge
+    file and just extracted/merged like any other per-station field).
+    """
+
+    @pytest.fixture
+    def glofas_rivr2o_test_file(self, tmp_path_factory):
+        """Synthetic enriched GloFAS file: two stations share one lat/lon
+        (forcing an overlap-merge onto the same ROMS grid cell, matching
+        `glofas_test_file`'s geometry, already confirmed by
+        `test_overlap_rivers_created` to produce an overlap on this grid),
+        a third station is distinct.
+        """
+        path = tmp_path_factory.mktemp("glofas_rivr2o") / "glofas_rivr2o_test.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        lats = np.array([65.12, 65.12, 63.72], dtype=np.float32)
+        lons = np.array([-20.43, -20.43, -17.53], dtype=np.float32)
+        names = [
+            "GloFAS_65.12N_20.43W",
+            "GloFAS_65.12N_20.43W_b",
+            "GloFAS_63.72N_17.53W",
+        ]
+        flow = np.tile(np.array([500.0, 200.0, 400.0], dtype=np.float32), (2, 1))
+        vol = np.array([500.0, 200.0, 400.0], dtype=np.float32)
+        years = np.array([1998])
+        rivr2o_concentrations = {
+            "DIC": np.array([[10.0, 20.0, 30.0]]),
+            "ALK": np.array([[10.0, 20.0, 30.0]]),
+            "NO3": np.array([[1.0, 2.0, 3.0]]),
+            "PO4": np.array([[0.1, 0.2, 0.3]]),
+        }
+        write_glofas_file_with_rivr2o(
+            path,
+            lats,
+            lons,
+            flow,
+            names,
+            times,
+            years=years,
+            rivr2o_concentrations=rivr2o_concentrations,
+            vol=vol,
+        )
+        return path
+
+    def test_auto_selected_for_glofas(self, iceland_test_grid, glofas_rivr2o_test_file):
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+        )
+        assert rf.bgc_source.discharge_accounting == "total_discharge"
+
+        dic = rf.ds["river_tracer"].isel(
+            ntracers=rf.ds.tracer_name.values.tolist().index("DIC")
+        )
+        default_dic = BGCMarbl.river_defaults()["DIC"]
+        assert not np.allclose(dic.values, default_dic)
+
+    def test_round_trip_yaml(
+        self, iceland_test_grid, glofas_rivr2o_test_file, tmp_path
+    ):
+        """The auto-resolved discharge_accounting and a min_discharge_m3s
+        override must both survive a YAML round-trip unchanged.
+        """
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+            min_discharge_m3s=0.5,
+        )
+        filepath = tmp_path / "test_yaml_total_discharge"
+        rf.to_yaml(filepath)
+        rf_from_file = RiverForcing.from_yaml(filepath)
+
+        assert rf_from_file.bgc_source.discharge_accounting == "total_discharge"
+        assert rf_from_file.min_discharge_m3s == 0.5
+        assert rf == rf_from_file
+        filepath.unlink()
+
+    def test_merges_overlapping_stations_by_volume(
+        self, iceland_test_grid, glofas_rivr2o_test_file
+    ):
+        """Two stations at the identical location (500 and 200 m3/s, DIC
+        10 and 20 mmol/m3) should merge into one synthetic 'overlap_*'
+        river with volume-weighted DIC = (500*10 + 200*20) / 700.
+        """
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": glofas_rivr2o_test_file},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+        )
+        overlap_names = [
+            n for n in rf.ds.river_name.values if str(n).startswith("overlap_")
+        ]
+        assert len(overlap_names) == 1
+        nriver_idx = list(rf.ds.river_name.values).index(overlap_names[0])
+        dic_idx = rf.ds.tracer_name.values.tolist().index("DIC")
+        dic_val = float(
+            rf.ds["river_tracer"]
+            .isel(nriver=nriver_idx, ntracers=dic_idx)
+            .isel(river_time=0)
+        )
+        expected = (500.0 * 10.0 + 200.0 * 20.0) / (500.0 + 200.0)
+        assert dic_val == pytest.approx(expected, rel=1e-4)
+
+    def test_requires_glofas_when_explicitly_requested(
+        self, iceland_test_grid, single_cell_indices
+    ):
+        with pytest.raises(ValueError, match="GLOFAS"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=single_cell_indices,
+                include_bgc=True,
+                bgc_source={
+                    "name": "RIVR2O",
+                    "discharge_accounting": "total_discharge",
+                },
+            )
+
+    def test_plain_glofas_file_raises_not_silently_falls_back(
+        self, iceland_test_grid, glofas_test_file
+    ):
+        """A plain (non-enriched) GloFAS file must raise, not silently fall
+        back to CONSTANTS, when total_discharge mode is auto-selected.
+        """
+        with pytest.raises(ValueError, match="enriched"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                source={"name": "GLOFAS", "path": Path(glofas_test_file)},
+                include_bgc=True,
+                bgc_source={"name": "RIVR2O"},
+            )
+
+    def test_zero_discharge_station_is_dropped(
+        self, iceland_test_grid, tmp_path_factory
+    ):
+        """A standalone station (not part of an overlap merge) with zero
+        discharge on every day falls below GloFAS's MIN_DISCHARGE_M3S and
+        must be dropped entirely -- there's nothing physically meaningful to
+        force a ROMS river point with, so it's excluded rather than kept
+        around with a borrowed concentration value. A normally-flowing
+        station must be unaffected.
+        """
+        path = tmp_path_factory.mktemp("glofas_rivr2o_zero") / "glofas_zero.nc"
+        times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
+        lats = np.array([65.12, 63.72], dtype=np.float32)
+        lons = np.array([-20.43, -17.53], dtype=np.float32)
+        names = ["GloFAS_65.12N_20.43W", "GloFAS_63.72N_17.53W"]
+        # Station 0 has zero discharge every day; station 1 flows normally.
+        flow = np.array([[0.0, 400.0], [0.0, 400.0]], dtype=np.float32)
+        vol = np.array([0.0, 400.0], dtype=np.float32)
+        years = np.array([1998])
+        rivr2o_concentrations = {
+            "DIC": np.array([[999.0, 20.0]]),
+            "ALK": np.array([[999.0, 20.0]]),
+            "NO3": np.array([[99.0, 2.0]]),
+            "PO4": np.array([[9.0, 0.2]]),
+        }
+        write_glofas_file_with_rivr2o(
+            path,
+            lats,
+            lons,
+            flow,
+            names,
+            times,
+            years=years,
+            rivr2o_concentrations=rivr2o_concentrations,
+            vol=vol,
+        )
+
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"name": "GLOFAS", "path": path},
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+        )
+
+        river_names = [str(n) for n in rf.ds.river_name.values]
+        assert "GloFAS_65.12N_20.43W" not in river_names
+        assert "GloFAS_63.72N_17.53W" in river_names
+
+        dic_idx = rf.ds.tracer_name.values.tolist().index("DIC")
+        dic_vals = rf.ds["river_tracer"].isel(ntracers=dic_idx).values
+        flowing_col = river_names.index("GloFAS_63.72N_17.53W")
+        assert np.allclose(dic_vals[:, flowing_col], 20.0)

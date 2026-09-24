@@ -19,16 +19,40 @@ from pydantic import (
 from pydantic_core.core_schema import ValidationInfo
 from scipy.interpolate import interp1d
 
-from roms_tools.setup.utils import (
-    convert_to_relative_days,
-    get_tracer_defaults,
-    get_tracer_metadata_dict,
+from roms_tools.setup.bgc_model import (
+    RELEASE_TRACER_MODELS,
+    BGCCdrLite,
+    BGCMarbl,
+    BGCPassive,
+    TracerSet,
 )
+from roms_tools.setup.utils import convert_to_relative_days
 
 NonNegativeFloat = Annotated[float, Ge(0)]
 
 # Show all columns when printing a DataFrame
 pd.set_option("display.max_columns", None)
+
+
+#: Flux keys a tracer_set="cdr_lite" release may specify. Physics tracers
+#: (temp, salt) are deliberately excluded: CDR tracer experiments require the
+#: physics to remain untouched by the release, so their rows in the forcing
+#: file are always zero.
+_CDR_LITE_KEYS = (BGCCdrLite.ROLE_ALK, BGCCdrLite.ROLE_DIC)
+
+#: Concentration/flux key a tracer_set="passive" release specifies (volume
+#: releases may additionally give temp/salt for the discharged water).
+_PASSIVE_KEYS = (BGCPassive.ROLE_TRACER,)
+
+
+def _raise_on_unknown_tracers(provided, allowed, tracer_set: TracerSet) -> None:
+    """Reject tracer keys that are not part of the release's tracer set."""
+    unknown = sorted(set(provided) - set(allowed))
+    if unknown:
+        raise ValueError(
+            f"Unknown tracer name(s) {unknown} for tracer_set='{tracer_set}'. "
+            f"Valid names: {sorted(allowed)}."
+        )
 
 
 @dataclass
@@ -229,6 +253,22 @@ class Release(BaseModel):
         Time points of the release events. Must be strictly increasing and within the simulation window.
     time_interpolation : bool, optional
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
+    tracer_set : {"marbl", "cdr_lite", "passive"}, optional
+        Tracer schema. ``"marbl"`` (default) specifies tracer values by MARBL
+        tracer name. ``"cdr_lite"`` targets the dedicated CDR tracers of a
+        ROMS ``CDR_TRACER`` build: the release specifies ``"ALK"`` and/or
+        ``"DIC"`` fluxes, and ``CDRForcing`` assigns tracers automatically —
+        a release with ``"ALK"`` (an OAE or combined OAE+DOR intervention)
+        gets the next ``CDR_OAE_ALK{k}``/``CDR_OAE_DIC{k}`` pair; a release
+        with only ``"DIC"`` (a DOR intervention) gets the next
+        ``CDR_DOR_DIC{j}`` tracer. cdr_lite is only supported on
+        ``TracerPerturbation`` — CDR tracer experiments require the physics
+        to remain untouched, so volume releases and ``temp`` / ``salt``
+        forcing are not allowed. ``"passive"`` targets a generic passive
+        (dye) tracer via a single ``"passive_tracer"`` flux (or, on
+        ``VolumeRelease``, concentration together with the discharged
+        water's ``temp``/``salt``), assigned the next ``passive_tracer{i}``
+        slot.
     """
 
     name: str
@@ -247,12 +287,45 @@ class Release(BaseModel):
     """Time points of the release events."""
     time_interpolation: bool = False
     """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
+    tracer_set: TracerSet = "marbl"
+    """Tracer schema: ``"marbl"`` (values keyed by MARBL tracer name),
+    ``"cdr_lite"`` (values keyed by ``"ALK"``/``"DIC"``; ``CDRForcing``
+    auto-assigns the release's own CDR tracer(s)), or ``"passive"`` (a single
+    ``"passive_tracer"`` value; auto-assigned passive slot). ``"cdr_lite"``
+    is only supported on :class:`TracerPerturbation`: CDR tracer experiments
+    require the physics to remain untouched, which rules out volume releases
+    (and temp/salt forcing)."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
     """Type of the release."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @property
+    def is_oae(self) -> bool:
+        """Whether this cdr_lite release is an OAE (or combined OAE+DOR)
+        intervention, i.e. specifies an ``"ALK"`` flux — it is assigned an
+        OAE (ALK, DIC) tracer pair. False for marbl releases.
+        """
+        if self.tracer_set != "cdr_lite":
+            return False
+        return BGCCdrLite.ROLE_ALK in getattr(self, "tracer_fluxes", {})
+
+    @property
+    def is_dor(self) -> bool:
+        """Whether this cdr_lite release is a DOR intervention, i.e. specifies
+        only a ``"DIC"`` flux — it is assigned a standalone DOR tracer.
+        False for marbl releases.
+        """
+        return self.tracer_set == "cdr_lite" and not self.is_oae
+
+    @property
+    def is_passive(self) -> bool:
+        """Whether this release feeds a generic passive (dye) tracer — it is
+        assigned the next ``passive_tracer{i}`` slot.
+        """
+        return self.tracer_set == "passive"
 
     @model_validator(mode="after")
     def _check_increasing_times(self) -> "Release":
@@ -287,12 +360,17 @@ class Release(BaseModel):
                 self.times.append(end_time)
 
     @classmethod
-    def get_tracer_metadata(cls):
+    def get_tracer_metadata(cls, tracer_set: TracerSet = "marbl"):
         return {}
 
     @classmethod
-    def get_metadata(cls):
-        return pd.DataFrame(cls.get_tracer_metadata())
+    def get_metadata(cls, tracer_set: TracerSet = "marbl"):
+        return pd.DataFrame(cls.get_tracer_metadata(tracer_set))
+
+    @property
+    def metadata(self) -> pd.DataFrame:
+        """Long names and expected units for this release's tracer inputs."""
+        return pd.DataFrame(self.get_tracer_metadata(self.tracer_set))
 
     def _compute_integrated_tracers(
         self,
@@ -424,45 +502,87 @@ class VolumeRelease(Release):
 
     times: list[datetime] = Field([])
     fill_values: Literal["auto", "zero"] = "auto"
-    """Strategy for filling missing tracer concentration values."""
+    """Strategy for filling missing tracer concentration values. For
+    ``tracer_set="passive"`` releases this governs the MARBL BGC rows of the
+    forcing file when the MARBL block is on the tracer axis (mixed with marbl
+    releases or ``include_marbl_bgc=True``): "auto" fills them with river
+    defaults, "zero" with 0 — a volume release adds water, so a zero
+    concentration means the added water contains none of that tracer."""
     volume_fluxes: Flux | NonNegativeFloat | list[NonNegativeFloat] = Field(
         default=0.0, validate_default=True
     )
     """Volume flux(es) of the release in m³/s over time."""
-    tracer_concentrations: dict[
-        str, Concentration | NonNegativeFloat | list[NonNegativeFloat]
-    ] = Field({})
-    """Dictionary of tracer names and their concentration values."""
+    tracer_concentrations: dict[str, Concentration | float | list[float]] = Field({})
+    """Dictionary of tracer names and their non-negative concentration values."""
 
     release_type: Literal[ReleaseType.volume] = ReleaseType.volume
+
+    @field_validator("tracer_set", mode="after")
+    @classmethod
+    def _reject_cdr_lite_set(cls, tracer_set: TracerSet) -> TracerSet:
+        """Volume releases perturb the physics (volume flux enters the continuity
+        equation, and ROMS applies volume*concentration to temp/salt), which CDR
+        tracer experiments must avoid — so only TracerPerturbation supports
+        tracer_set="cdr_lite".
+        """
+        if tracer_set == "cdr_lite":
+            raise ValueError(
+                'tracer_set="cdr_lite" is not supported on VolumeRelease: '
+                "CDR tracer experiments require the physics to remain untouched "
+                "by the release. Use TracerPerturbation instead."
+            )
+        return tracer_set
 
     @field_validator("tracer_concentrations", mode="after")
     @classmethod
     def _create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
-        defaults = get_tracer_defaults()
-        for tracer_name in defaults.keys():
-            if tracer_name in tracer_concentrations:
-                continue
-            else:
-                if tracer_name in ["temp", "salt"]:
-                    tracer_concentrations[tracer_name] = defaults[tracer_name]
-                else:
-                    fill_values = info.data["fill_values"]
-                    if fill_values == "auto":
-                        tracer_concentrations[tracer_name] = defaults[tracer_name]
-                    elif fill_values == "zero":
-                        tracer_concentrations[tracer_name] = 0.0
+        tracer_set: TracerSet = info.data.get("tracer_set", "marbl")
+        defaults = BGCMarbl.river_defaults()
 
-        tracer_concentrations = {
+        if tracer_set == "passive":
+            # Discharged water: physics tracers plus the dye. The dye is not
+            # zero-filled — it must be provided (checked in a model validator).
+            allowed = ("temp", "salt", *_PASSIVE_KEYS)
+            _raise_on_unknown_tracers(tracer_concentrations, allowed, tracer_set)
+            filled = {
+                key: tracer_concentrations.get(key, defaults[key])
+                for key in ("temp", "salt")
+            }
+            filled.update(
+                {k: v for k, v in tracer_concentrations.items() if k in _PASSIVE_KEYS}
+            )
+            return {
+                tracer: (
+                    conc
+                    if isinstance(conc, Concentration)
+                    else Concentration(name=tracer, values=conc)
+                )
+                for tracer, conc in filled.items()
+            }
+
+        _raise_on_unknown_tracers(tracer_concentrations, defaults, "marbl")
+        filled = {}
+        for tracer_name in defaults:
+            if tracer_name in tracer_concentrations:
+                filled[tracer_name] = tracer_concentrations[tracer_name]
+            elif tracer_name in ["temp", "salt"]:
+                # Physics tracers always get river/physics defaults.
+                filled[tracer_name] = defaults[tracer_name]
+            else:
+                fill_values = info.data["fill_values"]
+                if fill_values == "auto":
+                    filled[tracer_name] = defaults[tracer_name]
+                elif fill_values == "zero":
+                    filled[tracer_name] = 0.0
+
+        return {
             tracer: (
                 conc
                 if isinstance(conc, Concentration)
                 else Concentration(name=tracer, values=conc)
             )
-            for tracer, conc in tracer_concentrations.items()
+            for tracer, conc in filled.items()
         }
-
-        return tracer_concentrations
 
     @field_validator("volume_fluxes", mode="after")
     @classmethod
@@ -470,6 +590,37 @@ class VolumeRelease(Release):
         if not isinstance(volume_fluxes, Flux):
             volume_fluxes = Flux("volume", volume_fluxes)
         return volume_fluxes
+
+    @model_validator(mode="after")
+    def _check_passive_concentration_present(self) -> "VolumeRelease":
+        """A passive volume release must specify the dye concentration."""
+        if self.tracer_set == "passive" and not any(
+            key in self.tracer_concentrations for key in _PASSIVE_KEYS
+        ):
+            raise ValueError(
+                'Releases with tracer_set="passive" must specify a '
+                "'passive_tracer' concentration."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_concentration_signs(self) -> "VolumeRelease":
+        """Enforce non-negative tracer concentrations.
+
+        Replaces the former ``NonNegativeFloat`` field typing: the rule is the
+        same, but because values are heterogeneous (``Concentration`` | float
+        | list) the check runs at model validation rather than field coercion,
+        so the error surfaces at a different stage.
+        """
+        for tracer_name, conc in self.tracer_concentrations.items():
+            values = conc.values if isinstance(conc, Concentration) else conc
+            vals = values if isinstance(values, list) else [values]
+            if any(v < 0 for v in vals):
+                raise ValueError(
+                    f"Tracer concentration for '{tracer_name}' must be non-negative. "
+                    f"Got: {values}"
+                )
+        return self
 
     @model_validator(mode="after")
     def _check_lengths(self) -> "VolumeRelease":
@@ -497,9 +648,27 @@ class VolumeRelease(Release):
         self._extend_times_to_endpoints(start_time, end_time)
 
     @staticmethod
-    def get_tracer_metadata():
+    def get_tracer_metadata(tracer_set: TracerSet = "marbl"):
         """Returns long names and expected units for the tracer concentrations."""
-        return get_tracer_metadata_dict(include_bgc=True, unit_type="concentration")
+        if tracer_set == "cdr_lite":
+            raise ValueError(
+                'tracer_set="cdr_lite" is not supported on VolumeRelease. '
+                "Use TracerPerturbation instead."
+            )
+        metadata = RELEASE_TRACER_MODELS[tracer_set].release_metadata(
+            unit_type="concentration"
+        )
+        if tracer_set == "passive":
+            # Volume releases also carry the physics of the discharged water.
+            physics = RELEASE_TRACER_MODELS["marbl"].release_metadata(
+                unit_type="concentration"
+            )
+            metadata = {
+                "temp": physics["temp"],
+                "salt": physics["salt"],
+                **metadata,
+            }
+        return metadata
 
     def _do_accounting(
         self,
@@ -607,13 +776,23 @@ class TracerPerturbation(Release):
         - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
         - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
 
+        With ``tracer_set="marbl"`` keys are MARBL tracer names. With
+        ``tracer_set="cdr_lite"`` the only keys are ``"ALK"`` and ``"DIC"``:
+        a release providing ``"ALK"`` is an OAE (or, with negative ``"DIC"``,
+        combined OAE+DOR) intervention assigned an OAE tracer pair; a release
+        providing only ``"DIC"`` (negative = removal) is a DOR intervention
+        assigned a standalone DOR tracer. With ``tracer_set="passive"`` the
+        only key is ``"passive_tracer"``. ``temp`` / ``salt`` may not be
+        forced by cdr_lite or passive perturbations.
+
     time_interpolation : bool, optional
         Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
     """
 
     times: list[datetime] = Field([])
     tracer_fluxes: dict[str, Flux | float | list[float]] = Field({})
-    """Dictionary of tracer names and their non-negative flux values."""
+    """Dictionary of tracer names (or, for ``tracer_set="cdr_lite"``, role
+    keys) and their flux values."""
 
     release_type: Literal[ReleaseType.tracer_perturbation] = (
         ReleaseType.tracer_perturbation
@@ -621,18 +800,49 @@ class TracerPerturbation(Release):
 
     @field_validator("tracer_fluxes", mode="after")
     @classmethod
-    def _create_fluxes(cls, tracer_fluxes):
-        # Fill all tracer fluxes that are not provided with zero
-        defaults = get_tracer_defaults()
-        for tracer_name in defaults.keys():
-            if tracer_name not in tracer_fluxes:
-                tracer_fluxes[tracer_name] = 0.0
+    def _create_fluxes(cls, tracer_fluxes, info: ValidationInfo):
+        tracer_set: TracerSet = info.data.get("tracer_set", "marbl")
 
-        tracer_fluxes = {
+        if tracer_set == "cdr_lite":
+            _raise_on_unknown_tracers(tracer_fluxes, _CDR_LITE_KEYS, tracer_set)
+            # No zero-filling: the provided keys are the intervention-type
+            # signal (ALK present -> OAE pair; DIC only -> DOR tracer).
+            filled: dict[str, Flux | float | list[float]] = dict(tracer_fluxes)
+        elif tracer_set == "passive":
+            _raise_on_unknown_tracers(tracer_fluxes, _PASSIVE_KEYS, tracer_set)
+            filled = dict(tracer_fluxes)
+        else:
+            allowed = list(BGCMarbl.river_defaults())
+            _raise_on_unknown_tracers(tracer_fluxes, allowed, tracer_set)
+            # Fill all tracer fluxes that are not provided with zero
+            filled = {
+                tracer_name: tracer_fluxes.get(tracer_name, 0.0)
+                for tracer_name in allowed
+            }
+
+        return {
             tracer: (flux if isinstance(flux, Flux) else Flux(name=tracer, values=flux))
-            for tracer, flux in tracer_fluxes.items()
+            for tracer, flux in filled.items()
         }
-        return tracer_fluxes
+
+    @model_validator(mode="after")
+    def _check_fluxes_present(self):
+        """cdr_lite and passive releases must specify their flux key(s): for
+        cdr_lite the provided keys determine whether it is an OAE-pair or DOR
+        intervention; for passive the dye flux is the release's entire content.
+        """
+        if self.tracer_set == "cdr_lite" and not self.tracer_fluxes:
+            raise ValueError(
+                'Releases with tracer_set="cdr_lite" must specify tracer_fluxes '
+                "for 'ALK' (OAE; optionally with 'DIC', which may be negative "
+                "for combined OAE+DOR) and/or 'DIC' alone (DOR)."
+            )
+        if self.tracer_set == "passive" and not self.tracer_fluxes:
+            raise ValueError(
+                'Releases with tracer_set="passive" must specify a '
+                "'passive_tracer' flux."
+            )
+        return self
 
     @model_validator(mode="after")
     def _check_tracer_flux_lengths(self):
@@ -654,9 +864,9 @@ class TracerPerturbation(Release):
         self._extend_times_to_endpoints(start_time, end_time)
 
     @staticmethod
-    def get_tracer_metadata():
+    def get_tracer_metadata(tracer_set: TracerSet = "marbl"):
         """Returns long names and expected units for the tracer fluxes."""
-        return get_tracer_metadata_dict(include_bgc=True, unit_type="flux")
+        return RELEASE_TRACER_MODELS[tracer_set].release_metadata(unit_type="flux")
 
     def _do_accounting(
         self,

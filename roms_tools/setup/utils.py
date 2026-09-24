@@ -8,7 +8,6 @@ from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -1334,10 +1333,7 @@ def get_tracer_metadata_dict(
         A dictionary where keys are tracer names and values are dictionaries
         containing 'units' and 'long_name' for each tracer.
     """
-    if include_bgc:
-        tracer_names = list(MARBL_TRACER_NAMES)
-    else:
-        tracer_names = ["temp", "salt"]
+    tracer_names = list(MARBL_TRACER_NAMES) if include_bgc else ["temp", "salt"]
 
     metadata = get_variable_metadata()
 
@@ -1358,7 +1354,12 @@ def get_tracer_metadata_dict(
     return tracer_dict
 
 
-def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
+def add_tracer_metadata_to_ds(
+    ds,
+    include_bgc=True,
+    with_flux_units=False,
+    tracer_metadata=None,
+):
     """Adds tracer metadata to a dataset.
 
     This function adds tracer metadata (name, unit, long name) as coordinates to
@@ -1371,21 +1372,33 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
+        Ignored when ``tracer_metadata`` is given.
     with_flux_units : bool, optional
         If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
         If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
+        Ignored when ``tracer_metadata`` is given (its units are used as-is).
+    tracer_metadata : dict, optional
+        Prebuilt ordered mapping ``{name: {"units", "long_name"}}`` defining the
+        ``ntracers`` axis directly (e.g. from a tracer model or schema). Keeps
+        this helper model-agnostic: callers with generated tracer names (such
+        as CDR-LiTE) supply their own metadata here.
 
     Returns
     -------
     xarray.Dataset
         The dataset with added tracer metadata.
     """
-    unit_type = "flux" if with_flux_units else "concentration"
-    tracer_dict = get_tracer_metadata_dict(include_bgc, unit_type=unit_type)
+    if tracer_metadata is None:
+        unit_type: Literal["concentration", "flux", "integrated"] = (
+            "flux" if with_flux_units else "concentration"
+        )
+        tracer_metadata = get_tracer_metadata_dict(include_bgc, unit_type=unit_type)
 
-    tracer_names = list(tracer_dict.keys())
-    tracer_units = [tracer_dict[tracer]["units"] for tracer in tracer_names]
-    tracer_long_names = [tracer_dict[tracer]["long_name"] for tracer in tracer_names]
+    tracer_names = list(tracer_metadata.keys())
+    tracer_units = [tracer_metadata[tracer]["units"] for tracer in tracer_names]
+    tracer_long_names = [
+        tracer_metadata[tracer]["long_name"] for tracer in tracer_names
+    ]
 
     ds = ds.assign_coords(
         tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"}),
@@ -1406,40 +1419,6 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
     )
 
     return ds
-
-
-def get_tracer_defaults() -> dict[str, float]:
-    """Return constant default tracer concentrations for ROMS-MARBL.
-
-    Values are read from ``river_tracer_defaults.nc`` (recommended values at
-    ``value_option`` index 0) from the roms-tools-data repository.
-
-    This accessor lives in ``setup.utils`` rather than ``river_datasets`` so
-    ``RiverForcing``, fill sources, and other setup code can reuse the same
-    defaults without pulling in dataset implementations at import time. The
-    dataset class is loaded lazily in :func:`_load_tracer_defaults` to avoid a
-    circular import: ``river_datasets`` imports :data:`MARBL_TRACER_NAMES` from
-    here for schema validation.
-
-    Returns
-    -------
-    dict
-        Dictionary of tracer names and their default concentrations.
-    """
-    return _load_tracer_defaults()
-
-
-@lru_cache(maxsize=1)
-def _load_tracer_defaults() -> dict[str, float]:
-    """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
-
-    ``RiverTracerDefaultsDataset`` is imported inside this function so
-    ``river_datasets`` can import :data:`MARBL_TRACER_NAMES` from this module
-    without a circular dependency at module load time.
-    """
-    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
-
-    return RiverTracerDefaultsDataset().defaults
 
 
 def extract_single_value(data):

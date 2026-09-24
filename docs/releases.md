@@ -13,9 +13,17 @@
 
 ### Bug Fixes
 
+* Initial conditions created from a ROMS restart ignored the reference date recorded in the restart, giving the new initial conditions the wrong time origin whenever the parent simulation did not use 2000-01-01. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+
 ### Improvements
 
+* The resolved `model_reference_date` is written to the YAML export, so a round-trip reproduces the same time origin. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+* `InitialConditions` / `InitialConditionsSource` built from a `"ROMS"` source without an explicit `model_reference_date` now write `ocean_time` relative to the reference date recorded in the restart file rather than 2000-01-01. Output is unchanged when the restart's reference date is 2000-01-01, when `model_reference_date` is passed explicitly, or for non-ROMS sources. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+* The `model_reference_date` default is now `None` (resolved at construction); after construction the attribute always holds the resolved `datetime`. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+
 ### Miscellaneous
+
+* The "Initializing from ROMS Restart Files" section of the initial conditions tutorial notes that the reference date is inherited from the restart and must match the child's ROMS namelist. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
 
 ## 5.0.0
 

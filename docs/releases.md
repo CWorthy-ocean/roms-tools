@@ -22,6 +22,7 @@
 
 * Initial conditions created from a ROMS restart ignored the reference date recorded in the restart, giving the new initial conditions the wrong time origin whenever the parent simulation did not use 2000-01-01. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
 * Previous GloFAS+RIVR2O BGC pairing produced unphysical tracer concentrations from mismatched spatial matching of RIVR2O export fluxes to GloFAS discharge stations; total_discharge mode consumes concentrations from an improved offline preprocessing pipeline that matches large fluxes to large-discharge stations. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+* `RiverForcing`'s ERA5 river-mouth temperature sampling no longer OOMs ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
 
 ### Improvements
 
@@ -30,6 +31,9 @@
 * The `model_reference_date` default is now `None` (resolved at construction); after construction the attribute always holds the resolved `datetime`. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
 * Absorbed *original* entries of an overlap-merge (not the mergedriver itself) are exempt from the min-discharge filter, their post-merge volume is deliberately zeroed as bookkeeping for the YAML round-trip, not a real low-discharge signal. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
 * Added `write_glofas_file_with_rivr2o` test helper for synthesizing a GloFAS file enriched with precomputed RIVR2O concentrations, used by the new `total_discharge` mode tests. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+* `_sample_tair_at_river_mouths` now dispatches to a new ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
+* Removed `_bounding_box_with_buffer` and its two tests: it became dead ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
+* Considered and rejected using the package's usual ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
 
 ### Miscellaneous
 

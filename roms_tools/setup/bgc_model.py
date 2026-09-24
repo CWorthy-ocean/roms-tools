@@ -743,7 +743,9 @@ class ROMSTracerSchema(BaseModel):
             names += [f"CDR_OAE_ALK{k}", f"CDR_OAE_DIC{k}"]
         names += [f"CDR_DOR_DIC{j}" for j in range(1, self.n_dor + 1)]
         if self.include_marbl_bgc:
-            names += [n for n in BGCMarbl.TRACER_NAMES if n not in PHYSICS_TRACER_NAMES]
+            # TRACER_NAMES is guaranteed (BGCModel.__init_subclass__) to be
+            # PHYSICS_TRACER_NAMES followed by the model's BGC tracers.
+            names += list(BGCMarbl.TRACER_NAMES[len(PHYSICS_TRACER_NAMES) :])
         return names
 
     @property

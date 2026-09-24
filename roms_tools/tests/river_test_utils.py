@@ -74,9 +74,9 @@ def write_glofas_file_with_rivr2o(
     concentrations, mimicking ``glofas_v4_rivers_daily_w_rivr2o.nc``.
 
     ``rivr2o_concentrations`` maps tracer name (e.g. ``"DIC"``) to an array
-    of shape ``(len(years), n_stations)`` -- the "total_discharge" mode's
-    ``Rivr2oRiverBGCDataset.extract_station_concentrations`` reads these
-    directly, on a ``(year, station)`` dims, independent of the file's
+    of shape ``(len(years), n_stations)`` --
+    ``Rivr2oTotalDischargeBGCDataset.extract_station_concentrations`` reads
+    these directly, on ``(year, station)`` dims, independent of the file's
     ``FLOW`` time axis.
     """
     _write_river_file(path, lats, lons, flow, river_names, times, ratio=ratio, vol=vol)

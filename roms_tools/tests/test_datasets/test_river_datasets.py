@@ -112,8 +112,8 @@ class TestFillRiverBGCConcentrations:
 
 
 def test_rivr2o_provided_tracers_subset_of_marbl():
-    # Test-time replacement for the former import-time subset guard: the
-    # tracers RIVR2O supplies must exist in the MARBL model's tracer set.
+    # Mirrors the import-time guard in river_datasets.py: the tracers RIVR2O
+    # supplies must exist in the MARBL model's tracer set.
     from roms_tools import BGCMarbl
 
     assert set(Rivr2oRiverBGCDataset.PROVIDED_TRACERS) <= BGCMarbl().tracer_vars()

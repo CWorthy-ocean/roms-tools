@@ -33,7 +33,7 @@ from roms_tools.setup.bgc_model import (
     BGCCdrLite,
     BGCMarbl,
     BGCPassive,
-    CdrLiteTracerSchema,
+    ROMSTracerSchema,
 )
 from roms_tools.setup.cdr_release import (
     Release,
@@ -221,7 +221,7 @@ class ReleaseCollector(RootModel):
 
 
 def _release_assignments(
-    releases, tracer_schema: CdrLiteTracerSchema | None
+    releases, tracer_schema: ROMSTracerSchema | None
 ) -> dict[str, tuple[tuple[str, str], ...]]:
     """Release name -> ordered ``(global_tracer_name, role_key)`` pairs.
 
@@ -267,7 +267,7 @@ class CDRForcingDatasetBuilder:
         releases: ReleaseCollector,
         model_reference_date: datetime,
         release_type: ReleaseType,
-        tracer_schema: CdrLiteTracerSchema | None = None,
+        tracer_schema: ROMSTracerSchema | None = None,
     ):
         """
         Initialize the dataset builder.
@@ -280,7 +280,7 @@ class CDRForcingDatasetBuilder:
             Reference date for relative time conversion.
         release_type : ReleaseType
             Type of release.
-        tracer_schema : CdrLiteTracerSchema, optional
+        tracer_schema : ROMSTracerSchema, optional
             Layout of the file's tracer axis; required when the releases use
             ``tracer_set="cdr_lite"``.
         """
@@ -534,7 +534,7 @@ class CDRForcing(BaseModel):
 
     # these are defined during init and shouldn't be serialized
     _ds: xr.Dataset = None
-    _tracer_schema: CdrLiteTracerSchema | None = None
+    _tracer_schema: ROMSTracerSchema | None = None
 
     @model_validator(mode="after")
     def _validate(self):
@@ -617,7 +617,7 @@ class CDRForcing(BaseModel):
         return self.releases.tracer_set
 
     @property
-    def tracer_schema(self) -> CdrLiteTracerSchema | None:
+    def tracer_schema(self) -> ROMSTracerSchema | None:
         """The derived CDR-LiTE tracer axis (None for a pure-marbl forcing).
 
         Its counts are what the ROMS namelist must match:

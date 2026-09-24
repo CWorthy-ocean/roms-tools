@@ -663,7 +663,7 @@ _ALK_UNITS = {"units": "meq/m^3", "flux_units": "meq/s", "integrated_units": "me
 _MMOL_UNITS = {"units": "mmol/m^3", "flux_units": "mmol/s", "integrated_units": "mmol"}
 
 
-class CdrLiteTracerSchema(BaseModel):
+class ROMSTracerSchema(BaseModel):
     """Layout of the CDR-LiTE tracer suite in the ROMS forcing file.
 
     ROMS reads the ``ntracers`` axis of the CDR forcing file positionally, so
@@ -700,7 +700,7 @@ class CdrLiteTracerSchema(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     @model_validator(mode="after")
-    def _check_has_tracers(self) -> CdrLiteTracerSchema:
+    def _check_has_tracers(self) -> ROMSTracerSchema:
         if self.n_passive == 0 and self.n_oae_pairs == 0 and self.n_dor == 0:
             raise ValueError(
                 "The tracer schema must declare at least one generated tracer: "
@@ -820,7 +820,7 @@ class BGCCdrLite:
     ROLE_DIC: ClassVar[str] = "DIC"
 
     #: Layout of the forcing file's tracer axis (mirrors the ROMS namelist).
-    TracerSchema = CdrLiteTracerSchema
+    TracerSchema = ROMSTracerSchema
 
     @classmethod
     def release_metadata(

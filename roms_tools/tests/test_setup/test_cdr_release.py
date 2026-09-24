@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from scipy.interpolate import interp1d
 
 from roms_tools.constants import NUM_TRACERS
+from roms_tools.setup.bgc_model import BGCCdrLite, BGCMarbl
 from roms_tools.setup.cdr_release import (
     Concentration,
     Flux,
@@ -14,7 +15,6 @@ from roms_tools.setup.cdr_release import (
     TracerPerturbation,
     VolumeRelease,
 )
-from roms_tools.setup.utils import get_tracer_defaults
 
 
 class TestValueArray:
@@ -237,7 +237,7 @@ class TestVolumeRelease:
     def test_auto_fill_strategy(self):
         alk_value = 100.0
         vr = VolumeRelease(**self.params, tracer_concentrations={"ALK": alk_value})
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         for tracer in defaults:
             assert tracer in vr.tracer_concentrations
             assert isinstance(vr.tracer_concentrations[tracer], Concentration)
@@ -251,7 +251,7 @@ class TestVolumeRelease:
         vr = VolumeRelease(
             **self.params, tracer_concentrations={"ALK": alk_value}, fill_values="zero"
         )
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         for tracer in defaults:
             assert tracer in vr.tracer_concentrations
             assert isinstance(vr.tracer_concentrations[tracer], Concentration)
@@ -340,7 +340,7 @@ class TestTracerPerturbation:
             **self.params,
             tracer_fluxes={"ALK": alk_value},
         )
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         for tracer in defaults:
             assert tracer in tp.tracer_fluxes
             assert isinstance(tp.tracer_fluxes[tracer], Flux)
@@ -522,3 +522,192 @@ class TestReleaseAccounting:
         roms_stamps = np.array([0.0])
         with pytest.raises(ValueError, match="at least two ROMS time stamps"):
             vr._do_accounting(roms_stamps, self.start)
+
+
+class TestCdrLiteTracerSet:
+    """Tests for the CDR-LiTE tracer scheme (auto-assigned targeting).
+
+    tracer_set="cdr_lite" is TracerPerturbation-only: CDR tracer experiments
+    require the physics to remain untouched, so volume releases (and temp/salt
+    forcing) are rejected. Releases specify 'ALK' and/or 'DIC' fluxes; the
+    provided keys determine the intervention type (ALK -> OAE pair, DIC-only
+    -> DOR tracer); CDRForcing assigns tracer indices in release order.
+    """
+
+    def setup_method(self):
+        self.params = {
+            "name": "cdr_lite_release",
+            "lat": 0.0,
+            "lon": 0.0,
+            "depth": 10.0,
+            "tracer_set": "cdr_lite",
+        }
+
+    def test_volume_release_rejected(self):
+        with pytest.raises(ValidationError, match="not supported on VolumeRelease"):
+            VolumeRelease(**self.params)
+        with pytest.raises(ValueError, match="not supported on VolumeRelease"):
+            VolumeRelease.get_tracer_metadata(tracer_set="cdr_lite")
+
+    def test_requires_alk_or_dic(self):
+        with pytest.raises(ValidationError, match="must specify tracer_fluxes"):
+            TracerPerturbation(**self.params, tracer_fluxes={})
+
+    def test_oae_release(self):
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"ALK": 1.0e6})
+        assert tp.is_oae and not tp.is_dor
+        assert set(tp.tracer_fluxes) == {"ALK"}
+        assert tp.tracer_fluxes["ALK"].values == 1.0e6
+
+    def test_dor_release(self):
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"DIC": -1.0e6})
+        assert tp.is_dor and not tp.is_oae
+        assert set(tp.tracer_fluxes) == {"DIC"}
+        assert tp.tracer_fluxes["DIC"].values == -1.0e6
+
+    def test_combined_oae_dor_release(self):
+        # Combined OAE+DOR is one intervention: the OAE pair with negative DIC.
+        tp = TracerPerturbation(
+            **self.params, tracer_fluxes={"ALK": 1.0e6, "DIC": -2.0e5}
+        )
+        assert tp.is_oae and not tp.is_dor
+        assert tp.tracer_fluxes["ALK"].values == 1.0e6
+        assert tp.tracer_fluxes["DIC"].values == -2.0e5
+
+    def test_marbl_release_is_neither(self):
+        tp = TracerPerturbation(
+            name="m", lat=0.0, lon=0.0, depth=10.0, tracer_fluxes={"ALK": 1.0}
+        )
+        assert not tp.is_oae and not tp.is_dor
+
+    def test_rejects_physics_tracers(self):
+        # Physics must remain untouched: temp/salt cannot be forced.
+        for key in ("temp", "salt"):
+            with pytest.raises(ValidationError, match="Unknown tracer name"):
+                TracerPerturbation(**self.params, tracer_fluxes={key: 1.0})
+
+    def test_rejects_unknown_tracer_names(self):
+        for bad in ("ALKK", "DOR_DIC", "NO3"):
+            with pytest.raises(ValidationError, match="Unknown tracer name"):
+                TracerPerturbation(**self.params, tracer_fluxes={bad: 1.0e6})
+
+    def test_marbl_rejects_unknown_tracer_names(self):
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            VolumeRelease(
+                name="x",
+                lat=0.0,
+                lon=0.0,
+                depth=10.0,
+                tracer_concentrations={"NotATracer": 1.0},
+            )
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            TracerPerturbation(
+                name="x",
+                lat=0.0,
+                lon=0.0,
+                depth=10.0,
+                tracer_fluxes={"NotATracer": 1.0},
+            )
+
+    def test_release_tracer_models_dispatch(self):
+        from roms_tools import BGCMarbl
+        from roms_tools.setup.bgc_model import RELEASE_TRACER_MODELS, BGCPassive
+
+        assert RELEASE_TRACER_MODELS == {
+            "marbl": BGCMarbl,
+            "cdr_lite": BGCCdrLite,
+            "passive": BGCPassive,
+        }
+        # marbl dispatch returns the full MARBL table, cdr_lite the role table
+        assert set(TracerPerturbation.get_tracer_metadata("marbl")) == set(
+            BGCMarbl.release_metadata("flux")
+        )
+        assert TracerPerturbation.get_tracer_metadata(
+            "cdr_lite"
+        ) == BGCCdrLite.release_metadata("flux")
+
+    def test_metadata_property_uses_instance_tracer_set(self):
+        import pandas as pd
+
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"ALK": 1.0e6})
+        assert isinstance(tp.metadata, pd.DataFrame)
+        assert list(tp.metadata.columns) == ["ALK", "DIC"]
+
+        marbl_tp = TracerPerturbation(
+            name="m", lat=0.0, lon=0.0, depth=10.0, tracer_fluxes={"ALK": 1.0}
+        )
+        assert "spChl" in marbl_tp.metadata.columns
+
+    def test_get_tracer_metadata(self):
+        expected = ["ALK", "DIC"]
+        meta_flux = TracerPerturbation.get_tracer_metadata(tracer_set="cdr_lite")
+        assert list(meta_flux.keys()) == expected
+        assert meta_flux["ALK"]["units"] == "meq/s"
+        assert meta_flux["DIC"]["units"] == "mmol/s"
+
+
+class TestPassiveTracerSet:
+    """tracer_set="passive": generic dye tracers, valid on both release types."""
+
+    def setup_method(self):
+        self.params = {
+            "name": "dye_release",
+            "lat": 0.0,
+            "lon": 0.0,
+            "depth": 10.0,
+            "tracer_set": "passive",
+        }
+
+    def test_perturbation(self):
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"passive_tracer": 1.0e5})
+        assert tp.is_passive and not tp.is_oae and not tp.is_dor
+        assert set(tp.tracer_fluxes) == {"passive_tracer"}
+
+    def test_perturbation_requires_dye(self):
+        with pytest.raises(ValidationError, match="passive_tracer"):
+            TracerPerturbation(**self.params, tracer_fluxes={})
+
+    def test_perturbation_rejects_other_keys(self):
+        for bad in ("ALK", "DIC", "temp"):
+            with pytest.raises(ValidationError, match="Unknown tracer name"):
+                TracerPerturbation(**self.params, tracer_fluxes={bad: 1.0})
+
+    def test_volume_release(self):
+        vr = VolumeRelease(
+            **self.params,
+            volume_fluxes=50.0,
+            tracer_concentrations={"temp": 12.0, "passive_tracer": 10.0},
+        )
+        assert vr.is_passive
+        assert set(vr.tracer_concentrations) == {"temp", "salt", "passive_tracer"}
+        assert vr.tracer_concentrations["temp"].values == 12.0
+        # salt falls back to the physics default
+        assert vr.tracer_concentrations["salt"].values != 0.0
+
+    def test_volume_release_requires_dye(self):
+        with pytest.raises(ValidationError, match="passive_tracer"):
+            VolumeRelease(**self.params, volume_fluxes=50.0)
+
+    def test_volume_release_rejects_negative_dye(self):
+        with pytest.raises(ValidationError, match="non-negative"):
+            VolumeRelease(
+                **self.params,
+                volume_fluxes=50.0,
+                tracer_concentrations={"passive_tracer": -1.0},
+            )
+
+    def test_volume_release_rejects_unknown_keys(self):
+        with pytest.raises(ValidationError, match="Unknown tracer name"):
+            VolumeRelease(
+                **self.params,
+                volume_fluxes=50.0,
+                tracer_concentrations={"passive_tracer": 1.0, "ALK": 2000.0},
+            )
+
+    def test_get_tracer_metadata(self):
+        vol_meta = VolumeRelease.get_tracer_metadata("passive")
+        assert list(vol_meta) == ["temp", "salt", "passive_tracer"]
+        assert vol_meta["passive_tracer"]["units"] == "mmol/m^3"
+        pert_meta = TracerPerturbation.get_tracer_metadata("passive")
+        assert list(pert_meta) == ["passive_tracer"]
+        assert pert_meta["passive_tracer"]["units"] == "mmol/s"

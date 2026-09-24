@@ -16,6 +16,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5ARCODataset,
     ERA5Dataset,
 )
+from roms_tools.setup.bgc_model import BGCMarbl
 from roms_tools.setup.river_forcing import (
     AIR_TEMP_COVERAGE_TOLERANCE_DAYS,
     _bounding_box_with_buffer,
@@ -24,7 +25,7 @@ from roms_tools.setup.river_forcing import (
     _smooth_and_floor_air_temp,
     check_river_locations_are_along_coast,
 )
-from roms_tools.setup.utils import find_coastal_cells, get_tracer_defaults
+from roms_tools.setup.utils import find_coastal_cells
 from roms_tools.tests.river_test_utils import write_glofas_file
 from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
@@ -977,7 +978,7 @@ class TestRiverForcingWithOverlappingIndices:
 
 class TestRiverForcingBGCSource:
     def test_bgc_constants_by_default(self, iceland_test_grid, single_cell_indices):
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         river_forcing = RiverForcing(
             grid=iceland_test_grid,
             start_time=datetime(1998, 1, 1),
@@ -1095,7 +1096,7 @@ class TestRiverForcingBGCSource:
 
 class TestRiverForcingRivr2oFromTestData:
     def test_dynamic_tracers_differ_from_defaults(self, river_forcing_with_rivr2o_bgc):
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         river_forcing = river_forcing_with_rivr2o_bgc
 
         def tracer(name):
@@ -1526,7 +1527,7 @@ class TestRiverForcingTemperatureFromERA5:
         temp = rf.ds["river_tracer"].isel(
             ntracers=rf.ds.tracer_name.values.tolist().index("temp")
         )
-        expected = get_tracer_defaults()["temp"]
+        expected = BGCMarbl.river_defaults()["temp"]
         np.testing.assert_allclose(temp.values, expected)
 
     def test_real_time_temperature_differs_from_default_and_is_floored(
@@ -1549,7 +1550,7 @@ class TestRiverForcingTemperatureFromERA5:
         temp = rf.ds["river_tracer"].isel(
             ntracers=rf.ds.tracer_name.values.tolist().index("temp")
         )
-        default = get_tracer_defaults()["temp"]
+        default = BGCMarbl.river_defaults()["temp"]
         assert not np.allclose(temp.values, default)
         assert (temp.values >= 0.0).all()
         # Ramp spans -15 to +5 degC; smoothed/floored result should stay
@@ -1613,7 +1614,7 @@ class TestRiverForcingTemperatureFromERA5:
         temp = rf.ds["river_tracer"].isel(
             ntracers=rf.ds.tracer_name.values.tolist().index("temp")
         )
-        default = get_tracer_defaults()["temp"]
+        default = BGCMarbl.river_defaults()["temp"]
         assert not np.allclose(temp.values, default)
         assert (temp.values >= 0.0).all()
 
@@ -1692,6 +1693,6 @@ def test_river_temperature_from_real_arco_era5(iceland_test_grid):
     temp = rf.ds["river_tracer"].isel(
         ntracers=rf.ds.tracer_name.values.tolist().index("temp")
     )
-    default = get_tracer_defaults()["temp"]
+    default = BGCMarbl.river_defaults()["temp"]
     assert not np.allclose(temp.values, default)
     assert (temp.values >= 0.0).all()

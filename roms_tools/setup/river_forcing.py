@@ -33,6 +33,7 @@ from roms_tools.plot import (
     plot_2d_horizontal_field,
     plot_location,
 )
+from roms_tools.setup.bgc_model import BGCMarbl
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
@@ -41,7 +42,6 @@ from roms_tools.setup.utils import (
     find_coastal_cells,
     from_yaml,
     get_target_coords,
-    get_tracer_defaults,
     get_variable_metadata,
     interpolate_dynamic_bgc_by_calendar_year,
     serialize_paths,
@@ -392,7 +392,7 @@ class RiverForcing:
         ERA5 source dict (e.g. ``{"name": "ERA5", "path": ...}``) specifying
         where to sample air temperature from at each river's injection
         point(s), used to derive river temperature. When not provided,
-        river temperature keeps its flat default from ``get_tracer_defaults()``.
+        river temperature keeps its flat default from ``BGCMarbl.river_defaults()``.
 
         Always samples real (non-climatological) ERA5 air temperature --
         like every other river tracer, river temperature is written onto
@@ -1082,7 +1082,7 @@ class RiverForcing:
 
         Only runs when ``surface_forcing_source`` is set. Otherwise the
         ``temp`` slice of ``river_tracer`` keeps the flat default written in
-        ``_create_river_forcing`` (from ``get_tracer_defaults()``, or NaN
+        ``_create_river_forcing`` (from ``BGCMarbl.river_defaults()``, or NaN
         pending BGC fill when ``include_bgc=True``).
 
         Parameters
@@ -1317,7 +1317,7 @@ class RiverForcing:
         if self.include_bgc:
             ds["river_tracer"] = ds["river_tracer"] * np.nan
         else:
-            defaults = get_tracer_defaults()
+            defaults = BGCMarbl.river_defaults()
             for ntracer in range(ds.ntracers.size):
                 tracer_name = ds.tracer_name[ntracer].item()
                 ds["river_tracer"].loc[{"ntracers": ntracer}] = defaults[tracer_name]
@@ -1538,7 +1538,7 @@ class RiverForcing:
         )
         # If combined_river_volume is 0.0, the result will be NaN. Replace with default for clarity.
         # This is mainly for plotting and to avoid confusing users—ROMS will ignore tracers with zero volume anyway.
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
         for ntracer in range(combined_river_tracer.sizes["ntracers"]):
             tracer_name = combined_river_tracer.tracer_name[ntracer].item()
             default = defaults[tracer_name]

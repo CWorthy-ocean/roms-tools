@@ -390,6 +390,7 @@ def _ic_from_restart(use_dask: bool, **kwargs) -> InitialConditions:
     )
 
 
+@skip_xesmf
 def test_model_reference_date_inherited_from_roms_source(use_dask, tmp_path):
     """Without an explicit date, IC from a ROMS restart use the parent's time origin."""
     ic = _ic_from_restart(use_dask)
@@ -410,6 +411,7 @@ def test_model_reference_date_inherited_from_roms_source(use_dask, tmp_path):
     assert params["InitialConditions"]["model_reference_date"] == expected.isoformat()
 
 
+@skip_xesmf
 def test_explicit_model_reference_date_overrides_roms_source(use_dask):
     """An explicit date wins over the one recorded in the ROMS restart."""
     ic = _ic_from_restart(use_dask, model_reference_date=datetime(2000, 1, 1))

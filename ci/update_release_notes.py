@@ -79,6 +79,7 @@ def _should_skip_section(name: str) -> bool:
 
 # Note texts that mean "nothing to report" rather than a real release note.
 # Authors write these in place of, or instead of, the template's "- N/A".
+# Mirrored in finalize_release_notes.py; a test keeps the two in agreement.
 _PLACEHOLDER_TEXTS = frozenset(
     {"n/a", "na", "none", "nothing", "no", "no change", "no changes"}
 )
@@ -93,6 +94,13 @@ _RELEASE_NOTE_SECTIONS = frozenset(s.lower() for s in SECTION_MAP)
 _NON_PROSE_LINE_RE = re.compile(r"^(?:<[^>]+>\s*$|\|)")
 
 
+# A placeholder word optionally followed by one trailing parenthetical, e.g.
+# "N/A (`x` remains the default)" — a justification for having nothing to
+# report.  Only a trailing parenthetical qualifies, so "None — but X is now
+# deprecated" and "N/A (x) plus Y" remain real notes.
+_PLACEHOLDER_RE = re.compile(r"^(?P<word>[^(]*?)\s*(?:\(.*\))?\s*\.?$", re.DOTALL)
+
+
 def _is_placeholder(text: str) -> bool:
     """
     Return True if *text* is an "empty" placeholder rather than a real note.
@@ -100,7 +108,10 @@ def _is_placeholder(text: str) -> bool:
     Args:
         text: A note's text, with any leading bullet marker already removed.
     """
-    return text.strip().rstrip(".").strip().lower() in _PLACEHOLDER_TEXTS
+    m = _PLACEHOLDER_RE.match(text.strip())
+    if m is None:
+        return False
+    return m.group("word").rstrip(".").strip().lower() in _PLACEHOLDER_TEXTS
 
 
 # Matches a PR link appended by this script: ([#NNN](url))
@@ -275,7 +286,12 @@ def parse_pr_body(
       are handled correctly.
     - Skips the Summary and any section whose name contains "checklist".
     - Drops notes that are "nothing to report" placeholders — ``N/A``,
-      ``None``, ``Nothing`` etc. (see :func:`_is_placeholder`).
+      ``None``, ``Nothing`` etc., optionally with a trailing parenthetical
+      justification (see :func:`_is_placeholder`) — unless the note carries
+      sub-bullets, which are real content.
+    - Rejoins hard-wrapped bullets: a text line directly beneath a bullet
+      (no blank line between) continues that bullet, as Markdown renders it.
+      A blank line, another bullet or a heading ends the bullet.
     - Drops checklist-style bullets (``- [ ]`` / ``- [x]``) even if they
       appear under a content section, as a belt-and-suspenders guard.
     - Strips inline HTML comments (``<!-- … -->``) before processing, and
@@ -303,13 +319,16 @@ def parse_pr_body(
     items: list[list] = []
     # Un-bulleted prose in the current section, grouped into paragraphs
     paragraphs: list[list[str]] = []
+    # The bullet a wrapped line continues: (item index, sub-item index), with
+    # a sub-item index of None for the top-level text; None when none is open.
+    open_bullet: tuple[int, int | None] | None = None
     in_fence = False
 
     def _flush() -> None:
         if not current or _should_skip_section(current):
             return
         collected = items or _prose_fallback(current, paragraphs)
-        good = [(t, s) for t, s in collected if not _is_placeholder(t)]
+        good = [(t, s) for t, s in collected if s or not _is_placeholder(t)]
         if good:
             result[current] = good
 
@@ -321,6 +340,7 @@ def parse_pr_body(
         # Fenced code blocks are never release-note content
         if line.startswith("```") or line.startswith("~~~"):
             in_fence = not in_fence
+            open_bullet = None
             continue
         if in_fence:
             continue
@@ -332,6 +352,7 @@ def parse_pr_body(
             current = heading.group(1).strip()
             items = []
             paragraphs = []
+            open_bullet = None
             continue
 
         if current is None or _should_skip_section(current):
@@ -339,19 +360,42 @@ def parse_pr_body(
 
         # Skip checklist-style bullets regardless of which section they appear in
         if re.match(r"^[-*]\s+\[[ xX]\]", line):
+            open_bullet = None
             continue
 
-        bullet = re.match(r"^[-*]\s+(.+)$", line)
+        # A bare marker ("- " left over from the template) is an empty bullet
+        bullet = re.match(r"^[-*](?:\s+(.*))?$", line)
         if bullet:
-            text = bullet.group(1).strip()
+            text = (bullet.group(1) or "").strip()
+            open_bullet = None
             if not text:
                 continue
             if indent == 0:
                 items.append([text, []])
+                open_bullet = (len(items) - 1, None)
             elif items:
                 # Attach as a sub-bullet of the most recent top-level item
                 items[-1][1].append(text)
+                open_bullet = (len(items) - 1, len(items[-1][1]) - 1)
             continue
+
+        # A text line directly beneath a bullet is that bullet hard-wrapped
+        # (GitHub keeps the author's line breaks).  Join it on; otherwise it
+        # would land in the prose buffer, which is discarded once the section
+        # has bullets, silently truncating the note.
+        if (
+            open_bullet is not None
+            and line
+            and not _NON_PROSE_LINE_RE.match(line)
+            and re.search(r"[A-Za-z0-9]", line)
+        ):
+            i, j = open_bullet
+            if j is None:
+                items[i][0] = f"{items[i][0]} {line}"
+            else:
+                items[i][1][j] = f"{items[i][1][j]} {line}"
+            continue
+        open_bullet = None
 
         # Un-bulleted prose: buffer it in case this section has no bullets
         # at all, in which case _flush() promotes each paragraph to a note.

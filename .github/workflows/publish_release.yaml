@@ -3,7 +3,8 @@ name: Publish Release
 # Auto-creates the tagged GitHub release when the "Finalize release notes for
 # <tag>" PR (opened by finalize_release_notes.yaml from the next_release_notes
 # branch) is merged into main. The release body is the curated notes we just
-# merged, extracted by ci/release_body.py.
+# merged, extracted by ci/release_body.py. It also deletes next_release_notes
+# so the next cycle's branch starts from main.
 #
 # The release is created with a Personal Access Token (secrets.RELEASE_PAT),
 # NOT the default GITHUB_TOKEN: releases created by GITHUB_TOKEN do not fire
@@ -60,6 +61,24 @@ jobs:
           fetch-depth: 0
           # PAT so the created release cascades to on:release workflows (see header).
           token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Delete the next_release_notes branch
+        # Its notes are on main now; the next merged PR recreates the branch
+        # from main.  A squash merge never makes the branch part of main's
+        # history, so a surviving branch would drag this release's notes into
+        # the next finalize PR's diff, conflicting with main's copy.  The repo's
+        # "Automatically delete head branches" setting does the same, but this
+        # workflow cannot see that setting, so it does not rely on it.  Done
+        # first, before anything that can fail, to keep the window in which an
+        # update run could still push to the old branch short.
+        run: |
+          if ! git push origin --delete next_release_notes; then
+            # Fine if the repo setting deleted it first; fail on anything else.
+            if git ls-remote --exit-code --heads origin next_release_notes >/dev/null; then
+              echo "::error::Could not delete the next_release_notes branch."
+              exit 1
+            fi
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5

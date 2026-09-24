@@ -35,9 +35,19 @@ _BULLET_RE = re.compile(r"^[*-]\s+(.+?)\s*$")
 
 # Bullet texts that are placeholders rather than real release notes.  A
 # category holding only these is treated as having collected nothing.
+# Mirrors update_release_notes.py (which this script cannot import: it needs
+# third-party packages this workflow does not install); a test keeps the two
+# in agreement.
 _PLACEHOLDER_TEXTS = frozenset(
     {"n/a", "na", "none", "nothing", "no", "no change", "no changes"}
 )
+
+# A placeholder word optionally followed by one trailing parenthetical, e.g.
+# "N/A (`x` remains the default)".  The PR link the updater appends,
+# "([#N](url))", is itself a trailing parenthetical, so a placeholder is
+# recognised with or without it.  "None — but X is now deprecated" and
+# "N/A (x) plus Y" remain real notes.
+_PLACEHOLDER_RE = re.compile(r"^(?P<word>[^(]*?)\s*(?:\(.*\))?\s*\.?$", re.DOTALL)
 
 
 def _is_placeholder(text: str) -> bool:
@@ -47,7 +57,10 @@ def _is_placeholder(text: str) -> bool:
     Args:
         text: A bullet's text, with the leading ``*``/``-`` marker removed.
     """
-    return text.strip().rstrip(".").strip().lower() in _PLACEHOLDER_TEXTS
+    m = _PLACEHOLDER_RE.match(text.strip())
+    if m is None:
+        return False
+    return m.group("word").rstrip(".").strip().lower() in _PLACEHOLDER_TEXTS
 
 
 def normalize_tag(tag: str) -> str:

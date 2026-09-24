@@ -152,11 +152,48 @@ def test_nothing_dropped_when_every_category_has_notes():
 
 
 def test_placeholder_recognition():
-    for value in ("N/A", "n/a", "None", "none.", "Nothing", "No changes"):
+    for value in (
+        "N/A",
+        "n/a",
+        "None",
+        "none.",
+        "Nothing",
+        "No changes",
+        "N/A (default unchanged)",
+        "N/A ([#1](https://github.com/o/r/pull/1))",
+        "N/A (default unchanged) ([#1](https://github.com/o/r/pull/1))",
+    ):
         assert _is_placeholder(value), value
     for value in (
         "Nonetheless, we fixed it",
         "No longer crashes",
         "N/A handling added",
+        "None — but `old_arg` is now deprecated",
+        "N/A (x) plus a real change",
+        "Fixed a crash (see the docs) ([#1](https://github.com/o/r/pull/1))",
     ):
         assert not _is_placeholder(value), value
+
+
+def test_parenthetical_placeholder_category_dropped():
+    # The updater used to let "N/A (reason)" through, and once the PR link
+    # was appended the finalizer could not recognise it either.
+    text = (
+        "# Release notes\n"
+        "\n"
+        "## Unreleased\n"
+        "\n"
+        "### Breaking Changes\n"
+        "\n"
+        "* N/A (default unchanged) ([#7](https://github.com/o/r/pull/7))\n"
+        "\n"
+        "### New Features\n"
+        "\n"
+        "* Real feature ([#8](https://github.com/o/r/pull/8))\n"
+        "\n"
+        "## 1.0.0\n"
+    )
+    out, dropped = _run(text)
+    assert dropped == ["Breaking Changes"]
+    assert "N/A" not in out
+    assert "Real feature" in out

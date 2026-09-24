@@ -369,6 +369,64 @@ def test_initial_conditions_raises_on_regridded_nans(use_dask):
         )
 
 
+def _ic_from_restart(use_dask: bool, **kwargs) -> InitialConditions:
+    """Build physics + BGC initial conditions from the eastpac25km restart, whose
+    ``ocean_time`` long_name records a 1995-01-01 model reference date.
+    """
+    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    source = {"name": "ROMS", "grid": parent_grid, "path": restart_file}
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(1998, 1, 6),
+        source=source,  # type: ignore
+        bgc_source=source,  # type: ignore
+        bgc_model=BGCMarbl,
+        use_dask=use_dask,
+        **kwargs,
+    )
+
+
+@skip_xesmf
+def test_model_reference_date_inherited_from_roms_source(use_dask, tmp_path):
+    """Without an explicit date, IC from a ROMS restart use the parent's time origin."""
+    ic = _ic_from_restart(use_dask)
+
+    expected = datetime(1995, 1, 1)
+    assert ic.model_reference_date == expected
+    assert ic.physics.model_reference_date == expected
+    assert [b.model_reference_date for b in ic.bgc] == [expected]
+    assert ic.ds.attrs["model_reference_date"] == str(expected)
+    assert str(expected) in ic.ds["ocean_time"].attrs["long_name"]
+    seconds = (datetime(1998, 1, 6) - expected).total_seconds()
+    assert ic.ds["ocean_time"].values.tolist() == [seconds]
+
+    # The resolved date is serialized, so a YAML round-trip reproduces it.
+    yaml_path = tmp_path / "ic.yaml"
+    ic.to_yaml(yaml_path)
+    params = list(yaml.safe_load_all(yaml_path.read_text()))[1]
+    assert params["InitialConditions"]["model_reference_date"] == expected.isoformat()
+
+
+@skip_xesmf
+def test_explicit_model_reference_date_overrides_roms_source(use_dask):
+    """An explicit date wins over the one recorded in the ROMS restart."""
+    ic = _ic_from_restart(use_dask, model_reference_date=datetime(2000, 1, 1))
+
+    assert ic.model_reference_date == datetime(2000, 1, 1)
+    assert [b.model_reference_date for b in ic.bgc] == [datetime(2000, 1, 1)]
+    assert ic.ds.attrs["model_reference_date"] == str(datetime(2000, 1, 1))
+
+
+def test_model_reference_date_defaults_for_lat_lon_source(initial_conditions):
+    """A non-ROMS source keeps the historical 2000-01-01 default."""
+    assert initial_conditions.model_reference_date == datetime(2000, 1, 1)
+    assert initial_conditions.physics.model_reference_date == datetime(2000, 1, 1)
+
+
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
 def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask):
     grid_params = {

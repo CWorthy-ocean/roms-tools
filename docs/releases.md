@@ -1,5 +1,40 @@
 # Release notes
 
+## 5.1.0
+
+### Breaking Changes
+
+* **Requires updating the GloFAS source path to the RIVR2O-enriched file**: `source={"name": "GLOFAS", "path": ...}` must now point to a new pre-compted file:`.../glofas_v4_rivers_daily_w_rivr2o.nc` instead of `.../glofas_v4_rivers_daily.nc`. Note `discharge_accounting` auto-selects `"total_discharge"` whenever `bgc_source={"name": "RIVR2O"}` is paired with GloFAS, breaking the previous method for pairing RIVR2O with GLOFAS. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+* GloFAS-sourced `RiverForcing` now drops rivers whose mean discharge falls below `GloFASRiverDataset.MIN_DISCHARGE_M3S` (1.0 m3/s by default) from the final output, regardless of `include_bgc`. Existing GloFAS-based configs may produce fewer rivers than before. Set `min_discharge_m3s=0` to restore the previous behavior. (This is not applied to Dai & Trenberth by default, preserving that process) ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+
+### New Features
+
+* In CDR releases `tracer_set="cdr_lite"` corresponds to either a 2-tracer (OAE) or single tracer (DOR) in ROMS, which requires CDR-LiTE forcing fields and run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required), and the CDR-LiTE linearized gas-transfer model is computed. ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
+* In CDR releases `tracer_set="passive"` corresponds to a single tracer addition to ROMS, which requires run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required). ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
+* New `discharge_accounting` option on the RIVR2O `bgc_source` (`{"name": "RIVR2O", "discharge_accounting": "per_river" | "total_discharge"}`): ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+  * `"per_river"` (existing behavior): samples RIVR2O's yearly export files by lon/lat, requires `path`.
+  * `"total_discharge"` (new): reads concentrations already precomputed per GloFAS station/year and embedded on the GloFAS discharge file itself; no RIVR2O file needed.
+  * Left unset, auto-selects `"total_discharge"` when paired with GloFAS discharge, `"per_river"` otherwise. Requesting `"total_discharge"` with a non-GloFAS discharge source raises a clear `ValueError`.
+* New `min_discharge_m3s` parameter on `RiverForcing` to override the discharge source's default minimum-discharge threshold, or disable filtering entirely (`0`) for GloFAS. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+
+### Bug Fixes
+
+* Initial conditions created from a ROMS restart ignored the reference date recorded in the restart, giving the new initial conditions the wrong time origin whenever the parent simulation did not use 2000-01-01. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+* Previous GloFAS+RIVR2O BGC pairing produced unphysical tracer concentrations from mismatched spatial matching of RIVR2O export fluxes to GloFAS discharge stations; total_discharge mode consumes concentrations from an improved offline preprocessing pipeline that matches large fluxes to large-discharge stations. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+* `RiverForcing`'s ERA5 river-mouth temperature sampling no longer OOMs ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
+
+### Improvements
+
+* The resolved `model_reference_date` is written to the YAML export, so a round-trip reproduces the same time origin. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+* `InitialConditions` / `InitialConditionsSource` built from a `"ROMS"` source without an explicit `model_reference_date` now write `ocean_time` relative to the reference date recorded in the restart file rather than 2000-01-01. Output is unchanged when the restart's reference date is 2000-01-01, when `model_reference_date` is passed explicitly, or for non-ROMS sources. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+* The `model_reference_date` default is now `None` (resolved at construction); after construction the attribute always holds the resolved `datetime`. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+* Absorbed *original* entries of an overlap-merge (not the mergedriver itself) are exempt from the min-discharge filter, their post-merge volume is deliberately zeroed as bookkeeping for the YAML round-trip, not a real low-discharge signal. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+* Added `write_glofas_file_with_rivr2o` test helper for synthesizing a GloFAS file enriched with precomputed RIVR2O concentrations, used by the new `total_discharge` mode tests. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
+
+### Miscellaneous
+
+* The "Initializing from ROMS Restart Files" section of the initial conditions tutorial notes that the reference date is inherited from the restart and must match the child's ROMS namelist. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
+
 ## 5.0.0
 
 ### Breaking Changes

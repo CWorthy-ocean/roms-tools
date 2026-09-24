@@ -177,15 +177,6 @@ class TestMarblTracerOrder:
             "salt",
         }
 
-    def test_utils_marbl_alias(self):
-        # Back-compat: the symbol stays importable from setup.utils via the
-        # module-level __getattr__ lazy alias.
-        from roms_tools.setup import utils
-        from roms_tools.setup.utils import MARBL_TRACER_NAMES
-
-        assert MARBL_TRACER_NAMES is BGCMarbl.TRACER_NAMES
-        assert utils.MARBL_TRACER_NAMES is BGCMarbl.TRACER_NAMES
-
 
 class TestValidateBgcModel:
     def test_accepts_concrete_class(self):
@@ -218,6 +209,21 @@ class TestValidateBgcModel:
 
         with pytest.raises(ValueError, match="not an instance"):
             bgc_model_to_name(BGCMarbl())
+
+
+def test_tracer_set_matches_release_tracer_models():
+    from typing import get_args
+
+    from roms_tools.setup.bgc_model import RELEASE_TRACER_MODELS, TracerSet
+
+    assert set(get_args(TracerSet)) == set(RELEASE_TRACER_MODELS)
+
+
+def test_river_defaults_covers_marbl_axis_and_caches():
+    defaults = BGCMarbl.river_defaults()
+    assert set(defaults) == set(BGCMarbl.TRACER_NAMES)
+    # cached: repeated calls return the same object
+    assert BGCMarbl.river_defaults() is defaults
 
 
 def test_chl_expansion_and_drop():
@@ -261,7 +267,7 @@ def test_ocean_fill_mirrors_main_compute_missing_bgc_variables():
     """The constant fills must match the ``(None, factor)`` entries of the
     ``compute_missing_bgc_variables`` table this class replaced.
 
-    Regression guard: these were briefly taken from ``get_tracer_defaults()``,
+    Regression guard: these were briefly taken from the river-mouth defaults,
     which reads ``river_tracer_defaults.nc`` -- river-mouth concentrations. That
     put DOC at 460.476 mmol/m3 uniformly through the ocean interior instead of
     1e-6, and zeroed the refractory DOM pools.
@@ -279,9 +285,7 @@ def test_ocean_fill_mirrors_main_compute_missing_bgc_variables():
 
 def test_fill_does_not_use_river_tracer_defaults():
     """No river-mouth value may reach an ocean field."""
-    from roms_tools.setup.utils import get_tracer_defaults
-
-    river = get_tracer_defaults()
+    river = BGCMarbl.river_defaults()
     ic = _FakeInitialConditions(_ic_ds({"Fe": 1.0, "ALK": 2300.0}))
     BGCMarbl().process_bgc_fields(ic)
     for var in ("DOC", "DON", "DOP", "DONr", "DOPr"):

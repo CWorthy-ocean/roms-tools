@@ -31,12 +31,14 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import ClassVar
+from functools import lru_cache
+from typing import ClassVar, Literal
 
 import numpy as np
 import xarray as xr
+from pydantic import BaseModel, Field, model_validator
 
-from roms_tools.setup.utils import get_variable_metadata
+from roms_tools.setup.utils import get_tracer_metadata_dict, get_variable_metadata
 
 #: Physical (non-BGC) tracers that lead every ROMS tracer axis.
 PHYSICS_TRACER_NAMES: tuple[str, str] = ("temp", "salt")
@@ -384,6 +386,29 @@ class BGCMarbl(BGCModel):
         return cls._transform_for("Lig")(fe)
 
     @classmethod
+    def river_defaults(cls) -> dict[str, float]:
+        """Default river-mouth/discharge tracer concentrations for ROMS-MARBL.
+
+        Values come from ``river_tracer_defaults.nc`` (recommended values at
+        ``value_option`` index 0) in the roms-tools-data repository. Used to
+        fill unspecified river tracer concentrations and CDR volume-release
+        concentrations (``fill_values="auto"``).
+
+        Deliberately distinct from :attr:`_OCEAN_FILL`: these are river-mouth
+        values, not open-ocean backgrounds — see the separation guard tests in
+        ``test_bgc_model.py``.
+        """
+        return _load_river_defaults()
+
+    @classmethod
+    def release_metadata(
+        cls,
+        unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    ) -> dict[str, dict[str, str]]:
+        """Tracer names -> units/long_name for CDR release inputs (full MARBL set)."""
+        return get_tracer_metadata_dict(include_bgc=True, unit_type=unit_type)
+
+    @classmethod
     def derive_alt_co2(
         cls, dic: xr.DataArray, alk: xr.DataArray
     ) -> dict[str, xr.DataArray]:
@@ -552,6 +577,19 @@ class BGCMarbl(BGCModel):
                 )
 
 
+@lru_cache(maxsize=1)
+def _load_river_defaults() -> dict[str, float]:
+    """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
+
+    ``RiverTracerDefaultsDataset`` is imported inside this function because
+    ``bgc_model`` must not import dataset modules at module load time
+    (``river_datasets`` imports from ``setup`` modules).
+    """
+    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
+
+    return RiverTracerDefaultsDataset().defaults
+
+
 # Name -> class registry for the ``BoundaryForcing``/``InitialConditions`` wrapper
 # classes' ``bgc_model=`` field: a `BGCModel` subclass has to round-trip through
 # YAML as a plain string (``to_dict``'s generic serialization would otherwise pass
@@ -614,6 +652,259 @@ def bgc_model_from_name(name: str | None) -> type[BGCModel] | None:
         raise ValueError(
             f"Unknown bgc_model {name!r}; valid options: {sorted(_BGC_MODEL_REGISTRY)}."
         ) from None
+
+
+# ---------------------------------------------------------------------------
+# CDR-LiTE: dedicated CDR tracers without a full BGC model
+# ---------------------------------------------------------------------------
+
+# Unit families for generated CDR-LiTE tracer names, by unit_type.
+_ALK_UNITS = {"units": "meq/m^3", "flux_units": "meq/s", "integrated_units": "meq"}
+_MMOL_UNITS = {"units": "mmol/m^3", "flux_units": "mmol/s", "integrated_units": "mmol"}
+
+
+class CdrLiteTracerSchema(BaseModel):
+    """Layout of the CDR-LiTE tracer suite in the ROMS forcing file.
+
+    ROMS reads the ``ntracers`` axis of the CDR forcing file positionally, so
+    the file must list every model tracer in the model's own order. This
+    schema mirrors the ucla-roms namelist counts (``nt_passive``,
+    ``nt_cdr_oae``, ``nt_cdr_dor`` in ``&PARAM_SETTINGS``) and generates the
+    matching tracer axis:
+
+    ``temp, salt, passive_tracer{1..n_passive},
+    CDR_OAE_ALK1, CDR_OAE_DIC1, ..., CDR_OAE_ALK{n}, CDR_OAE_DIC{n},
+    CDR_DOR_DIC{1..n_dor}[, MARBL BGC tracers]``
+
+    Access via :attr:`BGCCdrLite.TracerSchema`.
+
+    Parameters
+    ----------
+    n_passive : int, optional
+        Number of generic passive tracers (``nt_passive``). Defaults to 0.
+    n_oae_pairs : int, optional
+        Number of OAE (alkalinity, DIC) tracer pairs (``nt_cdr_oae``).
+    n_dor : int, optional
+        Number of DOR DIC tracers (``nt_cdr_dor``).
+    include_marbl_bgc : bool, optional
+        If True, append the MARBL BGC tracers after the CDR tracers, matching
+        a ROMS build with both ``CDR_TRACER`` and ``MARBL`` enabled. Defaults
+        to False.
+    """
+
+    n_passive: int = Field(0, ge=0)
+    n_oae_pairs: int = Field(0, ge=0)
+    n_dor: int = Field(0, ge=0)
+    include_marbl_bgc: bool = False
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _check_has_tracers(self) -> CdrLiteTracerSchema:
+        if self.n_passive == 0 and self.n_oae_pairs == 0 and self.n_dor == 0:
+            raise ValueError(
+                "The tracer schema must declare at least one generated tracer: "
+                "set n_passive > 0, n_oae_pairs > 0, and/or n_dor > 0."
+            )
+        return self
+
+    def passive_name(self, index: int) -> str:
+        """Return the tracer name of passive slot ``index`` (1-based)."""
+        if not 1 <= index <= self.n_passive:
+            raise ValueError(
+                f"Passive index {index} out of range: schema declares "
+                f"n_passive={self.n_passive}."
+            )
+        return f"passive_tracer{index}"
+
+    def oae_pair_names(self, pair: int) -> tuple[str, str]:
+        """Return the (ALK, DIC) tracer names of OAE pair ``pair`` (1-based)."""
+        if not 1 <= pair <= self.n_oae_pairs:
+            raise ValueError(
+                f"OAE pair index {pair} out of range: schema declares "
+                f"n_oae_pairs={self.n_oae_pairs}."
+            )
+        return f"CDR_OAE_ALK{pair}", f"CDR_OAE_DIC{pair}"
+
+    def dor_name(self, index: int) -> str:
+        """Return the tracer name of DOR slot ``index`` (1-based)."""
+        if not 1 <= index <= self.n_dor:
+            raise ValueError(
+                f"DOR index {index} out of range: schema declares n_dor={self.n_dor}."
+            )
+        return f"CDR_DOR_DIC{index}"
+
+    @property
+    def tracer_names(self) -> list[str]:
+        """All tracer names, in the ROMS model's tracer index order."""
+        names = ["temp", "salt"]
+        names += [f"passive_tracer{i}" for i in range(1, self.n_passive + 1)]
+        for k in range(1, self.n_oae_pairs + 1):
+            names += [f"CDR_OAE_ALK{k}", f"CDR_OAE_DIC{k}"]
+        names += [f"CDR_DOR_DIC{j}" for j in range(1, self.n_dor + 1)]
+        if self.include_marbl_bgc:
+            names += [n for n in BGCMarbl.TRACER_NAMES if n not in PHYSICS_TRACER_NAMES]
+        return names
+
+    @property
+    def ntracers(self) -> int:
+        """Total tracer count; must equal the ROMS build's ``nt``."""
+        return len(self.tracer_names)
+
+    def tracer_metadata(
+        self,
+        unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    ) -> dict[str, dict[str, str]]:
+        """Map each tracer name to its 'units' and 'long_name'."""
+        metadata = get_variable_metadata()
+        unit_key = {
+            "concentration": "units",
+            "flux": "flux_units",
+            "integrated": "integrated_units",
+        }[unit_type]
+
+        tracer_dict = {}
+        for name in self.tracer_names:
+            if name in metadata:
+                entry = metadata[name]
+            elif name.startswith("CDR_OAE_ALK"):
+                entry = {
+                    **_ALK_UNITS,
+                    "long_name": f"CDR OAE alkalinity tracer {name.removeprefix('CDR_OAE_ALK')}",
+                }
+            elif name.startswith("CDR_OAE_DIC"):
+                entry = {
+                    **_MMOL_UNITS,
+                    "long_name": f"CDR OAE DIC tracer {name.removeprefix('CDR_OAE_DIC')}",
+                }
+            elif name.startswith("CDR_DOR_DIC"):
+                entry = {
+                    **_MMOL_UNITS,
+                    "long_name": f"CDR DOR DIC tracer {name.removeprefix('CDR_DOR_DIC')}",
+                }
+            else:  # passive_tracer{i}
+                entry = {
+                    **_MMOL_UNITS,
+                    "long_name": f"passive tracer {name.removeprefix('passive_tracer')}",
+                }
+            tracer_dict[name] = {
+                "units": entry.get(unit_key),
+                "long_name": entry["long_name"],
+            }
+        return tracer_dict
+
+
+class BGCCdrLite:
+    """Namespace for the CDR-LiTE tracer scheme.
+
+    CDR-LiTE runs carry dedicated CDR tracers (the ucla-roms ``CDR_TRACER``
+    option) instead of a full BGC model: releases address their own
+    (alkalinity, DIC) OAE pair and/or DOR tracer via the role keys below, and
+    the forcing file's tracer axis is generated by :attr:`TracerSchema`.
+
+    Deliberately *not* a :class:`BGCModel` subclass: its tracer axis is
+    count-parameterized per experiment (``TracerSchema`` instances carry
+    ``n_oae_pairs`` etc.), and it has no derivation rules or background
+    fills, so the class-level ``BGCModel`` contract (fixed ``_TRACER_VARS``
+    plus ``process_bgc_fields``) does not apply. Revisit if ``BGCModel``
+    grows instance-parameterized tracer axes.
+    """
+
+    name: ClassVar[str] = "CDR-LiTE"
+
+    #: Flux keys used by tracer_set="cdr_lite" releases. A release providing
+    #: ROLE_ALK is an OAE (or combined OAE+DOR) intervention and is assigned
+    #: an OAE (ALK, DIC) tracer pair; a release providing only ROLE_DIC is a
+    #: DOR intervention and is assigned a standalone DOR tracer.
+    ROLE_ALK: ClassVar[str] = "ALK"
+    ROLE_DIC: ClassVar[str] = "DIC"
+
+    #: Layout of the forcing file's tracer axis (mirrors the ROMS namelist).
+    TracerSchema = CdrLiteTracerSchema
+
+    @classmethod
+    def release_metadata(
+        cls,
+        unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    ) -> dict[str, dict[str, str]]:
+        """Flux keys -> units/long_name for CDR-LiTE release inputs.
+
+        Releases specify fluxes via the keys ``"ALK"`` / ``"DIC"`` rather than
+        by global tracer names like ``CDR_OAE_ALK7`` — ``CDRForcing``
+        auto-assigns each release its own tracer(s) from the keys provided.
+        Physics tracers (temp, salt) are not accepted: CDR-LiTE experiments
+        leave the physics untouched, so their rows in the forcing file are
+        always zero.
+        """
+        unit_key = {
+            "concentration": "units",
+            "flux": "flux_units",
+            "integrated": "integrated_units",
+        }[unit_type]
+
+        return {
+            cls.ROLE_ALK: {
+                "units": _ALK_UNITS[unit_key],
+                "long_name": "alkalinity of the release's OAE tracer pair",
+            },
+            cls.ROLE_DIC: {
+                "units": _MMOL_UNITS[unit_key],
+                "long_name": (
+                    "DIC of the release's OAE tracer pair (with ALK; may be "
+                    "negative for combined OAE+DOR), or of its standalone DOR "
+                    "tracer when given alone (negative = removal)"
+                ),
+            },
+        }
+
+
+class BGCPassive:
+    """Namespace for generic passive (dye) tracers.
+
+    A ROMS build with ``nt_passive > 0`` carries inert tracers named
+    ``passive_tracer{N}`` between temp/salt and the CDR-LiTE block, with no
+    BGC behavior and no air-sea exchange (``t_ana_frc=1``) — useful as
+    plume/dye tracers. Releases with ``tracer_set="passive"`` specify a
+    single ``"passive_tracer"`` flux/concentration and are auto-assigned the
+    next passive slot by ``CDRForcing``.
+    """
+
+    name: ClassVar[str] = "passive"
+
+    #: The flux/concentration key used by tracer_set="passive" releases.
+    ROLE_TRACER: ClassVar[str] = "passive_tracer"
+
+    @classmethod
+    def release_metadata(
+        cls,
+        unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    ) -> dict[str, dict[str, str]]:
+        """Flux key -> units/long_name for passive release inputs."""
+        unit_key = {
+            "concentration": "units",
+            "flux": "flux_units",
+            "integrated": "integrated_units",
+        }[unit_type]
+        return {
+            cls.ROLE_TRACER: {
+                "units": _MMOL_UNITS[unit_key],
+                "long_name": "generic passive (dye) tracer",
+            }
+        }
+
+
+#: Valid values of a CDR release's ``tracer_set`` field — the keys of
+#: :data:`RELEASE_TRACER_MODELS`.
+TracerSet = Literal["marbl", "cdr_lite", "passive"]
+
+#: Tracer models selectable via a CDR release's ``tracer_set`` field.
+RELEASE_TRACER_MODELS: dict[
+    str, type[BGCMarbl] | type[BGCCdrLite] | type[BGCPassive]
+] = {
+    "marbl": BGCMarbl,
+    "cdr_lite": BGCCdrLite,
+    "passive": BGCPassive,
+}
 
 
 def _is_forcing(x) -> bool:

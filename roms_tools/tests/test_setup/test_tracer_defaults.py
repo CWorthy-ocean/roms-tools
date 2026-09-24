@@ -7,18 +7,14 @@ from roms_tools.datasets.river_datasets import (
     VALUE_OPTION_DIM,
     RiverTracerDefaultsDataset,
 )
-from roms_tools.setup.utils import (
-    MARBL_TRACER_NAMES,
-    _load_tracer_defaults,
-    get_tracer_defaults,
-)
+from roms_tools.setup.bgc_model import BGCMarbl, _load_river_defaults
 
 
 @pytest.fixture(autouse=True)
 def clear_tracer_defaults_cache():
-    _load_tracer_defaults.cache_clear()
+    _load_river_defaults.cache_clear()
     yield
-    _load_tracer_defaults.cache_clear()
+    _load_river_defaults.cache_clear()
 
 
 @pytest.fixture
@@ -29,7 +25,7 @@ def tracer_defaults_path():
 
 class TestTracerDefaults:
     def test_reads_recommended_values_from_netcdf(self):
-        defaults = get_tracer_defaults()
+        defaults = BGCMarbl.river_defaults()
 
         assert defaults["DIC"] == pytest.approx(1640.071)
         assert defaults["ALK"] == pytest.approx(1173.693)
@@ -39,7 +35,7 @@ class TestTracerDefaults:
         assert defaults["NH4"] == 0.0
         assert defaults["spC"] == 0.0
         # 32 MARBL tracers plus temperature and salinity
-        assert len(defaults) == len(MARBL_TRACER_NAMES)
+        assert len(defaults) == len(BGCMarbl.TRACER_NAMES)
         assert len(defaults) == 34
 
     def test_dataclass_exposes_dataset(self, tracer_defaults_path):
@@ -54,7 +50,7 @@ class TestTracerDefaults:
             "PO4": (VALUE_OPTION_DIM, [4.2453, 99.9]),
             "NO3": (VALUE_OPTION_DIM, [57.3565, 88.8]),
         }
-        for tracer in MARBL_TRACER_NAMES:
+        for tracer in BGCMarbl.TRACER_NAMES:
             if tracer not in data_vars:
                 data_vars[tracer] = (VALUE_OPTION_DIM, [1.0, 999.0])
 

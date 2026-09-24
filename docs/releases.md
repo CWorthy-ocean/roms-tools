@@ -4,14 +4,13 @@
 
 ### Breaking Changes
 
-* N/A (`tracer_set="marbl"` remains the default) ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
 * **Requires updating the GloFAS source path to the RIVR2O-enriched file**: `source={"name": "GLOFAS", "path": ...}` must now point to a new pre-compted file:`.../glofas_v4_rivers_daily_w_rivr2o.nc` instead of `.../glofas_v4_rivers_daily.nc`. Note `discharge_accounting` auto-selects `"total_discharge"` whenever `bgc_source={"name": "RIVR2O"}` is paired with GloFAS, breaking the previous method for pairing RIVR2O with GLOFAS. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
 * GloFAS-sourced `RiverForcing` now drops rivers whose mean discharge falls below `GloFASRiverDataset.MIN_DISCHARGE_M3S` (1.0 m3/s by default) from the final output, regardless of `include_bgc`. Existing GloFAS-based configs may produce fewer rivers than before. Set `min_discharge_m3s=0` to restore the previous behavior. (This is not applied to Dai & Trenberth by default, preserving that process) ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
 
 ### New Features
 
-* In CDR releases `tracer_set="cdr_lite"` corresponds to either a 2-tracer (OAE) or single tracer (DOR)  in ROMS, which requires CDR-LiTE forcing fields and run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required), and the CDR-LiTE linearized gas-transfer model is computed. ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
-* In In CDR releases `tracer_set="passive"` corresponds to a single tracer addition to ROMS, which requires run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required). ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
+* In CDR releases `tracer_set="cdr_lite"` corresponds to either a 2-tracer (OAE) or single tracer (DOR) in ROMS, which requires CDR-LiTE forcing fields and run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required), and the CDR-LiTE linearized gas-transfer model is computed. ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
+* In CDR releases `tracer_set="passive"` corresponds to a single tracer addition to ROMS, which requires run options to be setup in ROMS before use.  The release applies to tracers auto-generated inside of ROMS (e.g. no initial conditions/boundary forcing required). ([#673](https://github.com/CWorthy-ocean/roms-tools/pull/673))
 * New `discharge_accounting` option on the RIVR2O `bgc_source` (`{"name": "RIVR2O", "discharge_accounting": "per_river" | "total_discharge"}`): ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
   * `"per_river"` (existing behavior): samples RIVR2O's yearly export files by lon/lat, requires `path`.
   * `"total_discharge"` (new): reads concentrations already precomputed per GloFAS station/year and embedded on the GloFAS discharge file itself; no RIVR2O file needed.
@@ -31,9 +30,6 @@
 * The `model_reference_date` default is now `None` (resolved at construction); after construction the attribute always holds the resolved `datetime`. ([#684](https://github.com/CWorthy-ocean/roms-tools/pull/684))
 * Absorbed *original* entries of an overlap-merge (not the mergedriver itself) are exempt from the min-discharge filter, their post-merge volume is deliberately zeroed as bookkeeping for the YAML round-trip, not a real low-discharge signal. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
 * Added `write_glofas_file_with_rivr2o` test helper for synthesizing a GloFAS file enriched with precomputed RIVR2O concentrations, used by the new `total_discharge` mode tests. ([#679](https://github.com/CWorthy-ocean/roms-tools/pull/679))
-* `_sample_tair_at_river_mouths` now dispatches to a new ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
-* Removed `_bounding_box_with_buffer` and its two tests: it became dead ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
-* Considered and rejected using the package's usual ([#681](https://github.com/CWorthy-ocean/roms-tools/pull/681))
 
 ### Miscellaneous
 

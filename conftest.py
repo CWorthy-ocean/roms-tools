@@ -575,6 +575,9 @@ def initial_conditions_from_roms(
         source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
         bgc_source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
         bgc_model=BGCMarbl,
+        # Pinned (the restart's own reference date is 1995-01-01) so the stored
+        # reference fixture keeps its time origin; inheritance is tested separately.
+        model_reference_date=datetime(2000, 1, 1),
         use_dask=use_dask,
     )
 

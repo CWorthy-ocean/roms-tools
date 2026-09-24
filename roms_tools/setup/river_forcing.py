@@ -312,37 +312,6 @@ def _smooth_and_floor_air_temp(
     return smoothed.clip(min=0.0)
 
 
-def _bounding_box_with_buffer(
-    lat: np.ndarray, lon: np.ndarray, buffer_deg: float = 1.0
-) -> dict[str, tuple[float, float]]:
-    """Build a lat/lon bounding box around a set of points, with a buffer.
-
-    Used as ``initial_slice_bounds`` for a ``LatLonDataset``, to narrow a
-    read to a small bounding box around a handful of points (e.g. river
-    locations) instead of the full source domain.
-
-    Parameters
-    ----------
-    lat : np.ndarray
-        Latitudes of the points to bound.
-    lon : np.ndarray
-        Longitudes of the points to bound, in the source's native longitude
-        convention.
-    buffer_deg : float, optional
-        Degrees of slack added on each side of the box (e.g. a couple of
-        source grid cells' worth). Defaults to 1.0.
-
-    Returns
-    -------
-    dict[str, tuple[float, float]]
-        ``{"latitude": (min, max), "longitude": (min, max)}``, in degrees.
-    """
-    return {
-        "latitude": (float(lat.min()) - buffer_deg, float(lat.max()) + buffer_deg),
-        "longitude": (float(lon.min()) - buffer_deg, float(lon.max()) + buffer_deg),
-    }
-
-
 def _sample_tair_at_river_mouths(
     tair: xr.DataArray,
     lat_name: str,
@@ -353,8 +322,7 @@ def _sample_tair_at_river_mouths(
 ) -> xr.DataArray:
     """Nearest-neighbor sample Tair at each river's mouth coordinate.
 
-    Builds a KDTree over ``tair``'s native lat/lon grid (already narrowed to
-    a small bounding box via ``initial_slice_bounds``) and looks up the
+    Builds a KDTree over ``tair``'s native lat/lon grid and looks up the
     single nearest source cell for each river in one vectorized query --
     samples once per river, not once per grid cell, which is what made this
     fast before.
@@ -398,11 +366,86 @@ def _sample_tair_at_river_mouths(
         col2d.ravel(),
     )
 
+    if tair.chunks is not None:
+        return _sample_points_chunkwise(
+            tair, lat_name, lon_name, nearest_row, nearest_col
+        )
+
     return tair.isel(
         {
             lat_name: xr.DataArray(nearest_row, dims="nriver"),
             lon_name: xr.DataArray(nearest_col, dims="nriver"),
         }
+    )
+
+
+def _sample_points_chunkwise(
+    tair: xr.DataArray,
+    lat_name: str,
+    lon_name: str,
+    nearest_row: np.ndarray,
+    nearest_col: np.ndarray,
+) -> xr.DataArray:
+    """Point-samples air temperature at river mouths, streaming one Dask chunk at a time.
+
+    Assumes ``tair`` is chunked only along dims other than ``lat_name``/``lon_name``
+    (e.g. one chunk per time step, each holding the full lat/lon slab) — sampling
+    each chunk as it arrives then bounds memory to a handful of in-flight chunks,
+    regardless of the time range requested.
+
+    Uses ``map_blocks`` instead of the usual ``apply_ufunc(dask="parallelized")``
+    because ``apply_ufunc`` needs single-chunked core dims, which isn't guaranteed
+    here (``ensure_dimension_is_ascending`` can fragment chunking when it reverses
+    a descending-latitude source like ERA5).
+
+    Parameters
+    ----------
+    tair : xr.DataArray
+        Dask-backed source array with ``lat_name``/``lon_name`` dims.
+    lat_name, lon_name : str
+        Names of ``tair``'s latitude/longitude dimensions.
+    nearest_row, nearest_col : np.ndarray
+        Per-river nearest-neighbor grid indices into ``tair``'s native
+        (raveled) lat/lon grid, as returned by ``query_kdtree_nearest``.
+
+    Returns
+    -------
+    xr.DataArray
+        Per-river ``tair``, dims ``(*other_dims, "nriver")``. A coordinate
+        depending on ``lat_name``/``lon_name`` without being one of them
+        (e.g. a 2-D auxiliary coordinate) isn't carried over and will raise.
+    """
+    # Output dims may get reordered (``nriver`` moves last) —
+    # callers must pass ``(time, latitude, longitude)``
+    if tair.dims[-2:] != (lat_name, lon_name):
+        raise ValueError(
+            f"_sample_points_chunkwise assumes {lat_name!r}/{lon_name!r} are already "
+            f"the trailing dims of `tair`; got dims={tair.dims!r}"
+        )
+
+    other_dims = [d for d in tair.dims if d not in (lat_name, lon_name)]
+    tair = tair.transpose(*other_dims, lat_name, lon_name)
+    darr = tair.data
+    n_lead = darr.ndim - 2
+
+    def _sample_block(block: np.ndarray) -> np.ndarray:
+        return block[..., nearest_row, nearest_col]
+
+    # Explicit `meta` skips dask's own probe call (running `_sample_block`
+    # on a synthetic zero-sized array to infer dtype), which otherwise warns
+    # about indexing an empty array.
+    meta = np.empty((0,) * (n_lead + 1), dtype=darr.dtype)
+    sampled = darr.map_blocks(
+        _sample_block,
+        dtype=darr.dtype,
+        chunks=(*darr.chunks[:n_lead], (len(nearest_row),)),
+        drop_axis=[n_lead, n_lead + 1],
+        new_axis=[n_lead],
+        meta=meta,
+    )
+    out_coords = {k: v for k, v in tair.coords.items() if k not in (lat_name, lon_name)}
+    return xr.DataArray(
+        sampled, dims=(*other_dims, "nriver"), coords=out_coords, name=tair.name
     )
 
 
@@ -996,14 +1039,12 @@ class RiverForcing:
         """Sample air temperature at each river's mouth coordinate.
 
         Builds a dataset for ``surface_forcing_source`` (see
-        ``_resolve_surface_forcing_source``) narrowed to a bounding box
-        around the river mouths (``initial_slice_bounds``), then
-        nearest-neighbor samples the raw source grid once per river via a
-        KDTree (``_sample_tair_at_river_mouths``) -- not once per grid cell,
-        since that scales both the sampling and the downstream ``.compute()``
-        with the number of grid cells a river occupies rather than the
-        number of rivers, which is much slower for domains with multi-cell
-        rivers.
+        ``_resolve_surface_forcing_source``), then nearest-neighbor samples
+        the raw source grid once per river via a KDTree
+        (``_sample_tair_at_river_mouths``) -- not once per grid cell, since
+        that scales both the sampling and the downstream ``.compute()`` with
+        the number of grid cells a river occupies rather than the number of
+        rivers, which is much slower for domains with multi-cell rivers.
 
         If the river forcing is climatological, the multi-year Tair record
         is first reduced to its own day-of-year climatology
@@ -1038,19 +1079,20 @@ class RiverForcing:
         dataset_cls, resolved_path, river_lons, raw_tair_name, is_arco = (
             self._resolve_surface_forcing_source(river_lons)
         )
-        # river_lons is only converted (and only narrowed below) when
-        # `is_arco` -- a local file's native convention isn't guessed.
+        # river_lons is only converted to 0-360 when `is_arco` -- a local
+        # file's native convention isn't guessed.
         logging.info("Opening ERA5 source for river temperatures...")
 
+        # No initial_slice_bounds: ARCO's chunks are one full lat/lon slab
+        # per time step, so cropping shrinks the logical shape but not what
+        # gets fetched. `_sample_points_chunkwise` bounds memory by
+        # streaming chunks, not by pre-cropping the source.
         data = dataset_cls(
             filename=resolved_path,
             start_time=self.start_time,
             end_time=self.end_time,
             climatology=False,
             use_dask=True,
-            initial_slice_bounds=(
-                _bounding_box_with_buffer(river_lats, river_lons) if is_arco else None
-            ),
             var_names={"Tair": raw_tair_name},
             needs_lateral_fill=False,
             apply_post_processing=False,
@@ -1058,7 +1100,6 @@ class RiverForcing:
 
         tair = data.ds[data.var_names["Tair"]] - 273.15
         tair.attrs["units"] = "degrees C"
-        tair = tair.chunk({"time": -1})
 
         river_tair = _sample_tair_at_river_mouths(
             tair,
@@ -1129,8 +1170,7 @@ class RiverForcing:
         here, not restructuring the caller.
 
         Also converts ``cell_lon`` to the source's native longitude
-        convention, since this varies by source (ERA5 uses 0-360) and has to
-        be known before ``initial_slice_bounds`` can be built correctly.
+        convention, since this varies by source (ERA5 uses 0-360).
 
         Parameters
         ----------
@@ -1162,11 +1202,9 @@ class RiverForcing:
             path_value = cast("str | Path | None", surface_forcing_source.get("path"))
             resolved_path, is_arco, dataset_cls = resolve_era5_source(path_value)
             if is_arco:
-                # ARCO's native longitude convention is known to be 0-360.
-                # A local ERA5 extract's convention isn't known in advance
-                # (a regional file may already be -180-180), so only
-                # convert -- and only narrow via `initial_slice_bounds` --
-                # for the known-0-360 ARCO case.
+                # ARCO's convention is known to be 0-360; a local extract's
+                # isn't known in advance (may already be -180-180), so only
+                # convert for ARCO.
                 cell_lon = np.where(cell_lon < 0, cell_lon + 360, cell_lon)
 
             default_factory = next(

@@ -1387,3 +1387,92 @@ class TestForwardableFields:
 
         assert forwardable_fields(A, B) == {"x", "y"}
         assert forwardable_fields(A, B, exclude=("y",)) == {"x"}
+
+
+# ---------------------------------------------------------------------------
+# companions_derive_from_physics_ts: which bgc companions read the physics T/S
+# ---------------------------------------------------------------------------
+class TestCompanionsDeriveFromPhysicsTS:
+    def _f(self, items, default="depth"):
+        from roms_tools.setup.utils import companions_derive_from_physics_ts
+
+        return companions_derive_from_physics_ts(items, default)
+
+    def test_no_sources_is_false(self):
+        assert self._f(None) is False
+        assert self._f([]) is False
+
+    def test_esper_always_derives(self):
+        assert self._f([{"source": {"name": "ESPER"}}]) is True
+
+    @pytest.mark.parametrize("method", ["density", "density_mld"])
+    def test_density_methods_derive_per_item(self, method):
+        items = [{"source": {"name": "UNIFIED"}, "bgc_interpolation_method": method}]
+        assert self._f(items) is True
+
+    @pytest.mark.parametrize("method", ["density", "density_mld"])
+    def test_density_methods_derive_via_the_wrapper_default(self, method):
+        items = [{"source": {"name": "UNIFIED"}}]  # inherits the section default
+        assert self._f(items, default=method) is True
+
+    def test_depth_only_climatology_does_not(self):
+        items = [
+            {"source": {"name": "UNIFIED"}, "bgc_interpolation_method": "depth"},
+            {"source": {"name": "constants", "constants": {"NO3": 1.0}}},
+        ]
+        assert self._f(items, default="depth") is False
+
+
+class TestMaterializePhysicsTS:
+    def _ds(self, n_time=20):
+        rng = np.random.default_rng(0)
+        data = rng.random((n_time, 3, 4))
+        return (
+            xr.Dataset(
+                {
+                    "temp_west": (("bry_time", "s_rho", "eta_rho"), data),
+                    "salt_west": (("bry_time", "s_rho", "eta_rho"), data + 30),
+                    "zeta_west": (("bry_time", "eta_rho"), data[:, 0, :]),
+                }
+            ).chunk({"bry_time": 1}),
+            data,
+        )
+
+    def test_computes_in_time_blocks_and_rewraps_with_original_chunks(
+        self, monkeypatch
+    ):
+        from xarray.core.utils import is_duck_dask_array
+
+        from roms_tools.setup import utils as u
+
+        ds, data = self._ds(n_time=20)
+        calls = []
+        real = u.dask.compute
+
+        def counting(*args, **kwargs):
+            calls.append(len(args))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(u.dask, "compute", counting)
+        u.materialize_physics_ts(
+            ds, ["temp_west", "salt_west", "missing"], time_block=8
+        )
+
+        assert len(calls) == 3  # 20 steps in blocks of 8: 8 + 8 + 4
+        assert all(c == 2 for c in calls)  # both strips per block, one compute
+        for var, offset in (("temp_west", 0.0), ("salt_west", 30.0)):
+            out = ds[var]
+            assert is_duck_dask_array(out.data)
+            assert out.chunks[0] == tuple([1] * 20)  # original chunking restored
+            assert len(dict(out.data.dask)) <= out.data.npartitions + 1  # memory-backed
+            np.testing.assert_allclose(out.values, data + offset)
+        assert len(dict(ds["zeta_west"].data.dask)) > 0  # untouched
+
+    def test_noop_without_dask_or_names(self):
+        from roms_tools.setup import utils as u
+
+        ds, data = self._ds()
+        eager = ds.compute()
+        u.materialize_physics_ts(eager, ["temp_west"])  # numpy: nothing to do
+        np.testing.assert_allclose(eager["temp_west"].values, data)
+        u.materialize_physics_ts(ds, [])  # empty: nothing to do

@@ -48,6 +48,7 @@ from roms_tools.setup.utils import (
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_source_coverage,
+    companions_derive_from_physics_ts,
     compute_barotropic_velocity,
     deserialize_forcing_data,
     forwardable_fields,
@@ -56,6 +57,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     materialize_before_check,
+    materialize_physics_ts,
     nan_check_batch,
     pop_grid_data,
     preflight_esper_sources,
@@ -2005,6 +2007,12 @@ class InitialConditions:
         self.model_reference_date = self.physics.model_reference_date
 
         if bgc_sources:
+            # Realize the T/S fields the companions derive from before their graphs
+            # are built; see materialize_physics_ts and the boundary-forcing wrapper.
+            if companions_derive_from_physics_ts(
+                bgc_sources, self.bgc_interpolation_method
+            ):
+                materialize_physics_ts(self.physics.ds, ["temp", "salt"])
             self.bgc = build_bgc_companions(
                 InitialConditionsSource,
                 self.grid,

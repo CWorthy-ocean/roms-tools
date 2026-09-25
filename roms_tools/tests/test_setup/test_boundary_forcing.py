@@ -1507,6 +1507,45 @@ class TestBoundaryForcingWrapper:
             **kwargs,
         )
 
+    def test_physics_ts_is_realized_before_companions_that_derive_from_it(
+        self, small_grid
+    ):
+        """A density-interpolated companion reads the physics T/S, so the wrapper
+        realizes those strips before building it. Every companion save then depends
+        on small in-memory arrays instead of the shared lazy source regrid -- the
+        graph shape that made ESPER boundary saves grow in memory without bound.
+        Only T/S are realized -- and re-wrapped as dask so ESPER stays chunk-planned;
+        the rest of the physics keeps its real lazy graph.
+        """
+        from xarray.core.utils import is_duck_dask_array
+
+        bf = self._make(small_grid, use_dask=True)  # default sources include "density"
+        active = [d for d, on in bf.physics.boundaries.items() if on]
+        assert active
+        for d in active:
+            for var in ("temp", "salt"):
+                data = bf.physics.ds[f"{var}_{d}"].data
+                # Still dask -- PyESPER's chunk plan must keep applying -- but
+                # backed by memory: nothing in its graph reads the source anymore.
+                assert is_duck_dask_array(data)
+                assert len(dict(data.dask)) <= data.npartitions + 1
+            zeta = bf.physics.ds[f"zeta_{d}"].data
+            assert is_duck_dask_array(zeta)
+            assert len(dict(zeta.dask)) > zeta.npartitions + 1  # the real lazy graph
+
+    def test_physics_ts_stays_lazy_when_no_companion_needs_it(self, small_grid):
+        """Constants on plain depth interpolation never touch T/S: nothing is realized."""
+        from xarray.core.utils import is_duck_dask_array
+
+        bf = self._make(
+            small_grid,
+            use_dask=True,
+            bgc_sources=[{"source": {"name": "constants", "constants": {"NO3": 24.0}}}],
+        )
+        active = [d for d, on in bf.physics.boundaries.items() if on]
+        for d in active:
+            assert is_duck_dask_array(bf.physics.ds[f"salt_{d}"].data)
+
     def test_save_honours_group_and_format_and_returns_real_paths(
         self, small_grid, use_dask, tmp_path
     ):

@@ -48,6 +48,7 @@ from roms_tools.setup.utils import (
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
+    companions_derive_from_physics_ts,
     compute_barotropic_velocity,
     deserialize_forcing_data,
     forwardable_fields,
@@ -58,6 +59,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     materialize_before_check,
+    materialize_physics_ts,
     nan_check_batch,
     pop_grid_data,
     preflight_esper_sources,
@@ -1992,6 +1994,22 @@ class BoundaryForcing:
         self.physics = BoundaryForcingSource(**{**shared_kwargs, "type": "physics"})
 
         if bgc_sources:
+            # Realize the boundary T/S strips the companions derive from (ESPER's
+            # inputs, density_mld's sigma-0) before their graphs are built, so their
+            # saves depend on small in-memory arrays rather than on the shared lazy
+            # source regrid -- which is what made every companion save climb in
+            # memory without bound. See materialize_physics_ts.
+            if companions_derive_from_physics_ts(
+                bgc_sources, self.bgc_interpolation_method
+            ):
+                materialize_physics_ts(
+                    self.physics.ds,
+                    [
+                        name
+                        for name in self.physics.ds.data_vars
+                        if str(name).split("_")[0] in ("temp", "salt")
+                    ],
+                )
             self.bgc = build_bgc_companions(
                 BoundaryForcingSource,
                 self.grid,

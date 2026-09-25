@@ -21,6 +21,7 @@ import xgcm
 import yaml
 from pydantic import BaseModel
 from scipy.spatial import cKDTree
+from xarray.core.utils import is_duck_dask_array
 
 from roms_tools.constants import R_EARTH
 
@@ -351,6 +352,102 @@ def materialize_before_check(ds, var_names, materialize: bool) -> None:
     realized = dask.compute(*(ds[v] for v in names))
     for v, value in zip(names, realized):
         ds[v] = value
+
+
+def companions_derive_from_physics_ts(
+    bgc_sources: Sequence[Mapping[str, Any]] | None, default_interpolation: str
+) -> bool:
+    """True when any bgc companion will read the physics temperature/salinity.
+
+    Two kinds do: an ``ESPER`` source (PyESPER's inputs *are* T/S) and any source
+    interpolated on density -- ``"density"`` or ``"density_mld"`` both need sigma-0
+    from T/S. A climatology on plain ``"depth"`` interpolation never touches them.
+    """
+    for item in bgc_sources or ():
+        if (item.get("source") or {}).get("name") == "ESPER":
+            return True
+        method = item.get("bgc_interpolation_method") or default_interpolation
+        if method in ("density", "density_mld"):
+            return True
+    return False
+
+
+def materialize_physics_ts(ds, var_names: Iterable[str], time_block: int = 1) -> None:
+    """Realize the physics T/S fields the bgc companions derive from, in place.
+
+    Called by the ``BoundaryForcing``/``InitialConditions`` wrappers *before*
+    ``build_bgc_companions``, so that ESPER's inputs and every density-based
+    interpolation are built on data already in memory rather than on the lazy
+    source regrid graph.
+
+    Why: a companion's own ``.save()`` computes all of its variables in one graph
+    (18 per monthly boundary file for ESPER: six tracers, three directions). Left
+    lazy, every one of them reaches back through the same per-day regrids of the
+    source slabs, and dask's ordering over that wide, shared graph materialises
+    many days of ~190 MB domain-bbox temp+salt slabs before their consumers run.
+    Measured on a 12 km ESPER boundary month under the synchronous scheduler: RSS
+    rose linearly at ~12 GB/h through the save and no monthly file completed in
+    the time a single variable took to compute alone (which stayed flat) -- the
+    same signature that ended a 5-year run at >112 GB. Realizing the regridded
+    strips here severs the companions' graphs from the source entirely, and the
+    physics save writes T/S from memory too. Every other physics variable stays
+    lazy.
+
+    Two things this deliberately does NOT do:
+
+    * **Realize the whole span in one compute.** That is the same wide, shared
+      graph -- six strips over every day -- and it peaked at 25 GB for a single
+      34-day month. The unit of memory here is not the strip but the *decoded
+      source day*: the regrid reads whole global GLORYS slabs, and one day of
+      temp+salt decoded to float64 is ~7 GB (2041x4320x50 levels x 2) whatever
+      the ROMS grid looks like. So the strips are computed in blocks of
+      ``time_block`` steps along their time dimension, one block at a time, which
+      bounds the peak by the block rather than by the run length. Eight-day
+      blocks still peaked at 35 GB on that month; the default of one step peaked
+      at 18.6 GB -- one day's slabs plus their decode intermediates -- and built
+      faster (392 s against 583 s), for one small compute call per step. Cropping
+      the source to the domain *before* CF decoding would cut that day-size by
+      the global-to-bbox area ratio; that is a loader change, not done here.
+    * **Hand the companions numpy.** ``estimate_bgc_fields`` only applies
+      PyESPER's chunk plan and point budget when its inputs are dask-backed; numpy
+      inputs make PyESPER run eagerly, at build time, on the full span in one
+      call -- bypassing the ``_max_points_per_chunk`` guard that exists because a
+      4 km / 100-level grid OOM-killed a 251 GB machine at the default chunking.
+      So each realized strip is re-wrapped as a dask array carrying the chunks it
+      had before: the values are in memory, but ESPER stays lazy, chunk-planned
+      and under ``serialize_dask`` exactly as it was.
+
+    What it costs is the strips themselves: at 12 km, 1.8 MB per variable per
+    direction per month (about 0.5 GB for five years of three boundaries); on a
+    100-level 1858x962 grid, order 16 GB for a year. That is the data the physics
+    save writes regardless, held a little earlier.
+
+    A no-op for names that are absent or not dask-backed.
+    """
+    names = [v for v in var_names if v in ds and is_duck_dask_array(ds[v].data)]
+    if not names:
+        return
+    time_dims = {
+        v: next((d for d in ds[v].dims if "time" in str(d)), None) for v in names
+    }
+    original_chunks = {v: dict(ds[v].chunksizes) for v in names}
+
+    # Group by time dimension so one block slices every strip on the same axis.
+    for time_dim in {*time_dims.values()}:
+        group = [v for v in names if time_dims[v] == time_dim]
+        if time_dim is None:
+            realized = dict(zip(group, dask.compute(*(ds[v] for v in group))))
+        else:
+            n = ds.sizes[time_dim]
+            pieces: dict[str, list] = {v: [] for v in group}
+            for start in range(0, n, time_block):
+                block = slice(start, min(start + time_block, n))
+                vals = dask.compute(*(ds[v].isel({time_dim: block}) for v in group))
+                for v, val in zip(group, vals):
+                    pieces[v].append(val)
+            realized = {v: xr.concat(pieces[v], dim=time_dim) for v in group}
+        for v, value in realized.items():
+            ds[v] = value.chunk(original_chunks[v])
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:

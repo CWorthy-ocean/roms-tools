@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -206,6 +207,84 @@ def test_load_data_open_dataset(
         assert fn_od.called
 
     assert expected_dim in ds.dims
+
+
+def _from_array_source_chain(dask_array) -> list:
+    """The objects ``dask.from_array`` wrapped, outermost first, for each source key."""
+    import dask
+
+    chain = []
+    for key, task in dict(dask_array.dask).items():
+        if isinstance(key, tuple) or callable(task):
+            continue
+        obj = getattr(task, "value", task)
+        while obj is not None:
+            chain.append(obj)
+            if dask.is_dask_collection(obj):
+                break
+            obj = getattr(obj, "array", None)
+    return chain
+
+
+@pytest.fixture
+def kerchunk_reference(tmp_path: Path) -> tuple[Path, xr.Dataset]:
+    """A kerchunk JSON reference to a small netCDF file, plus the source dataset."""
+    pytest.importorskip("kerchunk")  # pulls in ujson/h5py; skip cleanly if absent
+    from kerchunk.hdf import SingleHdf5ToZarr
+
+    rng = np.random.default_rng(0)
+    src = xr.Dataset(
+        {"temp": (("time", "lat", "lon"), rng.random((4, 5, 6), dtype="float32"))},
+        coords={
+            "time": np.arange(4, dtype="int64"),
+            "lat": np.linspace(-2, 2, 5, dtype="float32"),
+            "lon": np.linspace(0, 5, 6, dtype="float32"),
+        },
+    )
+    nc = tmp_path / "src.nc"
+    src.to_netcdf(nc, engine="h5netcdf")
+    refs = SingleHdf5ToZarr(str(nc), inline_threshold=0).translate()
+    ref = tmp_path / "src.json"
+    ref.write_text(json.dumps(refs))
+    return ref, src
+
+
+def test_load_data_kerchunk_reference_uses_a_single_dask_layer(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """A kerchunk reference must not come back as dask-inside-dask.
+
+    The kerchunk backend's ``open_zarr`` defaults to ``chunks="auto"``, and xarray
+    wraps whatever the backend returns before applying the outer ``chunks=`` -- so
+    without ``_kerchunk_open_kwargs`` every outer chunk hides a nested ``compute()``
+    of an inner dask array. Walk the objects ``from_array`` wrapped and require that
+    none of them is a dask collection.
+    """
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=True
+    )
+    data = ds["temp"].data
+    assert hasattr(data, "dask"), "expected a dask-backed variable with use_dask=True"
+
+    chain = _from_array_source_chain(data)
+    assert chain, "no from_array source found in the graph"
+    nested = [type(o).__name__ for o in chain if hasattr(o, "dask")]
+    assert not nested, f"kerchunk reference is wrapped dask-inside-dask via {nested}"
+
+    xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
+
+
+def test_load_data_kerchunk_reference_eager_is_not_dask(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """With ``use_dask=False`` the backend must not smuggle dask arrays in either."""
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=False
+    )
+    assert not hasattr(ds["temp"].data, "dask")
+    xr.testing.assert_allclose(ds["temp"], src["temp"])
 
 
 # test get_dask_chunks

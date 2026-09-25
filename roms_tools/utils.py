@@ -481,6 +481,7 @@ def _load_data_dask(
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
+        kwargs.update(_kerchunk_open_kwargs(filenames[0]))
 
         preprocessor = (
             _get_ds_preprocessor(initial_slice_bounds, initial_slice_bounds_use_isel)
@@ -495,6 +496,51 @@ def _load_data_dask(
             preprocess=preprocessor,
             **kwargs,
         )
+
+
+_KERCHUNK_SUFFIXES = (".json", ".json.zstd", ".parquet")
+
+
+def _is_kerchunk_reference(path: str | Path) -> bool:
+    """True for a kerchunk reference file (what ``KerchunkBackend.guess_can_open`` accepts)."""
+    return str(path).endswith(_KERCHUNK_SUFFIXES)
+
+
+def _kerchunk_open_kwargs(path: str | Path) -> dict:
+    """Extra ``xr.open_dataset`` kwargs so a kerchunk reference is read through ONE dask layer.
+
+    The kerchunk backend implements ``open_dataset`` as ``xr.open_zarr(store, ...)``,
+    and ``open_zarr`` defaults to ``chunks="auto"`` -- so the *backend* already hands
+    xarray dask-backed variables. xarray then wraps every backend variable in
+    ``CopyOnWriteArray`` unconditionally (``_protect_dataset_variables_inplace`` has
+    no dask check), and ``Variable.chunk()`` cannot see through that wrapper, so the
+    outer ``chunks=`` we pass ends up as ``dask.from_array`` over an indexing adapter
+    whose leaf is the inner dask array:
+
+        ImplicitToExplicitIndexingAdapter -> CopyOnWriteArray -> DaskIndexingAdapter -> dask.Array
+
+    Every outer chunk then runs a *nested* ``compute()`` of the inner array inside its
+    own task, and because CF decoding lives in that inner graph it is applied to whole
+    chunks *before* the outer task slices them. Profiled with py-spy on a 12 km ESPER
+    boundary month against the GLORYS subchunk reference (18 400 chunks per 3-D
+    variable, one per day and depth level): 84 % of all compute samples sat inside
+    those nested computes, 64 % of them decoding full 2041x4320 global slabs
+    (mask/scale/offset) and concatenating 50 levels into a ~1.8 GB array that the
+    outer task then cut down to a boundary strip; PyESPER itself was 0.1 %. A single
+    (time, depth) chunk read cost 0.49 s against 0.15 s once fixed, and the lazy
+    decode then runs on the slice rather than the slab.
+
+    Telling the backend's ``open_zarr`` ``chunks=None`` makes it return plain lazy
+    zarr wrappers, so the outer ``chunks=`` builds the only dask layer. The engine is
+    pinned too: ``open_mfdataset`` would otherwise re-run xarray's engine guessing per
+    file. Returns ``{}`` for anything that is not a reference file.
+    """
+    if not _is_kerchunk_reference(path):
+        return {}
+    return {
+        "engine": "kerchunk",
+        "backend_kwargs": {"open_dataset_options": {"chunks": None}},
+    }
 
 
 def _check_load_data_dask(use_dask: bool) -> None:
@@ -689,14 +735,16 @@ def load_data(
         ds_list = []
         for file in match_result.matches:
             # Decide the engine explicitly for zarr stores rather than letting
-            # xr.open_dataset auto-detect it; see `_is_zarr_store` for why.
+            # xr.open_dataset auto-detect it; see `_is_zarr_store` for why. A kerchunk
+            # reference would otherwise come back dask-backed from its own backend even
+            # on this eager path; see `_kerchunk_open_kwargs`.
             engine = "zarr" if _is_zarr_store(file) else None
             ds = xr.open_dataset(
                 file,
-                engine=engine,
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
                 chunks=None,
+                **({"engine": engine} | _kerchunk_open_kwargs(file)),
             )
             ds_list.append(ds)
 

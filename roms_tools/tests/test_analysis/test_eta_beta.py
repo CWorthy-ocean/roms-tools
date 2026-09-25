@@ -52,8 +52,8 @@ def eta_beta_iceland(use_dask):
     grid = Grid(filename=Path(download_test_data("Iceland_grid.nc")))
 
     return calculate_eta_beta(
-        his_path=Path(download_test_data("Iceland_his.nc")),
-        bgc_path=Path(download_test_data("Iceland_bgc.nc")),
+        his_path=Path(download_test_data("Iceland_his.20240710120000.nc")),
+        bgc_path=Path(download_test_data("Iceland_bgc.20240710120000.nc")),
         grid=grid,
         use_dask=use_dask,
     )

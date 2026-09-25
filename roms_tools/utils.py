@@ -482,6 +482,8 @@ def _load_data_dask(
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
         kwargs.update(_kerchunk_open_kwargs(filenames[0]))
+        if _is_kerchunk_reference(filenames[0]):
+            chunks = _without_lateral_chunks(chunks, dim_names)
 
         preprocessor = (
             _get_ds_preprocessor(initial_slice_bounds, initial_slice_bounds_use_isel)
@@ -504,6 +506,29 @@ _KERCHUNK_SUFFIXES = (".json", ".json.zstd", ".parquet")
 def _is_kerchunk_reference(path: str | Path) -> bool:
     """True for a kerchunk reference file (what ``KerchunkBackend.guess_can_open`` accepts)."""
     return str(path).endswith(_KERCHUNK_SUFFIXES)
+
+
+def _without_lateral_chunks(
+    chunks: dict[str, int] | None, dim_names: dict[str, str] | None
+) -> dict[str, int] | None:
+    """Drop the latitude/longitude entries from a dask ``chunks`` dict.
+
+    For a kerchunk reference the source is zarr-chunked, and GLORYS references
+    carry one chunk per (day, depth level) spanning the whole 2041x4320 level.
+    Imposing lateral dask tiles on top of that -- ``LatLonDataset``'s default
+    ``_default_lateral_dask_chunk`` of 50 gives 41x87 tiles per level -- makes
+    every tile's getter read and CF-decode the entire level slab and keep a 50x50
+    corner. Cropping a 12 km domain then touches 195 tiles per level, i.e. a 195x
+    read-and-decode amplification: one day's bbox crop took 19.7 s tiled against
+    0.8 s with the lateral dims inherited (0.3 s per-level), bit-identical.
+    ``read_zarr`` already avoids this by passing ``chunks={}``; this applies the
+    same rule to references. Time and depth entries are kept: one outer chunk per
+    day with the water column whole suits the vertical interpolation.
+    """
+    if not chunks or not dim_names:
+        return chunks
+    lateral = {dim_names.get("latitude"), dim_names.get("longitude")} - {None}
+    return {dim: size for dim, size in chunks.items() if dim not in lateral}
 
 
 def _kerchunk_open_kwargs(path: str | Path) -> dict:

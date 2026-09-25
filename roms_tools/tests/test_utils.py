@@ -275,6 +275,26 @@ def test_load_data_kerchunk_reference_uses_a_single_dask_layer(
     xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
 
 
+def test_load_data_kerchunk_reference_ignores_lateral_chunks(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """Lateral dask tiles over a reference would re-read every source chunk per
+    tile; the loader keeps time chunking and inherits the source's lateral extent.
+    """
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref,
+        {"time": "time", "latitude": "lat", "longitude": "lon"},
+        use_dask=True,
+        chunks={"time": 1, "lat": 2, "lon": 2},
+    )
+    chunks = ds["temp"].chunksizes
+    assert chunks["time"] == (1, 1, 1, 1)  # time chunking honoured
+    assert chunks["lat"] == (src.sizes["lat"],)  # lateral tiles dropped
+    assert chunks["lon"] == (src.sizes["lon"],)
+    xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
+
+
 def test_load_data_kerchunk_reference_eager_is_not_dask(
     kerchunk_reference: tuple[Path, xr.Dataset],
 ) -> None:

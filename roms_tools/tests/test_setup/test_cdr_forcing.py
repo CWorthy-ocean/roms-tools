@@ -9,7 +9,7 @@ import xarray as xr
 from pydantic import ValidationError
 
 from conftest import calculate_file_hash
-from roms_tools import CDRForcing, Grid, TracerPerturbation, VolumeRelease
+from roms_tools import BGCMarbl, CDRForcing, Grid, TracerPerturbation, VolumeRelease
 from roms_tools.constants import MAX_DISTINCT_COLORS, NUM_TRACERS
 from roms_tools.setup.cdr_forcing import (
     CDRForcingDatasetBuilder,
@@ -1174,8 +1174,6 @@ class TestCdrLiteForcing:
         assert cdr.ds.sizes["ntracers"] == NUM_TRACERS
 
     def test_include_marbl_bgc_appends_bgc_block(self):
-        from roms_tools.setup.utils import MARBL_TRACER_NAMES
-
         cdr = CDRForcing(
             start_time=self.start_time,
             end_time=self.end_time,
@@ -1183,7 +1181,7 @@ class TestCdrLiteForcing:
             include_marbl_bgc=True,
         )
         names = list(cdr.ds.tracer_name.values)
-        expected_tail = [n for n in MARBL_TRACER_NAMES if n not in ("temp", "salt")]
+        expected_tail = [n for n in BGCMarbl.TRACER_NAMES if n not in ("temp", "salt")]
         assert names == ["temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1", *expected_tail]
 
     def test_include_marbl_bgc_rejected_for_pure_marbl(self):

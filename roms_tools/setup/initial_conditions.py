@@ -106,6 +106,9 @@ _BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {
     "ESPER",
 }
 
+#: Model reference date used when neither the caller nor a ``"ROMS"`` source sets one.
+_DEFAULT_MODEL_REFERENCE_DATE: datetime = datetime(2000, 1, 1)
+
 
 @dataclass(kw_only=True)
 class InitialConditionsSource:
@@ -169,7 +172,11 @@ class InitialConditionsSource:
         Mirrors :class:`~roms_tools.setup.boundary_forcing.BoundaryForcingSource`'s
         ``physics_forcing`` pattern.
     model_reference_date : datetime, optional
-        The reference date for the model. Defaults to January 1, 2000.
+        The reference date for the model. Defaults to None, which resolves to the
+        ``physics_forcing``'s reference date for ``type="bgc"``, to the reference date
+        recorded in a ``"ROMS"`` restart source (so the new initial conditions share
+        the parent simulation's time origin), and otherwise to January 1, 2000. The
+        resolved date is written back to this field.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
     chunks : dict[str, int], optional
@@ -311,8 +318,9 @@ class InitialConditionsSource:
     """Required when ``type="bgc"``: a ``type="physics"`` InitialConditionsSource
     object supplying temperature/salinity, so this object's own physics regridding
     is skipped entirely. See the class docstring for the full contract."""
-    model_reference_date: datetime = datetime(2000, 1, 1)
-    """The reference date for the model."""
+    model_reference_date: datetime | None = None
+    """The reference date for the model; None resolves as described in the class
+    docstring."""
     allow_flex_time: bool = False
     """Whether to handle ini_time flexibly."""
     use_dask: bool = False
@@ -377,6 +385,10 @@ class InitialConditionsSource:
 
         processed_fields = {}
         if self.type == "bgc":
+            # A BGC object merges onto its physics companion, so it must share that
+            # companion's (already resolved) time origin.
+            if self.model_reference_date is None:
+                self.model_reference_date = self.physics_forcing.model_reference_date
             # BGC-only construction: reuse the required physics companion's T/S and
             # depth coordinates instead of redundantly regridding the full physics
             # variable set (u, v, zeta, w, barotropic velocities, ...) again for this
@@ -423,6 +435,9 @@ class InitialConditionsSource:
                 processed_fields.pop(k, None)
         else:
             processed_fields = self._process_data(processed_fields, type="physics")
+
+        if self.model_reference_date is None:
+            self.model_reference_date = _DEFAULT_MODEL_REFERENCE_DATE
 
         for var_name in processed_fields:
             processed_fields[var_name] = transpose_dimensions(
@@ -555,6 +570,10 @@ class InitialConditionsSource:
             # ``LateralRegridFromROMS`` (unchanged). The prefill/regrid/extrap options
             # do not apply here; warn if the user explicitly set any of them.
             self._warn_if_regrid_options_set_for_roms()
+            # Default to the parent simulation's time origin, inferred by the
+            # ROMSDataset from the restart's `ocean_time` metadata.
+            if self.model_reference_date is None:
+                self.model_reference_date = data.model_reference_date
             data.apply_lateral_fill()
         else:
             # `self.source` is always the source relevant to `type` now (contextual
@@ -1885,8 +1904,9 @@ class InitialConditions:
     bgc_model: type[BGCModel] | None = None
     """The BGCModel subclass (e.g. BGCMarbl) used to complete the tracer set.
     Required whenever ``bgc_source``/``bgc_sources`` is given."""
-    model_reference_date: datetime = datetime(2000, 1, 1)
-    """The reference date for the model."""
+    model_reference_date: datetime | None = None
+    """The reference date for the model; None resolves as described in
+    :class:`InitialConditionsSource`, and the resolved date is written back here."""
     allow_flex_time: bool = False
     """Whether to handle ini_time flexibly."""
     use_dask: bool = False
@@ -1981,6 +2001,7 @@ class InitialConditions:
             )
         }
         self.physics = InitialConditionsSource(**{**shared_kwargs, "type": "physics"})
+        self.model_reference_date = self.physics.model_reference_date
 
         if bgc_sources:
             self.bgc = build_bgc_companions(

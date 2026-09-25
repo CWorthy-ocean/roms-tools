@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 import numpy as np
 import xarray as xr
@@ -14,8 +14,8 @@ from roms_tools.datasets.download import (
     download_river_tracer_defaults,
 )
 from roms_tools.datasets.utils import check_dataset, select_relevant_times
+from roms_tools.setup.bgc_model import BGCMarbl, BGCModel
 from roms_tools.setup.utils import (
-    MARBL_TRACER_NAMES,
     build_kdtree_from_latlon,
     find_coastal_cells,
     latlon_to_xyz,
@@ -31,13 +31,42 @@ RIVR2O_MIN_YEAR = 1903
 RIVR2O_MAX_YEAR = 2024
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
 
+#: MARBL tracers the RIVR2O product supplies (both accounting modes produce
+#: exactly these keys).
+RIVR2O_PROVIDED_TRACERS = (
+    "DIC",
+    "ALK",
+    "DOC",
+    "DON",
+    "DOP",
+    "NO3",
+    "PO4",
+    "DIC_ALT_CO2",
+    "ALK_ALT_CO2",
+)
+
+# Loud import-time guard (mirrored by a unit test): every RIVR2O-supplied
+# tracer must exist on the MARBL tracer axis, because the downstream
+# consumers match names against that axis and silently skip unknown ones.
+_unknown_rivr2o_tracers = set(RIVR2O_PROVIDED_TRACERS) - set(BGCMarbl.TRACER_NAMES)
+if _unknown_rivr2o_tracers:
+    raise ValueError(
+        "RIVR2O_PROVIDED_TRACERS contains tracers unknown to BGCMarbl: "
+        f"{sorted(_unknown_rivr2o_tracers)}"
+    )
+
 VALUE_OPTION_DIM = "value_option"
 RECOMMENDED_VALUE_INDEX = 0
 RIVER_TRACER_DEFAULTS_FILENAME = "river_tracer_defaults.nc"
 
 
 class RiverBGCDataset(Protocol):
-    """Protocol for river BGC datasets used by ``RiverForcing``."""
+    """Protocol for river BGC datasets used by ``RiverForcing``.
+
+    The precomputed-concentration members carry default implementations
+    (sources implement this Protocol by explicit subclassing), so only sources
+    that actually precompute per-station concentrations need to override them.
+    """
 
     @property
     def requires_calendar_discharge_time(self) -> bool:
@@ -69,8 +98,44 @@ class RiverBGCDataset(Protocol):
         straddle: bool,
         river_names: list[str],
     ) -> dict[str, xr.DataArray]:
-        """Return ROMS tracer concentrations on ``(river_time, nriver)``."""
+        """Return ROMS tracer concentrations on ``(river_time, nriver)``.
+
+        Not called when ``precomputed_concentrations`` is ``True``.
+        """
         ...
+
+    @property
+    def precomputed_concentrations(self) -> bool:
+        """Whether concentrations are precomputed per station -- see
+        ``extract_station_concentrations`` -- rather than sampled via
+        ``forcing_concentrations``. Default: False.
+        """
+        return False
+
+    @property
+    def provided_tracers(self) -> tuple[str, ...]:
+        """ROMS tracer names this source supplies; ``()`` when the source only
+        provides fill values.
+        """
+        return ()
+
+    def extract_station_concentrations(
+        self, data: "RiverDataset"
+    ) -> dict[str, xr.DataArray]:
+        """Return pre-computed tracer concentrations already present on
+        ``data.ds``, on ``data.ds``'s own native ``(time, station)`` dims.
+
+        Only called when ``precomputed_concentrations`` is ``True``, once,
+        before overlap merging.
+        """
+        # A real default implementation (not a stub): sources that don't
+        # precompute inherit this guard, so mypy must not read the body as
+        # trivial/abstract.
+        message = (
+            f"{type(self).__name__} does not precompute station concentrations "
+            "(precomputed_concentrations is False)."
+        )
+        raise NotImplementedError(message)
 
 
 def fill_river_bgc_concentrations(
@@ -149,6 +214,9 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
         Path to the NetCDF file. Defaults to the file from roms-tools-data.
     value_option_index : int, optional
         Index along ``value_option`` to read. Defaults to 0 (recommended values).
+    bgc_model : type[BGCModel], optional
+        The BGC model whose tracer axis the defaults file must cover exactly.
+        Defaults to :class:`BGCMarbl`.
 
     Attributes
     ----------
@@ -160,6 +228,7 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
 
     filename: str | Path = field(default_factory=download_river_tracer_defaults)
     value_option_index: int = RECOMMENDED_VALUE_INDEX
+    bgc_model: type[BGCModel] = BGCMarbl
     defaults: dict[str, float] = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -170,7 +239,7 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
 
     def _read_defaults(self, ds: xr.Dataset) -> dict[str, float]:
         """Extract tracer concentrations for the selected value option."""
-        expected_tracers = set(MARBL_TRACER_NAMES)
+        expected_tracers = set(self.bgc_model.TRACER_NAMES)
 
         if VALUE_OPTION_DIM not in ds.dims:
             raise ValueError(
@@ -309,6 +378,9 @@ class RiverDataset:
     filename: str | Path | list[str | Path]
     COAST_SNAP_BUFFER_KM: float | None = None
     DOMAIN_EDGE_BUFFER: int = 20
+    MIN_DISCHARGE_M3S: float | None = None
+    """Minimum time-mean discharge (m3/s) required to keep a river; ``None``
+    disables the filter."""
     start_time: datetime
     end_time: datetime
     dim_names: dict[str, str]
@@ -749,6 +821,9 @@ class GloFASRiverDataset(RiverDataset):
 
     COAST_SNAP_BUFFER_KM: float = 50.0
     DOMAIN_EDGE_BUFFER: int = 20
+    MIN_DISCHARGE_M3S: float = 1.0
+    """Rivers below 1 m3/s are small streams not relevant for regional-scale
+    ocean modeling."""
 
     dim_names: dict = field(
         default_factory=lambda: {"station": "station", "time": "time"}
@@ -894,6 +969,12 @@ _DOP_FROM_POC = 1 / 276
 class Rivr2oRiverBGCDataset(RiverBGCDataset):
     """River BGC export data from the RIVR2O river inputs product.
 
+    This is the ``"per_river"`` accounting mode: RIVR2O's yearly export files
+    are sampled by lon/lat at each river mouth, as described below. For the
+    ``"total_discharge"`` mode (concentrations precomputed per GloFAS station,
+    embedded in the discharge file), see
+    :class:`Rivr2oTotalDischargeBGCDataset`.
+
     The product is distributed as one NetCDF file per year. Each file contains
     global river export fields on a regular lat/lon grid (typically 0.5°). Raw
     variables are annual mass exports in ``10^6 g element yr-1``.
@@ -936,6 +1017,8 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
     ds : xr.Dataset
         Processed dataset with MARBL tracer variables on the native lat/lon grid.
     """
+
+    PROVIDED_TRACERS: ClassVar[tuple[str, ...]] = RIVR2O_PROVIDED_TRACERS
 
     filename: str | Path | list[str | Path]
     start_time: datetime
@@ -1341,6 +1424,10 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
     def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
         return "calendar_year"
 
+    @property
+    def provided_tracers(self) -> tuple[str, ...]:
+        return self.PROVIDED_TRACERS
+
     @staticmethod
     def _align_concentration(
         values: xr.DataArray, nriver_coord: xr.DataArray
@@ -1461,14 +1548,12 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         don_forcing = doc_sl_conc * _DON_FROM_DOC_SL + poc_conc * _DON_FROM_POC
         dop_forcing = doc_sl_conc * _DOP_FROM_DOC_SL + poc_conc * _DOP_FROM_POC
 
-        return {
+        concentrations = {
             "DIC": dic_forcing,
             "DOC": doc_forcing,
             "DON": don_forcing.astype(np.float32),
             "DOP": dop_forcing.astype(np.float32),
             "ALK": alk_forcing,
-            "DIC_ALT_CO2": dic_forcing,
-            "ALK_ALT_CO2": alk_forcing,
             "NO3": self._export_to_concentration(
                 sampled["NO3"],
                 _RIVR2O_MOLAR_MASS_G["NO3"],
@@ -1484,6 +1569,90 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
                 **conc_kw,
             ),
         }
+        # The alternative-CO2 tracers mirror DIC/ALK; the rule lives on the
+        # BGC model, not here.
+        concentrations.update(BGCMarbl.derive_alt_co2(dic_forcing, alk_forcing))
+        return concentrations
+
+
+@dataclass(kw_only=True)
+class Rivr2oTotalDischargeBGCDataset(RiverBGCDataset):
+    """RIVR2O river BGC concentrations precomputed per GloFAS station.
+
+    The ``"total_discharge"`` accounting mode: instead of sampling RIVR2O's
+    yearly export files by lon/lat (see :class:`Rivr2oRiverBGCDataset`), it
+    reads MARBL tracer concentrations already precomputed per station —
+    accounting for each station's share of the total discharge — and embedded
+    as ``(year, station)`` variables on the GloFAS discharge file itself; see
+    ``extract_station_concentrations``. It therefore loads no data of its own.
+    """
+
+    PROVIDED_TRACERS: ClassVar[tuple[str, ...]] = RIVR2O_PROVIDED_TRACERS
+
+    fill_value: float = RIVR2O_FILL_VALUE
+
+    @property
+    def requires_calendar_discharge_time(self) -> bool:
+        """Reads real (non-climatological) GloFAS discharge and does its own
+        per-year broadcasting, so no climatology axis expansion is needed.
+        """
+        return False
+
+    @property
+    def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        # extract_station_concentrations already broadcasts each station's
+        # per-year value across every real day in that year -- no further
+        # calendar-year gap interpolation applies.
+        return "none"
+
+    @property
+    def precomputed_concentrations(self) -> bool:
+        return True
+
+    @property
+    def provided_tracers(self) -> tuple[str, ...]:
+        return self.PROVIDED_TRACERS
+
+    def forcing_concentrations(
+        self,
+        river_volume: xr.DataArray,
+        abs_time: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        *,
+        straddle: bool,
+        river_names: list[str],
+    ) -> dict[str, xr.DataArray]:
+        raise NotImplementedError(
+            "Rivr2oTotalDischargeBGCDataset precomputes station concentrations; "
+            "use extract_station_concentrations instead."
+        )
+
+    def extract_station_concentrations(
+        self, data: "RiverDataset"
+    ) -> dict[str, xr.DataArray]:
+        """Read precomputed per-station RivR2O concentrations off ``data.ds``.
+
+        Each ``(year, station)`` variable is broadcast across every real day
+        in that year.
+        """
+        time_dim = data.dim_names["time"]
+        per_day_years = data.ds[time_dim].dt.year
+        requested_years = np.unique(per_day_years.values)
+
+        present = [name for name in self.PROVIDED_TRACERS if name in data.ds]
+        if not present:
+            raise ValueError(
+                "discharge_accounting='total_discharge' requires a GloFAS "
+                "file enriched with precomputed RivR2O concentrations; none "
+                "were found."
+            )
+
+        # Reindex to a unique year axis first -- .sel() alone rejects
+        # repeated/missing indexers like the per-day year array.
+        annual = data.ds[present].reindex(year=requested_years, fill_value=np.nan)
+        per_day = annual.sel(year=per_day_years)
+        return {name: per_day[name] for name in present}
 
 
 def _decode_string(byte_array):

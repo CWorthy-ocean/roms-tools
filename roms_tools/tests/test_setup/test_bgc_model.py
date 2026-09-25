@@ -88,6 +88,7 @@ class TestBGCModelSubclassContract:
             Intermediate()
 
         class Concrete(Intermediate):
+            TRACER_NAMES = ("temp", "salt", "NO3")
             _TRACER_VARS = frozenset({"NO3"})
 
             def process_bgc_fields(self, forcings):
@@ -95,11 +96,86 @@ class TestBGCModelSubclassContract:
 
         assert Concrete().tracer_vars() == frozenset({"NO3"})
 
+    def test_concrete_subclass_with_inconsistent_axis_is_rejected(self):
+        with pytest.raises(TypeError, match="disagree"):
+
+            class Inconsistent(BGCModel):
+                TRACER_NAMES = ("temp", "salt", "NO3")
+                _TRACER_VARS = frozenset({"NO3", "PO4"})
+
+                def process_bgc_fields(self, forcings):
+                    return forcings
+
+    def test_concrete_subclass_axis_must_lead_with_physics_tracers(self):
+        with pytest.raises(TypeError, match="must start with"):
+
+            class NoPhysics(BGCModel):
+                TRACER_NAMES = ("NO3",)
+                _TRACER_VARS = frozenset({"NO3"})
+
+                def process_bgc_fields(self, forcings):
+                    return forcings
+
     def test_marbl_subclass_override_still_works(self):
         class DoubleLigand(BGCMarbl):
             _FE_TO_LIG = 6.0
 
         assert DoubleLigand().tracer_vars() == BGCMarbl().tracer_vars()
+
+
+class TestMarblTracerOrder:
+    """BGCMarbl.TRACER_NAMES is the on-disk ``ntracers`` axis order — frozen."""
+
+    def test_marbl_tracer_order_is_frozen(self):
+        # Load-bearing: river/CDR forcing files and river_tracer_defaults.nc
+        # encode this exact order. Any change is an on-disk format change.
+        assert BGCMarbl.TRACER_NAMES == (
+            "temp",
+            "salt",
+            "PO4",
+            "NO3",
+            "SiO3",
+            "NH4",
+            "Fe",
+            "Lig",
+            "O2",
+            "DIC",
+            "DIC_ALT_CO2",
+            "ALK",
+            "ALK_ALT_CO2",
+            "DOC",
+            "DON",
+            "DOP",
+            "DOPr",
+            "DONr",
+            "DOCr",
+            "zooC",
+            "spChl",
+            "spC",
+            "spP",
+            "spFe",
+            "spCaCO3",
+            "diatChl",
+            "diatC",
+            "diatP",
+            "diatFe",
+            "diatSi",
+            "diazChl",
+            "diazC",
+            "diazP",
+            "diazFe",
+        )
+
+    def test_num_tracers_matches_canonical_order(self):
+        from roms_tools.constants import NUM_TRACERS
+
+        assert NUM_TRACERS == len(BGCMarbl.TRACER_NAMES)
+
+    def test_tracer_vars_derived_from_order(self):
+        assert BGCMarbl._TRACER_VARS == frozenset(BGCMarbl.TRACER_NAMES) - {
+            "temp",
+            "salt",
+        }
 
 
 class TestValidateBgcModel:
@@ -144,10 +220,8 @@ def test_tracer_set_matches_release_tracer_models():
 
 
 def test_river_defaults_covers_marbl_axis_and_caches():
-    from roms_tools.setup.utils import MARBL_TRACER_NAMES
-
     defaults = BGCMarbl.river_defaults()
-    assert set(defaults) == set(MARBL_TRACER_NAMES)
+    assert set(defaults) == set(BGCMarbl.TRACER_NAMES)
     # cached: repeated calls return the same object
     assert BGCMarbl.river_defaults() is defaults
 

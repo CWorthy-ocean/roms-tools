@@ -1268,50 +1268,10 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
-# Canonical ROMS-MARBL tracer list for river forcing and related setup code.
-# Defined here (not in river_datasets) so RiverForcing, BGC dataset classes, and
-# tracer metadata share one schema without circular imports between setup and datasets.
-MARBL_TRACER_NAMES = (
-    "temp",
-    "salt",
-    "PO4",
-    "NO3",
-    "SiO3",
-    "NH4",
-    "Fe",
-    "Lig",
-    "O2",
-    "DIC",
-    "DIC_ALT_CO2",
-    "ALK",
-    "ALK_ALT_CO2",
-    "DOC",
-    "DON",
-    "DOP",
-    "DOPr",
-    "DONr",
-    "DOCr",
-    "zooC",
-    "spChl",
-    "spC",
-    "spP",
-    "spFe",
-    "spCaCO3",
-    "diatChl",
-    "diatC",
-    "diatP",
-    "diatFe",
-    "diatSi",
-    "diazChl",
-    "diazC",
-    "diazP",
-    "diazFe",
-)
-
-
 def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
+    tracer_names: Sequence[str] | None = None,
 ):
     """Generate a dictionary containing metadata for model tracers.
 
@@ -1323,9 +1283,15 @@ def get_tracer_metadata_dict(
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
+        Ignored when ``tracer_names`` is given.
 
     unit_type : str
         One of "concentration" (default), "flux", or "integrated".
+
+    tracer_names : sequence of str, optional
+        Explicit ordered tracer axis (e.g. a ``BGCModel.TRACER_NAMES``).
+        When omitted, ``include_bgc`` selects the MARBL axis or just
+        temp/salt.
 
     Returns
     -------
@@ -1333,7 +1299,11 @@ def get_tracer_metadata_dict(
         A dictionary where keys are tracer names and values are dictionaries
         containing 'units' and 'long_name' for each tracer.
     """
-    tracer_names = list(MARBL_TRACER_NAMES) if include_bgc else ["temp", "salt"]
+    if tracer_names is None:
+        from roms_tools.setup.bgc_model import PHYSICS_TRACER_NAMES, BGCMarbl
+
+        tracer_names = BGCMarbl.TRACER_NAMES if include_bgc else PHYSICS_TRACER_NAMES
+    tracer_names = list(tracer_names)
 
     metadata = get_variable_metadata()
 
@@ -1358,6 +1328,7 @@ def add_tracer_metadata_to_ds(
     ds,
     include_bgc=True,
     with_flux_units=False,
+    tracer_names=None,
     tracer_metadata=None,
 ):
     """Adds tracer metadata to a dataset.
@@ -1372,16 +1343,20 @@ def add_tracer_metadata_to_ds(
     include_bgc : bool, optional
         If True (default), includes biogeochemical tracers in the output.
         If False, returns only physical tracers (e.g., temperature, salinity).
-        Ignored when ``tracer_metadata`` is given.
+        Ignored when ``tracer_names`` or ``tracer_metadata`` is given.
     with_flux_units : bool, optional
         If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
         If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
         Ignored when ``tracer_metadata`` is given (its units are used as-is).
+    tracer_names : sequence of str, optional
+        Explicit ordered tracer axis (e.g. a ``BGCModel.TRACER_NAMES``); this
+        order becomes the on-disk ``ntracers`` axis order, with units and long
+        names looked up in :func:`get_variable_metadata`.
     tracer_metadata : dict, optional
-        Prebuilt ordered mapping ``{name: {"units", "long_name"}}`` defining the
-        ``ntracers`` axis directly (e.g. from a tracer model or schema). Keeps
-        this helper model-agnostic: callers with generated tracer names (such
-        as CDR-LiTE) supply their own metadata here.
+        Prebuilt ordered mapping ``{name: {"units", "long_name"}}`` defining
+        the ``ntracers`` axis directly. For callers whose generated tracer
+        names are not in :func:`get_variable_metadata` (such as CDR-LiTE).
+        Takes precedence over ``tracer_names``.
 
     Returns
     -------
@@ -1392,7 +1367,9 @@ def add_tracer_metadata_to_ds(
         unit_type: Literal["concentration", "flux", "integrated"] = (
             "flux" if with_flux_units else "concentration"
         )
-        tracer_metadata = get_tracer_metadata_dict(include_bgc, unit_type=unit_type)
+        tracer_metadata = get_tracer_metadata_dict(
+            include_bgc, unit_type=unit_type, tracer_names=tracer_names
+        )
 
     tracer_names = list(tracer_metadata.keys())
     tracer_units = [tracer_metadata[tracer]["units"] for tracer in tracer_names]

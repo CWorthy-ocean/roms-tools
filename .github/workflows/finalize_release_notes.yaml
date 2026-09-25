@@ -37,8 +37,17 @@ jobs:
           if git ls-remote --exit-code --heads origin next_release_notes; then
             git checkout -b next_release_notes origin/next_release_notes
           else
-            git checkout -b next_release_notes
+            # From origin/main, not the event's SHA: a PR merged just before
+            # the last finalize PR would otherwise start the branch stale.
+            git checkout -b next_release_notes origin/main
           fi
+
+      - name: Use main's copy of the script
+        # next_release_notes can lag main (in the worst case by a whole release
+        # cycle), and a script fix merged in the meantime must still apply.
+        # This restores the working tree only; the index is untouched, so the
+        # commit below still holds nothing but the release notes.
+        run: git restore --source=origin/main --worktree -- ci/finalize_release_notes.py
 
       - name: Run finalize release notes script
         run: python ci/finalize_release_notes.py "${{ inputs.tag }}"

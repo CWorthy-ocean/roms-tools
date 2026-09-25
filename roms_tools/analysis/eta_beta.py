@@ -180,6 +180,14 @@ class calculate_eta_beta:
         # PyCO2SYS works on in-memory numpy arrays
         ds_surface = ds_surface.load()
 
+        # Skip near-empty cells, using MARBL's floors
+        salt_min = 0.1
+        ds_surface = ds_surface.where(
+            (ds_surface.salt >= salt_min)
+            & (ds_surface.ALK_ALT_CO2 >= salt_min / 35.0 * 2225.0)
+            & (ds_surface.DIC_ALT_CO2 >= salt_min / 35.0 * 1944.0)
+        )
+
         rho_factor = 1000.0 / 1025.0  # mmol/m3 → µmol/kg
 
         ALK = ds_surface["ALK_ALT_CO2"] * rho_factor
@@ -192,8 +200,9 @@ class calculate_eta_beta:
             par2_type=2,
             salinity=ds_surface.salt.values,
             temperature=ds_surface.temp.values,
-            total_silicate=ds_surface.SiO3.values * rho_factor,
-            total_phosphate=ds_surface.PO4.values * rho_factor,
+            total_silicate=ds_surface.SiO3.clip(min=0).values * rho_factor,
+            total_phosphate=ds_surface.PO4.clip(min=0).values * rho_factor,
+            opt_buffers_mode=2,
         )
 
         iso_q = csys["isocapnic_quotient"]

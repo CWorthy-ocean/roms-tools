@@ -55,6 +55,10 @@ stream = [
     "zarr",
     "copernicusmarine",
 ]
+catalog = [
+    "intake>=2",
+    "cf_xarray",
+]
 movie = [
     "imageio-ffmpeg",
 ]
@@ -110,7 +114,7 @@ fallback_version = "9999"
 exclude = ["docs", "tests", "tests.*", "docs.*", "roms_tools.tests", "roms_tools.tests.*", "ci", "ci.*"]
 
 [tool.setuptools.package-data]
-roms_tools = ["py.typed"]
+roms_tools = ["py.typed", "datasets/vocabulary.json", "datasets/catalogs/*.yaml"]
 
 [tool.setuptools.exclude-package-data]
 # Excluding roms_tools.tests* from packages.find (above) is not sufficient on

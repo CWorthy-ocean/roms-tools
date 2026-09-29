@@ -713,6 +713,32 @@ def load_data(
         msg = "A dataset was not loaded."
         raise RuntimeError(msg)
 
+    return finalize_loaded_dataset(ds, dim_names, read_zarr=read_zarr)
+
+
+def finalize_loaded_dataset(
+    ds: xr.Dataset, dim_names: dict[str, str], read_zarr: bool = False
+) -> xr.Dataset:
+    """Apply the time-axis normalisation that follows every load.
+
+    Ensures a time dimension exists and, except for zarr stores, drops duplicated time
+    entries. Shared by :func:`load_data` and by callers that open a dataset themselves
+    (the catalog path).
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The freshly opened dataset.
+    dim_names : dict[str, str]
+        Dimension names with standardized keys; only ``"time"`` is used.
+    read_zarr : bool, optional
+        Whether the dataset came from a zarr store, in which case duplicates are kept.
+
+    Returns
+    -------
+    xr.Dataset
+        The dataset with a time dimension and no duplicated time entries.
+    """
     if "time" in dim_names and dim_names["time"] not in ds.dims:
         ds = ds.expand_dims(dim_names["time"])
 
@@ -720,6 +746,35 @@ def load_data(
         ds = ds.drop_duplicates(dim=dim_names["time"])
 
     return ds
+
+
+def apply_initial_slice(
+    ds: xr.Dataset,
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None,
+    use_isel: bool = False,
+) -> xr.Dataset:
+    """Slice an already opened dataset with the bounds ``load_data`` would apply.
+
+    Equivalent to the ``preprocess`` step used when opening files with dask, so a
+    caller that opens the data itself still reads only the region it needs.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The opened dataset.
+    initial_slice_bounds : dict or None
+        Per-dimension ``(lower, upper)`` bounds. ``None`` returns ``ds`` unchanged.
+    use_isel : bool, optional
+        Treat the bounds as inclusive integer index ranges (ROMS) instead of labels.
+
+    Returns
+    -------
+    xr.Dataset
+        The sliced dataset.
+    """
+    if initial_slice_bounds is None:
+        return ds
+    return _get_ds_preprocessor(initial_slice_bounds, use_isel)(ds)
 
 
 def _interpolate_generic(

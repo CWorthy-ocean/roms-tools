@@ -113,6 +113,13 @@ def _get_topography_data(source):
     """
     kwargs = {"use_dask": False}
 
+    from roms_tools.datasets import catalog
+
+    if catalog.enabled() and catalog.has(source["name"], "topography"):
+        return catalog.from_catalog(
+            source["name"], source, "topography", use_dask=False
+        )
+
     if source["name"] == "ETOPO5":
         if "path" in source.keys():
             kwargs["filename"] = source["path"]

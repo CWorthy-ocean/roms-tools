@@ -24,6 +24,7 @@ from roms_tools.datasets.download import (
     download_sal_data,
     download_topo,
 )
+from roms_tools.datasets.transforms import Names, Transform
 from roms_tools.datasets.utils import (
     check_dataset,
     convert_to_float64,
@@ -183,6 +184,9 @@ class LatLonDataset:
     end_time_pad: bool = True
     apply_post_processing: bool = True
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
+    clean_up_fn: Transform | None = None
+    post_process_fn: Transform | None = None
+    _preloaded_ds: xr.Dataset | None = field(default=None, repr=False, compare=False)
     _default_lateral_dask_chunk: ClassVar[int | None] = None
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
@@ -202,7 +206,36 @@ class LatLonDataset:
             if lateral is not None:
                 self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
 
-        ds = self.load_data()
+        ds = self._preloaded_ds if self._preloaded_ds is not None else self.load_data()
+        self._preloaded_ds = None
+        self._process(ds)
+
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset, **fields: Any) -> LatLonDataset:
+        """Build an object from a dataset the caller has already opened.
+
+        Runs every step of construction except loading: cleaning up, validating,
+        selecting fields and times, ordering axes, and post-processing. Used by the
+        catalog path, where the reader owns loading.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The opened dataset.
+        **fields
+            Any constructor field (``var_names``, ``dim_names``, ``start_time``, ...).
+            ``filename`` defaults to the empty string since nothing is loaded from it.
+
+        Returns
+        -------
+        LatLonDataset
+            An instance of the class this is called on.
+        """
+        fields.setdefault("filename", "")
+        return cls(_preloaded_ds=ds, **fields)
+
+    def _process(self, ds: xr.Dataset) -> None:
+        """Run every construction step that follows loading."""
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
@@ -278,7 +311,22 @@ class LatLonDataset:
         xr.Dataset
             The cleaned-up xarray Dataset (as implemented by child classes).
         """
-        return ds  # Default behavior (no-op, subclasses should override)
+        if self.clean_up_fn is not None:
+            ds = self._run_transform(self.clean_up_fn, ds)
+        return ds
+
+    def _run_transform(self, transform: Transform, ds: xr.Dataset) -> xr.Dataset:
+        """Apply a transform and adopt the name maps it returns."""
+        names = Names(
+            var_names=dict(self.var_names),
+            dim_names=dict(self.dim_names),
+            opt_var_names=dict(self.opt_var_names),
+        )
+        ds, names = transform(ds, names)
+        self.var_names = names.var_names
+        self.dim_names = names.dim_names
+        self.opt_var_names = names.opt_var_names
+        return ds
 
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -566,7 +614,8 @@ class LatLonDataset:
         None
             This method does not return any value. Subclasses are expected to modify the dataset in-place.
         """
-        pass
+        if self.post_process_fn is not None:
+            self.ds = self._run_transform(self.post_process_fn, self.ds)
 
     def convert_to_float64(self) -> None:
         """Convert all data variables in the dataset to float64.

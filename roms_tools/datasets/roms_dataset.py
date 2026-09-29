@@ -119,6 +119,8 @@ class ROMSDataset:
     coordinates."""
     chunks: dict[str, int] | None = None
     """Optional Dask chunk sizes for loading ROMS output when ``use_dask=True``."""
+    _preloaded_ds: xr.Dataset | None = field(default=None, repr=False, compare=False)
+    """A dataset the caller has already opened; when set, nothing is loaded from ``path``."""
     _default_lateral_dask_chunk: ClassVar[int | None] = _DEFAULT_ROMS_LATERAL_DASK_CHUNK
     """If set on a class, used to build ``chunks`` when the caller passes ``chunks=None``."""
 
@@ -131,7 +133,34 @@ class ROMSDataset:
             lateral = type(self)._default_lateral_dask_chunk
             if lateral is not None:
                 self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
-        ds = self.load_data()
+        ds = self._preloaded_ds if self._preloaded_ds is not None else self.load_data()
+        self._preloaded_ds = None
+        self._process(ds)
+
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset, **fields: Any) -> "ROMSDataset":
+        """Build an object from a ROMS dataset the caller has already opened.
+
+        Runs every step of construction except loading. Used by the catalog path,
+        where the reader owns loading. ``path`` defaults to the empty string.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The opened ROMS output.
+        **fields
+            Any constructor field (``grid`` is required).
+
+        Returns
+        -------
+        ROMSDataset
+            An instance of the class this is called on.
+        """
+        fields.setdefault("path", "")
+        return cls(_preloaded_ds=ds, **fields)
+
+    def _process(self, ds: xr.Dataset) -> None:
+        """Run every construction step that follows loading."""
         self._check_consistency_data_grid(ds)
 
         self._set_default_var_names(ds)

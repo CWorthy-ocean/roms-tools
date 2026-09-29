@@ -1,0 +1,185 @@
+# ROMS-Tools source-dataset catalog (intake v2), hand-written for the catalog trial.
+#
+# Shape follows ocean-skill's docs/intake_v2_reference.md so ocean-skill can read the
+# same file. Template entries (SRTM15, GLORYS, ROMS) read whatever file the caller
+# supplies through the catalog-scoped `path` parameter; entries with a real location
+# (ETOPO5 via pooch, glorys_my_daily_geo via Copernicus Marine) take no path.
+# `glorys_my_daily_geo` is copied from ocean-skill's ocean_skill/catalogs/copernicus.yaml
+# (commit 446d0d2); the only additions are `land_masked` and `transforms` in its metadata.
+version: 2
+metadata:
+  title: ROMS-Tools source datasets (trial)
+user_parameters:
+  path:
+    dtype: str
+    description: Local file, list of files, or glob supplied by the caller.
+    default: ''
+aliases:
+  SRTM15: SRTM15
+  ETOPO5: ETOPO5
+  GLORYS: GLORYS
+  GLORYS_default: glorys_my_daily_geo
+  glorys_my_daily_geo: glorys_my_daily_geo
+  ROMS: ROMS
+data:
+  srtm15_data:
+    datatype: intake.readers.datatypes:HDF5
+    kwargs:
+      url: '{path}'
+      storage_options: null
+    metadata: {}
+    user_parameters: {}
+  glorys_files_data:
+    datatype: intake.readers.datatypes:HDF5
+    kwargs:
+      url: '{path}'
+      storage_options: null
+    metadata: {}
+    user_parameters: {}
+  roms_output_data:
+    datatype: intake.readers.datatypes:HDF5
+    kwargs:
+      url: '{path}'
+      storage_options: null
+    metadata: {}
+    user_parameters: {}
+entries:
+  SRTM15:
+    reader: intake.readers.readers:XArrayDatasetReader
+    output_instance: xarray:Dataset
+    kwargs:
+      data: '{data(srtm15_data)}'
+      engine: netcdf4
+      chunks: {}
+    metadata:
+      title: SRTM15+ global bathymetry and topography
+      info_url: https://topex.ucsd.edu/WWW_html/srtm15_plus.html
+      axes:
+        X: lon
+        Y: lat
+      featureType: grid
+      land_masked: false
+    user_parameters: {}
+  ETOPO5:
+    reader: roms_tools.datasets.readers:PoochReader
+    output_instance: xarray:Dataset
+    kwargs:
+      registry: topo
+      filename: etopo5.nc
+      engine: netcdf4
+    metadata:
+      title: ETOPO5 global topography
+      info_url: https://www.ncei.noaa.gov/products/etopo-global-relief-model
+      axes:
+        X: lon
+        Y: lat
+      featureType: grid
+      land_masked: false
+      transforms:
+        clean_up: roms_tools.datasets.transforms:etopo5_assign_coords
+    user_parameters: {}
+  GLORYS:
+    reader: intake.readers.readers:XArrayDatasetReader
+    output_instance: xarray:Dataset
+    kwargs:
+      data: '{data(glorys_files_data)}'
+      engine: netcdf4
+      chunks: {}
+    metadata:
+      title: GLORYS12 reanalysis, files downloaded by the user
+      info_url: https://data.marine.copernicus.eu/product/GLOBAL_MULTIYEAR_PHY_001_030/description
+      axes:
+        T: time
+        X: longitude
+        Y: latitude
+        Z: depth
+      featureType: grid
+      land_masked: true
+      transforms:
+        post_process: roms_tools.datasets.transforms:glorys_masks
+    user_parameters: {}
+  ROMS:
+    reader: intake.readers.readers:XArrayDatasetReader
+    output_instance: xarray:Dataset
+    kwargs:
+      data: '{data(roms_output_data)}'
+      engine: netcdf4
+      decode_times: false
+      decode_timedelta: false
+      chunks: {}
+    metadata:
+      title: ROMS model output read as a source (restart or history files)
+      model: roms
+      loader: ocean_skill.roms
+      self_contained_grid: false
+      time_coord: ocean_time
+      time_dim: time
+      time_units: seconds
+      axes:
+        T: ocean_time
+        X: xi_rho
+        Y: eta_rho
+      featureType: grid
+    user_parameters: {}
+  glorys_my_daily_geo:
+    kwargs:
+      dataset_id: cmems_mod_glo_phy_my_0.083deg_P1D-m
+      service: arco-geo-series
+    metadata:
+      land_masked: true
+      transforms:
+        post_process: roms_tools.datasets.transforms:glorys_masks
+      axes:
+        T: time
+        X: longitude
+        Y: latitude
+        Z: depth
+      chunking: geo
+      dataset_id: cmems_mod_glo_phy_my_0.083deg_P1D-m
+      featureType: grid
+      featureType_source: inferred
+      geospatial_lat_max: 90.0
+      geospatial_lat_min: -80.0
+      geospatial_lon_max: 179.9166717529297
+      geospatial_lon_min: -180.0
+      geospatial_vertical_max: 5727.9169921875
+      geospatial_vertical_min: 0.49402499198913574
+      grid_regular: true
+      grid_resolution_deg: 0.083333
+      grid_resolution_km: 9.266
+      lon_convention: -180-180
+      service: arco-geo-series
+      standard_names:
+        bottomT: sea_water_potential_temperature_at_sea_floor
+        mlotst: ocean_mixed_layer_thickness_defined_by_sigma_theta
+        siconc: sea_ice_area_fraction
+        sithick: sea_ice_thickness
+        so: sea_water_salinity
+        thetao: sea_water_potential_temperature
+        uo: eastward_sea_water_velocity
+        usi: eastward_sea_ice_velocity
+        vo: northward_sea_water_velocity
+        vsi: northward_sea_ice_velocity
+        zos: sea_surface_height_above_geoid
+      time_coverage_end: '2026-06-23'
+      time_coverage_start: '1993-01-01'
+      time_resolution: P1D
+      time_resolution_s: 86400.0
+      variables:
+      - eastward_sea_ice_velocity
+      - eastward_sea_water_velocity
+      - northward_sea_ice_velocity
+      - northward_sea_water_velocity
+      - ocean_mixed_layer_thickness_defined_by_sigma_theta
+      - sea_ice_area_fraction
+      - sea_ice_thickness
+      - sea_surface_height_above_geoid
+      - sea_water_potential_temperature
+      - sea_water_potential_temperature_at_sea_floor
+      - sea_water_salinity
+      vertical_levels: 50
+      vertical_resolution_max: 453.133
+      vertical_resolution_min: 1.047
+    output_instance: xarray:Dataset
+    reader: ocean_skill.readers:CopernicusMarineReader
+    user_parameters: {}

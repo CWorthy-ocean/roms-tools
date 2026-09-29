@@ -11,6 +11,7 @@ import xarray as xr
 from matplotlib.axes import Axes
 
 from roms_tools import Grid
+from roms_tools.datasets import catalog
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     GLODAPv2BGCDataset,
@@ -1060,32 +1061,63 @@ class InitialConditionsSource:
             var_names = _set_required_vars(forcing_type)
             self.adjust_depth_for_sea_surface_height = True
 
-            data = data_type(
-                path=source_dict["path"],  # type: ignore
-                grid=source_dict["grid"],  # type: ignore
-                var_names=var_names,
-                start_time=self.ini_time,
-                allow_flex_time=self.allow_flex_time,
-                adjust_depth_for_sea_surface_height=True,
-                use_dask=self.use_dask,
-                chunks=self.chunks,
-            )
+            if catalog.enabled() and catalog.has(source_name, f"ic_{forcing_type}"):
+                data = catalog.from_catalog(
+                    source_name,
+                    source_dict,
+                    f"ic_{forcing_type}",
+                    var_names=var_names,
+                    start_time=self.ini_time,
+                    allow_flex_time=self.allow_flex_time,
+                    adjust_depth_for_sea_surface_height=True,
+                    use_dask=self.use_dask,
+                    chunks=self.chunks,
+                )
+            else:
+                data = data_type(
+                    path=source_dict["path"],  # type: ignore
+                    grid=source_dict["grid"],  # type: ignore
+                    var_names=var_names,
+                    start_time=self.ini_time,
+                    allow_flex_time=self.allow_flex_time,
+                    adjust_depth_for_sea_surface_height=True,
+                    use_dask=self.use_dask,
+                    chunks=self.chunks,
+                )
 
         else:
             self.adjust_depth_for_sea_surface_height = False
 
-            data = data_type(
-                # A self-downloading source (see _SELF_DOWNLOADING_BGC) may carry no
-                # "path"; it fetches its own data when handed a falsy filename.
-                filename=source_dict.get("path", ""),  # type: ignore
-                start_time=self.ini_time,
-                climatology=source_dict["climatology"],  # type: ignore
-                allow_flex_time=self.allow_flex_time,
-                use_dask=self.use_dask,
-                chunks=self.chunks,
-                initial_slice_bounds=self.initial_slice_bounds,
-                **bgc_source_extra_kwargs(source_dict),
-            )
+            if (
+                catalog.enabled()
+                and forcing_type == "physics"
+                and catalog.has(source_name, "ic_physics", variant)
+            ):
+                data = catalog.from_catalog(
+                    source_name,
+                    source_dict,
+                    "ic_physics",
+                    variant=variant,
+                    start_time=self.ini_time,
+                    climatology=source_dict["climatology"],  # type: ignore
+                    allow_flex_time=self.allow_flex_time,
+                    use_dask=self.use_dask,
+                    chunks=self.chunks,
+                    initial_slice_bounds=self.initial_slice_bounds,
+                )
+            else:
+                data = data_type(
+                    # A self-downloading source (see _SELF_DOWNLOADING_BGC) may carry no
+                    # "path"; it fetches its own data when handed a falsy filename.
+                    filename=source_dict.get("path", ""),  # type: ignore
+                    start_time=self.ini_time,
+                    climatology=source_dict["climatology"],  # type: ignore
+                    allow_flex_time=self.allow_flex_time,
+                    use_dask=self.use_dask,
+                    chunks=self.chunks,
+                    initial_slice_bounds=self.initial_slice_bounds,
+                    **bgc_source_extra_kwargs(source_dict),
+                )
 
         return data
 

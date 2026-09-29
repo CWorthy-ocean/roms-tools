@@ -1,0 +1,25 @@
+{
+  "temp": {
+    "name": "^(temp|thetao|t_an|TEMP)$",
+    "standard_name": "^(sea_water_potential_temperature|sea_water_temperature)$"
+  },
+  "salt": {
+    "name": "^(salt|so|s_an|SALT)$",
+    "standard_name": "^(sea_water_salinity|sea_water_practical_salinity)$"
+  },
+  "u": {
+    "name": "^(u|uo|UVEL)$",
+    "standard_name": "^(eastward_sea_water_velocity|sea_water_x_velocity)$"
+  },
+  "v": {
+    "name": "^(v|vo|VVEL)$",
+    "standard_name": "^(northward_sea_water_velocity|sea_water_y_velocity)$"
+  },
+  "zeta": {
+    "name": "^(zeta|zos|ssh)$",
+    "standard_name": "^sea_surface_height_above_geoid$"
+  },
+  "topo": {
+    "name": "^(topo|z|elevation|Band1)$"
+  }
+}

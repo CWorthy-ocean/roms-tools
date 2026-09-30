@@ -411,6 +411,16 @@ class LateralRegridFromROMS:
             pass
 
 
+def _single_chunk_along(da, dim):
+    """Rechunk a dask-backed ``da`` into a single chunk along ``dim``.
+
+    Returns ``da`` unchanged when it is not dask-backed or does not have ``dim``.
+    """
+    if dim is not None and da.chunks is not None and dim in da.dims:
+        return da.chunk({dim: -1})
+    return da
+
+
 class VerticalRegrid:
     """Regrid ROMS variables along the vertical.
 
@@ -479,6 +489,12 @@ class VerticalRegrid:
         for dim in dims:
             if dim in target_depth_coords.dims:
                 target_dim = dim
+
+        # xgcm runs ``apply_ufunc(dask="parallelized")`` with the vertical dims as core
+        # dims, which requires each to be a single dask chunk.
+        da = _single_chunk_along(da, self.source_dim)
+        source_depth_coords = _single_chunk_along(source_depth_coords, self.source_dim)
+        target_depth_coords = _single_chunk_along(target_depth_coords, target_dim)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")

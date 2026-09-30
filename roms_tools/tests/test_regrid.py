@@ -182,6 +182,48 @@ def test_vertical_regrid_from_depth_to_3d_roms():
     assert np.allclose(regridded.data, expected, equal_nan=True)
 
 
+def test_vertical_regrid_dask_chunked_vertical_dim():
+    """Dask inputs split into several chunks along the vertical dims regrid correctly.
+
+    xgcm's ``transform`` runs ``apply_ufunc(dask="parallelized")`` with the vertical
+    dims as core dims, which raises unless each is a single chunk.
+    """
+    pytest.importorskip("dask")
+
+    source_depth_values = np.array([5, 50, 100, 150])
+    temp_data = np.array([30.0, 25.0, 10.0, 2.0])
+    eta, xi = 2, 3
+
+    base_depths = np.array([130, 100, 70, 30])[:, None, None]
+    perturbation = np.linspace(0, 10, eta * xi).reshape(eta, xi)
+    target_values = base_depths + perturbation
+
+    def regrid(chunked):
+        temp = xr.DataArray(
+            np.broadcast_to(temp_data[:, None, None], (4, eta, xi)),
+            dims=["depth", "eta", "xi"],
+        )
+        source = xr.DataArray(source_depth_values, dims=["depth"])
+        target = xr.DataArray(target_values, dims=["s_rho", "eta", "xi"])
+        if chunked:
+            temp = temp.chunk({"depth": 1})
+            source = source.chunk({"depth": 1})
+            target = target.chunk({"s_rho": 1})
+        vertical_regrid = VerticalRegrid(xr.Dataset({"temp": temp}), source_dim="depth")
+        return vertical_regrid.apply(
+            temp,
+            source_depth_coords=source,
+            target_depth_coords=target,
+            mask_edges=True,
+        ).transpose("s_rho", "eta", "xi")
+
+    expected = regrid(chunked=False)
+    regridded = regrid(chunked=True)
+
+    assert regridded.chunks is not None
+    assert np.allclose(regridded.values, expected.values, equal_nan=True)
+
+
 # Test VerticalRegrid
 def test_vertical_regrid_2d_depths_different_vertical_levels():
     """

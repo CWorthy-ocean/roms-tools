@@ -22,6 +22,9 @@ import yaml
 from pydantic import BaseModel
 from scipy.spatial import cKDTree
 
+# Must precede the ``cache=True`` kernels below: numba picks the cache location
+# when the decorator runs.
+import roms_tools._numba_cache  # noqa: F401
 from roms_tools.constants import R_EARTH
 
 # Re-exported from the single-source-of-truth ``processing_methods`` module so that
@@ -1805,14 +1808,17 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
 # The explicit signatures below make numba compile at import time (they are
 # needed so ``min_dist_to_land`` can call the ufuncs from nopython code and
 # so xarray objects dispatch through ``__array_ufunc__``). ``cache=True``
-# keeps that behaviour but persists the compiled machine code next to this
-# file (or under ``NUMBA_CACHE_DIR``), so only the first import in a fresh
-# environment pays the ~1.5 s compile cost instead of every process.
-# Caveat: numba invalidates the cache when *this file* changes (mtime/size)
-# or numba is upgraded, but NOT when a global imported from another module
-# changes -- ``R_EARTH`` is frozen into the cached machine code. If you edit
-# ``roms_tools/constants.py`` in an editable install, delete the ``.nbi``/
-# ``.nbc`` files in ``__pycache__`` (or touch this file) to force a rebuild.
+# keeps that behaviour but persists the compiled machine code, so only the
+# first import in a fresh environment pays the ~1.5 s compile cost instead of
+# every process. The cache lives under ``<user cache dir>/roms-tools-numba``
+# (see ``roms_tools/_numba_cache.py``), or under ``NUMBA_CACHE_DIR`` if set --
+# not in ``__pycache__``, where it would outlive an uninstall.
+# Caveat: numba invalidates the cache when *this file* changes or numba is
+# upgraded, but NOT when a global imported from another module changes --
+# ``R_EARTH`` is frozen into the cached machine code. If you edit
+# ``roms_tools/constants.py`` in an editable install, delete
+# ``<user cache dir>/roms-tools-numba`` (``~/Library/Caches/roms-tools-numba``
+# on macOS, ``~/.cache/roms-tools-numba`` on Linux) or touch this file.
 @nb.vectorize(
     [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)],
     nopython=True,

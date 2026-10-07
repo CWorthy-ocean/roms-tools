@@ -1,10 +1,6 @@
 # Release notes
 
-## Unreleased
-
-### Breaking Changes
-
-### New Features
+## 5.1.1
 
 ### Bug Fixes
 

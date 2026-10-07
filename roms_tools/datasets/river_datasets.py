@@ -1086,8 +1086,10 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         return xr.concat(
             ds_list,
             dim=self.dim_names["time"],
+            data_vars="all",
             coords="minimal",
             compat="override",
+            join="outer",
             combine_attrs="override",
         )
 

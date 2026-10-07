@@ -99,6 +99,10 @@ NetCDFFormat = Literal[
     "NETCDF3_64BIT_DATA",
 ]
 DEFAULT_NETCDF_FORMAT: NetCDFFormat = "NETCDF4"
+# Always name the write engine: since xarray 2026.9 the default engine is chosen from
+# `format` and refuses NETCDF3_64BIT_OFFSET / NETCDF3_64BIT_DATA. netcdf4 is what
+# roms-tools has always written with and supports every `NetCDFFormat`.
+NETCDF_WRITE_ENGINE: Literal["netcdf4"] = "netcdf4"
 
 
 def _path_list_from_input(files: FilePaths) -> list[Path]:
@@ -1113,7 +1117,12 @@ def save_datasets(
                 logging.info("Writing NetCDF file(s)...")
             _start = time.perf_counter()
             with serialize_dask_and_boost_threads(serialize_dask):
-                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+                xr.save_mfdataset(
+                    dataset_list,
+                    output_filenames,
+                    format=format,
+                    engine=NETCDF_WRITE_ENGINE,
+                )
             if verbose:
                 logging.info(
                     "Finished writing NetCDF file(s) in %s",
@@ -1123,11 +1132,23 @@ def save_datasets(
             from dask.diagnostics import ProgressBar
 
             with ProgressBar():
-                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+                xr.save_mfdataset(
+                    dataset_list,
+                    output_filenames,
+                    format=format,
+                    engine=NETCDF_WRITE_ENGINE,
+                )
         else:
-            xr.save_mfdataset(dataset_list, output_filenames, format=format)
+            xr.save_mfdataset(
+                dataset_list,
+                output_filenames,
+                format=format,
+                engine=NETCDF_WRITE_ENGINE,
+            )
     else:
-        xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        xr.save_mfdataset(
+            dataset_list, output_filenames, format=format, engine=NETCDF_WRITE_ENGINE
+        )
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

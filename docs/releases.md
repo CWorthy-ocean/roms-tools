@@ -1,5 +1,27 @@
 # Release notes
 
+## 5.1.1
+
+### Bug Fixes
+
+* Switching from a regular to an editable install no longer fails with `cannot import name 'Grid' from 'roms_tools' (unknown location)` due to leftover numba cache files in site-packages. ([#688](https://github.com/CWorthy-ocean/roms-tools/pull/688))
+* Saving boundary forcing no longer fails (xarray 2025.8) or warns (later releases) about an unlimited `time` dimension the dataset no longer has. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+  * Boundary files also no longer carry the empty, unused `time` dimension that older xarray wrote; `bry_time` is unchanged.
+* Saving with `format="NETCDF3_64BIT_OFFSET"` or `"NETCDF3_64BIT_DATA"` works with xarray 2026.9 and newer. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+
+### Improvements
+
+* Compiled numba kernels are now cached in `roms-tools-numba` under the user cache directory (e.g. `~/Library/Caches/roms-tools-numba`), or under `NUMBA_CACHE_DIR` if set. ([#688](https://github.com/CWorthy-ocean/roms-tools/pull/688))
+* Merge and concat calls that xarray warns will change default behaviour now spell out today's defaults, so a future xarray default change cannot silently alter results. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+
+### Miscellaneous
+
+* Release notes no longer truncate PR-description bullets that are wrapped across several lines, and no longer include `N/A (reason)`-style placeholders. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* The release-notes branch is now deleted when a release is published and recreated from `main`, so a finalize PR can no longer re-include the previous release's notes and conflict with them. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* The release-notes workflows run `main`'s copy of their scripts, so a fix to them applies immediately rather than whenever the notes branch next catches up with `main`. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* Minimum numba version raised to 0.62. ([#688](https://github.com/CWorthy-ocean/roms-tools/pull/688))
+* The xarray upper bound is removed; roms-tools now runs with xarray 2026.9 and newer. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+
 ## 5.1.0
 
 ### Breaking Changes

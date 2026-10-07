@@ -2,6 +2,7 @@ import copy
 import logging
 import os
 import textwrap
+import warnings
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -785,6 +786,37 @@ def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):
             assert saved_filenames == [expected_filepath]
             assert expected_filepath.exists()
             expected_filepath.unlink()
+
+
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "boundary_forcing",
+        "bgc_boundary_forcing_from_climatology",
+    ],
+)
+def test_boundary_forcing_save_has_no_stale_unlimited_dim(
+    boundary_forcing_fixture, request, tmp_path
+):
+    """Saving must not declare the renamed-away ``time`` dimension unlimited.
+
+    A stale ``unlimited_dims`` naming a dimension that is not in the dataset is a
+    ``ValueError`` or a ``UserWarning`` depending on the xarray release; before
+    2025.8 it silently wrote an empty, unlimited ``time`` dimension. ``bry_time``
+    stays a fixed dimension.
+    """
+    import netCDF4
+
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        (filepath,) = boundary_forcing.save(tmp_path / "test_bf", group=False)
+
+    assert not [w for w in caught if "Unlimited dimension" in str(w.message)]
+    with netCDF4.Dataset(filepath) as ncds:
+        assert "time" not in ncds.dimensions
+        assert not ncds.dimensions["bry_time"].isunlimited()
 
 
 @pytest.mark.parametrize(

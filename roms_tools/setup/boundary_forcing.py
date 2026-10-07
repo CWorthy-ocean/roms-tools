@@ -1456,6 +1456,10 @@ class BoundaryForcingSource:
         ds = ds.assign_coords({"bry_time": bry_time})
         ds = ds.swap_dims({"time": "bry_time"})
         ds = ds.drop_vars("time")
+        # `add_time_info_to_ds` declared "time" unlimited, but that dimension is
+        # gone. Drop the stale entry rather than retarget it, so `bry_time` stays a
+        # fixed dimension; older xarray turned the entry into an empty `time` dim.
+        ds.encoding.pop("unlimited_dims", None)
 
         return ds
 

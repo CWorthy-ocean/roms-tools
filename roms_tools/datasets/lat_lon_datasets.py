@@ -1613,7 +1613,9 @@ class WOABGCDataset(WOADataset):
                 "them, or point the source at a directory that already holds them."
             )
 
-        merged = xr.merge(datasets)
+        # Spell out xarray's current merge defaults so a future change to them
+        # cannot alter the result.
+        merged = xr.merge(datasets, compat="no_conflicts", join="outer")
         if not self.use_dask:
             # `xr.open_mfdataset` (via `_open_monthly`) is always dask-backed
             # regardless of `use_dask` -- unlike every other dataset class here,
@@ -2357,7 +2359,9 @@ class GLODAPv2Dataset(LatLonDataset):
                 f"No GLODAP files found in {base_dir} with prefix '{self._file_prefix}'."
             )
 
-        return xr.merge(datasets)
+        # Spell out xarray's current merge defaults so a future change to them
+        # cannot alter the result.
+        return xr.merge(datasets, compat="no_conflicts", join="outer")
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Rename GLODAP native coordinates/variables to roms-tools conventions.

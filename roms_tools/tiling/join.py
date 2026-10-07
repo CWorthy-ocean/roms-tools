@@ -6,6 +6,7 @@ import xarray as xr
 
 from roms_tools.utils import (
     DEFAULT_NETCDF_FORMAT,
+    NETCDF_WRITE_ENGINE,
     FilePaths,
     NetCDFFormat,
     _path_list_from_input,
@@ -66,7 +67,7 @@ def join_netcdf(
         output_path = filepaths[0].with_suffix("").with_suffix(".nc")
 
     joined = open_partitions(cast(FilePaths, filepaths))
-    joined.to_netcdf(output_path, format=format)
+    joined.to_netcdf(output_path, format=format, engine=NETCDF_WRITE_ENGINE)
     print(f"Saved joined dataset to: {output_path}")
 
     return output_path

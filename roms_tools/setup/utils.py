@@ -465,7 +465,16 @@ def tile_monthly_climatology_on_calendar(
     pieces = [
         ds_base.isel({time_dim: month_to_index[dt.month]}) for dt in calendar_dates
     ]
-    ds_tiled = xr.concat(pieces, dim=time_dim)
+    # Spell out xarray's current combine defaults so a future change to them cannot
+    # alter the result.
+    ds_tiled = xr.concat(
+        pieces,
+        dim=time_dim,
+        data_vars="all",
+        coords="different",
+        compat="equals",
+        join="outer",
+    )
     return ds_tiled.assign_coords(
         {time_dim: np.array(calendar_dates, dtype="datetime64[ns]")}
     )

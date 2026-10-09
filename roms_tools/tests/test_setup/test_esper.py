@@ -1523,3 +1523,202 @@ class TestWrappersPreflightPyESPER:
         preflight_esper_sources(
             [{"source": {"name": "constants", "constants": {"NO3": 1.0}}}]
         )  # no raise
+
+
+# --------------------------------------------------------------------------------------
+# Salinity conditioning (source["salinity_conditioning"] -> PyESPER)
+# --------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def woa_salinity_file(tmp_path) -> Path:
+    """A tiny file in the WOA layout (``s_an(time, depth, lat, lon)``, 1-degree
+    centres, NaN over land) -- enough for PyESPER's lookup; no real data needed.
+    """
+    depth = np.array([0.0, 50.0, 200.0])
+    lat = np.arange(-89.5, 90.0, 1.0)
+    lon = np.arange(-179.5, 180.0, 1.0)
+    d, la, _lo = np.meshgrid(depth, lat, lon, indexing="ij")
+    s = (34.0 + d / 100.0 + la / 90.0).astype("float32")
+    ds = xr.Dataset(
+        {"s_an": (("time", "depth", "lat", "lon"), s[None])},
+        coords={"time": [0.0], "depth": depth, "lat": lat, "lon": lon},
+    )
+    path = tmp_path / "woa23_decav_s00_01.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+def test_salinity_conditioning_off_by_default():
+    assert esper_module._salinity_conditioning({"name": "ESPER"}) is None
+    assert (
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": None}
+        )
+        is None
+    )
+
+
+def test_salinity_conditioning_rejects_non_mapping():
+    with pytest.raises(ValueError, match="must be a mapping"):
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": True}
+        )
+
+
+def test_salinity_conditioning_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="unknown key"):
+        esper_module._salinity_conditioning(
+            {
+                "name": "ESPER",
+                "salinity_conditioning": {"woa_salinity_path": "/x", "band": [31, 34]},
+            }
+        )
+
+
+def test_salinity_conditioning_requires_a_path():
+    with pytest.raises(ValueError, match="woa_salinity_path"):
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": {"low": 31}}
+        )
+
+
+@needs_pyesper
+def test_salinity_conditioning_missing_file_names_the_download_url(tmp_path):
+    with pytest.raises(FileNotFoundError, match="ncei.noaa.gov"):
+        validate_esper_source(
+            {
+                "name": "ESPER",
+                "salinity_conditioning": {
+                    "woa_salinity_path": str(tmp_path / "missing.nc")
+                },
+            }
+        )
+
+
+@needs_pyesper
+def test_salinity_conditioning_builds_pyesper_object(woa_salinity_file):
+    from PyESPER.salinity_conditioning import SalinityConditioning
+
+    cond = esper_module._salinity_conditioning(
+        {
+            "name": "ESPER",
+            "salinity_conditioning": {
+                "woa_salinity_path": str(woa_salinity_file),
+                "low": 30,
+                "high": 33,
+            },
+        }
+    )
+    assert isinstance(cond, SalinityConditioning)
+    assert (cond.low, cond.high) == (30.0, 33.0)
+    # Defaults come from PyESPER, not from roms-tools.
+    cond = esper_module._salinity_conditioning(
+        {
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": str(woa_salinity_file)},
+        }
+    )
+    assert (cond.low, cond.high) == (31.0, 34.0)
+
+
+def _spy_pyesper(monkeypatch):
+    """Replace the PyESPER entry points with a spy that records its kwargs and returns
+    zeros, so the pass-through can be checked without the nets or their data.
+    """
+    calls: list[dict] = []
+
+    def fake(salinity, temperature, longitude, latitude, depth, *, variables, **kw):
+        calls.append(kw)
+        sal, *_ = xr.broadcast(salinity, temperature, longitude, latitude, depth)
+        return {v: xr.zeros_like(sal) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module,
+        "_ensure_pyesper",
+        lambda path=None: {"lir": fake, "nn": fake, "mixed": fake},
+    )
+    return calls
+
+
+def _tiny_inputs():
+    temp = xr.DataArray(np.full((2, 3), 10.0), dims=("s", "y"))
+    salt = xr.DataArray(np.full((2, 3), 35.0), dims=("s", "y"))
+    lon = xr.DataArray(np.zeros(3), dims=("y",))
+    lat = xr.DataArray(np.full(3, 40.0), dims=("y",))
+    depth = xr.DataArray(np.array([-5.0, -50.0]), dims=("s",))
+    return temp, salt, lon, lat, depth
+
+
+@needs_pyesper
+def test_estimate_bgc_fields_forwards_salinity_conditioning(
+    monkeypatch, woa_salinity_file
+):
+    from PyESPER.salinity_conditioning import SalinityConditioning
+
+    calls = _spy_pyesper(monkeypatch)
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": str(woa_salinity_file)},
+        },
+        roms_variables=["NO3", "ALK"],
+        est_dates=2014.0,
+    )
+    cond = calls[-1]["salinity_conditioning"]
+    assert isinstance(cond, SalinityConditioning)
+    assert Path(cond.woa_salinity_path) == woa_salinity_file.resolve()
+    for da in out.values():
+        attr = da.attrs["esper_salinity_conditioning"]
+        assert "31-34 PSU" in attr and "woa23_decav_s00_01.nc" in attr
+
+
+@needs_pyesper
+def test_estimate_bgc_fields_without_conditioning_passes_none(monkeypatch):
+    calls = _spy_pyesper(monkeypatch)
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={"name": "ESPER"},
+        roms_variables=["NO3"],
+        est_dates=2014.0,
+    )
+    assert calls[-1]["salinity_conditioning"] is None
+    assert "esper_salinity_conditioning" not in out["NO3"].attrs
+
+
+@needs_pyesper
+def test_boundary_forcing_esper_with_salinity_conditioning(woa_salinity_file):
+    """End to end through the real nets: the option reaches PyESPER (the attr is
+    stamped on every ESPER variable) and the result is still a complete BGC set.
+    """
+    grid = _small_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    with dask.config.set(scheduler="synchronous"):
+        phys = BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            type="physics",
+            source={"name": "GLORYS", "path": fname},
+            use_dask=False,
+        )
+        bf = BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            type="bgc",
+            source={
+                "name": "ESPER",
+                "path": _PYESPER_PATH,
+                "salinity_conditioning": {"woa_salinity_path": str(woa_salinity_file)},
+            },
+            physics_forcing=phys,
+            use_dask=False,
+        )
+    active = [d for d, on in bf.boundaries.items() if on]
+    for d in active:
+        for var in ESPER_SUPPORTED_VARS:
+            da = bf.ds[f"{var}_{d}"]
+            assert "31-34 PSU" in da.attrs["esper_salinity_conditioning"]
+            assert np.isfinite(da.values).any()

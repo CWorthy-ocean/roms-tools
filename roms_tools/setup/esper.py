@@ -47,6 +47,7 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 from __future__ import annotations
 
 import itertools
+import os
 import sys
 
 import numpy as np
@@ -377,6 +378,57 @@ def validate_esper_source(source: dict) -> None:
             f"(salinity only), got {equation!r}."
         )
     _ensure_pyesper(source.get("path"))
+    _salinity_conditioning(source)
+
+
+def _salinity_conditioning(source: dict):
+    """The ``PyESPER.salinity_conditioning.SalinityConditioning`` for ``source``, or
+    ``None`` when the source does not ask for it.
+
+    ``source["salinity_conditioning"]`` is a mapping with ``woa_salinity_path`` (the
+    WOA23 1-degree annual-mean salinity file, ``woa23_decav_s00_01.nc``) and optional
+    ``low``/``high`` band edges in PSU (PyESPER's defaults: 31 and 34). PyESPER does
+    not download the file; a missing one raises ``FileNotFoundError`` naming the NCEI
+    URL. ``None``/``False``/an empty mapping mean off.
+
+    ESPER's nets have no training data at river-plume salinities and extrapolate
+    unphysically there (silicate > 100 µmol/kg, negative nutrients, DIC above TA);
+    conditioning blends the salinity *they see* toward climatology below the band and
+    leaves everything above it bit-identical. The rationale and measurements are in
+    PyESPER's module docstring.
+    """
+    spec = source.get("salinity_conditioning")
+    if not spec:
+        return None
+    if not isinstance(spec, dict):
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' must be a mapping with "
+            "'woa_salinity_path' (and optional 'low'/'high' band edges in PSU), "
+            f"got {spec!r}."
+        )
+    unknown = set(spec) - {"woa_salinity_path", "low", "high"}
+    if unknown:
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' has unknown key(s) "
+            f"{sorted(unknown)}; allowed: 'woa_salinity_path', 'low', 'high'."
+        )
+    if not spec.get("woa_salinity_path"):
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' needs 'woa_salinity_path': the WOA23 "
+            "1-degree annual-mean salinity file (woa23_decav_s00_01.nc). PyESPER does "
+            "not download it; see PyESPER.salinity_conditioning.WOA23_SALINITY_URL."
+        )
+    try:
+        from PyESPER.salinity_conditioning import SalinityConditioning
+    except ImportError as exc:
+        raise ImportError(
+            "The installed PyESPER has no `salinity_conditioning` module. Salinity "
+            "conditioning needs the CWorthy fork at or after the "
+            "'salinity-conditioning' branch (https://github.com/CWorthy-ocean/PyESPER)."
+        ) from exc
+    band = {k: float(spec[k]) for k in ("low", "high") if k in spec}
+    # FileNotFoundError (with the download URL) and band ValueError propagate as-is.
+    return SalinityConditioning(spec["woa_salinity_path"], **band)
 
 
 def estimate_bgc_fields(
@@ -406,6 +458,9 @@ def estimate_bgc_fields(
         (default ``"nn"``), ``equation`` (default 8). ``path`` points at a PyESPER
         repository checkout; omit it when PyESPER is installed in the environment
         (``pip install -e <checkout>``), in which case PyESPER finds its own data.
+        ``salinity_conditioning`` (optional mapping, see :func:`_salinity_conditioning`)
+        makes PyESPER evaluate the nets at a climatological salinity wherever the
+        model salinity is below the nets' training support.
     roms_variables : sequence of str
         ROMS/MARBL tracer names to derive (subset of :data:`ESPER_SUPPORTED_VARS`).
     est_dates : float or xarray.DataArray, optional
@@ -422,6 +477,7 @@ def estimate_bgc_fields(
     method = str(source.get("method", "nn")).lower()
     equation = source.get("equation", 8)
     path = source.get("path") or ""
+    conditioning = _salinity_conditioning(source)
 
     unknown = [v for v in roms_variables if v not in ROMS_TO_ESPER]
     if unknown:
@@ -467,6 +523,7 @@ def estimate_bgc_fields(
         path=str(path),
         equation=equation,
         est_dates=est_dates,
+        salinity_conditioning=conditioning,
     )
 
     # Results are deliberately left lazy: PyESPER's own kernel lock keeps its
@@ -491,5 +548,11 @@ def estimate_bgc_fields(
             da.attrs["long_name"] = meta["long_name"]
         if "units" in meta:
             da.attrs["units"] = meta["units"]
+        if conditioning is not None:
+            da.attrs["esper_salinity_conditioning"] = (
+                f"salinity fed to PyESPER blended (raised cosine, "
+                f"{conditioning.low:g}-{conditioning.high:g} PSU) toward "
+                f"{os.path.basename(conditioning.woa_salinity_path)}"
+            )
         out[roms_name] = da
     return out

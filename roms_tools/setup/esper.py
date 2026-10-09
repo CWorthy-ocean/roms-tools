@@ -580,5 +580,16 @@ def estimate_bgc_fields(
                 f"{conditioning.low:g}-{conditioning.high:g} PSU) toward "
                 f"{os.path.basename(conditioning.woa_salinity_path)}"
             )
+            if roms_name in ("ALK", "DIC"):
+                endmember = (
+                    conditioning.ta_endmember
+                    if roms_name == "ALK"
+                    else conditioning.dic_endmember
+                )
+                da.attrs["esper_salinity_conditioning"] += (
+                    "; estimate diluted back to the model salinity along a "
+                    f"conservative mixing line (freshwater endmember {endmember:g} "
+                    "umol/kg)"
+                )
         out[roms_name] = da
     return out

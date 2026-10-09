@@ -1,5 +1,19 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
+* The CDR forcing docs and API docstrings now refer to the ucla-roms CDR-LiTE CPP option by its new name, `CDR_LITE`. ([#691](https://github.com/CWorthy-ocean/roms-tools/pull/691))
+
 ## 5.1.1
 
 ### Bug Fixes

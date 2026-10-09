@@ -39,6 +39,7 @@ from roms_tools.datasets.download import download_test_data
 from roms_tools.setup import esper as esper_module
 from roms_tools.setup.esper import (
     _MAX_POINTS_PER_CHUNK,
+    ESPER_FLOORS,
     ESPER_SUPPORTED_VARS,
     _apply_chunk_plan,
     _decimal_year,
@@ -1722,3 +1723,47 @@ def test_boundary_forcing_esper_with_salinity_conditioning(woa_salinity_file):
             da = bf.ds[f"{var}_{d}"]
             assert "31-34 PSU" in da.attrs["esper_salinity_conditioning"]
             assert np.isfinite(da.values).any()
+
+
+# --------------------------------------------------------------------------------------
+# Per-variable floors (ESPER_FLOORS)
+# --------------------------------------------------------------------------------------
+
+
+def test_every_supported_variable_has_a_floor():
+    assert set(ESPER_FLOORS) == set(ESPER_SUPPORTED_VARS)
+    assert ESPER_FLOORS["O2"] == 2.0
+    assert all(ESPER_FLOORS[v] == 0.0 for v in ESPER_SUPPORTED_VARS if v != "O2")
+
+
+@needs_pyesper
+def test_estimate_bgc_fields_floors_oxygen_at_two_and_nutrients_at_zero(monkeypatch):
+    """The nets overshoot below the physical range at the low end (OMZ oxygen,
+    oligotrophic nutrients). Nutrients clamp at 0; O2 at 2.0 mmol/m3, below WOA23's
+    own value everywhere ESPER needs the floor on the measured boundaries. The attr
+    records the floor on O2 only.
+    """
+    calls = _spy_pyesper(monkeypatch)
+
+    def fake(salinity, temperature, longitude, latitude, depth, *, variables, **kw):
+        calls.append(kw)
+        sal, *_ = xr.broadcast(salinity, temperature, longitude, latitude, depth)
+        # -3 umol/kg everywhere: below every floor once converted.
+        return {v: xr.full_like(sal, -3.0) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module,
+        "_ensure_pyesper",
+        lambda path=None: {"lir": fake, "nn": fake, "mixed": fake},
+    )
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={"name": "ESPER"},
+        roms_variables=["NO3", "O2", "ALK"],
+        est_dates=2014.0,
+    )
+    assert float(out["NO3"].min()) == 0.0 and float(out["NO3"].max()) == 0.0
+    assert float(out["ALK"].min()) == 0.0
+    assert float(out["O2"].min()) == 2.0 and float(out["O2"].max()) == 2.0
+    assert "2 mmol/m^3" in out["O2"].attrs["esper_floor"]
+    assert "esper_floor" not in out["NO3"].attrs

@@ -113,6 +113,26 @@ ESPER_TO_ROMS = {v: k for k, v in ROMS_TO_ESPER.items()}
 #: ROMS/MARBL tracers the ESPER source can derive from T/S.
 ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 
+#: Lower bound (mmol/m³) applied to each estimate after the unit conversion. The nets
+#: are unconstrained regressions, so they overshoot below the physical range at the
+#: low end: nutrients and oxygen go negative. Zero is the obvious floor for the
+#: nutrients; oxygen gets 2.0 because ESPER's negative excursions sit in the oxygen
+#: minimum zones (Bay of Bengal, eastern tropical Pacific, ~300-700 m), where the WOA23
+#: climatology is 3-10 µmol/kg and never below 2.75 at any of those points on the 12 km
+#: Indo-Pacific and California Current boundaries measured (2010/2014). Clipping to
+#: zero there would hand MARBL exactly anoxic boundary water that no observation
+#: supports; 2.0 is below WOA's own value everywhere ESPER needs it, so it removes the
+#: artefact without inventing oxygen (WOA23 reaches zero only in a few OMZ cores).
+#: ALK and DIC never approach zero and keep the generic floor.
+ESPER_FLOORS: dict[str, float] = {
+    "ALK": 0.0,
+    "DIC": 0.0,
+    "NO3": 0.0,
+    "PO4": 0.0,
+    "SiO3": 0.0,
+    "O2": 2.0,
+}
+
 _VALID_METHODS = ("lir", "nn", "mixed")
 
 #: Shared install guidance. ``{problem}`` names which of the two failure modes was hit
@@ -533,8 +553,8 @@ def estimate_bgc_fields(
     # share this call's per-chunk upstream work (they are all one graph).
 
     # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
-    # depth), matching the GLODAP/WOA adapters' convention; then clamp
-    # physically non-negative tracers at 0.
+    # depth), matching the GLODAP/WOA adapters' convention; then clamp each tracer
+    # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 2.0 for O2).
     density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()
@@ -542,12 +562,18 @@ def estimate_bgc_fields(
     out: dict[str, xr.DataArray] = {}
     for roms_name in roms_variables:
         da = est[ROMS_TO_ESPER[roms_name]] * factor
-        da = da.clip(min=0.0)
+        floor = ESPER_FLOORS[roms_name]
+        da = da.clip(min=floor)
         meta = d_meta.get(roms_name, {})
         if "long_name" in meta:
             da.attrs["long_name"] = meta["long_name"]
         if "units" in meta:
             da.attrs["units"] = meta["units"]
+        if floor > 0:
+            da.attrs["esper_floor"] = (
+                f"PyESPER estimate clamped at {floor:g} mmol/m^3 (see "
+                "roms_tools.setup.esper.ESPER_FLOORS)"
+            )
         if conditioning is not None:
             da.attrs["esper_salinity_conditioning"] = (
                 f"salinity fed to PyESPER blended (raised cosine, "

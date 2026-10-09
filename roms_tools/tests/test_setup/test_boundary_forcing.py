@@ -15,7 +15,6 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BGCMarbl, BoundaryForcing, BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
-from roms_tools.setup.boundary_forcing import _interpolate_phys_to_bgc_time
 from roms_tools.setup.utils import _xesmf_available
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
@@ -1170,6 +1169,11 @@ def test_bgc_bc_with_physics_forcing(use_dask):
 
     assert bgc_bc.bgc_interpolation_method == "density"
     assert bgc_bc.physics_forcing is physics_bc
+    # On the physics time axis (one record here), not the source's 12-month cycle.
+    np.testing.assert_array_equal(
+        bgc_bc.ds["bry_time"].values, physics_bc.ds["bry_time"].values
+    )
+    assert "cycle_length" not in bgc_bc.ds["bry_time"].attrs
     for direction in ["south", "east", "north", "west"]:
         if bgc_bc.boundaries[direction]:
             assert f"NO3_{direction}" in bgc_bc.ds
@@ -1198,21 +1202,25 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
-    any_diff = False
-    for direction in ["south", "east", "north", "west"]:
-        if not bgc_bc.boundaries[direction]:
-            continue
-        for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
-            name = f"{var}_{direction}"
-            if name in bgc_bc.ds and name in bgc_bc_depth.ds:
-                a = bgc_bc.ds[name].values
-                b = bgc_bc_depth.ds[name].values
-                valid = ~(np.isnan(a) | np.isnan(b))
-                if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
-                    any_diff = True
-                    break
-        if any_diff:
-            break
+
+    # The density outputs sit on the physics time axis (one record, 1 Jan 2012); the
+    # depth output is the cycled 12-record climatology, so compare against its
+    # January record.
+    def _differs(density_bc) -> bool:
+        for direction in ["south", "east", "north", "west"]:
+            if not density_bc.boundaries[direction]:
+                continue
+            for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+                name = f"{var}_{direction}"
+                if name in density_bc.ds and name in bgc_bc_depth.ds:
+                    a = density_bc.ds[name].isel(bry_time=0).values
+                    b = bgc_bc_depth.ds[name].isel(bry_time=0).values
+                    valid = ~(np.isnan(a) | np.isnan(b))
+                    if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
+                        return True
+        return False
+
+    any_diff = _differs(bgc_bc)
 
     # MLD-anchored interpolation: builds, produces BGC vars, and never leaks T/S.
     bgc_bc_mld = BoundaryForcingSource(
@@ -1231,21 +1239,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         str(v).startswith(("temp_", "salt_")) for v in bgc_bc_mld.ds.data_vars
     )
 
-    mld_diff = False
-    for direction in ["south", "east", "north", "west"]:
-        if not bgc_bc.boundaries[direction]:
-            continue
-        for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
-            name = f"{var}_{direction}"
-            if name in bgc_bc_mld.ds and name in bgc_bc_depth.ds:
-                a = bgc_bc_mld.ds[name].values
-                b = bgc_bc_depth.ds[name].values
-                valid = ~(np.isnan(a) | np.isnan(b))
-                if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
-                    mld_diff = True
-                    break
-        if mld_diff:
-            break
+    mld_diff = _differs(bgc_bc_mld)
 
     if source_has_ts:
         # Wiring guard: confirm the density methods actually fire (do not silently fall
@@ -1325,38 +1319,76 @@ def test_physics_forcing_survives_yaml_roundtrip(
                     xr.testing.assert_allclose(reloaded.ds[name], bf.ds[name])
 
 
-def test_interpolate_phys_to_bgc_time_nearest_noncyclic():
-    """Non-climatology alignment takes the nearest physics time and works on dask."""
-    ptime = np.array(["2013-01-01", "2013-01-11", "2013-01-21"], dtype="datetime64[ns]")
-    phys = xr.DataArray([10.0, 20.0, 30.0], dims="time", coords={"time": ptime})
-    targets = xr.DataArray(
-        np.array(["2013-01-02", "2013-01-19"], dtype="datetime64[ns]"), dims="time"
+def test_bgc_bc_density_follows_the_physics_time_axis(use_dask):
+    """A density method places the climatology on *every* physics record: the output
+    carries the physics time axis (no ``cycle_length``, monthly grouping), while the
+    same source on ``depth`` stays a cycled 12-record climatology. With two physics
+    days that have different stratification (1 Jan and 31 Dec 2012) the two records
+    differ, which the old one-sampled-day climatology could never do.
+    """
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
     )
-
-    out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=False)
-    np.testing.assert_array_equal(out.values, [10.0, 30.0])
-
-    # Chunked along time must also work (nearest selection needs no rechunk).
-    out_chunked = _interpolate_phys_to_bgc_time(
-        phys.chunk({"time": 1}), "time", targets, bgc_climatology=False
+    fname_phys = Path(download_test_data("GLORYS_NA_2012.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+    physics_bc = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_phys, "name": "GLORYS"},
+        type="physics",
+        apply_2d_horizontal_fill=False,
+        regrid_method="scipy",
+        use_dask=use_dask,
     )
-    np.testing.assert_array_equal(out_chunked.values, [10.0, 30.0])
-
-
-def test_interpolate_phys_to_bgc_time_nearest_cyclic_wraps():
-    """Climatology alignment picks the cyclically nearest day-of-year (year wrap)."""
-    # Physics at day-of-year ~10, ~180, ~364 (values encode which slice is chosen).
-    ptime = np.array(["2013-01-10", "2013-06-29", "2013-12-30"], dtype="datetime64[ns]")
-    phys = xr.DataArray([1.0, 2.0, 3.0], dims="time", coords={"time": ptime})
-
-    # Target ~ day-of-year 2 (timedelta of 1 day from year start). The cyclically
-    # nearest physics is late December (doy 364), not early January (doy 10).
-    targets = xr.DataArray(
-        np.array([np.timedelta64(1, "D")], dtype="timedelta64[ns]"), dims="time"
+    assert physics_bc.ds.sizes["bry_time"] == 2
+    kwargs = dict(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
     )
+    on_physics = BoundaryForcingSource(
+        physics_forcing=physics_bc, bgc_interpolation_method="density_mld", **kwargs
+    )
+    on_depth = BoundaryForcingSource(bgc_interpolation_method="depth", **kwargs)
 
-    out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=True)
-    np.testing.assert_array_equal(out.values, [3.0])
+    # Physics time axis, not a climatology.
+    np.testing.assert_array_equal(
+        on_physics.ds["bry_time"].values, physics_bc.ds["bry_time"].values
+    )
+    assert "cycle_length" not in on_physics.ds["bry_time"].attrs
+    assert "climatology" not in on_physics.ds.attrs
+    assert on_physics.ds.attrs["bgc_time_axis"] == "physics"
+    assert on_physics.ds.attrs["bgc_interpolation_method"] == "density_mld"
+    # The depth path is untouched: a cycled 12-record climatology.
+    assert on_depth.ds.sizes["bry_time"] == 12
+    assert on_depth.ds["bry_time"].attrs["cycle_length"] == 365.25
+    assert on_depth.ds.attrs["bgc_time_axis"] == "source"
+
+    direction = next(d for d, on in on_physics.boundaries.items() if on)
+    no3 = on_physics.ds[f"NO3_{direction}"]
+    jan, dec = no3.isel(bry_time=0).values, no3.isel(bry_time=1).values
+    valid = np.isfinite(jan) & np.isfinite(dec)
+    assert valid.any()
+    assert np.abs(jan[valid] - dec[valid]).max() > 0
+    # The source T/S used for the density coordinate never reach the output.
+    assert not any(
+        str(v).startswith(("temp_", "salt_")) for v in on_physics.ds.data_vars
+    )
 
 
 def test_bgc_source_names_match_the_dataset_map():

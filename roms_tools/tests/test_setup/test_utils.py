@@ -19,6 +19,7 @@ from roms_tools.setup.utils import (
     compute_in_situ_density,
     compute_mld,
     compute_potential_density,
+    cycle_to_times,
     expand_monthly_climatology_time_axis,
     gc_dist,
     get_target_coords,
@@ -1476,3 +1477,89 @@ class TestMaterializePhysicsTS:
         u.materialize_physics_ts(eager, ["temp_west"])  # numpy: nothing to do
         np.testing.assert_allclose(eager["temp_west"].values, data)
         u.materialize_physics_ts(ds, [])  # empty: nothing to do
+
+
+class TestCycleToTimes:
+    """``cycle_to_times`` puts a BGC source on the physics ``time`` axis."""
+
+    @staticmethod
+    def _clim():
+        from roms_tools.setup.utils import assign_dates_to_climatology
+
+        da = xr.DataArray(np.arange(1.0, 13.0), dims="time")
+        return assign_dates_to_climatology(da.to_dataset(name="v"), "time")["v"]
+
+    def test_exact_at_mid_month_and_linear_between(self):
+        from roms_tools.setup.utils import climatology_mid_month_days
+
+        clim = self._clim()
+        jan, feb = climatology_mid_month_days()[:2]  # days since 1 January (0-based)
+        base = np.datetime64("2012-01-01", "ns")
+        day = np.timedelta64(1, "D")
+        targets = xr.DataArray(
+            np.array(
+                [base + jan * day, base + feb * day, base + (jan + feb) // 2 * day]
+            ),
+            dims="time",
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True)
+        assert out.dims == ("time",)
+        np.testing.assert_array_equal(out["time"].values, targets.values)
+        np.testing.assert_allclose(out.values[:2], [1.0, 2.0], atol=1e-9)
+        assert 1.0 < out.values[2] < 2.0
+
+    def test_wraps_december_into_january(self):
+        clim = self._clim()
+        targets = xr.DataArray(
+            np.array(["2013-01-01", "2013-12-31T12"], dtype="datetime64[ns]"),
+            dims="time",
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True).values
+        # 1 Jan sits between mid-December (12) and mid-January (1): a blend, not an edge.
+        assert 1.0 < out[0] < 12.0 and 1.0 < out[1] < 12.0
+        assert out[0] > 6.0 and out[1] > 6.0  # closer to December's value
+
+    def test_dask_input_stays_lazy_and_matches(self):
+        clim = self._clim().chunk({"time": 4})
+        targets = xr.DataArray(
+            np.array(["2012-03-01", "2012-07-04"], dtype="datetime64[ns]"), dims="time"
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True)
+        assert hasattr(out.data, "chunks")
+        ref = cycle_to_times(self._clim(), "time", targets, climatology=True)
+        np.testing.assert_allclose(out.values, ref.values)
+
+    def test_non_climatology_interpolates_and_holds_the_ends(self):
+        src = xr.DataArray(
+            [10.0, 20.0],
+            dims="t",
+            coords={
+                "t": np.array(["2012-01-01", "2012-01-11"], dtype="datetime64[ns]")
+            },
+        )
+        targets = xr.DataArray(
+            np.array(
+                ["2011-12-01", "2012-01-06", "2012-02-01"], dtype="datetime64[ns]"
+            ),
+            dims="time",
+        )
+        out = cycle_to_times(src, "t", targets, climatology=False)
+        assert out.dims == ("time",)
+        np.testing.assert_allclose(out.values, [10.0, 15.0, 20.0])
+
+    def test_static_field_is_broadcast(self):
+        src = xr.DataArray(np.ones((2, 3)), dims=("depth", "x"))
+        targets = xr.DataArray(
+            np.array(["2012-01-01", "2012-01-02"], dtype="datetime64[ns]"), dims="time"
+        )
+        out = cycle_to_times(src, None, targets, climatology=True)
+        assert out.dims == ("time", "depth", "x") and out.sizes["time"] == 2
+        np.testing.assert_array_equal(out["time"].values, targets.values)
+
+    def test_rejects_a_climatology_without_timedelta_axis(self):
+        src = xr.DataArray([1.0, 2.0], dims="time", coords={"time": [0, 1]})
+        targets = xr.DataArray(
+            np.array(["2012-01-01"], dtype="datetime64[ns]"), dims="time"
+        )
+        with pytest.raises(ValueError, match="timedelta64"):
+            cycle_to_times(src, "time", targets, climatology=True)

@@ -46,13 +46,24 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 
 from __future__ import annotations
 
-import itertools
 import sys
 
 import numpy as np
 import xarray as xr
 
-from roms_tools.setup.utils import compute_in_situ_density, get_variable_metadata
+from roms_tools.setup.utils import (
+    apply_chunk_plan,
+    compute_in_situ_density,
+    get_variable_metadata,
+    month_aligned_time_chunks,
+    time_dim_of,
+)
+
+# The PyESPER chunk plan is built on the shared physics-time helpers in setup.utils
+# (the density placement of a BGC climatology partitions time the same way).
+_time_dim = time_dim_of
+_month_aligned_time_chunks = month_aligned_time_chunks
+_apply_chunk_plan = apply_chunk_plan
 
 # Fallback ceiling on ESPER chunk size, used only when PyESPER does not expose its
 # own budget helper. Equal to the value PyESPER itself hard-coded before it made the
@@ -96,7 +107,6 @@ def _pyesper_point_budget(method: str, n_variables: int) -> int:
 
 # Dim names treated as the time axis when no datetime coordinate identifies one
 # (see _time_dim). Ordered by how specific they are to a real time axis.
-_TIME_DIM_NAMES = ("time", "bry_time", "abs_time")
 
 # ROMS/MARBL tracer name -> PyESPER "DesiredVariable" name.
 ROMS_TO_ESPER = {
@@ -196,70 +206,6 @@ def _ensure_pyesper(path=None):
                 del sys.modules[name]
 
 
-def _time_dim(da: xr.DataArray) -> str | None:
-    """Name of ``da``'s time dimension, or None when it has no usable one.
-
-    Prefers a dim carrying a datetime64 coordinate -- what the boundary path
-    hands us, since ``BoundaryForcing._process_bgc_esper`` renames ``abs_time``
-    to ``time`` precisely so the datetime view *is* the dim -- and falls back to
-    a conventional name for a bare dim with no coordinate. Initial conditions
-    have no time dim at all (one instant, one level-set), so this returns None
-    there and :func:`_pyesper_chunk_plan` keeps its spatial-split behaviour.
-    """
-    for dim in da.dims:
-        coord = da.coords.get(dim)
-        if coord is not None and np.issubdtype(coord.dtype, np.datetime64):
-            return str(dim)
-    for name in _TIME_DIM_NAMES:
-        if name in da.dims:
-            return name
-    return None
-
-
-def _month_aligned_time_chunks(
-    da: xr.DataArray, time_dim: str, max_steps: int
-) -> tuple[int, ...] | int:
-    """Chunk lengths along ``time_dim``: exactly one block per calendar month, or
-    a uniform ``max_steps`` when the coordinate isn't datetimes (or one month
-    alone would exceed ``max_steps``, e.g. sub-daily forcing on a large grid).
-
-    One block per month -- never several months bundled into one, even when they
-    would fit ``max_steps`` -- because a block is recomputed once per output file
-    it feeds. ``xarray.save_mfdataset(compute=True)`` issues a *separate*
-    ``dask.compute`` per file (``writes = [w.sync(compute=compute) for w in
-    writers]``), so nothing is shared between files: a block spanning N monthly
-    files is computed in full N times. Measured on the 12-month Pacific boundary
-    axis (367 daily steps, 14 monthly files), counting the time steps each file's
-    graph forces:
-
-        one block per month      2.8x the useful work
-        two months per block     4.8x
-        time collapsed to one    14.0x   (every block spans every file)
-
-    Undersized blocks only cost PyESPER's fixed per-call setup (~2.4 s measured),
-    which is cheap next to recomputing whole months; oversized ones cost real
-    duplicated estimation. So this errs small. For data coarse enough that
-    ``group_dataset`` writes yearly rather than monthly files, monthly blocks are
-    finer than the file partition -- a few extra calls, still no recompute, since
-    each block feeds exactly one file.
-    """
-    coord = da.coords.get(time_dim)
-    if coord is None or not np.issubdtype(coord.dtype, np.datetime64):
-        return max_steps
-    index = coord.to_index()
-    # Run lengths of consecutive (year, month). `group_by_month` groups by the
-    # (year, month) *value*; for the monotonic time axes ROMS forcing carries
-    # that is the same partition, and run lengths are what `.chunk()` needs --
-    # dask blocks have to be contiguous.
-    months = [
-        sum(1 for _ in group)
-        for _, group in itertools.groupby(zip(index.year, index.month, strict=True))
-    ]
-    if not months or max(months) > max_steps:
-        return max_steps
-    return tuple(months)
-
-
 def _pyesper_chunk_plan(
     da: xr.DataArray, max_points: int | None = None
 ) -> dict[str, int | tuple[int, ...]]:
@@ -324,29 +270,6 @@ def _pyesper_chunk_plan(
     per_slice = max(1, da.size // da.sizes[chunk_dim])
     plan[chunk_dim] = max(1, cap // per_slice)
     return plan
-
-
-def _apply_chunk_plan(
-    da: xr.DataArray, plan: dict[str, int | tuple[int, ...]]
-) -> xr.DataArray:
-    """Apply as much of ``plan`` as ``da`` can take, and return the result.
-
-    ``DataArray.chunk`` raises on a mapping key that isn't one of the array's own
-    dims, so a plan derived from ``temp`` has to be filtered per input: 2D
-    ``lon``/``lat`` against a 3D ``temp``, and a boundary ``depth`` that need not
-    carry the time dim at all. A tuple entry additionally has to sum to that
-    input's own length along the dim; where it doesn't, fall back to a single
-    chunk for that dim rather than raising -- the inputs are broadcast against
-    each other downstream regardless.
-    """
-    filtered: dict[str, int | tuple[int, ...]] = {}
-    for dim, spec in plan.items():
-        if dim not in da.dims:
-            continue
-        if isinstance(spec, tuple) and sum(spec) != da.sizes[dim]:
-            spec = -1
-        filtered[dim] = spec
-    return da.chunk(filtered) if filtered else da
 
 
 def _decimal_year(time_da: xr.DataArray) -> xr.DataArray:

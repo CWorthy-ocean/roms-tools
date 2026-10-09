@@ -527,7 +527,7 @@ class CDRForcing(BaseModel):
     """A list of one or more CDR release objects."""
     include_marbl_bgc: bool = False
     """Append the MARBL BGC tracers to the file's tracer axis, matching a ROMS
-    build with both ``CDR_TRACER`` and ``MARBL`` enabled. Only valid when
+    build with both ``CDR_LITE`` and ``MARBL`` enabled. Only valid when
     cdr_lite or passive releases are present (a pure-marbl forcing already
     carries the full MARBL axis). Auto-enabled when marbl releases are mixed
     with generated-tracer releases."""

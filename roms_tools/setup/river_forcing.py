@@ -1470,7 +1470,7 @@ class RiverForcing:
 
         # Tracer metadata
         # The single seam defining the file's ordered ntracers axis. A future
-        # schema-driven axis (e.g. PR #673's CDRTracerSchema for CDR_TRACER
+        # schema-driven axis (e.g. PR #673's CDRTracerSchema for CDR_LITE
         # runs, where rivers would carry zero for every CDR tracer) plugs in
         # here by passing its own ordered name list via `tracer_names=`.
         ds = add_tracer_metadata_to_ds(

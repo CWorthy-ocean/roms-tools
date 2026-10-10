@@ -1,4 +1,5 @@
 import importlib.metadata
+import itertools
 import logging
 import time
 import typing
@@ -21,6 +22,7 @@ import xgcm
 import yaml
 from pydantic import BaseModel
 from scipy.spatial import cKDTree
+from xarray.core.utils import is_duck_dask_array
 
 # Must precede the ``cache=True`` kernels below: numba picks the cache location
 # when the decorator runs.
@@ -354,6 +356,265 @@ def materialize_before_check(ds, var_names, materialize: bool) -> None:
     realized = dask.compute(*(ds[v] for v in names))
     for v, value in zip(names, realized):
         ds[v] = value
+
+
+#: Dim names a time axis may go by on the arrays these helpers see (the boundary path
+#: renames the physics ``abs_time`` view to ``time``; ``bry_time`` is the ROMS output dim).
+TIME_DIM_NAMES = ("time", "bry_time", "abs_time")
+
+
+def time_dim_of(da: xr.DataArray) -> str | None:
+    """Name of ``da``'s time dimension, or None when it has no usable one.
+
+    Prefers a dim carrying a datetime64 coordinate and falls back to a conventional
+    name (:data:`TIME_DIM_NAMES`) for a bare dim with no coordinate. Initial conditions
+    have no time dim at all (one instant), so this returns None there.
+    """
+    for dim in da.dims:
+        coord = da.coords.get(dim)
+        if coord is not None and np.issubdtype(coord.dtype, np.datetime64):
+            return str(dim)
+    for name in TIME_DIM_NAMES:
+        if name in da.dims:
+            return name
+    return None
+
+
+def month_aligned_time_chunks(
+    da: xr.DataArray, time_dim: str, max_steps: int
+) -> tuple[int, ...] | int:
+    """Chunk lengths along ``time_dim``: exactly one block per calendar month, or a
+    uniform ``max_steps`` when the coordinate isn't datetimes (or one month alone would
+    exceed ``max_steps``, e.g. sub-daily forcing on a large grid).
+
+    One block per month -- never several months bundled into one, even when they would
+    fit ``max_steps`` -- because a block is recomputed once per output file it feeds.
+    ``xarray.save_mfdataset(compute=True)`` issues a *separate* ``dask.compute`` per
+    file, so nothing is shared between files: a block spanning N monthly files is
+    computed in full N times. Measured on a 12-month daily Pacific boundary axis (14
+    monthly files): one block per month 2.8x the useful work, two months per block 4.8x,
+    time collapsed to one block 14x. Undersized blocks cost only fixed per-call setup,
+    so this errs small. The same partition suits every per-record companion computation
+    on the physics time axis (PyESPER, density placement of a climatology).
+    """
+    coord = da.coords.get(time_dim)
+    if coord is None or not np.issubdtype(coord.dtype, np.datetime64):
+        return max_steps
+    index = coord.to_index()
+    months = [
+        sum(1 for _ in group)
+        for _, group in itertools.groupby(zip(index.year, index.month, strict=True))
+    ]
+    if not months or max(months) > max_steps:
+        return max_steps
+    return tuple(months)
+
+
+def apply_chunk_plan(
+    da: xr.DataArray, plan: Mapping[str, int | tuple[int, ...]]
+) -> xr.DataArray:
+    """Apply as much of ``plan`` as ``da`` can take, and return the result.
+
+    ``DataArray.chunk`` raises on a mapping key that isn't one of the array's own dims,
+    so a plan derived from one array has to be filtered per input (2D ``lon``/``lat``
+    against a 3D ``temp``; a boundary ``depth`` that need not carry the time dim). A
+    tuple entry additionally has to sum to the input's own length along the dim; where
+    it doesn't, that dim falls back to a single chunk rather than raising. Non-dask
+    inputs are returned untouched.
+    """
+    if not hasattr(da.data, "chunks"):
+        return da
+    usable: dict[str, int | tuple[int, ...]] = {}
+    for dim, size in plan.items():
+        if dim not in da.dims:
+            continue
+        if isinstance(size, tuple) and sum(size) != da.sizes[dim]:
+            usable[dim] = -1
+        else:
+            usable[dim] = size
+    return da.chunk(usable) if usable else da
+
+
+def physics_time_view(
+    ds: xr.Dataset, direction: str
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """The physics boundary ``temp``/``salt`` strips for ``direction`` with their datetime
+    axis as the ``time`` dim.
+
+    A saved/processed physics boundary dataset carries ``bry_time`` (relative days) as
+    the time dim with an ``abs_time`` datetime64 companion coordinate. Every companion
+    that works per physics record (PyESPER, density placement of a BGC climatology)
+    wants the datetime view, named ``time`` so the shared ``_add_global_metadata`` can
+    rebuild ``bry_time`` from it afterwards.
+    """
+    temp = ds[f"temp_{direction}"]
+    salt = ds[f"salt_{direction}"]
+    if "abs_time" in temp.coords:
+        temp = temp.swap_dims({"bry_time": "abs_time"}).rename({"abs_time": "time"})
+        salt = salt.swap_dims({"bry_time": "abs_time"}).rename({"abs_time": "time"})
+    return temp, salt
+
+
+def _day_of_year(times: np.ndarray) -> np.ndarray:
+    """Fractional day of year (1-based) of datetime64 ``times``."""
+    index = pd.DatetimeIndex(times)
+    year_start = pd.to_datetime(index.year.astype(str) + "-01-01")
+    return (index - year_start).total_seconds() / 86400.0 + 1.0
+
+
+def cycle_to_times(
+    da: xr.DataArray,
+    time_dim: str | None,
+    target_times: xr.DataArray,
+    *,
+    climatology: bool,
+    cycle: float = 365.25,
+) -> xr.DataArray:
+    """Put ``da`` on the physics time axis ``target_times`` (datetime64), named ``time``.
+
+    A climatology (``time_dim`` holding timedelta64 since the start of the year, as
+    :func:`assign_dates_to_climatology` sets) is interpolated linearly in day of year,
+    with December wrapped into January by padding one record at each end -- what ROMS
+    does at runtime with ``cycle_length``, so a boundary file built this way and one
+    cycled by ROMS agree. A non-climatology axis (datetime64) is interpolated linearly in
+    time with the ends held (no extrapolation). An array with no time axis is broadcast
+    (lazily) to every target record.
+
+    The result is lazy for dask input; the interpolation dim is gathered into one chunk
+    first (xarray's ``interp`` needs that), which for a 12-record climatology is nothing.
+    """
+    target = np.asarray(target_times.values, dtype="datetime64[ns]")
+    if time_dim is None or time_dim not in da.dims:
+        out = da.expand_dims({"time": len(target)}, axis=0)
+        return out.assign_coords(time=("time", target))
+    if hasattr(da.data, "chunks"):
+        da = da.chunk({time_dim: -1})
+    if climatology:
+        src = da[time_dim].values
+        if not np.issubdtype(src.dtype, np.timedelta64):
+            raise ValueError(
+                f"a climatology's {time_dim!r} axis must be timedelta64 (days since the "
+                f"start of the year), got {src.dtype}; was assign_dates_to_climatology "
+                "applied?"
+            )
+        doy_src = src.astype("timedelta64[ns]").astype("int64") / 86400e9 + 1.0
+        padded = xr.concat(
+            [
+                da.isel({time_dim: [-1]}).assign_coords(
+                    {time_dim: [doy_src[-1] - cycle]}
+                ),
+                da.assign_coords({time_dim: doy_src}),
+                da.isel({time_dim: [0]}).assign_coords(
+                    {time_dim: [doy_src[0] + cycle]}
+                ),
+            ],
+            dim=time_dim,
+        )
+        query = _day_of_year(target)
+        out = padded.interp({time_dim: query}, method="linear")
+    else:
+        src = da[time_dim].values.astype("datetime64[ns]")
+        query = np.clip(target, src.min(), src.max())  # hold the ends
+        out = da.interp({time_dim: query}, method="linear")
+    if time_dim != "time":
+        out = out.rename({time_dim: "time"})
+    return out.assign_coords(time=("time", target))
+
+
+def companions_derive_from_physics_ts(
+    bgc_sources: Sequence[Mapping[str, Any]] | None, default_interpolation: str
+) -> bool:
+    """True when any bgc companion will read the physics temperature/salinity.
+
+    Two kinds do: an ``ESPER`` source (PyESPER's inputs *are* T/S) and any source
+    interpolated on density -- ``"density"`` or ``"density_mld"`` both need sigma-0
+    from T/S. A climatology on plain ``"depth"`` interpolation never touches them.
+    """
+    for item in bgc_sources or ():
+        if (item.get("source") or {}).get("name") == "ESPER":
+            return True
+        method = item.get("bgc_interpolation_method") or default_interpolation
+        if method in ("density", "density_mld"):
+            return True
+    return False
+
+
+def materialize_physics_ts(ds, var_names: Iterable[str], time_block: int = 1) -> None:
+    """Realize the physics T/S fields the bgc companions derive from, in place.
+
+    Called by the ``BoundaryForcing``/``InitialConditions`` wrappers *before*
+    ``build_bgc_companions``, so that ESPER's inputs and every density-based
+    interpolation are built on data already in memory rather than on the lazy
+    source regrid graph.
+
+    Why: a companion's own ``.save()`` computes all of its variables in one graph
+    (18 per monthly boundary file for ESPER: six tracers, three directions). Left
+    lazy, every one of them reaches back through the same per-day regrids of the
+    source slabs, and dask's ordering over that wide, shared graph materialises
+    many days of ~190 MB domain-bbox temp+salt slabs before their consumers run.
+    Measured on a 12 km ESPER boundary month under the synchronous scheduler: RSS
+    rose linearly at ~12 GB/h through the save and no monthly file completed in
+    the time a single variable took to compute alone (which stayed flat) -- the
+    same signature that ended a 5-year run at >112 GB. Realizing the regridded
+    strips here severs the companions' graphs from the source entirely, and the
+    physics save writes T/S from memory too. Every other physics variable stays
+    lazy.
+
+    Two things this deliberately does NOT do:
+
+    * **Realize the whole span in one compute.** That is the same wide, shared
+      graph -- six strips over every day -- and it peaked at 25 GB for a single
+      34-day month. The unit of memory here is not the strip but the *decoded
+      source day*: the regrid reads whole global GLORYS slabs, and one day of
+      temp+salt decoded to float64 is ~7 GB (2041x4320x50 levels x 2) whatever
+      the ROMS grid looks like. So the strips are computed in blocks of
+      ``time_block`` steps along their time dimension, one block at a time, which
+      bounds the peak by the block rather than by the run length. Eight-day
+      blocks still peaked at 35 GB on that month; the default of one step peaked
+      at 18.6 GB -- one day's slabs plus their decode intermediates -- and built
+      faster (392 s against 583 s), for one small compute call per step. Cropping
+      the source to the domain *before* CF decoding would cut that day-size by
+      the global-to-bbox area ratio; that is a loader change, not done here.
+    * **Hand the companions numpy.** ``estimate_bgc_fields`` only applies
+      PyESPER's chunk plan and point budget when its inputs are dask-backed; numpy
+      inputs make PyESPER run eagerly, at build time, on the full span in one
+      call -- bypassing the ``_max_points_per_chunk`` guard that exists because a
+      4 km / 100-level grid OOM-killed a 251 GB machine at the default chunking.
+      So each realized strip is re-wrapped as a dask array carrying the chunks it
+      had before: the values are in memory, but ESPER stays lazy, chunk-planned
+      and under ``serialize_dask`` exactly as it was.
+
+    What it costs is the strips themselves: at 12 km, 1.8 MB per variable per
+    direction per month (about 0.5 GB for five years of three boundaries); on a
+    100-level 1858x962 grid, order 16 GB for a year. That is the data the physics
+    save writes regardless, held a little earlier.
+
+    A no-op for names that are absent or not dask-backed.
+    """
+    names = [v for v in var_names if v in ds and is_duck_dask_array(ds[v].data)]
+    if not names:
+        return
+    time_dims = {
+        v: next((d for d in ds[v].dims if "time" in str(d)), None) for v in names
+    }
+    original_chunks = {v: dict(ds[v].chunksizes) for v in names}
+
+    # Group by time dimension so one block slices every strip on the same axis.
+    for time_dim in {*time_dims.values()}:
+        group = [v for v in names if time_dims[v] == time_dim]
+        if time_dim is None:
+            realized = dict(zip(group, dask.compute(*(ds[v] for v in group))))
+        else:
+            n = ds.sizes[time_dim]
+            pieces: dict[str, list] = {v: [] for v in group}
+            for start in range(0, n, time_block):
+                block = slice(start, min(start + time_block, n))
+                vals = dask.compute(*(ds[v].isel({time_dim: block}) for v in group))
+                for v, val in zip(group, vals):
+                    pieces[v].append(val)
+            realized = {v: xr.concat(pieces[v], dim=time_dim) for v in group}
+        for v, value in realized.items():
+            ds[v] = value.chunk(original_chunks[v])
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:

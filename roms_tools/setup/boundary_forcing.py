@@ -43,11 +43,14 @@ from roms_tools.setup.utils import (
     _SELF_DOWNLOADING_BGC,
     RawDataSource,
     add_time_info_to_ds,
+    apply_chunk_plan,
     bgc_source_extra_kwargs,
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
+    companions_derive_from_physics_ts,
     compute_barotropic_velocity,
+    cycle_to_times,
     deserialize_forcing_data,
     forwardable_fields,
     from_yaml,
@@ -57,7 +60,10 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     materialize_before_check,
+    materialize_physics_ts,
+    month_aligned_time_chunks,
     nan_check_batch,
+    physics_time_view,
     pop_grid_data,
     preflight_esper_sources,
     substitute_nans_by_fillvalue,
@@ -74,60 +80,6 @@ from roms_tools.utils import (
     transpose_dimensions,
 )
 from roms_tools.vertical_coordinate import compute_depth
-
-
-def _interpolate_phys_to_bgc_time(
-    phys_da: xr.DataArray,
-    time_dim: str,
-    bgc_time_coord: xr.DataArray,
-    bgc_climatology: bool,
-) -> xr.DataArray:
-    """Sample a physics DataArray at the BGC times using nearest-time selection.
-
-    Parameters
-    ----------
-    phys_da : xr.DataArray
-        Physics data with a ``datetime64`` time dimension named ``time_dim``.
-    time_dim : str
-        Name of the time dimension in ``phys_da``.
-    bgc_time_coord : xr.DataArray
-        Target time coordinate from the BGC dataset (1-D).
-    bgc_climatology : bool
-        Whether the BGC dataset is a climatology. If True, ``bgc_time_coord``
-        is expected to be ``timedelta64`` from the start of the year (as set by
-        ``assign_dates_to_climatology``), and the nearest neighbour is taken
-        cyclically in fractional day-of-year space (so an early-January target can
-        match late-December physics). If False, nearest selection is performed in
-        ``datetime64`` space.
-
-    Returns
-    -------
-    xr.DataArray
-        ``phys_da`` sampled at ``bgc_time_coord``, with time dimension still named
-        ``time_dim`` and coordinate set to ``bgc_time_coord``.
-
-    Notes
-    -----
-    The BGC boundary output is typically a 12-step climatology, and ROMS linearly
-    interpolates boundary records in time at runtime, so sub-monthly precision in the
-    physics T/S used only as the density/MLD anchor is washed out. Nearest-time
-    selection is therefore sufficient and, unlike ``xr.interp``, requires no rechunk of
-    the time axis (which would otherwise pull the entire physics time series into a
-    single in-memory chunk); only the selected slices are read.
-    """
-    if bgc_climatology:
-        # Circular nearest neighbour in fractional day-of-year space.
-        bgc_doy = (bgc_time_coord / np.timedelta64(1, "D")).values + 1.0
-        phys_doy = phys_da[time_dim].dt.dayofyear.values.astype(float)
-        period = 365.25
-        diff = np.abs(phys_doy[None, :] - np.asarray(bgc_doy)[:, None])
-        nearest = np.minimum(diff, period - diff).argmin(axis=1)
-        result = phys_da.isel({time_dim: nearest})
-        return result.assign_coords({time_dim: bgc_time_coord.values})
-
-    # Non-climatology: nearest selection in datetime64 space.
-    return phys_da.sel({time_dim: bgc_time_coord}, method="nearest")
-
 
 #: Which dataset class implements each ``source["name"]``, per forcing type. This is the
 #: single source of truth for *which source names BoundaryForcing supports*: both
@@ -293,6 +245,15 @@ class BoundaryForcingSource:
         carrying temperature/salinity; otherwise interpolation falls back to depth space.
         Interpolation uses ``xgcm.Grid.transform`` with the linear method inside the
         source range and edge-value extrapolation outside (``mask_edges=False``).
+
+        With a density method the BGC fields are placed on **every physics record**: the
+        source (a 12-month climatology, usually) is cycled onto the physics time axis by
+        linear interpolation in day of year and the vertical placement is done against
+        that record's own density/MLD, so the result follows the physics through the run
+        rather than being a climatology anchored on one sampled physics day. The output
+        therefore carries the physics time axis (monthly files, no ``cycle_length``), and
+        ``source["climatology"]`` describes only how the input dataset is read. With
+        ``"depth"`` the output of a climatological source stays a cycled climatology.
     physics_forcing : BoundaryForcingSource, optional
         A physics ``BoundaryForcingSource`` object (``type='physics'``) whose T/S fields
         supply the target density coordinate for BGC tracer interpolation. When None and
@@ -468,6 +429,9 @@ class BoundaryForcingSource:
             }
         )
 
+        # Set when a density method placed the BGC fields on the physics time axis:
+        # the output is then time-varying, not a climatology, whatever the source was.
+        on_physics_time = False
         for direction, is_enabled in self.boundaries.items():
             if not is_enabled:
                 continue
@@ -661,9 +625,15 @@ class BoundaryForcingSource:
                     source_coord = None
                     target_coord = None
                     if method != BgcInterpMethod.depth:
-                        source_coord, target_coord = self._compute_bgc_vertical_coords(
-                            method, direction, bdry_data, processed_fields
+                        source_coord, target_coord = self._place_bgc_on_physics_time(
+                            method,
+                            direction,
+                            bdry_data,
+                            processed_fields,
+                            tracer_vars,
+                            aux_ts_vars,
                         )
+                        on_physics_time = True
 
                     for var_name in tracer_vars:
                         if var_name not in processed_fields:
@@ -718,8 +688,15 @@ class BoundaryForcingSource:
             # Static BGC dataset source (no time axis, e.g. GLODAP climatology).
             ds = self._bracket_static_time(ds)
 
-        # Add global information
-        ds = self._add_global_metadata(data, ds)
+        # Add global information. A density method puts the BGC fields on the physics
+        # time axis (see _place_bgc_on_physics_time): that output is not a climatology
+        # even when the source is, so it must not carry ``cycle_length``.
+        ds = self._add_global_metadata(
+            data, ds, climatology=False if on_physics_time else None
+        )
+        if self.type == "bgc":
+            ds.attrs["bgc_interpolation_method"] = str(self.bgc_interpolation_method)
+            ds.attrs["bgc_time_axis"] = "physics" if on_physics_time else "source"
 
         if self.type == "bgc":
             # Describe the BGC variables actually present model-agnostically (only ALK is
@@ -763,72 +740,62 @@ class BoundaryForcingSource:
         )
         self.apply_2d_horizontal_fill = None
 
-    def _compute_bgc_vertical_coords(
+    def _place_bgc_on_physics_time(
         self,
         method: str,
         direction: str,
         bdry_data,
         processed_fields: dict,
+        tracer_vars: list[str],
+        aux_ts_vars: list[str],
     ) -> tuple[xr.DataArray, xr.DataArray]:
-        """Build source and target vertical coordinates for non-depth BGC
-        interpolation (``"density"`` or ``"density_mld"``) at one boundary.
+        """Put the BGC fields on the physics time axis and build the per-record vertical
+        coordinates for ``"density"`` / ``"density_mld"`` interpolation at one boundary.
 
-        The source T/S comes from the BGC dataset's OWN pair (``temp_bgc``/``salt_bgc``,
-        carried at the boundary on the BGC depth and time grid). No regridding or time
-        alignment is needed: it shares the tracers' grid and time axis.
+        The BGC source is (almost always) a 12-month climatology, while the physics it
+        has to sit on varies day by day and year by year. Placing the climatology on the
+        isopycnals or mixed layer of *one* sampled physics day and cycling that record
+        (what this did before) puts the tracers on a density structure that matches
+        neither the sampled year nor the years the record is reused in. So, like the
+        ESPER companion, the BGC fields are first cycled onto the physics ``time`` axis
+        (:func:`cycle_to_times`: linear in day of year, December wrapped into January --
+        ROMS's own ``cycle_length`` arithmetic), and the source/target coordinates are
+        then built per physics record from the cycled BGC T/S and the physics T/S as
+        they are. The output inherits the physics time axis and is written as monthly
+        files, not as a climatology; ``source["climatology"]`` keeps describing the
+        input dataset.
 
-        The target T/S comes from the model's (physics) sigma-level fields supplied by
-        ``physics_forcing``, interpolated onto the BGC time axis. The actual coordinate
-        construction (density vs. MLD-warped depth) is delegated to
-        :func:`build_bgc_vertical_coords`.
-
-        Returns
-        -------
-        tuple[xr.DataArray, xr.DataArray]
-            ``(source_coord, target_coord)``.
+        Every array that enters the xgcm transform is blocked one calendar month per
+        chunk along ``time`` (``month_aligned_time_chunks``), the same partition the
+        PyESPER companion uses: ``apply_ufunc`` needs the inputs' chunks to agree, and a
+        block is recomputed once per output file it feeds. ``processed_fields`` is
+        updated in place (tracers and the source T/S cycled); the ``(source, target)``
+        coordinate pair is returned for :meth:`VerticalRegrid.apply`.
         """
         assert self.physics_forcing is not None
         bgc_climatology = bool(self.source["climatology"])
         bgc_depth_dim = bdry_data.dim_names["depth"]
+        bgc_time_dim = bdry_data.dim_names.get("time")
         temp_key, salt_key = bdry_data.bgc_source_ts
 
-        # BGC time axis (shared with the tracers) — taken from the source T/S.
-        bgc_time_dim = bdry_data.dim_names.get("time")
-        bgc_time_coord = None
-        src_temp = processed_fields[temp_key]
-        if bgc_time_dim is not None and bgc_time_dim in src_temp.dims:
-            bgc_time_coord = src_temp[bgc_time_dim]
+        temp_sigma, salt_sigma = physics_time_view(self.physics_forcing.ds, direction)
+        times = temp_sigma["time"]
+        plan = {"time": month_aligned_time_chunks(temp_sigma, "time", times.size)}
+        temp_sigma = apply_chunk_plan(temp_sigma, plan)
+        salt_sigma = apply_chunk_plan(salt_sigma, plan)
 
-        def _align_time(da: xr.DataArray, time_dim: str) -> xr.DataArray:
-            """Align ``da``'s ``time_dim`` to the BGC time axis, or collapse it."""
-            if time_dim not in da.dims:
-                return da
-            if bgc_time_coord is not None:
-                return _interpolate_phys_to_bgc_time(
-                    da, time_dim, bgc_time_coord, bgc_climatology
-                )
-            return da.mean(time_dim)
-
-        # --- Target density: physics (model) sigma-level T/S, aligned to BGC time ---
-        # Physics BC dataset uses "bry_time" as the time dim with an "abs_time"
-        # datetime64 companion coord. Swap to the datetime view before time-aligning.
-        temp_sigma = self.physics_forcing.ds[f"temp_{direction}"]
-        salt_sigma = self.physics_forcing.ds[f"salt_{direction}"]
-        if "abs_time" in temp_sigma.coords:
-            temp_sigma = temp_sigma.swap_dims({"bry_time": "abs_time"}).rename(
-                {"abs_time": "time"}
+        for var_name in [*tracer_vars, *aux_ts_vars]:
+            if var_name not in processed_fields:
+                continue
+            cycled = cycle_to_times(
+                processed_fields[var_name],
+                bgc_time_dim,
+                times,
+                climatology=bgc_climatology,
             )
-            salt_sigma = salt_sigma.swap_dims({"bry_time": "abs_time"}).rename(
-                {"abs_time": "time"}
-            )
-            temp_sigma = _align_time(temp_sigma, "time")
-            salt_sigma = _align_time(salt_sigma, "time")
-        else:
-            temp_sigma = _align_time(temp_sigma, "bry_time")
-            salt_sigma = _align_time(salt_sigma, "bry_time")
+            processed_fields[var_name] = apply_chunk_plan(cycled, plan)
 
         s_dim = next(d for d in temp_sigma.dims if d.startswith("s_"))
-
         return build_bgc_vertical_coords(
             method,
             source_temp=processed_fields[temp_key],
@@ -980,18 +947,9 @@ class BoundaryForcingSource:
             self._get_depth_coordinates(0, direction, "rho", "interface")
             depth = self.ds_depth_coords[f"layer_depth_rho_{direction}"]
 
-            temp = pf.ds[f"temp_{direction}"]
-            salt = pf.ds[f"salt_{direction}"]
-            # Physics BC vars carry a "bry_time" dim with an "abs_time" datetime coord.
-            # Swap to the datetime view named "time" so the shared _add_global_metadata
-            # can rebuild bry_time from it (as the dataset/constants paths do).
-            if "abs_time" in temp.coords:
-                temp = temp.swap_dims({"bry_time": "abs_time"}).rename(
-                    {"abs_time": "time"}
-                )
-                salt = salt.swap_dims({"bry_time": "abs_time"}).rename(
-                    {"abs_time": "time"}
-                )
+            # The datetime view named "time", so the shared _add_global_metadata can
+            # rebuild bry_time from it (as the dataset/constants paths do).
+            temp, salt = physics_time_view(pf.ds, direction)
             est_dates = _decimal_year(temp["time"]) if "time" in temp.dims else None
 
             lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
@@ -1449,8 +1407,13 @@ class BoundaryForcingSource:
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
 
-        # ``data`` is None for a "constants" source; fall back to the explicit flag.
-        clim = data.climatology if data is not None else bool(climatology)
+        # An explicit ``climatology`` wins (a density method's physics-time output is
+        # never a climatology; the ESPER/constants paths have no ``data``); otherwise
+        # the loaded dataset says what it is.
+        if climatology is not None:
+            clim = bool(climatology)
+        else:
+            clim = bool(data.climatology) if data is not None else False
         ds, bry_time = add_time_info_to_ds(ds, self.model_reference_date, clim)
 
         ds = ds.assign_coords({"bry_time": bry_time})
@@ -1995,6 +1958,22 @@ class BoundaryForcing:
         self.physics = BoundaryForcingSource(**{**shared_kwargs, "type": "physics"})
 
         if bgc_sources:
+            # Realize the boundary T/S strips the companions derive from (ESPER's
+            # inputs, density_mld's sigma-0) before their graphs are built, so their
+            # saves depend on small in-memory arrays rather than on the shared lazy
+            # source regrid -- which is what made every companion save climb in
+            # memory without bound. See materialize_physics_ts.
+            if companions_derive_from_physics_ts(
+                bgc_sources, self.bgc_interpolation_method
+            ):
+                materialize_physics_ts(
+                    self.physics.ds,
+                    [
+                        name
+                        for name in self.physics.ds.data_vars
+                        if str(name).split("_")[0] in ("temp", "salt")
+                    ],
+                )
             self.bgc = build_bgc_companions(
                 BoundaryForcingSource,
                 self.grid,

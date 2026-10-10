@@ -49,11 +49,15 @@ from __future__ import annotations
 import itertools
 import os
 import sys
+from typing import TYPE_CHECKING
 
 import numpy as np
 import xarray as xr
 
 from roms_tools.setup.utils import compute_in_situ_density, get_variable_metadata
+
+if TYPE_CHECKING:
+    from PyESPER.salinity_conditioning import SalinityConditioning
 
 # Fallback ceiling on ESPER chunk size, used only when PyESPER does not expose its
 # own budget helper. Equal to the value PyESPER itself hard-coded before it made the
@@ -401,7 +405,7 @@ def validate_esper_source(source: dict) -> None:
     _salinity_conditioning(source)
 
 
-def _salinity_conditioning(source: dict):
+def _salinity_conditioning(source: dict) -> SalinityConditioning | None:
     """The ``PyESPER.salinity_conditioning.SalinityConditioning`` for ``source``, or
     ``None`` when the source does not ask for it.
 

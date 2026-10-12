@@ -1675,8 +1675,11 @@ def test_estimate_bgc_fields_forwards_salinity_conditioning(
         assert "31-34 PSU" in attr and "woa23_decav_s00_01.nc" in attr
 
 
-@needs_pyesper
-def test_estimate_bgc_fields_without_conditioning_passes_none(monkeypatch):
+def test_estimate_bgc_fields_without_conditioning_omits_the_keyword(monkeypatch):
+    """Off means the keyword is not sent at all -- not sent as None -- so a PyESPER
+    fork that predates salinity conditioning keeps working (no PyESPER needed here:
+    the entry points are stubbed).
+    """
     calls = _spy_pyesper(monkeypatch)
     out = estimate_bgc_fields(
         *_tiny_inputs(),
@@ -1684,8 +1687,46 @@ def test_estimate_bgc_fields_without_conditioning_passes_none(monkeypatch):
         roms_variables=["NO3"],
         est_dates=2014.0,
     )
-    assert calls[-1]["salinity_conditioning"] is None
+    assert "salinity_conditioning" not in calls[-1]
     assert "esper_salinity_conditioning" not in out["NO3"].attrs
+
+
+def test_estimate_bgc_fields_works_with_a_pyesper_that_predates_conditioning(
+    monkeypatch,
+):
+    """Regression: the fork before salinity conditioning declares exactly this
+    signature (no ``salinity_conditioning``, no ``**kwargs``); passing the keyword
+    as None raised ``TypeError`` after the physics regrid had already run.
+    """
+
+    def old_nn_xr(
+        salinity,
+        temperature,
+        longitude,
+        latitude,
+        depth,
+        *,
+        variables,
+        path="",
+        equation=8,
+        est_dates=None,
+        max_points_per_chunk=None,
+    ):
+        sal, *_ = xr.broadcast(salinity, temperature, longitude, latitude, depth)
+        return {v: xr.zeros_like(sal) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module,
+        "_ensure_pyesper",
+        lambda path=None: {"lir": old_nn_xr, "nn": old_nn_xr, "mixed": old_nn_xr},
+    )
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={"name": "ESPER", "method": "nn"},
+        roms_variables=["NO3", "O2"],
+        est_dates=2014.0,
+    )
+    assert set(out) == {"NO3", "O2"}
 
 
 @needs_pyesper
@@ -1736,7 +1777,6 @@ def test_every_supported_variable_has_a_floor():
     assert all(ESPER_FLOORS[v] == 0.0 for v in ESPER_SUPPORTED_VARS if v != "O2")
 
 
-@needs_pyesper
 def test_estimate_bgc_fields_floors_oxygen_at_two_and_nutrients_at_zero(monkeypatch):
     """The nets overshoot below the physical range at the low end (OMZ oxygen,
     oligotrophic nutrients). Nutrients clamp at 0; O2 at 2.0 mmol/m3, below WOA23's
@@ -1767,3 +1807,63 @@ def test_estimate_bgc_fields_floors_oxygen_at_two_and_nutrients_at_zero(monkeypa
     assert float(out["O2"].min()) == 2.0 and float(out["O2"].max()) == 2.0
     assert "2 mmol/m^3" in out["O2"].attrs["esper_floor"]
     assert "esper_floor" not in out["NO3"].attrs
+
+
+@needs_pyesper
+@pytest.mark.parametrize("wrapper", ["initial_conditions", "boundary_forcing"])
+def test_conditioned_source_survives_yaml_round_trips(
+    woa_salinity_file, tmp_path, wrapper
+):
+    """A conditioned ESPER source carries a nested path. It must serialize (as a
+    ``Path`` or a ``str``), load back, and serialize again: ``normalize_paths``
+    turns the nested string into a ``Path`` on load, which ``to_yaml`` then has to
+    handle a second time.
+    """
+    from roms_tools import BoundaryForcing, InitialConditions
+
+    grid = _small_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    bgc_sources = [
+        {
+            "source": {
+                "name": "ESPER",
+                "salinity_conditioning": {"woa_salinity_path": woa_salinity_file},
+            },
+            "use_vars": ["ALK", "DIC"],
+        }
+    ]
+    with dask.config.set(scheduler="synchronous"):
+        if wrapper == "initial_conditions":
+            obj = InitialConditions(
+                grid=grid,
+                ini_time=datetime(2021, 6, 29),
+                source={"name": "GLORYS", "path": fname},
+                bgc_sources=bgc_sources,
+                bgc_model=BGCMarbl,
+                use_dask=False,
+            )
+            cls = InitialConditions
+        else:
+            obj = BoundaryForcing(
+                grid=grid,
+                start_time=datetime(2021, 6, 29),
+                end_time=datetime(2021, 6, 30),
+                source={"name": "GLORYS", "path": fname},
+                bgc_sources=bgc_sources,
+                bgc_model=BGCMarbl,
+                use_dask=False,
+            )
+            cls = BoundaryForcing
+        first = tmp_path / "first.yaml"
+        obj.to_yaml(first)
+        reloaded = cls.from_yaml(first, use_dask=False)
+        second = tmp_path / "second.yaml"
+        reloaded.to_yaml(second)  # the loaded nested path serializes again
+    src = reloaded.bgc[0].source
+    assert Path(src["salinity_conditioning"]["woa_salinity_path"]) == woa_salinity_file
+    assert (
+        "esper_salinity_conditioning"
+        in reloaded.bgc[0]
+        .ds[next(v for v in reloaded.bgc[0].ds.data_vars if str(v).startswith("ALK"))]
+        .attrs
+    )

@@ -117,17 +117,22 @@ ESPER_TO_ROMS = {v: k for k, v in ROMS_TO_ESPER.items()}
 #: ROMS/MARBL tracers the ESPER source can derive from T/S.
 ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 
-#: Lower bound (mmol/m³) applied to each estimate after the unit conversion. The nets
-#: are unconstrained regressions, so they overshoot below the physical range at the
-#: low end: nutrients and oxygen go negative. Zero is the obvious floor for the
-#: nutrients; oxygen gets 2.0 because ESPER's negative excursions sit in the oxygen
-#: minimum zones (Bay of Bengal, eastern tropical Pacific, ~300-700 m), where the WOA23
-#: climatology is 3-10 µmol/kg and never below 2.75 at any of those points on the 12 km
-#: Indo-Pacific and California Current boundaries measured (2010/2014). Clipping to
-#: zero there would hand MARBL exactly anoxic boundary water that no observation
-#: supports; 2.0 is below WOA's own value everywhere ESPER needs it, so it removes the
-#: artefact without inventing oxygen (WOA23 reaches zero only in a few OMZ cores).
-#: ALK and DIC never approach zero and keep the generic floor.
+#: Lower bound (mmol/m³) applied to EVERY estimate after the unit conversion, with or
+#: without salinity conditioning. The nets are unconstrained regressions, so they
+#: overshoot below the physical range at the low end: nutrients and oxygen go negative.
+#: Zero is the obvious floor for the nutrients; oxygen gets 2.0 because ESPER's negative
+#: excursions sit in the oxygen minimum zones (Bay of Bengal, eastern tropical Pacific,
+#: ~300-700 m), where the WOA23 climatology is 3-10 µmol/kg and never below 2.75 at any
+#: of those points on the 12 km Indo-Pacific and California Current boundaries measured
+#: (2010/2014) -- WOA23 does reach zero in a few OMZ cores elsewhere. Clipping to zero
+#: there would hand MARBL exactly anoxic boundary water that no observation supports;
+#: 2.0 is below WOA's own value everywhere ESPER needs it on those boundaries, so it
+#: removes the artefact without inventing oxygen. For MARBL the choice is inert:
+#: ``parm_o2_min`` = 5 and ``parm_o2_min_delta`` = 5 (mmol/m³) make its denitrification
+#: weight and O2-consumption clamp identical at O2 = 0 and O2 = 2, so the floor changes
+#: the O2 inventory handed in, not MARBL's suboxic behaviour. ALK and DIC never approach
+#: zero and keep the generic floor. Any point that ESPER put in [0, 2) now reads 2.0 --
+#: an output change relative to the old clip at zero.
 ESPER_FLOORS: dict[str, float] = {
     "ALK": 0.0,
     "DIC": 0.0,
@@ -440,7 +445,9 @@ def _salinity_conditioning(source: dict) -> SalinityConditioning | None:
         raise ValueError(
             "ESPER source 'salinity_conditioning' needs 'woa_salinity_path': the WOA23 "
             "1-degree annual-mean salinity file (woa23_decav_s00_01.nc). PyESPER does "
-            "not download it; see PyESPER.salinity_conditioning.WOA23_SALINITY_URL."
+            "not download it: roms_tools.datasets.download.download_woa23_bgc("
+            "variables=['salt_bgc']) fetches it into pooch.os_cache('roms-tools')/WOA23, "
+            "or see PyESPER.salinity_conditioning.WOA23_SALINITY_URL."
         )
     try:
         from PyESPER.salinity_conditioning import SalinityConditioning
@@ -547,7 +554,11 @@ def estimate_bgc_fields(
         path=str(path),
         equation=equation,
         est_dates=est_dates,
-        salinity_conditioning=conditioning,
+        # Only when asked for: a PyESPER fork that predates the keyword must keep
+        # working with conditioning off (the convention _pyesper_point_budget's
+        # fallback follows too), and passing it explicitly as None broke exactly
+        # that, after the physics regrid had already run.
+        **({} if conditioning is None else {"salinity_conditioning": conditioning}),
     )
 
     # Results are deliberately left lazy: PyESPER's own kernel lock keeps its

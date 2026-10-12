@@ -375,15 +375,22 @@ companion physics object (``physics_forcing``; the ``InitialConditions`` /
   plumes they extrapolate unphysically (silicate above 100 µmol kg⁻¹, negative nutrients,
   DIC above alkalinity). With this key PyESPER blends the salinity it feeds the nets toward
   the WOA23 annual climatology with a raised cosine over the band, then dilutes the
-  alkalinity and DIC estimates back to the model salinity along a conservative mixing line.
-  Above the band nothing changes. The file is the 1° annual-mean ``woa23_decav_s00_01.nc``
-  from NCEI; PyESPER does not download it (a missing file names the URL).
+  alkalinity and DIC estimates back to the model salinity along a conservative mixing line
+  with a freshwater endmember. Above the band nothing changes. Inside and below it the
+  DIC/alkalinity ratio is the nets' own at the conditioned salinity and tends to the
+  endmember ratio in fresh water -- 1, approached from below, with PyESPER's defaults, so
+  DIC never crosses above alkalinity. The file is the 1° annual-mean
+  ``woa23_decav_s00_01.nc`` from NCEI; PyESPER does not download it, but
+  :func:`roms_tools.datasets.download.download_woa23_bgc` (``variables=["salt_bgc"]``)
+  fetches exactly this file into ``pooch.os_cache("roms-tools") / "WOA23"``.
 
 Estimates are converted to mmol m⁻³ like the gridded sources and clamped at a per-variable
-floor (``roms_tools.setup.esper.ESPER_FLOORS``): 0 for the nutrients, alkalinity and DIC,
-2.0 mmol m⁻³ for oxygen, because the nets go negative inside the oxygen minimum zones
-where the climatology never drops below ~3. The output variables record what was applied in
-their ``esper_salinity_conditioning`` and ``esper_floor`` attributes.
+floor (``roms_tools.setup.esper.ESPER_FLOORS``), with or without salinity conditioning:
+0 for the nutrients, alkalinity and DIC, 2.0 mmol m⁻³ for oxygen, because the nets go
+negative inside the oxygen minimum zones where the WOA23 climatology stays at 3-10 on the
+boundaries measured (12 km Indo-Pacific and California Current; it does reach zero in a few
+OMZ cores elsewhere). The output variables record what was applied in their
+``esper_salinity_conditioning`` and ``esper_floor`` attributes.
 
 :Required for: BGC Initial Conditions, BGC Boundary Forcing
 

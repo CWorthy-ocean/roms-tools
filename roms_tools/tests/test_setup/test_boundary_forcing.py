@@ -9,6 +9,7 @@ from unittest import mock
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -1260,6 +1261,72 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         )
 
 
+def test_bgc_bc_density_inherits_a_climatological_physics_cycle(tmp_path, use_dask):
+    """Climatological physics plus a density method gives a cyclic BGC output.
+
+    The BGC is placed on the physics's 12 cyclic records and must carry the same
+    ``cycle_length`` and ``climatology`` labelling, so ROMS finds a BGC record in
+    every year, not only the reference year. (Dated BGC beside cyclic physics would
+    leave every other year without boundary data.)
+    """
+    from roms_tools.setup.utils import climatology_mid_month_days
+
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    # Twelve copies of one GLORYS day, timed as a climatology (timedelta since the
+    # start of the year, the form the climatology path accepts).
+    one_day = xr.open_dataset(download_test_data("GLORYS_NA_20120101.nc"))
+    days = np.array(climatology_mid_month_days(), dtype="timedelta64[D]")
+    clim = xr.concat([one_day.isel(time=0, drop=True)] * 12, dim="time")
+    clim = clim.assign_coords(time=("time", days.astype("timedelta64[ns]")))
+    fname_phys = tmp_path / "glorys_clim.nc"
+    clim.to_netcdf(fname_phys)
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+    physics_bc = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_phys, "name": "GLORYS", "climatology": True},
+        type="physics",
+        apply_2d_horizontal_fill=False,
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    assert physics_bc.ds["bry_time"].attrs["cycle_length"] == 365.25
+    bgc_bc = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        physics_forcing=physics_bc,
+        bgc_interpolation_method="density_mld",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    assert bgc_bc.ds.attrs["bgc_time_axis"] == "physics"
+    assert (
+        bgc_bc.ds.attrs["climatology"] == physics_bc.ds.attrs["climatology"] == "True"
+    )
+    assert bgc_bc.ds["bry_time"].attrs["cycle_length"] == 365.25
+    np.testing.assert_array_equal(
+        bgc_bc.ds["bry_time"].values, physics_bc.ds["bry_time"].values
+    )
+    assert bgc_bc.ds.sizes["bry_time"] == 12
+
+
 def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
     """An unknown ``bgc_interpolation_method`` is rejected."""
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
@@ -1379,11 +1446,28 @@ def test_bgc_bc_density_follows_the_physics_time_axis(use_dask):
     assert on_depth.ds["bry_time"].attrs["cycle_length"] == 365.25
     assert on_depth.ds.attrs["bgc_time_axis"] == "source"
 
+    # The two records differ *because of the vertical placement*, not merely because
+    # the climatology is read at two different days of year: compare against the depth
+    # output cycled to the same two dates, which carries only the time-of-year change.
+    from roms_tools.setup.utils import cycle_to_times
+
     direction = next(d for d, on in on_physics.boundaries.items() if on)
     no3 = on_physics.ds[f"NO3_{direction}"]
+    depth_no3 = on_depth.ds[f"NO3_{direction}"].swap_dims({"bry_time": "bry_time"})
+    depth_clim = depth_no3.assign_coords(
+        time=("bry_time", pd.to_timedelta(on_depth.ds["bry_time"].values, unit="D"))
+    ).swap_dims({"bry_time": "time"})
+    depth_cycled = cycle_to_times(
+        depth_clim, "time", on_physics.ds["abs_time"], climatology=True
+    )
+    for k in (0, 1):
+        a = no3.isel(bry_time=k).values
+        b = depth_cycled.isel(time=k).values
+        valid = np.isfinite(a) & np.isfinite(b)
+        assert valid.any()
+        assert np.abs(a[valid] - b[valid]).max() > 0, f"record {k} == depth cycled"
     jan, dec = no3.isel(bry_time=0).values, no3.isel(bry_time=1).values
     valid = np.isfinite(jan) & np.isfinite(dec)
-    assert valid.any()
     assert np.abs(jan[valid] - dec[valid]).max() > 0
     # The source T/S used for the density coordinate never reach the output.
     assert not any(

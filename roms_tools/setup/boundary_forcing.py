@@ -252,9 +252,11 @@ class BoundaryForcingSource:
         linear interpolation in day of year and the vertical placement is done against
         that record's own density/MLD, so the result follows the physics through the run
         rather than being a climatology anchored on one sampled physics day. The output
-        therefore carries the physics time axis (monthly files, no ``cycle_length``), and
-        ``source["climatology"]`` describes only how the input dataset is read. With
-        ``"depth"`` the output of a climatological source stays a cycled climatology.
+        therefore carries the physics time axis -- grouped into files like the physics
+        (monthly for daily physics), cyclic only when the physics itself is a
+        climatology -- and ``source["climatology"]`` describes only how the input
+        dataset is read. With ``"depth"`` the output of a climatological source stays
+        a cycled climatology.
     physics_forcing : BoundaryForcingSource, optional
         A physics ``BoundaryForcingSource`` object (``type='physics'``) whose T/S fields
         supply the target density coordinate for BGC tracer interpolation. When None and
@@ -433,6 +435,9 @@ class BoundaryForcingSource:
         # Set when a density method placed the BGC fields on the physics time axis:
         # the output is then time-varying, not a climatology, whatever the source was.
         on_physics_time = False
+        # The vertical interpolation methods actually used (after any fallback to
+        # depth), recorded on the output rather than the requested one.
+        resolved_methods: set[str] = set()
         for direction, is_enabled in self.boundaries.items():
             if not is_enabled:
                 continue
@@ -622,6 +627,7 @@ class BoundaryForcingSource:
                             has_source_ts=has_source_ts,
                             where=f"{direction} boundary",
                         )
+                        resolved_methods.add(str(method))
 
                     source_coord = None
                     target_coord = None
@@ -690,13 +696,24 @@ class BoundaryForcingSource:
             ds = self._bracket_static_time(ds)
 
         # Add global information. A density method puts the BGC fields on the physics
-        # time axis (see _place_bgc_on_physics_time): that output is not a climatology
-        # even when the source is, so it must not carry ``cycle_length``.
-        ds = self._add_global_metadata(
-            data, ds, climatology=False if on_physics_time else None
-        )
+        # time axis (see _place_bgc_on_physics_time), so the output is a climatology
+        # exactly when the PHYSICS is one -- cyclic BGC beside cyclic physics, dated
+        # BGC beside dated physics -- whatever the BGC source itself was.
+        if on_physics_time:
+            assert self.physics_forcing is not None
+            clim = self.physics_forcing.ds.attrs.get("climatology") == "True"
+            if clim:
+                # The physics view carries absolute dates in the reference year
+                # (``add_time_info_to_ds``: model_reference_date + timedelta); hand
+                # the timedeltas back so the same routine labels this output cyclic.
+                ds = ds.assign_coords(
+                    time=ds["time"] - np.datetime64(self.model_reference_date, "ns")
+                )
+            ds = self._add_global_metadata(data, ds, climatology=clim)
+        else:
+            ds = self._add_global_metadata(data, ds)
         if self.type == "bgc":
-            ds.attrs["bgc_interpolation_method"] = str(self.bgc_interpolation_method)
+            ds.attrs["bgc_interpolation_method"] = ",".join(sorted(resolved_methods))
             ds.attrs["bgc_time_axis"] = "physics" if on_physics_time else "source"
 
         if self.type == "bgc":
@@ -762,9 +779,9 @@ class BoundaryForcingSource:
         (:func:`cycle_to_times`: linear in day of year, December wrapped into January --
         ROMS's own ``cycle_length`` arithmetic), and the source/target coordinates are
         then built per physics record from the cycled BGC T/S and the physics T/S as
-        they are. The output inherits the physics time axis and is written as monthly
-        files, not as a climatology; ``source["climatology"]`` keeps describing the
-        input dataset.
+        they are. The output inherits the physics time axis -- grouped into files like
+        the physics (monthly for daily physics) and cyclic only when the physics is a
+        climatology; ``source["climatology"]`` keeps describing the input dataset.
 
         Every array that enters the xgcm transform is blocked one calendar month per
         chunk along ``time`` (``month_aligned_time_chunks``), the same partition the
@@ -851,6 +868,8 @@ class BoundaryForcingSource:
         ds = self._bracket_static_time(ds)
 
         ds = self._add_global_metadata(None, ds, climatology=False)
+        ds.attrs["bgc_interpolation_method"] = "none"
+        ds.attrs["bgc_time_axis"] = "static"
 
         self.variable_info = bgc_variable_info(self._present_bgc_bare_names(ds))
 
@@ -973,6 +992,8 @@ class BoundaryForcingSource:
 
         # ds carries a "time" dim inherited from physics_forcing; convert to bry_time.
         ds = self._add_global_metadata(None, ds, climatology=climatology)
+        ds.attrs["bgc_interpolation_method"] = "none"
+        ds.attrs["bgc_time_axis"] = "physics"
 
         self.variable_info = bgc_variable_info(self._present_bgc_bare_names(ds))
 

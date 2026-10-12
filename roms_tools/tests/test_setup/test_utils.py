@@ -1394,10 +1394,19 @@ class TestForwardableFields:
 # companions_derive_from_physics_ts: which bgc companions read the physics T/S
 # ---------------------------------------------------------------------------
 class TestCompanionsDeriveFromPhysicsTS:
+    """The gate must fire only for companions that will *actually* read the physics
+    T/S: ESPER, or a dataset with its own T/S on a non-depth method. Constants never
+    interpolate; a dataset without its own T/S falls back to depth.
+    """
+
+    @staticmethod
+    def _has_ts(name):
+        return name in {"UNIFIED", "WOA", "GLODAP"}
+
     def _f(self, items, default="depth"):
         from roms_tools.setup.utils import companions_derive_from_physics_ts
 
-        return companions_derive_from_physics_ts(items, default)
+        return companions_derive_from_physics_ts(items, default, self._has_ts)
 
     def test_no_sources_is_false(self):
         assert self._f(None) is False
@@ -1423,6 +1432,47 @@ class TestCompanionsDeriveFromPhysicsTS:
         ]
         assert self._f(items, default="depth") is False
 
+    @pytest.mark.parametrize("method", ["density", "density_mld"])
+    def test_constants_on_a_density_method_do_not(self, method):
+        """A constants source returns before any interpolation runs."""
+        items = [
+            {
+                "source": {"name": "constants", "constants": {"Fe": 3e-3}},
+                "bgc_interpolation_method": method,
+            }
+        ]
+        assert self._f(items) is False
+        assert self._f(items[:1], default=method) is False
+
+    def test_a_dataset_without_its_own_ts_falls_back_to_depth_and_does_not(self):
+        items = [
+            {
+                "source": {"name": "CESM_REGRIDDED"},
+                "bgc_interpolation_method": "density",
+            }
+        ]
+        assert self._f(items) is False
+
+    def test_bgc_source_has_own_ts_reads_the_dataset_map(self):
+        from collections import defaultdict
+
+        from roms_tools.setup.boundary_forcing import _DATASET_MAP
+        from roms_tools.setup.utils import bgc_source_has_own_ts
+
+        bgc = _DATASET_MAP["bgc"]
+        assert bgc_source_has_own_ts(bgc, "UNIFIED")
+        assert bgc_source_has_own_ts(bgc, "WOA")
+        assert not bgc_source_has_own_ts(bgc, "CESM_REGRIDDED")
+        for name in ("constants", "ESPER", None):
+            assert not bgc_source_has_own_ts(bgc, name)
+
+        # Explicit external/default entries work too.
+        class WithTS:
+            bgc_source_ts = ("temp_bgc", "salt_bgc")
+
+        assert bgc_source_has_own_ts({"X": {"default": WithTS}}, "X")
+        assert bgc_source_has_own_ts({"X": defaultdict(lambda: WithTS)}, "X")
+
 
 class TestMaterializePhysicsTS:
     def _ds(self, n_time=20):
@@ -1439,14 +1489,12 @@ class TestMaterializePhysicsTS:
             data,
         )
 
-    def test_computes_in_time_blocks_and_rewraps_with_original_chunks(
+    def test_computes_one_time_chunk_at_a_time_and_rewraps_with_original_chunks(
         self, monkeypatch
     ):
-        from xarray.core.utils import is_duck_dask_array
-
         from roms_tools.setup import utils as u
 
-        ds, data = self._ds(n_time=20)
+        ds, data = self._ds(n_time=20)  # chunked one step per chunk
         calls = []
         real = u.dask.compute
 
@@ -1455,19 +1503,42 @@ class TestMaterializePhysicsTS:
             return real(*args, **kwargs)
 
         monkeypatch.setattr(u.dask, "compute", counting)
-        u.materialize_physics_ts(
-            ds, ["temp_west", "salt_west", "missing"], time_block=8
-        )
+        u.materialize_physics_ts(ds, ["temp_west", "salt_west", "missing"])
 
-        assert len(calls) == 3  # 20 steps in blocks of 8: 8 + 8 + 4
-        assert all(c == 2 for c in calls)  # both strips per block, one compute
+        assert len(calls) == 20  # one compute per time chunk ...
+        assert all(c == 2 for c in calls)  # ... covering both strips
         for var, offset in (("temp_west", 0.0), ("salt_west", 30.0)):
             out = ds[var]
-            assert is_duck_dask_array(out.data)
+            assert out.chunks is not None
             assert out.chunks[0] == tuple([1] * 20)  # original chunking restored
             assert len(dict(out.data.dask)) <= out.data.npartitions + 1  # memory-backed
             np.testing.assert_allclose(out.values, data + offset)
         assert len(dict(ds["zeta_west"].data.dask)) > 0  # untouched
+
+    def test_each_upstream_chunk_is_computed_exactly_once(self):
+        """Slicing finer than the strip's own time chunks would recompute every
+        upstream chunk once per step (a 4-step chunk sliced one step at a time runs
+        its upstream four times). Iterating the strip's own chunks runs each once.
+        """
+        import dask.array as da
+
+        from roms_tools.setup import utils as u
+
+        seen = []
+
+        def upstream(block, block_info=None):
+            seen.append(block_info[None]["chunk-location"])
+            return block * 2.0
+
+        base = da.from_array(
+            np.arange(8 * 3 * 4, dtype="float64").reshape(8, 3, 4), chunks=(4, 3, 4)
+        )
+        lazy = base.map_blocks(upstream, dtype="float64")
+        ds = xr.Dataset({"temp_west": (("bry_time", "s_rho", "eta_rho"), lazy)})
+        u.materialize_physics_ts(ds, ["temp_west"])
+        assert sorted(seen) == [(0, 0, 0), (1, 0, 0)]  # two chunks, each once
+        np.testing.assert_allclose(ds["temp_west"].values, base.compute() * 2.0)
+        assert ds["temp_west"].chunks[0] == (4, 4)
 
     def test_noop_without_dask_or_names(self):
         from roms_tools.setup import utils as u

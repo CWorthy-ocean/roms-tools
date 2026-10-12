@@ -13,4 +13,7 @@ dependencies:
   # serial hdf5 bundled in the pip-installed netcdf4/h5py wheels.
   - esmf=*=nompi*
   - threadpoolctl
+  # kerchunk reference tests (json and parquet references)
+  - kerchunk
+  - fastparquet
   - pip

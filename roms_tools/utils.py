@@ -508,7 +508,11 @@ _KERCHUNK_SUFFIXES = (".json", ".json.zstd", ".parquet")
 
 
 def _is_kerchunk_reference(path: str | Path) -> bool:
-    """True for a kerchunk reference file (what ``KerchunkBackend.guess_can_open`` accepts)."""
+    """True for a kerchunk reference: a ``.json`` / ``.json.zstd`` file or a ``.parquet``
+    directory. Wider than ``KerchunkBackend.guess_can_open`` (kerchunk 0.2.10 does not
+    list ``.json.zstd``), so a zstd-compressed reference is still opened explicitly
+    through the kerchunk engine instead of falling to xarray's engine guessing.
+    """
     return str(path).endswith(_KERCHUNK_SUFFIXES)
 
 
@@ -704,6 +708,9 @@ def load_data(
     chunks : dict[str, int], optional
         Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
         If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        For a kerchunk reference the latitude/longitude entries are ignored, caller-supplied
+        or not: the reference is read with the source's own lateral chunking (see
+        ``_without_lateral_chunks``) and only the time/depth entries apply.
         Defaults to None.
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
         Optional horizontal subset to apply when loading.

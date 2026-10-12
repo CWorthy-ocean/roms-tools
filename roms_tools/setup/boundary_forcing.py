@@ -45,6 +45,7 @@ from roms_tools.setup.utils import (
     add_time_info_to_ds,
     apply_chunk_plan,
     bgc_source_extra_kwargs,
+    bgc_source_has_own_ts,
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
@@ -1828,6 +1829,12 @@ class BoundaryForcing:
         ``{"source": RawDataSource, "use_vars": list[str] | None,
         "bgc_interpolation_method": str | None}``. A per-item
         ``bgc_interpolation_method`` overrides the wrapper-level default below.
+        When any item derives from the physics temperature/salinity (an ``ESPER``
+        source, or a dataset with its own T/S on a density method), those physics
+        fields are computed at construction and held in memory until saved, so the
+        footprint scales with the run length (see
+        :func:`~roms_tools.setup.utils.materialize_physics_ts` for the numbers and
+        why).
     bgc_model : type[BGCModel], optional
         The :class:`~roms_tools.setup.bgc_model.BGCModel` subclass (e.g.
         :class:`~roms_tools.setup.bgc_model.BGCMarbl`) used to complete the tracer
@@ -1964,7 +1971,9 @@ class BoundaryForcing:
             # source regrid -- which is what made every companion save climb in
             # memory without bound. See materialize_physics_ts.
             if companions_derive_from_physics_ts(
-                bgc_sources, self.bgc_interpolation_method
+                bgc_sources,
+                self.bgc_interpolation_method,
+                lambda name: bgc_source_has_own_ts(_DATASET_MAP["bgc"], name),
             ):
                 materialize_physics_ts(
                     self.physics.ds,

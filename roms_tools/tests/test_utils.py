@@ -226,10 +226,15 @@ def _from_array_source_chain(dask_array) -> list:
     return chain
 
 
-@pytest.fixture
-def kerchunk_reference(tmp_path: Path) -> tuple[Path, xr.Dataset]:
-    """A kerchunk JSON reference to a small netCDF file, plus the source dataset."""
-    pytest.importorskip("kerchunk")  # pulls in ujson/h5py; skip cleanly if absent
+@pytest.fixture(params=["json", "parquet"])
+def kerchunk_reference(tmp_path: Path, request) -> tuple[Path, xr.Dataset]:
+    """A kerchunk reference to a small netCDF file, plus the source dataset.
+
+    Parametrised over the two reference formats: a ``.json`` file and a ``.parquet``
+    *directory* (what Forge writes by default). The directory form matters because
+    ``_is_zarr_store`` takes any directory for a zarr store.
+    """
+    kerchunk = pytest.importorskip("kerchunk")  # in the dev extras; CI runs these
     from kerchunk.hdf import SingleHdf5ToZarr
 
     rng = np.random.default_rng(0)
@@ -244,9 +249,37 @@ def kerchunk_reference(tmp_path: Path) -> tuple[Path, xr.Dataset]:
     nc = tmp_path / "src.nc"
     src.to_netcdf(nc, engine="h5netcdf")
     refs = SingleHdf5ToZarr(str(nc), inline_threshold=0).translate()
-    ref = tmp_path / "src.json"
-    ref.write_text(json.dumps(refs))
+    if request.param == "json":
+        ref = tmp_path / "src.json"
+        ref.write_text(json.dumps(refs))
+    else:
+        pytest.importorskip("fastparquet")
+        from kerchunk.df import refs_to_dataframe
+
+        ref = tmp_path / "src.parquet"
+        refs_to_dataframe(refs, str(ref))
+    del kerchunk
     return ref, src
+
+
+def test_kerchunk_parquet_reference_wins_over_the_zarr_directory_guess(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """A ``.parquet`` reference is a directory, so ``_is_zarr_store`` says "zarr" --
+    and opening it with the zarr engine raises ``GroupNotFoundError``. The eager path
+    must let the kerchunk engine take precedence (``{"engine": engine} |
+    _kerchunk_open_kwargs(file)``); this pins that order.
+    """
+    from roms_tools.utils import _is_kerchunk_reference, _is_zarr_store
+
+    ref, src = kerchunk_reference
+    if ref.suffix != ".parquet":
+        pytest.skip("the precedence only matters for the directory form")
+    assert _is_zarr_store(ref) and _is_kerchunk_reference(ref)
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=False
+    )
+    xr.testing.assert_allclose(ds["temp"], src["temp"])
 
 
 def test_load_data_kerchunk_reference_uses_a_single_dask_layer(

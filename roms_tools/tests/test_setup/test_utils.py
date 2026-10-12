@@ -1401,17 +1401,15 @@ class TestSourceDictNestedPaths:
             serialize_source_dict,
         )
 
+        woa = Path("/data/WOA23/woa23_decav_s00_01.nc")
         src = {
             "name": "ESPER",
-            "salinity_conditioning": {
-                "woa_salinity_path": Path("/data/WOA23/woa23_decav_s00_01.nc"),
-                "low": 31.0,
-            },
+            "salinity_conditioning": {"woa_salinity_path": woa, "low": 31.0},
         }
         once = serialize_source_dict(src)
-        assert once["salinity_conditioning"]["woa_salinity_path"] == (
-            "/data/WOA23/woa23_decav_s00_01.nc"
-        )
+        # str(Path) is platform-specific (backslashes on Windows); compare to it, not
+        # to a POSIX literal.
+        assert once["salinity_conditioning"]["woa_salinity_path"] == str(woa)
         assert once["salinity_conditioning"]["low"] == 31.0
         back = deserialize_source_dict(once)
         assert isinstance(back["salinity_conditioning"]["woa_salinity_path"], Path)

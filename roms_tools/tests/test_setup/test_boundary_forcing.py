@@ -1539,19 +1539,37 @@ class TestBoundaryForcingWrapper:
             **kwargs,
         )
 
-    def test_physics_ts_is_realized_before_companions_that_derive_from_it(
-        self, small_grid
-    ):
-        """A density-interpolated companion reads the physics T/S, so the wrapper
-        realizes those strips before building it. Every companion save then depends
-        on small in-memory arrays instead of the shared lazy source regrid -- the
-        graph shape that made ESPER boundary saves grow in memory without bound.
-        Only T/S are realized -- and re-wrapped as dask so ESPER stays chunk-planned;
-        the rest of the physics keeps its real lazy graph.
-        """
-        from xarray.core.utils import is_duck_dask_array
+    @staticmethod
+    def _unified_density_item():
+        fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+        return {
+            "source": {"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+            "bgc_interpolation_method": "density",
+        }
 
-        bf = self._make(small_grid, use_dask=True)  # default sources include "density"
+    def test_physics_ts_is_realized_before_companions_that_derive_from_it(
+        self, small_grid, monkeypatch
+    ):
+        """A density-interpolated companion with its own T/S reads the physics T/S,
+        so the wrapper realizes those strips before building it. Every companion
+        save then depends on small in-memory arrays instead of the shared lazy
+        source regrid -- the graph shape that made ESPER boundary saves grow in
+        memory without bound. Only T/S are realized -- and re-wrapped as dask so
+        ESPER stays chunk-planned; the rest of the physics keeps its real lazy graph.
+        """
+        from roms_tools.setup import boundary_forcing as bfm
+
+        calls = []
+        real = bfm.materialize_physics_ts
+        monkeypatch.setattr(
+            bfm,
+            "materialize_physics_ts",
+            lambda ds, names: (calls.append(list(names)), real(ds, names)),
+        )
+        bf = self._make(
+            small_grid, use_dask=True, bgc_sources=[self._unified_density_item()]
+        )
+        assert len(calls) == 1
         active = [d for d, on in bf.physics.boundaries.items() if on]
         assert active
         for d in active:
@@ -1559,24 +1577,44 @@ class TestBoundaryForcingWrapper:
                 data = bf.physics.ds[f"{var}_{d}"].data
                 # Still dask -- PyESPER's chunk plan must keep applying -- but
                 # backed by memory: nothing in its graph reads the source anymore.
-                assert is_duck_dask_array(data)
+                assert bf.physics.ds[f"{var}_{d}"].chunks is not None
                 assert len(dict(data.dask)) <= data.npartitions + 1
             zeta = bf.physics.ds[f"zeta_{d}"].data
-            assert is_duck_dask_array(zeta)
             assert len(dict(zeta.dask)) > zeta.npartitions + 1  # the real lazy graph
 
-    def test_physics_ts_stays_lazy_when_no_companion_needs_it(self, small_grid):
-        """Constants on plain depth interpolation never touch T/S: nothing is realized."""
-        from xarray.core.utils import is_duck_dask_array
+    @pytest.mark.parametrize(
+        "bgc_sources",
+        [
+            [{"source": {"name": "constants", "constants": {"NO3": 24.0}}}],
+            # Constants never interpolate, whatever method the item names.
+            [
+                {
+                    "source": {"name": "constants", "constants": {"Fe": 3.0e-3}},
+                    "bgc_interpolation_method": "density",
+                }
+            ],
+        ],
+        ids=["constants-depth", "constants-density"],
+    )
+    def test_physics_ts_stays_lazy_when_no_companion_needs_it(
+        self, small_grid, monkeypatch, bgc_sources
+    ):
+        """Nothing reads the physics T/S here, so nothing is realized -- asserted on
+        the call itself, since a realized strip is re-wrapped as dask and would
+        still look lazy to a dask-type check.
+        """
+        from roms_tools.setup import boundary_forcing as bfm
 
-        bf = self._make(
-            small_grid,
-            use_dask=True,
-            bgc_sources=[{"source": {"name": "constants", "constants": {"NO3": 24.0}}}],
+        monkeypatch.setattr(
+            bfm,
+            "materialize_physics_ts",
+            lambda *a, **k: pytest.fail("materialize_physics_ts must not run"),
         )
+        bf = self._make(small_grid, use_dask=True, bgc_sources=bgc_sources)
         active = [d for d, on in bf.physics.boundaries.items() if on]
         for d in active:
-            assert is_duck_dask_array(bf.physics.ds[f"salt_{d}"].data)
+            salt = bf.physics.ds[f"salt_{d}"].data
+            assert len(dict(salt.dask)) > salt.npartitions + 1  # the real lazy graph
 
     def test_save_honours_group_and_format_and_returns_real_paths(
         self, small_grid, use_dask, tmp_path

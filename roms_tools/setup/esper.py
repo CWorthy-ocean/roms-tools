@@ -59,12 +59,6 @@ from roms_tools.setup.utils import (
     time_dim_of,
 )
 
-# The PyESPER chunk plan is built on the shared physics-time helpers in setup.utils
-# (the density placement of a BGC climatology partitions time the same way).
-_time_dim = time_dim_of
-_month_aligned_time_chunks = month_aligned_time_chunks
-_apply_chunk_plan = apply_chunk_plan
-
 # Fallback ceiling on ESPER chunk size, used only when PyESPER does not expose its
 # own budget helper. Equal to the value PyESPER itself hard-coded before it made the
 # cap dynamic, so behaviour on an older fork is unchanged.
@@ -104,9 +98,6 @@ def _pyesper_point_budget(method: str, n_variables: int) -> int:
         # only reachable if PyESPER's method table and ours drift apart.
         return _MAX_POINTS_PER_CHUNK
 
-
-# Dim names treated as the time axis when no datetime coordinate identifies one
-# (see _time_dim). Ordered by how specific they are to a real time axis.
 
 # ROMS/MARBL tracer name -> PyESPER "DesiredVariable" name.
 ROMS_TO_ESPER = {
@@ -214,10 +205,10 @@ def _pyesper_chunk_plan(
     the ceiling comes from and why matching it matters) -- one plan, not each
     input rechunked independently, so they stay consistently blocked with each
     other. Apply it with
-    :func:`_apply_chunk_plan`, which drops the entries a given input can't take.
+    :func:`~roms_tools.setup.utils.apply_chunk_plan`, which drops the entries a given input can't take.
 
     Cuts along **time** whenever there is a time axis to cut (see
-    :func:`_time_dim`), leaving the spatial dims whole. That is a memory choice,
+    :func:`~roms_tools.setup.utils.time_dim_of`), leaving the spatial dims whole. That is a memory choice,
     not a chunk-count one. Cutting a boundary slab spatially leaves every chunk
     needing the *entire* time range of the upstream regrid behind it, so a
     year-long run has to hold a year-long GLORYS slab per chunk and nothing can
@@ -241,14 +232,14 @@ def _pyesper_chunk_plan(
         return {d: -1 for d in da.dims}
 
     plan: dict[str, int | tuple[int, ...]] = {d: -1 for d in da.dims}
-    time_dim = _time_dim(da)
+    time_dim = time_dim_of(da)
 
     if time_dim is not None and da.sizes[time_dim] > 1:
         per_step = max(1, da.size // da.sizes[time_dim])
         if per_step <= cap:
             # The ordinary case: one time step's spatial slab fits the budget, so
             # time is the only axis that needs cutting.
-            plan[time_dim] = _month_aligned_time_chunks(
+            plan[time_dim] = month_aligned_time_chunks(
                 da, time_dim, max(1, cap // per_step)
             )
             return plan
@@ -370,12 +361,12 @@ def estimate_bgc_fields(
         chunk_plan = _pyesper_chunk_plan(
             temp, _pyesper_point_budget(method, len(esper_vars))
         )
-        salt = _apply_chunk_plan(salt, chunk_plan)
-        temp = _apply_chunk_plan(temp, chunk_plan)
-        lon = _apply_chunk_plan(lon, chunk_plan) if hasattr(lon.data, "chunks") else lon
-        lat = _apply_chunk_plan(lat, chunk_plan) if hasattr(lat.data, "chunks") else lat
+        salt = apply_chunk_plan(salt, chunk_plan)
+        temp = apply_chunk_plan(temp, chunk_plan)
+        lon = apply_chunk_plan(lon, chunk_plan) if hasattr(lon.data, "chunks") else lon
+        lat = apply_chunk_plan(lat, chunk_plan) if hasattr(lat.data, "chunks") else lat
         depth_pos = (
-            _apply_chunk_plan(depth_pos, chunk_plan)
+            apply_chunk_plan(depth_pos, chunk_plan)
             if hasattr(depth_pos.data, "chunks")
             else depth_pos
         )

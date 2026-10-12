@@ -40,14 +40,14 @@ from roms_tools.setup import esper as esper_module
 from roms_tools.setup.esper import (
     _MAX_POINTS_PER_CHUNK,
     ESPER_SUPPORTED_VARS,
-    _apply_chunk_plan,
     _decimal_year,
     _pyesper_chunk_plan,
     _pyesper_point_budget,
-    _time_dim,
     estimate_bgc_fields,
     validate_esper_source,
 )
+from roms_tools.setup.utils import apply_chunk_plan as _apply_chunk_plan
+from roms_tools.setup.utils import time_dim_of as _time_dim
 
 _PYESPER_PATH = os.environ.get("ROMS_TOOLS_PYESPER_PATH")
 

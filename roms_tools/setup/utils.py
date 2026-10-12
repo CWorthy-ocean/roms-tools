@@ -475,18 +475,26 @@ def cycle_to_times(
     :func:`assign_dates_to_climatology` sets) is interpolated linearly in day of year,
     with December wrapped into January by padding one record at each end -- what ROMS
     does at runtime with ``cycle_length``, so a boundary file built this way and one
-    cycled by ROMS agree. A non-climatology axis (datetime64) is interpolated linearly in
-    time with the ends held (no extrapolation). An array with no time axis is broadcast
-    (lazily) to every target record.
+    cycled by ROMS agree to within a day of phase (ROMS cycles over
+    ``cycle_length`` days, which is not an integer number of calendar days). A
+    non-climatology axis (datetime64) is interpolated linearly in time with the ends
+    held and a warning when the source does not cover the targets. An array with no
+    time axis is broadcast (lazily) to every target record.
 
-    The result is lazy for dask input; the interpolation dim is gathered into one chunk
-    first (xarray's ``interp`` needs that), which for a 12-record climatology is nothing.
+    The result is blocked **one calendar month per chunk** along ``time``
+    (:func:`month_aligned_time_chunks`), each block interpolated on its own: the
+    monthly output files are written by ``xr.save_mfdataset``, which computes every
+    file separately, so a single whole-run interpolation would be recomputed once per
+    file -- about 14x for a year of daily physics -- and would hold the whole run in
+    one block. Each block depends only on the (padded) source, which for a 12-record
+    climatology is nothing. The interpolation dim of the source is gathered into one
+    chunk first (xarray's ``interp`` needs that).
     """
     target = np.asarray(target_times.values, dtype="datetime64[ns]")
     if time_dim is None or time_dim not in da.dims:
         out = da.expand_dims({"time": len(target)}, axis=0)
         return out.assign_coords(time=("time", target))
-    if hasattr(da.data, "chunks"):
+    if da.chunks is not None:
         da = da.chunk({time_dim: -1})
     if climatology:
         src = da[time_dim].values
@@ -497,7 +505,7 @@ def cycle_to_times(
                 "applied?"
             )
         doy_src = src.astype("timedelta64[ns]").astype("int64") / 86400e9 + 1.0
-        padded = xr.concat(
+        source = xr.concat(
             [
                 da.isel({time_dim: [-1]}).assign_coords(
                     {time_dim: [doy_src[-1] - cycle]}
@@ -510,14 +518,33 @@ def cycle_to_times(
             dim=time_dim,
         )
         query = _day_of_year(target)
-        out = padded.interp({time_dim: query}, method="linear")
     else:
         src = da[time_dim].values.astype("datetime64[ns]")
+        if target.min() < src.min() or target.max() > src.max():
+            logging.warning(
+                f"the BGC source's {time_dim!r} axis ({src.min()} .. {src.max()}) does "
+                f"not cover the physics times ({target.min()} .. {target.max()}); its "
+                "first/last record is held outside that range."
+            )
+        source = da
         query = np.clip(target, src.min(), src.max())  # hold the ends
-        out = da.interp({time_dim: query}, method="linear")
-    if time_dim != "time":
-        out = out.rename({time_dim: "time"})
-    return out.assign_coords(time=("time", target))
+
+    # One interpolation per calendar month of targets (see the docstring).
+    blocks = month_aligned_time_chunks(
+        xr.DataArray(target, dims="time", coords={"time": target}), "time", len(target)
+    )
+    if isinstance(blocks, int):
+        blocks = (len(target),)
+    pieces = []
+    for start, stop in itertools.pairwise(np.cumsum((0, *blocks))):
+        piece = source.interp({time_dim: query[start:stop]}, method="linear")
+        if time_dim != "time":
+            piece = piece.rename({time_dim: "time"})
+        pieces.append(piece.assign_coords(time=("time", target[start:stop])))
+    out = xr.concat(pieces, dim="time") if len(pieces) > 1 else pieces[0]
+    if out.chunks is not None:
+        out = out.chunk({"time": blocks})
+    return out
 
 
 def bgc_source_has_own_ts(bgc_dataset_map: Mapping[str, Any], name: str | None) -> bool:

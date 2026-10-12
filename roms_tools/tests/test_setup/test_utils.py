@@ -1588,7 +1588,9 @@ class TestCycleToTimes:
         out = cycle_to_times(clim, "time", targets, climatology=True).values
         # 1 Jan sits between mid-December (12) and mid-January (1): a blend, not an edge.
         assert 1.0 < out[0] < 12.0 and 1.0 < out[1] < 12.0
-        assert out[0] > 6.0 and out[1] > 6.0  # closer to December's value
+        # 1 Jan: ~6.3 (just below the 6.5 midpoint, so nearer January's value); 31 Dec
+        # evenly between December and the wrapped January.
+        assert out[0] > 6.0 and out[1] > 6.0
 
     def test_dask_input_stays_lazy_and_matches(self):
         clim = self._clim().chunk({"time": 4})
@@ -1599,6 +1601,59 @@ class TestCycleToTimes:
         assert hasattr(out.data, "chunks")
         ref = cycle_to_times(self._clim(), "time", targets, climatology=True)
         np.testing.assert_allclose(out.values, ref.values)
+
+    def test_output_is_blocked_one_month_per_chunk_and_each_block_stands_alone(self):
+        """``save_mfdataset`` computes every monthly file separately, so the cycled
+        array must come out blocked by month, with each block depending only on the
+        padded source -- not on one whole-run interpolation recomputed per file.
+        """
+        import dask
+
+        clim = self._clim().chunk({"time": -1})
+        targets = xr.DataArray(
+            np.arange("2012-01-01", "2012-05-01", dtype="datetime64[D]").astype(
+                "datetime64[ns]"
+            ),
+            dims="time",
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True)
+        assert out.chunks[0] == (31, 29, 31, 30)  # Jan, Feb, Mar, Apr 2012
+        # Computing one month runs a fraction of the whole graph's tasks.
+        seen: list = []
+
+        class Count(dask.callbacks.Callback):
+            def _pretask(self, key, dsk, state):
+                seen.append(key)
+
+        with Count():
+            out.isel(time=slice(0, 31)).compute()
+        one_month = len(seen)
+        seen.clear()
+        with Count():
+            out.compute()
+        assert one_month < len(seen) / 2
+        ref = cycle_to_times(self._clim(), "time", targets, climatology=True)
+        np.testing.assert_allclose(out.values, ref.values)
+
+    def test_non_climatology_source_shorter_than_the_physics_warns(self, caplog):
+        import logging
+
+        src = xr.DataArray(
+            [10.0, 20.0],
+            dims="t",
+            coords={
+                "t": np.array(["2012-01-01", "2012-01-11"], dtype="datetime64[ns]")
+            },
+        )
+        targets = xr.DataArray(
+            np.array(["2012-01-06", "2012-02-01"], dtype="datetime64[ns]"), dims="time"
+        )
+        with caplog.at_level(logging.WARNING):
+            out = cycle_to_times(src, "t", targets, climatology=False)
+        assert any(
+            "does not cover the physics times" in r.message for r in caplog.records
+        )
+        np.testing.assert_allclose(out.values, [15.0, 20.0])
 
     def test_non_climatology_interpolates_and_holds_the_ends(self):
         src = xr.DataArray(

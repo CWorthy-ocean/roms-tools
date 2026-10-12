@@ -436,7 +436,11 @@ def test_initial_conditions_from_woa(
         ], "density interpolation silently degraded; the WOA T/S are not reaching it"
 
 
-def test_boundary_forcing_from_woa(_roms_grid, _physics_path, woa_dir):
+@pytest.mark.parametrize("method", ["density_mld", "depth"])
+def test_boundary_forcing_from_woa(_roms_grid, _physics_path, woa_dir, method):
+    """A density method places the climatology on every physics record (the output
+    follows the physics time axis); ``depth`` keeps the 12-month cycled climatology.
+    """
     from datetime import datetime
 
     from roms_tools.setup.bgc_model import BGCMarbl
@@ -449,7 +453,7 @@ def test_boundary_forcing_from_woa(_roms_grid, _physics_path, woa_dir):
         source={"path": _physics_path, "name": "GLORYS"},
         bgc_sources=[{"source": {"name": "WOA", "path": woa_dir}}],
         bgc_model=BGCMarbl,
-        bgc_interpolation_method="density_mld",
+        bgc_interpolation_method=method,
         prefill="2d_lateral_fill",
         regrid_method="scipy",
         use_dask=True,
@@ -459,8 +463,12 @@ def test_boundary_forcing_from_woa(_roms_grid, _physics_path, woa_dir):
     for direction in ("north", "south", "east"):
         name = f"NO3_{direction}"
         assert name in ds
-        # A climatology source keeps all twelve months on the boundary.
-        assert ds[name].sizes["bry_time"] == 12
+        if method == "depth":
+            assert ds[name].sizes["bry_time"] == 12
+            assert ds["bry_time"].attrs["cycle_length"] == 365.25
+        else:
+            assert ds[name].sizes["bry_time"] == bf.physics.ds.sizes["bry_time"]
+            assert "cycle_length" not in ds["bry_time"].attrs
         assert not np.isnan(ds[name].values).any()
 
 

@@ -5,6 +5,7 @@ import pytest
 import xarray as xr
 
 from roms_tools.analysis.cdr_analysis import (
+    SOURCE_ROLES,
     _native_carbon_amount_to_tonnes_co2_scale,
     _native_dic_amount_to_mol_multiplier,
     _validate_source,
@@ -234,21 +235,21 @@ def test_missing_variable_in_grid(
 
 def test_validate_source_passes(minimal_ds):
     # Should not raise
-    _validate_source(minimal_ds)
+    _validate_source(minimal_ds, "release")
 
 
 def test_validate_source_alk_negative(minimal_ds):
     bad_ds = minimal_ds.copy()
     bad_ds["ALK_source"].loc[dict(time=0)] = -1
     with pytest.raises(ValueError, match="ALK_source"):
-        _validate_source(bad_ds)
+        _validate_source(bad_ds, "release")
 
 
 def test_validate_source_dic_positive(minimal_ds):
     bad_ds = minimal_ds.copy()
     bad_ds["DIC_source"].loc[dict(time=0)] = 1
     with pytest.raises(ValueError, match="DIC_source"):
-        _validate_source(bad_ds)
+        _validate_source(bad_ds, "release")
 
 
 def test_validate_uptake_efficiency_logs(caplog):
@@ -276,3 +277,90 @@ def test_efficiency_nan_when_zero_source(minimal_ds, minimal_grid_ds):
     # Should be NaN, not inf
     assert np.isnan(eff_flux)
     assert np.isnan(eff_diff)
+
+
+@pytest.fixture
+def transfer_ds(minimal_ds):
+    """Dataset whose source has the signs of a transfer (ALK < 0, DIC > 0)."""
+    ds = minimal_ds.copy(deep=True)
+    ds["ALK_source"] = -ds["ALK_source"]
+    ds["DIC_source"] = -ds["DIC_source"]
+    return ds
+
+
+def _expected_cumulative_source(ds: xr.Dataset) -> xr.DataArray:
+    window_length = ds["avg_end_time"] - ds["avg_begin_time"]
+    return (
+        (ds["ALK_source"] - ds["DIC_source"]).sum(dim=["s_rho", "eta_rho", "xi_rho"])
+        * window_length
+    ).cumsum("time")
+
+
+def test_cumulative_source_stored(minimal_ds, minimal_grid_ds):
+    ds_cdr = compute_cdr_metrics(minimal_ds, minimal_grid_ds)
+
+    np.testing.assert_allclose(
+        ds_cdr["cdr_cumulative_source"], _expected_cumulative_source(minimal_ds)
+    )
+    assert ds_cdr["cdr_cumulative_source"].attrs["units"] == "mmol"
+
+
+def test_cumulative_source_units_strip_per_second(minimal_ds, minimal_grid_ds):
+    minimal_ds["ALK_source"].attrs["units"] = "meq/s"
+    ds_cdr = compute_cdr_metrics(minimal_ds, minimal_grid_ds)
+
+    assert ds_cdr["cdr_cumulative_source"].attrs["units"] == "meq"
+
+
+def test_release_role_metadata(minimal_ds, minimal_grid_ds):
+    ds_cdr = compute_cdr_metrics(minimal_ds, minimal_grid_ds)
+
+    assert ds_cdr.attrs["cdr_source_role"] == "release"
+    for var, units_var in [
+        ("cdr_carbon_uptake_from_flux", "FG_CO2"),
+        ("cdr_carbon_uptake_from_DIC_difference", "hDIC"),
+    ]:
+        expected = _native_carbon_amount_to_tonnes_co2_scale(
+            minimal_ds[units_var].attrs.get("units")
+        )
+        assert ds_cdr[var].attrs["tonnes_co2_per_native_unit"] == expected
+
+
+def test_transfer_role(transfer_ds, minimal_ds, minimal_grid_ds):
+    ds_cdr = compute_cdr_metrics(transfer_ds, minimal_grid_ds, source_role="transfer")
+    release = compute_cdr_metrics(minimal_ds, minimal_grid_ds)
+
+    assert ds_cdr.attrs["cdr_source_role"] == "transfer"
+    for var in ["cdr_efficiency_from_flux", "cdr_efficiency_from_DIC_difference"]:
+        assert ds_cdr[var].isnull().all()
+        assert "time" in ds_cdr[var].coords
+        assert (
+            "not defined for source_role='transfer'" in ds_cdr[var].attrs["description"]
+        )
+    for var in [
+        "cdr_carbon_uptake_from_flux",
+        "cdr_carbon_uptake_from_DIC_difference",
+    ]:
+        assert np.isfinite(ds_cdr[var]).all()
+        xr.testing.assert_allclose(ds_cdr[var], release[var])
+    np.testing.assert_allclose(
+        ds_cdr["cdr_cumulative_source"], _expected_cumulative_source(transfer_ds)
+    )
+
+
+def test_release_role_rejects_transfer_signs(transfer_ds, minimal_grid_ds):
+    with pytest.raises(ValueError, match="release constraints"):
+        compute_cdr_metrics(transfer_ds, minimal_grid_ds, source_role="release")
+
+
+def test_transfer_role_still_requires_source_variables(minimal_ds, minimal_grid_ds):
+    with pytest.raises(KeyError):
+        compute_cdr_metrics(
+            minimal_ds.drop_vars("ALK_source"), minimal_grid_ds, source_role="transfer"
+        )
+
+
+def test_invalid_source_role(minimal_ds, minimal_grid_ds):
+    with pytest.raises(ValueError, match="source_role"):
+        compute_cdr_metrics(minimal_ds, minimal_grid_ds, source_role="bogus")  # type: ignore[arg-type]
+    assert SOURCE_ROLES == ("release", "transfer")

@@ -8,7 +8,7 @@ import xarray as xr
 from matplotlib.animation import FFMpegWriter, FuncAnimation
 from matplotlib.axes import Axes
 
-from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
+from roms_tools.analysis.cdr_analysis import SourceRole, compute_cdr_metrics
 from roms_tools.datasets.roms_dataset import ROMSDataset
 from roms_tools.plot import (
     format_timestamp,
@@ -48,7 +48,7 @@ class ROMSOutput(ROMSDataset):
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
     """
 
-    def cdr_metrics(self) -> None:
+    def cdr_metrics(self, source_role: SourceRole = "release") -> None:
         """
         Compute and plot Carbon Dioxide Removal (CDR) metrics.
 
@@ -57,18 +57,41 @@ class ROMSOutput(ROMSDataset):
         Afterwards, it generates a figure titled "CO2 uptake and CDR efficiency"
         with twin y-axes: dimensionless efficiency and CO2 uptake in tonnes CO2.
 
+        Parameters
+        ----------
+        source_role : {"release", "transfer"}, optional
+            Role of the ALK/DIC source in this domain: ``"release"`` (default) for
+            the CDR intervention itself, ``"transfer"`` for a parent domain that
+            receives a child's boundary perturbation. See
+            `roms_tools.analysis.cdr_analysis.compute_cdr_metrics`.
+
+        Raises
+        ------
+        ValueError
+            If `self.ds_cdr` was already computed with a different `source_role`.
+
         Notes
         -----
         Metrics include:
           - Grid cell area
           - Selected tracer and flux variables
           - Uptake efficiency computed from flux differences and DIC differences
+            (all-NaN for a ``"transfer"`` member)
           - Total carbon uptake from the same flux and DIC constructions (not
             normalized by the alkalinity/DIC source)
+          - Cumulative source (``cdr_cumulative_source``)
         """
         if not hasattr(self, "ds_cdr"):
             # Compute metrics and store
-            self.ds_cdr = compute_cdr_metrics(self.ds, self.grid.ds)
+            self.ds_cdr = compute_cdr_metrics(
+                self.ds, self.grid.ds, source_role=source_role
+            )
+        elif self.ds_cdr.attrs.get("cdr_source_role") != source_role:
+            raise ValueError(
+                f"ds_cdr was computed with source_role="
+                f"{self.ds_cdr.attrs.get('cdr_source_role')!r}, "
+                f"but source_role={source_role!r} was requested."
+            )
 
         plot_uptake_efficiency(self.ds_cdr)
 

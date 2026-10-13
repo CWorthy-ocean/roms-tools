@@ -85,6 +85,7 @@ Analyzing ROMS output
    roms_tools.ROMSOutput.regrid
    roms_tools.ROMSOutput.cdr_metrics
    roms_tools.Ensemble
+   roms_tools.UpscaledCDR
 
 =======
 

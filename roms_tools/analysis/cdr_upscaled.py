@@ -1,0 +1,495 @@
+import logging
+import operator
+from dataclasses import dataclass, field
+from functools import reduce
+from itertools import pairwise
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
+from roms_tools.analysis.cdr_analysis import SOURCE_ROLES
+
+_FLUX_UPTAKE = "cdr_carbon_uptake_from_flux"
+_DIC_UPTAKE = "cdr_carbon_uptake_from_DIC_difference"
+_CUMULATIVE_SOURCE = "cdr_cumulative_source"
+
+# Time series that are aligned and combined.
+_SERIES_VARS = (_CUMULATIVE_SOURCE, _FLUX_UPTAKE, _DIC_UPTAKE)
+_REQUIRED_VARS = (*_SERIES_VARS, "area", "hDIC", "hDIC_ALT_CO2", "window_length")
+_REQUIRED_COORDS = ("time", "lat_rho", "lon_rho")
+
+
+@dataclass
+class UpscaledCDR:
+    """
+    Combines the CDR metrics of a chain of nested domains into one total.
+
+    In a nested (upscaled) CDR experiment the actual release happens in a child
+    domain; each parent domain receives the child's boundary perturbation
+    re-injected as a source. Every member is a ``ds_cdr`` as produced by
+    :func:`roms_tools.analysis.cdr_analysis.compute_cdr_metrics` (or
+    ``ROMSOutput.cdr_metrics``) for its own domain, computed with that domain's
+    own grid and the matching ``source_role``.
+
+    Methodology:
+
+    - Members are ordered child -> parent, i.e. each member's footprint must lie
+      strictly inside the next one's.
+    - The total carbon uptake is the sum of the members' uptakes (flux-based and
+      DIC-difference-based separately): each domain removes the part of the
+      perturbation that is in it.
+    - The only real source is the release. The denominator of the combined
+      efficiency is therefore the cumulative source of the members with
+      ``cdr_source_role == "release"`` only. The source of a ``"transfer"``
+      member is the child's perturbation passed on to the parent (it is signed,
+      ``ALK_add = ALK_rate - ALK_alt_rate``), not new alkalinity, so adding it to
+      the denominator would count the same release twice.
+    - The members' uptakes are converted to native units with their own
+      ``tonnes_co2_per_native_unit`` before dividing, so the efficiency is the
+      native-unit uptake over the native-unit source.
+
+    Members must share the same longitude convention (longitudes are compared as
+    stored, without wrapping) and the same averaging window (``window_length``).
+    Members are aligned on the union of their absolute times; where any member
+    lacks a record the combined series are NaN there, and a warning is logged.
+
+    Two diagnostics help to judge the result:
+
+    - ``closure_residual``: combined flux-based uptake minus combined
+      DIC-difference-based uptake (tonnes CO2). The two are bookkeeping views of
+      the same perturbation, so this should be small.
+    - ``{parent}_DIC_difference_inside_{child}``: the DIC perturbation (tonnes CO2)
+      that a parent carries in the cells inside its child's bounding box. The
+      child already accounts for that region, so a nonzero value indicates
+      double counting.
+
+    Parameters
+    ----------
+    members : dict[str, str | Path | xr.Dataset]
+        Dictionary mapping member names to either file paths (NetCDF) or
+        xarray.Dataset objects holding the member's ``ds_cdr``. Order matters:
+        child first, then its parent, then the parent's parent, and so on. At
+        least two members are required, and at least one must have the role
+        ``"release"``. The datasets need the ``lat_rho``/``lon_rho`` coordinates
+        and the variables and attributes written by ``compute_cdr_metrics``.
+
+    Raises
+    ------
+    ValueError
+        If fewer than two members are given, a member lacks required variables,
+        coordinates or attributes, no member is a release, the members are not
+        nested in the given order or share the same grid, the averaging windows
+        differ, or the release members' source units differ.
+    """
+
+    members: dict[str, str | Path | xr.Dataset]
+    """Dictionary mapping member names (child first) to their CDR metrics."""
+    ds: xr.Dataset = field(init=False)
+    """Combined uptake, efficiency, per-member series and diagnostics."""
+
+    def __post_init__(self):
+        """Load and validate the members, align their times, and build ``self.ds``."""
+        datasets = self._load_members()
+        self._validate_members(datasets)
+        aligned = self._align_times(datasets)
+        self.ds = self._build_dataset(datasets, aligned)
+
+    def _load_members(self) -> dict[str, xr.Dataset]:
+        """
+        Load the member datasets.
+
+        Converts any file paths in `self.members` to xarray Datasets. Members that
+        are already xarray Datasets are left unchanged.
+
+        Returns
+        -------
+        dict[str, xr.Dataset]
+            Dictionary mapping member names to xarray.Dataset objects.
+        """
+        return {
+            name: xr.open_dataset(path) if isinstance(path, str | Path) else path
+            for name, path in self.members.items()
+        }
+
+    def _validate_members(self, datasets: dict[str, xr.Dataset]) -> None:
+        """
+        Check that the members form a consistent child -> parent chain.
+
+        Raises
+        ------
+        ValueError
+            On any misconfiguration; the message names the offending member(s).
+        """
+        if len(datasets) < 2:
+            raise ValueError(
+                "UpscaledCDR needs a child and at least one parent member, "
+                f"got {len(datasets)}."
+            )
+
+        hint = (
+            "recompute the member with `compute_cdr_metrics` from a roms-tools "
+            "version that writes these"
+        )
+        for name, ds in datasets.items():
+            missing = [v for v in _REQUIRED_VARS if v not in ds.data_vars]
+            missing += [c for c in _REQUIRED_COORDS if c not in ds.coords]
+            if "cdr_source_role" not in ds.attrs:
+                missing.append("attribute 'cdr_source_role'")
+            missing += [
+                f"attribute 'tonnes_co2_per_native_unit' on '{v}'"
+                for v in (_FLUX_UPTAKE, _DIC_UPTAKE)
+                if v in ds and "tonnes_co2_per_native_unit" not in ds[v].attrs
+            ]
+            if missing:
+                raise ValueError(f"Member {name!r} is missing {missing}; {hint}.")
+            if ds.attrs["cdr_source_role"] not in SOURCE_ROLES:
+                raise ValueError(
+                    f"Member {name!r} has cdr_source_role="
+                    f"{ds.attrs['cdr_source_role']!r}; expected one of {SOURCE_ROLES}."
+                )
+
+        if not any(
+            ds.attrs["cdr_source_role"] == "release" for ds in datasets.values()
+        ):
+            raise ValueError(
+                "At least one member must have cdr_source_role='release'; got "
+                f"{ {n: d.attrs['cdr_source_role'] for n, d in datasets.items()} }."
+            )
+
+        self._validate_geometry(datasets)
+
+        window_lengths = {}
+        for name, ds in datasets.items():
+            values = ds["window_length"].values
+            # A member read back from NetCDF may have been decoded to timedelta64.
+            if np.issubdtype(values.dtype, np.timedelta64):
+                values = values / np.timedelta64(1, "s")
+            unique = np.unique(values)
+            if unique.size != 1:
+                raise ValueError(
+                    f"Member {name!r} must have a single unique window_length, "
+                    f"got {unique}."
+                )
+            window_lengths[name] = unique[0]
+        if len(set(window_lengths.values())) != 1:
+            raise ValueError(
+                f"Members must share the same averaging window; got {window_lengths}."
+            )
+
+    @staticmethod
+    def _bbox(ds: xr.Dataset) -> tuple[float, float, float, float]:
+        """Return (lon_min, lon_max, lat_min, lat_max) of a member's rho points."""
+        lon, lat = ds["lon_rho"].values, ds["lat_rho"].values
+        return (
+            float(np.nanmin(lon)),
+            float(np.nanmax(lon)),
+            float(np.nanmin(lat)),
+            float(np.nanmax(lat)),
+        )
+
+    def _validate_geometry(self, datasets: dict[str, xr.Dataset]) -> None:
+        """
+        Check that members have distinct grids and are nested child -> parent.
+
+        Longitudes are compared as stored, so members must share the longitude
+        convention.
+        """
+        names = list(datasets)
+        for i, a in enumerate(names):
+            for b in names[i + 1 :]:
+                same = all(
+                    datasets[a][c].shape == datasets[b][c].shape
+                    and np.allclose(datasets[a][c].values, datasets[b][c].values)
+                    for c in ("lon_rho", "lat_rho")
+                )
+                if same:
+                    raise ValueError(
+                        f"Members {a!r} and {b!r} have identical lon_rho/lat_rho: "
+                        "the same grid appears to have been used for both members. "
+                        "Compute each member's metrics with its own grid."
+                    )
+
+        for child, parent in pairwise(names):
+            c_lon0, c_lon1, c_lat0, c_lat1 = self._bbox(datasets[child])
+            p_lon0, p_lon1, p_lat0, p_lat1 = self._bbox(datasets[parent])
+            if not (
+                p_lon0 < c_lon0
+                and p_lon1 > c_lon1
+                and p_lat0 < c_lat0
+                and p_lat1 > c_lat1
+            ):
+                raise ValueError(
+                    f"Member {parent!r} must strictly contain the lon/lat bounding "
+                    f"box of {child!r}; members must be ordered child -> parent and "
+                    "share the longitude convention. "
+                    f"{parent!r}: lon [{p_lon0}, {p_lon1}], lat [{p_lat0}, {p_lat1}]; "
+                    f"{child!r}: lon [{c_lon0}, {c_lon1}], lat [{c_lat0}, {c_lat1}]."
+                )
+
+    def _align_times(self, datasets: dict[str, xr.Dataset]) -> dict[str, xr.Dataset]:
+        """
+        Align the members' time series on the union of their absolute times.
+
+        Records that some member lacks are NaN for that member; a single warning
+        reports how many records are affected and which members are shorter.
+
+        Returns
+        -------
+        dict[str, xr.Dataset]
+            For each member, its cumulative source and uptake series on the common
+            time axis.
+        """
+        all_times = np.unique(
+            np.concatenate([ds["time"].values for ds in datasets.values()])
+        )
+        incomplete = np.zeros(all_times.size, dtype=bool)
+        for ds in datasets.values():
+            incomplete |= ~np.isin(all_times, ds["time"].values)
+        n_incomplete = int(incomplete.sum())
+        if n_incomplete:
+            shorter = [
+                n for n, ds in datasets.items() if ds["time"].size < all_times.size
+            ]
+            logging.warning(
+                "%d time record(s) are missing from at least one member; combined "
+                "series are NaN there. Members with fewer records: %s.",
+                n_incomplete,
+                ", ".join(shorter),
+            )
+        return {
+            name: ds[list(_SERIES_VARS)].reindex(time=all_times)
+            for name, ds in datasets.items()
+        }
+
+    def _footprint_dic_difference(
+        self, child: xr.Dataset, parent: xr.Dataset, all_times: np.ndarray
+    ) -> xr.DataArray:
+        """
+        DIC perturbation (tonnes CO2) of `parent` inside `child`'s bounding box.
+
+        Sums ``(hDIC - hDIC_ALT_CO2) * area`` over the parent cells whose
+        lon/lat lie within the child's lon/lat bounding box.
+        """
+        lon0, lon1, lat0, lat1 = self._bbox(child)
+        inside = (
+            (parent["lon_rho"] >= lon0)
+            & (parent["lon_rho"] <= lon1)
+            & (parent["lat_rho"] >= lat0)
+            & (parent["lat_rho"] <= lat1)
+        )
+        diff = ((parent["hDIC"] - parent["hDIC_ALT_CO2"]) * parent["area"]).sum("s_rho")
+        scale = parent[_DIC_UPTAKE].attrs["tonnes_co2_per_native_unit"]
+        footprint = (
+            diff.where(inside).sum(["eta_rho", "xi_rho"]).compute() * scale
+        ).reindex(time=all_times)
+        return footprint.reset_coords(drop=True)
+
+    def _build_dataset(
+        self, datasets: dict[str, xr.Dataset], aligned: dict[str, xr.Dataset]
+    ) -> xr.Dataset:
+        """Assemble the combined dataset from the aligned member series."""
+        names = list(datasets)
+        roles = {n: datasets[n].attrs["cdr_source_role"] for n in names}
+        releases = [n for n in names if roles[n] == "release"]
+        all_times = aligned[names[0]]["time"].values
+
+        def total(var: str, members: list[str]) -> xr.DataArray:
+            return reduce(operator.add, [aligned[n][var] for n in members])
+
+        def common_scale(var: str) -> float | None:
+            scales = [
+                datasets[n][var].attrs["tonnes_co2_per_native_unit"] for n in names
+            ]
+            return scales[0] if np.allclose(scales, scales[0]) else None
+
+        source_units = {
+            datasets[n][_CUMULATIVE_SOURCE].attrs.get("units") for n in releases
+        }
+        if len(source_units) != 1:
+            raise ValueError(
+                f"Release members must share the same {_CUMULATIVE_SOURCE} units, "
+                f"got {sorted(map(str, source_units))}."
+            )
+
+        out = xr.Dataset(coords={"time": all_times})
+
+        out[_CUMULATIVE_SOURCE] = total(_CUMULATIVE_SOURCE, releases)
+        out[_CUMULATIVE_SOURCE].attrs.update(
+            long_name="Cumulative CDR source (release members)",
+            description=(
+                "Time-cumulative volume-integrated (ALK_source - DIC_source) of the "
+                "release members only; the denominator of the combined efficiency"
+            ),
+        )
+        units = source_units.pop()
+        if units is not None:
+            out[_CUMULATIVE_SOURCE].attrs["units"] = units
+
+        out[_FLUX_UPTAKE] = total(_FLUX_UPTAKE, names)
+        out[_FLUX_UPTAKE].attrs.update(
+            long_name="CDR carbon uptake (cumulative flux differences, all members)",
+            units="tonnes CO2",
+            description=(
+                "Time-cumulative CO2 uptake mass from area-integrated CO2 flux "
+                "differences, summed over all members"
+            ),
+        )
+        out[_DIC_UPTAKE] = total(_DIC_UPTAKE, names)
+        out[_DIC_UPTAKE].attrs.update(
+            long_name="CDR carbon uptake (from DIC differences, all members)",
+            units="tonnes CO2",
+            description=(
+                "CO2-equivalent mass from the volume-integrated DIC difference, "
+                "summed over all members"
+            ),
+        )
+        # The scale is only meaningful for the sum if all members share it.
+        for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
+            scale = common_scale(var)
+            if scale is not None:
+                out[var].attrs["tonnes_co2_per_native_unit"] = scale
+
+        # Back to native units per member, so the ratio to the native source holds.
+        for eff_var, uptake_var in (
+            ("cdr_efficiency_from_flux", _FLUX_UPTAKE),
+            ("cdr_efficiency_from_DIC_difference", _DIC_UPTAKE),
+        ):
+            native = reduce(
+                operator.add,
+                [
+                    aligned[n][uptake_var]
+                    / datasets[n][uptake_var].attrs["tonnes_co2_per_native_unit"]
+                    for n in names
+                ],
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = native / out[_CUMULATIVE_SOURCE]
+                out[eff_var] = ratio.where(np.isfinite(ratio))
+        out["cdr_efficiency_from_flux"].attrs.update(
+            long_name="CDR uptake efficiency (from flux differences)",
+            units="nondimensional",
+            description=(
+                "Total uptake over all members (area-integrated CO2 flux "
+                "differences) divided by the cumulative source of the release members"
+            ),
+        )
+        out["cdr_efficiency_from_DIC_difference"].attrs.update(
+            long_name="CDR uptake efficiency (from DIC differences)",
+            units="nondimensional",
+            description=(
+                "Total uptake over all members (volume-integrated DIC differences) "
+                "divided by the cumulative source of the release members"
+            ),
+        )
+
+        for n in names:
+            for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
+                out[f"{n}_{var.removeprefix('cdr_')}"] = aligned[n][var]
+                out[f"{n}_{var.removeprefix('cdr_')}"].attrs = dict(
+                    datasets[n][var].attrs
+                )
+
+        out["closure_residual"] = out[_FLUX_UPTAKE] - out[_DIC_UPTAKE]
+        out["closure_residual"].attrs.update(
+            long_name="Closure residual (flux-based minus DIC-based uptake)",
+            units="tonnes CO2",
+            description=(
+                "Combined flux-based minus DIC-difference-based uptake; the two are "
+                "bookkeeping views of the same perturbation, so this should be small"
+            ),
+        )
+        diagnostics = {"closure_residual": out["closure_residual"]}
+
+        for child, parent in pairwise(names):
+            var = f"{parent}_DIC_difference_inside_{child}"
+            out[var] = self._footprint_dic_difference(
+                datasets[child], datasets[parent], all_times
+            )
+            out[var].attrs.update(
+                long_name=f"DIC perturbation of {parent} inside {child} footprint",
+                units="tonnes CO2",
+                description=(
+                    f"DIC perturbation that {parent} carries in cells inside the "
+                    f"bounding box of {child}; double-counted if nonzero"
+                ),
+            )
+            diagnostics[var] = out[var]
+
+        for var, da in diagnostics.items():
+            valid = da.dropna("time")
+            if valid.size:
+                logging.info(
+                    "Final-time %s: %.3e tonnes CO2", var, float(valid.isel(time=-1))
+                )
+
+        out.attrs["cdr_source_role"] = "release"
+        out.attrs["members"] = ", ".join(f"{n}:{roles[n]}" for n in names)
+        return out
+
+    def plot(
+        self,
+        save_path: str | None = None,
+    ) -> None:
+        """
+        Plot the combined CDR efficiency and CO2 uptake in two subplots.
+
+        The top panel shows the combined efficiency (flux-based and DIC-based); the
+        bottom panel the combined uptake (both methods) with each member's
+        flux-based uptake as a thinner line.
+
+        Parameters
+        ----------
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
+
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+        """
+        fig, (ax_eff, ax_uptake) = plt.subplots(
+            nrows=2, ncols=1, figsize=(9, 8), sharex=True
+        )
+        time = self.ds["time"].values
+
+        ax_eff.plot(
+            time, self.ds["cdr_efficiency_from_flux"], lw=2, label="flux differences"
+        )
+        ax_eff.plot(
+            time,
+            self.ds["cdr_efficiency_from_DIC_difference"],
+            lw=2,
+            label="DIC differences",
+        )
+        ax_eff.set_ylabel("CDR efficiency")
+        ax_eff.set_title("Combined CDR efficiency")
+        ax_eff.grid()
+        ax_eff.legend(loc="best")
+
+        ax_uptake.plot(
+            time, self.ds[_FLUX_UPTAKE], lw=2, label="total (flux differences)"
+        )
+        ax_uptake.plot(
+            time, self.ds[_DIC_UPTAKE], lw=2, label="total (DIC differences)"
+        )
+        for name in self.members:
+            ax_uptake.plot(
+                time,
+                self.ds[f"{name}_carbon_uptake_from_flux"],
+                lw=1,
+                alpha=0.8,
+                label=f"{name} (flux differences)",
+            )
+        ax_uptake.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
+        ax_uptake.set_xlabel("Time")
+        ax_uptake.set_title(r"Combined CO$_2$ uptake")
+        ax_uptake.grid()
+        ax_uptake.legend(loc="best")
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        else:
+            plt.show()

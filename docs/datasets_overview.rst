@@ -364,13 +364,16 @@ ESPER (experimental)
 Not a dataset but a derived source: ``{"name": "ESPER"}`` estimates ``ALK``, ``DIC``,
 ``NO3``, ``PO4``, ``SiO3`` and ``O2`` from the physics temperature and salinity already
 on the ROMS grid with the CWorthy fork of `PyESPER <https://github.com/CWorthy-ocean/PyESPER>`_
-(``pip install -e`` a checkout, or point the source's ``path`` at one). It needs the
+(``git clone --branch v1.1.1+cworthy.1 https://github.com/CWorthy-ocean/PyESPER`` then
+``pip install -e .`` in the clone, or point the source's ``path`` at one; the fork is not on
+PyPI or conda, and its tags are ``v<upstream>+cworthy.<n>``). It needs the
 companion physics object (``physics_forcing``; the ``InitialConditions`` /
 ``BoundaryForcing`` wrappers wire this up), inherits its time axis, and takes these keys:
 
 - ``method``: ``"nn"`` (default), ``"lir"`` or ``"mixed"``; ``equation``: 8 (salinity and
   temperature, default) or 16 (salinity only).
-- ``salinity_conditioning``: ``{"woa_salinity_path": ..., "low": 31, "high": 34}``. ESPER's
+- ``salinity_conditioning``: ``{"woa_salinity_path": ..., "low": 31, "high": 34}``
+  (needs fork tag ``v1.1.1+cworthy.1`` or later). ESPER's
   nets were fit to GLODAP bottle data with almost no coverage below ~31 PSU, so in river
   plumes they extrapolate unphysically (silicate above 100 µmol kg⁻¹, negative nutrients,
   DIC above alkalinity). With this key PyESPER blends the salinity it feeds the nets toward

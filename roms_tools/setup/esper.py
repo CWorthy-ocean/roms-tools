@@ -149,6 +149,10 @@ _VALID_METHODS = ("lir", "nn", "mixed")
 #: upstream rather than the fork. The second is the confusing one: the package imports
 #: fine and only fails on the ``*_xr`` names, which reads like a version skew rather
 #: than the wrong project.
+# The fork is installed from a clone at a tag, never from PyPI/conda; its versions are
+# `<upstream>+cworthy.<n>` with a matching tag. Bump this with each fork tag.
+_PYESPER_FORK_TAG = "v1.1.1+cworthy.1"
+
 _PYESPER_INSTALL_HINT = (
     "The ESPER BGC source requires CWorthy's PyESPER fork. PyESPER support is "
     "considered experimental at this time.\n"
@@ -157,7 +161,7 @@ _PYESPER_INSTALL_HINT = (
     "\n"
     "Install it from source:\n"
     "\n"
-    "    git clone https://github.com/CWorthy-ocean/PyESPER\n"
+    f"    git clone --branch {_PYESPER_FORK_TAG} https://github.com/CWorthy-ocean/PyESPER\n"
     "    cd PyESPER\n"
     "    pip install -e .\n"
     "\n"
@@ -454,8 +458,9 @@ def _salinity_conditioning(source: dict) -> SalinityConditioning | None:
     except ImportError as exc:
         raise ImportError(
             "The installed PyESPER has no `salinity_conditioning` module. Salinity "
-            "conditioning needs the CWorthy fork at or after the "
-            "'salinity-conditioning' branch (https://github.com/CWorthy-ocean/PyESPER)."
+            f"conditioning needs the CWorthy fork at tag {_PYESPER_FORK_TAG} or later "
+            f"(git clone --branch {_PYESPER_FORK_TAG} "
+            "https://github.com/CWorthy-ocean/PyESPER; pip install -e .)."
         ) from exc
     band = {k: float(spec[k]) for k in ("low", "high") if k in spec}
     # FileNotFoundError (with the download URL) and band ValueError propagate as-is.

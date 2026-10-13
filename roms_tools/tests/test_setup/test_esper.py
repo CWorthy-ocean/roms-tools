@@ -1207,8 +1207,28 @@ def test_missing_pyesper_points_at_the_cworthy_fork(monkeypatch):
 
     msg = str(excinfo.value)
     assert "https://github.com/CWorthy-ocean/PyESPER" in msg
+    assert "git clone --branch v1.1.1+cworthy.1" in msg
     assert "pip install -e ." in msg
     assert "No PyESPER is importable" in msg
+
+
+def test_missing_conditioning_module_names_the_fork_tag(monkeypatch):
+    """An installed PyESPER without `salinity_conditioning` (upstream, or the fork
+    before the tag) is reported with the tag to clone, not a branch name.
+    """
+    import sys
+
+    class _Block:
+        def find_spec(self, name, path=None, target=None):
+            if name == "PyESPER.salinity_conditioning":
+                raise ImportError(f"No module named {name!r}")
+
+    monkeypatch.delitem(sys.modules, "PyESPER.salinity_conditioning", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_Block(), *sys.meta_path])
+    with pytest.raises(ImportError, match="v1.1.1\\+cworthy.1"):
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": {"woa_salinity_path": "/x.nc"}}
+        )
 
 
 def test_ensure_pyesper_rolls_back_sys_path_insertion_on_failure(monkeypatch):

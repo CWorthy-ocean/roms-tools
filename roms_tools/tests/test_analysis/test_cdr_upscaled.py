@@ -149,27 +149,28 @@ def test_two_releases_sum_sources(members):
     )
 
 
-def test_different_scales_omit_attr_and_use_member_scale(members):
+def test_different_scales_raise(members):
     members["outer"] = members["outer"].copy(deep=True)
     members["outer"]["cdr_carbon_uptake_from_DIC_difference"].attrs[
         "tonnes_co2_per_native_unit"
     ] = 1000 * SCALE
+
+    with pytest.raises(ValueError, match="native carbon units"):
+        UpscaledCDR(members)
+
+
+def test_combined_uptake_keeps_shared_scale(members):
     ds = UpscaledCDR(members).ds
 
-    assert (
-        "tonnes_co2_per_native_unit"
-        not in ds["cdr_carbon_uptake_from_DIC_difference"].attrs
-    )
-    assert (
-        ds["cdr_carbon_uptake_from_flux"].attrs["tonnes_co2_per_native_unit"] == SCALE
-    )
-    native = sum(
-        _native(m, "cdr_carbon_uptake_from_DIC_difference") for m in members.values()
-    )
-    np.testing.assert_allclose(
-        ds["cdr_efficiency_from_DIC_difference"],
-        native / members["child"]["cdr_cumulative_source"],
-    )
+    for var in ("cdr_carbon_uptake_from_flux", "cdr_carbon_uptake_from_DIC_difference"):
+        assert ds[var].attrs["tonnes_co2_per_native_unit"] == SCALE
+
+
+def test_window_length_roundoff_tolerated(members):
+    members["mid"] = members["mid"].copy(deep=True)
+    members["mid"]["window_length"] = members["mid"]["window_length"] + 1e-9
+
+    UpscaledCDR(members)
 
 
 def test_shorter_member_gives_nan_and_warns(members, caplog):

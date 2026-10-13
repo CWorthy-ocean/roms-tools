@@ -46,12 +46,13 @@ class UpscaledCDR:
       member is the child's perturbation passed on to the parent (it is signed,
       ``ALK_add = ALK_rate - ALK_alt_rate``), not new alkalinity, so adding it to
       the denominator would count the same release twice.
-    - The members' uptakes are converted to native units with their own
-      ``tonnes_co2_per_native_unit`` before dividing, so the efficiency is the
-      native-unit uptake over the native-unit source.
+    - The summed uptake is converted back to native units with the members'
+      shared ``tonnes_co2_per_native_unit`` before dividing, so the efficiency is
+      the native-unit uptake over the native-unit source.
 
     Members must share the same longitude convention (longitudes are compared as
-    stored, without wrapping) and the same averaging window (``window_length``).
+    stored, without wrapping), the same averaging window (``window_length``) and
+    the same native carbon units (``tonnes_co2_per_native_unit``).
     Members are aligned on the union of their absolute times; where any member
     lacks a record the combined series are NaN there, and a warning is logged.
 
@@ -166,17 +167,28 @@ class UpscaledCDR:
             # A member read back from NetCDF may have been decoded to timedelta64.
             if np.issubdtype(values.dtype, np.timedelta64):
                 values = values / np.timedelta64(1, "s")
-            unique = np.unique(values)
-            if unique.size != 1:
+            if not np.allclose(values, values[0]):
                 raise ValueError(
                     f"Member {name!r} must have a single unique window_length, "
-                    f"got {unique}."
+                    f"got {np.unique(values)}."
                 )
-            window_lengths[name] = unique[0]
-        if len(set(window_lengths.values())) != 1:
+            window_lengths[name] = float(values[0])
+        first = next(iter(window_lengths.values()))
+        if not np.allclose(list(window_lengths.values()), first):
             raise ValueError(
                 f"Members must share the same averaging window; got {window_lengths}."
             )
+
+        for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
+            scales = {
+                n: ds[var].attrs["tonnes_co2_per_native_unit"]
+                for n, ds in datasets.items()
+            }
+            if not np.allclose(list(scales.values()), next(iter(scales.values()))):
+                raise ValueError(
+                    f"Members must share the same native carbon units for {var!r} "
+                    f"(tonnes_co2_per_native_unit); got {scales}."
+                )
 
     @staticmethod
     def _bbox(ds: xr.Dataset) -> tuple[float, float, float, float]:
@@ -298,12 +310,6 @@ class UpscaledCDR:
         def total(var: str, members: list[str]) -> xr.DataArray:
             return reduce(operator.add, [aligned[n][var] for n in members])
 
-        def common_scale(var: str) -> float | None:
-            scales = [
-                datasets[n][var].attrs["tonnes_co2_per_native_unit"] for n in names
-            ]
-            return scales[0] if np.allclose(scales, scales[0]) else None
-
         source_units = {
             datasets[n][_CUMULATIVE_SOURCE].attrs.get("units") for n in releases
         }
@@ -345,24 +351,19 @@ class UpscaledCDR:
                 "summed over all members"
             ),
         )
-        # The scale is only meaningful for the sum if all members share it.
+        # Validation guarantees all members share the scale, so the sum keeps it.
         for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
-            scale = common_scale(var)
-            if scale is not None:
-                out[var].attrs["tonnes_co2_per_native_unit"] = scale
+            out[var].attrs["tonnes_co2_per_native_unit"] = datasets[names[0]][
+                var
+            ].attrs["tonnes_co2_per_native_unit"]
 
-        # Back to native units per member, so the ratio to the native source holds.
+        # Back to native units, so the ratio to the native source holds.
         for eff_var, uptake_var in (
             ("cdr_efficiency_from_flux", _FLUX_UPTAKE),
             ("cdr_efficiency_from_DIC_difference", _DIC_UPTAKE),
         ):
-            native = reduce(
-                operator.add,
-                [
-                    aligned[n][uptake_var]
-                    / datasets[n][uptake_var].attrs["tonnes_co2_per_native_unit"]
-                    for n in names
-                ],
+            native = (
+                out[uptake_var] / out[uptake_var].attrs["tonnes_co2_per_native_unit"]
             )
             with np.errstate(divide="ignore", invalid="ignore"):
                 ratio = native / out[_CUMULATIVE_SOURCE]

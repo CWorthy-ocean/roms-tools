@@ -86,10 +86,11 @@ class ROMSOutput(ROMSDataset):
             self.ds_cdr = compute_cdr_metrics(
                 self.ds, self.grid.ds, source_role=source_role
             )
-        elif self.ds_cdr.attrs.get("cdr_source_role") != source_role:
+        elif self.ds_cdr.attrs.get("cdr_source_role", "release") != source_role:
+            # A ds_cdr without the attribute predates roles and was a release.
             raise ValueError(
                 f"ds_cdr was computed with source_role="
-                f"{self.ds_cdr.attrs.get('cdr_source_role')!r}, "
+                f"{self.ds_cdr.attrs.get('cdr_source_role', 'release')!r}, "
                 f"but source_role={source_role!r} was requested."
             )
 

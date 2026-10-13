@@ -569,4 +569,8 @@ def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
         with pytest.raises(ValueError, match="source_role"):
             roms_output_with_cdr_vars.cdr_metrics(source_role="transfer")
 
+        # A ds_cdr from before roles existed is treated as a release
+        del roms_output_with_cdr_vars.ds_cdr.attrs["cdr_source_role"]
+        roms_output_with_cdr_vars.cdr_metrics()
+
     plt.close("all")

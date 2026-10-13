@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from matplotlib.path import Path as MplPath
 
 from roms_tools.analysis.cdr_analysis import SOURCE_ROLES
 
@@ -62,9 +63,10 @@ class UpscaledCDR:
       DIC-difference-based uptake (tonnes CO2). The two are bookkeeping views of
       the same perturbation, so this should be small.
     - ``{parent}_DIC_difference_inside_{child}``: the DIC perturbation (tonnes CO2)
-      that a parent carries in the cells inside its child's bounding box. The
-      child already accounts for that region, so a nonzero value indicates
-      double counting.
+      that a parent carries in the cells whose centre lies inside its child's
+      area (the child's rho points extended by half a cell, following the
+      child's orientation). The child already accounts for that region, so a
+      nonzero value indicates double counting.
 
     Parameters
     ----------
@@ -275,21 +277,51 @@ class UpscaledCDR:
             for name, ds in datasets.items()
         }
 
+    @staticmethod
+    def _footprint(ds: xr.Dataset) -> MplPath:
+        """
+        Perimeter of a member's area as a lon/lat polygon.
+
+        The rho points are cell centres, so each row and column is extrapolated by
+        half a step to reach the cell edges before the outer ring is traced. This
+        follows the grid's own orientation, unlike a lon/lat bounding box.
+        """
+
+        def extend(a: np.ndarray) -> np.ndarray:
+            a = np.concatenate(
+                [a[:1] - 0.5 * (a[1:2] - a[:1]), a, a[-1:] + 0.5 * (a[-1:] - a[-2:-1])]
+            )
+            return np.concatenate(
+                [
+                    a[:, :1] - 0.5 * (a[:, 1:2] - a[:, :1]),
+                    a,
+                    a[:, -1:] + 0.5 * (a[:, -1:] - a[:, -2:-1]),
+                ],
+                axis=1,
+            )
+
+        lon, lat = extend(ds["lon_rho"].values), extend(ds["lat_rho"].values)
+
+        def ring(a: np.ndarray) -> np.ndarray:
+            return np.concatenate([a[0, :], a[1:, -1], a[-1, -2::-1], a[-2:0:-1, 0]])
+
+        return MplPath(np.column_stack([ring(lon), ring(lat)]))
+
     def _footprint_dic_difference(
         self, child: xr.Dataset, parent: xr.Dataset, all_times: np.ndarray
     ) -> xr.DataArray:
         """
-        DIC perturbation (tonnes CO2) of `parent` inside `child`'s bounding box.
+        DIC perturbation (tonnes CO2) of `parent` inside `child`'s footprint.
 
-        Sums ``(hDIC - hDIC_ALT_CO2) * area`` over the parent cells whose
-        lon/lat lie within the child's lon/lat bounding box.
+        Sums ``(hDIC - hDIC_ALT_CO2) * area`` over the parent cells whose centre
+        lies within the child's area (see `_footprint`).
         """
-        lon0, lon1, lat0, lat1 = self._bbox(child)
-        inside = (
-            (parent["lon_rho"] >= lon0)
-            & (parent["lon_rho"] <= lon1)
-            & (parent["lat_rho"] >= lat0)
-            & (parent["lat_rho"] <= lat1)
+        plon, plat = parent["lon_rho"].values, parent["lat_rho"].values
+        inside_values = self._footprint(child).contains_points(
+            np.column_stack([plon.ravel(), plat.ravel()])
+        )
+        inside = xr.DataArray(
+            inside_values.reshape(plon.shape), dims=parent["lon_rho"].dims
         )
         diff = ((parent["hDIC"] - parent["hDIC_ALT_CO2"]) * parent["area"]).sum("s_rho")
         scale = parent[_DIC_UPTAKE].attrs["tonnes_co2_per_native_unit"]
@@ -413,7 +445,7 @@ class UpscaledCDR:
                 units="tonnes CO2",
                 description=(
                     f"DIC perturbation that {parent} carries in cells inside the "
-                    f"bounding box of {child}; double-counted if nonzero"
+                    f"area of {child}; double-counted if nonzero"
                 ),
             )
             diagnostics[var] = out[var]

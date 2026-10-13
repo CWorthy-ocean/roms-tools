@@ -303,6 +303,21 @@ def test_footprint_diagnostic_hand_computed(members):
     np.testing.assert_allclose(ds["outer_DIC_difference_inside_mid"], 0.0)
 
 
+def test_footprint_follows_rotated_child(members):
+    # Rotate the child by 45 degrees about its centre: the mid points at the
+    # corners of its lon/lat bounding box now lie outside the child's area.
+    child = members["child"]
+    theta = np.pi / 4
+    lon, lat = child["lon_rho"] - 10.5, child["lat_rho"] - 20.5
+    members["child"] = child.assign_coords(
+        lon_rho=10.5 + lon * np.cos(theta) - lat * np.sin(theta),
+        lat_rho=20.5 + lon * np.sin(theta) + lat * np.cos(theta),
+    )
+    ds = UpscaledCDR(members).ds
+
+    np.testing.assert_allclose(ds["mid_DIC_difference_inside_child"], 0.0)
+
+
 def test_closure_residual(members):
     ds = UpscaledCDR(members).ds
     np.testing.assert_allclose(

@@ -460,6 +460,12 @@ def materialize_physics_ts(ds, var_names: Iterable[str]) -> None:
         v: next((d for d in ds[v].dims if "time" in str(d)), None) for v in names
     }
 
+    started = time.time()
+    logging.info(
+        f"Reading the physics {', '.join(names)} from the source for the whole run "
+        "(the BGC sources derive from them). The source is read once, end to end, "
+        "before anything is written -- this can take hours for a multi-year run."
+    )
     # Group by time dimension so one compute slices every strip on the same axis;
     # the first strip's own chunks along it set the block boundaries.
     for time_dim in {*time_dims.values()}:
@@ -471,15 +477,27 @@ def materialize_physics_ts(ds, var_names: Iterable[str]) -> None:
         else:
             axis = ds[group[0]].dims.index(time_dim)
             bounds = np.cumsum((0, *ds[group[0]].chunks[axis]))
-            for start, stop in itertools.pairwise(bounds):
+            n_blocks = len(bounds) - 1
+            next_report = 0.1  # progress every 10 % of the chunks (ten lines at most)
+            for i, (start, stop) in enumerate(itertools.pairwise(bounds), 1):
                 block = slice(int(start), int(stop))
                 vals = dask.compute(
                     *(ds[v].isel({time_dim: block}).data for v in group)
                 )
                 for v, val in zip(group, vals):
                     out[v][(slice(None),) * axis + (block,)] = val
+                if i == n_blocks or i >= next_report * n_blocks:
+                    logging.info(
+                        f"  {', '.join(group)}: {int(stop)}/{int(bounds[-1])} time "
+                        f"steps read in {(time.time() - started) / 60:.1f} min"
+                    )
+                    while next_report * n_blocks <= i:
+                        next_report += 0.1
         for v in group:
             ds[v] = ds[v].copy(data=out[v]).chunk(original_chunks[v])
+    logging.info(
+        f"Physics {', '.join(names)} realized in {(time.time() - started) / 60:.1f} min."
+    )
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:

@@ -1547,3 +1547,26 @@ class TestMaterializePhysicsTS:
         u.materialize_physics_ts(eager, ["temp_west"])  # numpy: nothing to do
         np.testing.assert_allclose(eager["temp_west"].values, data)
         u.materialize_physics_ts(ds, [])  # empty: nothing to do
+
+    def test_logs_start_progress_and_completion(self, caplog):
+        """A multi-hour read with no files appearing needs to say so: one line up
+        front, one every 10 % of the time chunks, one at the end.
+        """
+        from roms_tools.setup import utils as u
+
+        ds, _ = self._ds(n_time=20)
+        with caplog.at_level(logging.INFO):
+            u.materialize_physics_ts(ds, ["temp_west", "salt_west"])
+        msgs = [r.getMessage() for r in caplog.records]
+        assert msgs[0].startswith("Reading the physics temp_west, salt_west")
+        assert "can take hours" in msgs[0]
+        progress = [m for m in msgs if "time steps read in" in m]
+        assert len(progress) == 10
+        assert progress[0].startswith("  temp_west, salt_west: 2/20 time steps")
+        assert progress[-1].startswith("  temp_west, salt_west: 20/20 time steps")
+        assert msgs[-1].startswith("Physics temp_west, salt_west realized in")
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            u.materialize_physics_ts(ds.compute(), ["temp_west"])  # no-op: silent
+        assert not caplog.records

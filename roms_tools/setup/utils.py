@@ -2566,9 +2566,12 @@ def serialize_source_dict(
     else:
         src = deepcopy(src)
 
-    # Serialize paths
-    if "path" in src:
-        src["path"] = serialize_paths(src["path"])
+    # Serialize paths anywhere in the dict, not just under "path": an ESPER source
+    # carries salinity_conditioning={"woa_salinity_path": ...}, and
+    # deserialize_forcing_data's normalize_paths turns such nested strings back into
+    # Path objects on load, so a loaded source has to serialize again. (Grid objects
+    # pass through serialize_paths untouched and are handled below.)
+    src = serialize_paths(src)
 
     # Serialize nested grid
     if "grid" in src and src["grid"] is not None:
@@ -2597,11 +2600,9 @@ def deserialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None
 
     src = deepcopy(src)
 
-    # Deserialize paths
-    if "path" in src:
-        src["path"] = normalize_paths(src["path"])
-
-    return src
+    # Deserialize paths anywhere in the dict (the "path" key and nested ones such as
+    # salinity_conditioning.woa_salinity_path), mirroring serialize_source_dict.
+    return normalize_paths(src)
 
 
 def serialize_bgc_sources(

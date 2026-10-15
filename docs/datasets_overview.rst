@@ -358,6 +358,46 @@ climatology.
 :Available at: `NCEI <https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA/>`_
 
 
+ESPER (experimental)
+~~~~~~~~~~~~~~~~~~~~
+
+Not a dataset but a derived source: ``{"name": "ESPER"}`` estimates ``ALK``, ``DIC``,
+``NO3``, ``PO4``, ``SiO3`` and ``O2`` from the physics temperature and salinity already
+on the ROMS grid with the CWorthy fork of `PyESPER <https://github.com/CWorthy-ocean/PyESPER>`_
+(``git clone --branch v1.1.1+cworthy.1 https://github.com/CWorthy-ocean/PyESPER`` then
+``pip install -e .`` in the clone, or point the source's ``path`` at one; the fork is not on
+PyPI or conda, and its tags are ``v<upstream>+cworthy.<n>``). It needs the
+companion physics object (``physics_forcing``; the ``InitialConditions`` /
+``BoundaryForcing`` wrappers wire this up), inherits its time axis, and takes these keys:
+
+- ``method``: ``"nn"`` (default), ``"lir"`` or ``"mixed"``; ``equation``: 8 (salinity and
+  temperature, default) or 16 (salinity only).
+- ``salinity_conditioning``: ``{"woa_salinity_path": ..., "low": 31, "high": 34}``
+  (needs fork tag ``v1.1.1+cworthy.1`` or later). ESPER's
+  nets were fit to GLODAP bottle data with almost no coverage below ~31 PSU, so in river
+  plumes they extrapolate unphysically (silicate above 100 µmol kg⁻¹, negative nutrients,
+  DIC above alkalinity). With this key PyESPER blends the salinity it feeds the nets toward
+  the WOA23 annual climatology with a raised cosine over the band, then dilutes the
+  alkalinity and DIC estimates back to the model salinity along a conservative mixing line
+  with a freshwater endmember. Above the band nothing changes. Inside and below it the
+  DIC/alkalinity ratio is the nets' own at the conditioned salinity and tends to the
+  endmember ratio in fresh water -- 1, approached from below, with PyESPER's defaults, so
+  DIC never crosses above alkalinity. The file is the 1° annual-mean
+  ``woa23_decav_s00_01.nc`` from NCEI; PyESPER does not download it, but
+  :func:`roms_tools.datasets.download.download_woa23_bgc` (``variables=["salt_bgc"]``)
+  fetches exactly this file into ``pooch.os_cache("roms-tools") / "WOA23"``.
+
+Estimates are converted to mmol m⁻³ like the gridded sources and clamped at a per-variable
+floor (``roms_tools.setup.esper.ESPER_FLOORS``), with or without salinity conditioning:
+0 for the nutrients, alkalinity and DIC, 2.0 mmol m⁻³ for oxygen, because the nets go
+negative inside the oxygen minimum zones where the WOA23 climatology stays at 3-10 on the
+boundaries measured (12 km Indo-Pacific and California Current; it does reach zero in a few
+OMZ cores elsewhere). The output variables record what was applied in their
+``esper_salinity_conditioning`` and ``esper_floor`` attributes.
+
+:Required for: BGC Initial Conditions, BGC Boundary Forcing
+
+
 GLODAPv2 BGC Dataset
 ~~~~~~~~~~~~~~~~~~~~
 

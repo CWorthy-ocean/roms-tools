@@ -1389,6 +1389,49 @@ class TestForwardableFields:
         assert forwardable_fields(A, B, exclude=("y",)) == {"x"}
 
 
+class TestSourceDictNestedPaths:
+    """``serialize_source_dict`` / ``deserialize_source_dict`` handle paths anywhere in
+    the dict, not only under ``"path"`` -- an ESPER source's
+    ``salinity_conditioning.woa_salinity_path`` is the case that broke.
+    """
+
+    def test_nested_path_round_trips_twice(self):
+        from roms_tools.setup.utils import (
+            deserialize_source_dict,
+            serialize_source_dict,
+        )
+
+        woa = Path("/data/WOA23/woa23_decav_s00_01.nc")
+        src = {
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": woa, "low": 31.0},
+        }
+        once = serialize_source_dict(src)
+        # str(Path) is platform-specific (backslashes on Windows); compare to it, not
+        # to a POSIX literal.
+        assert once["salinity_conditioning"]["woa_salinity_path"] == str(woa)
+        assert once["salinity_conditioning"]["low"] == 31.0
+        back = deserialize_source_dict(once)
+        assert isinstance(back["salinity_conditioning"]["woa_salinity_path"], Path)
+        twice = serialize_source_dict(back)
+        assert twice == once
+        assert (
+            src["salinity_conditioning"]["woa_salinity_path"]
+            != once["salinity_conditioning"]["woa_salinity_path"]
+        )  # input untouched
+
+    def test_yaml_can_represent_the_serialized_dict(self):
+        import yaml
+
+        from roms_tools.setup.utils import serialize_source_dict
+
+        src = {
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": Path("/x/s00.nc")},
+        }
+        yaml.safe_dump(serialize_source_dict(src))  # no RepresenterError
+
+
 # ---------------------------------------------------------------------------
 # companions_derive_from_physics_ts: which bgc companions read the physics T/S
 # ---------------------------------------------------------------------------

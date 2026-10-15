@@ -5,16 +5,20 @@
 ### Breaking Changes
 
 * ESPER-derived `O2` is now floored at 2.0 mmol/m³ instead of 0 (every ESPER estimate, with or without conditioning): the nets go negative inside the oxygen minimum zones where the WOA23 climatology sits at 3–10 mmol/m³ on the boundaries measured, so the old clip handed MARBL anoxic boundary water. Points ESPER put in [0, 2) now read 2.0; MARBL's suboxic behaviour (`parm_o2_min` = 5) is unchanged by it. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* BGC `BoundaryForcing` built with `bgc_interpolation_method='density'` or `'density_mld'` is now a series on the physics boundary time axis, grouped into files like the physics (monthly for daily physics) instead of one 12-record `_clim` file. It is cyclic (`cycle_length`) only when the physics itself is a climatology. It is about N_physics/12 times larger and covers only the physics window: ~11 GB per year against 0.37 GB before for a 600×600×100 grid with 32 tracers, and ~12 more forcing files per simulated year per density source (ucla-roms caps `frcfiles` at `max_frc_files = 360`). `'depth'` is unchanged. The old anchored-climatology output is removed, not optional. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
 
 ### New Features
 
 * ESPER sources take `salinity_conditioning: {"woa_salinity_path": ..., "low": 31, "high": 34}` (needs the PyESPER fork at tag `v1.1.1+cworthy.1` or later): PyESPER evaluates the nets at a salinity blended toward the WOA23 annual climatology below the band (raised cosine), then dilutes TA and DIC back to the model salinity along a conservative mixing line. Above the band nothing changes. The file is `woa23_decav_s00_01.nc`, which `download_woa23_bgc(variables=["salt_bgc"])` fetches; a missing file fails before any regridding, naming the URL. Output variables record the conditioning and floor in `esper_salinity_conditioning` / `esper_floor` attributes. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* `roms_tools.setup.utils.cycle_to_times` puts a climatology (or a dated BGC series, or a static field) on a physics time axis by linear interpolation in day of year with the December→January wrap, blocked one calendar month per chunk. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* BGC boundary datasets record `bgc_interpolation_method` (the method actually used, after any fallback to depth) and `bgc_time_axis` (`physics`, `source` or `static`). ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
 
 ### Bug Fixes
 
 * Loading a kerchunk `.parquet` reference with `use_dask=False` no longer fails (`GroupNotFoundError`: the directory was taken for a zarr store), and kerchunk references opened without dask no longer come back as dask arrays. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 * Boundary forcing and initial conditions with an ESPER or density-interpolated BGC source no longer re-run the physics regrid for every BGC variable at save time, which grew memory without bound (~12 GB/h on a 12 km ESPER boundary month, the signature that ended a 5-year run at >112 GB). The physics temperature and salinity are computed once when the object is built, one time chunk at a time, and held in memory until saved; the footprint scales with the run length (order 16 GB per year on a 100-level 1858×962 grid). ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 * A source dict with nested paths (the conditioning key) now survives `to_yaml` → `from_yaml` → `to_yaml`: `serialize_source_dict` / `deserialize_source_dict` convert paths anywhere in the dict, not only under `path`. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* Density-interpolated BGC boundaries no longer place every year of a run on the density structure of a single sampled physics day. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
 
 ### Improvements
 
@@ -25,6 +29,7 @@
 * Kerchunk reference files (e.g. Forge's GLORYS subchunk references) are read through a single dask layer and keep the reference's own lateral chunking, so a boundary crop reads the slabs it needs instead of decoding whole global levels: one day's 12 km crop went from 19.7 s to 0.8 s. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 * `estimate_bgc_fields` forwards `salinity_conditioning` to PyESPER only when set, so a PyESPER fork that predates the keyword keeps working with conditioning off. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 * The PyESPER install guidance (import error, missing-module error, docs) clones the fork at tag `v1.1.1+cworthy.1`; the tag lives in one constant, bumped with each fork tag. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* The physics-time helpers the ESPER path grew (`time_dim_of`, `month_aligned_time_chunks`, `apply_chunk_plan`, `physics_time_view`) live in `roms_tools.setup.utils` and are shared by both companions. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
 
 ### Miscellaneous
 

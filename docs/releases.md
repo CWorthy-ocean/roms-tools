@@ -10,9 +10,15 @@
 
 ### Improvements
 
+* Tests run with `--use_copernicus` now check the Copernicus Marine credentials once per session instead of failing test by test. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
+  * If the Copernicus auth server is unreachable or doesn't answer within 60 s, every Copernicus test is skipped with the reason shown.
+  * Missing or rejected credentials make every Copernicus test error with a message naming the environment variables to set.
+
 ### Miscellaneous
 
 * The CDR forcing docs and API docstrings now refer to the ucla-roms CDR-LiTE CPP option by its new name, `CDR_LITE`. ([#691](https://github.com/CWorthy-ocean/roms-tools/pull/691))
+* CI no longer runs `copernicusmarine login` before the Copernicus tests; credentials come from the `COPERNICUSMARINE_SERVICE_*` environment variables. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
+* CI test steps for the two Copernicus jobs stop on the first failing command, print skip reasons, and the GLORYS invariance step is capped at 30 minutes. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
 
 ## 5.1.1
 

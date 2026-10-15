@@ -44,9 +44,11 @@ from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
     bgc_source_extra_kwargs,
+    bgc_source_has_own_ts,
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
+    companions_derive_from_physics_ts,
     compute_barotropic_velocity,
     deserialize_forcing_data,
     forwardable_fields,
@@ -57,6 +59,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     materialize_before_check,
+    materialize_physics_ts,
     nan_check_batch,
     pop_grid_data,
     preflight_esper_sources,
@@ -1865,6 +1868,12 @@ class BoundaryForcing:
         ``{"source": RawDataSource, "use_vars": list[str] | None,
         "bgc_interpolation_method": str | None}``. A per-item
         ``bgc_interpolation_method`` overrides the wrapper-level default below.
+        When any item derives from the physics temperature/salinity (an ``ESPER``
+        source, or a dataset with its own T/S on a density method), those physics
+        fields are computed at construction and held in memory until saved, so the
+        footprint scales with the run length (see
+        :func:`~roms_tools.setup.utils.materialize_physics_ts` for the numbers and
+        why).
     bgc_model : type[BGCModel], optional
         The :class:`~roms_tools.setup.bgc_model.BGCModel` subclass (e.g.
         :class:`~roms_tools.setup.bgc_model.BGCMarbl`) used to complete the tracer
@@ -1995,6 +2004,24 @@ class BoundaryForcing:
         self.physics = BoundaryForcingSource(**{**shared_kwargs, "type": "physics"})
 
         if bgc_sources:
+            # Realize the boundary T/S strips the companions derive from (ESPER's
+            # inputs, density_mld's sigma-0) before their graphs are built, so their
+            # saves depend on small in-memory arrays rather than on the shared lazy
+            # source regrid -- which is what made every companion save climb in
+            # memory without bound. See materialize_physics_ts.
+            if companions_derive_from_physics_ts(
+                bgc_sources,
+                self.bgc_interpolation_method,
+                lambda name: bgc_source_has_own_ts(_DATASET_MAP["bgc"], name),
+            ):
+                materialize_physics_ts(
+                    self.physics.ds,
+                    [
+                        name
+                        for name in self.physics.ds.data_vars
+                        if str(name).split("_")[0] in ("temp", "salt")
+                    ],
+                )
             self.bgc = build_bgc_companions(
                 BoundaryForcingSource,
                 self.grid,

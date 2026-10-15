@@ -140,15 +140,18 @@ jobs:
            python -V
            python -m pip install -e .[stream,movie,dev]  --force-reinstall
 
+      # copernicusmarine reads the credentials from these env vars on every call,
+      # so no `copernicusmarine login` step: the `copernicus_auth` probe in
+      # conftest.py checks them once, failing on bad credentials and skipping
+      # the Copernicus tests when the auth server is unreachable.
       - name: Running Tests with Streaming
-        shell: bash -l {0}
+        shell: bash -el {0}
         env:
           COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
           COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
-           copernicusmarine login
-           coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose roms_tools/tests/*
+           coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose -rs roms_tools/tests/*
         timeout-minutes: 20
 
       - name: Get coverage report
@@ -347,15 +350,18 @@ jobs:
            python -m pip install -e .[dev] --force-reinstall
            python -m pip install copernicusmarine
 
+      # See the streaming job for why there is no `copernicusmarine login` step.
       - name: Running Tests (use_dask=True)
-        shell: bash -l {0}
+        shell: bash -el {0}
         env:
           COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
           COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
-           copernicusmarine login
-           coverage run --rcfile=coverage.toml -m pytest --use_copernicus --use_dask --verbose -k "test_invariance_to_get_glorys_bounds" roms_tools/tests/
+           coverage run --rcfile=coverage.toml -m pytest --use_copernicus --use_dask --verbose -rs -k "test_invariance_to_get_glorys_bounds" roms_tools/tests/
+        # The whole green job takes ~11 min; before the conftest probe, an auth outage
+        # with connect timeouts ran for ~3 h.
+        timeout-minutes: 30
 
       - name: Get coverage report
         shell: bash -l {0}

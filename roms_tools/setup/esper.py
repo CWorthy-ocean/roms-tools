@@ -46,7 +46,9 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 
 from __future__ import annotations
 
+import os
 import sys
+from typing import TYPE_CHECKING
 
 import numpy as np
 import xarray as xr
@@ -58,6 +60,9 @@ from roms_tools.setup.utils import (
     month_aligned_time_chunks,
     time_dim_of,
 )
+
+if TYPE_CHECKING:
+    from PyESPER.salinity_conditioning import SalinityConditioning
 
 # Fallback ceiling on ESPER chunk size, used only when PyESPER does not expose its
 # own budget helper. Equal to the value PyESPER itself hard-coded before it made the
@@ -113,6 +118,31 @@ ESPER_TO_ROMS = {v: k for k, v in ROMS_TO_ESPER.items()}
 #: ROMS/MARBL tracers the ESPER source can derive from T/S.
 ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 
+#: Lower bound (mmol/m³) applied to EVERY estimate after the unit conversion, with or
+#: without salinity conditioning. The nets are unconstrained regressions, so they
+#: overshoot below the physical range at the low end: nutrients and oxygen go negative.
+#: Zero is the obvious floor for the nutrients; oxygen gets 2.0 because ESPER's negative
+#: excursions sit in the oxygen minimum zones (Bay of Bengal, eastern tropical Pacific,
+#: ~300-700 m), where the WOA23 climatology is 3-10 µmol/kg and never below 2.75 at any
+#: of those points on the 12 km Indo-Pacific and California Current boundaries measured
+#: (2010/2014) -- WOA23 does reach zero in a few OMZ cores elsewhere. Clipping to zero
+#: there would hand MARBL exactly anoxic boundary water that no observation supports;
+#: 2.0 is below WOA's own value everywhere ESPER needs it on those boundaries, so it
+#: removes the artefact without inventing oxygen. For MARBL the choice is inert:
+#: ``parm_o2_min`` = 5 and ``parm_o2_min_delta`` = 5 (mmol/m³) make its denitrification
+#: weight and O2-consumption clamp identical at O2 = 0 and O2 = 2, so the floor changes
+#: the O2 inventory handed in, not MARBL's suboxic behaviour. ALK and DIC never approach
+#: zero and keep the generic floor. Any point that ESPER put in [0, 2) now reads 2.0 --
+#: an output change relative to the old clip at zero.
+ESPER_FLOORS: dict[str, float] = {
+    "ALK": 0.0,
+    "DIC": 0.0,
+    "NO3": 0.0,
+    "PO4": 0.0,
+    "SiO3": 0.0,
+    "O2": 2.0,
+}
+
 _VALID_METHODS = ("lir", "nn", "mixed")
 
 #: Shared install guidance. ``{problem}`` names which of the two failure modes was hit
@@ -120,6 +150,10 @@ _VALID_METHODS = ("lir", "nn", "mixed")
 #: upstream rather than the fork. The second is the confusing one: the package imports
 #: fine and only fails on the ``*_xr`` names, which reads like a version skew rather
 #: than the wrong project.
+# The fork is installed from a clone at a tag, never from PyPI/conda; its versions are
+# `<upstream>+cworthy.<n>` with a matching tag. Bump this with each fork tag.
+_PYESPER_FORK_TAG = "v1.1.1+cworthy.1"
+
 _PYESPER_INSTALL_HINT = (
     "The ESPER BGC source requires CWorthy's PyESPER fork. PyESPER support is "
     "considered experimental at this time.\n"
@@ -128,7 +162,7 @@ _PYESPER_INSTALL_HINT = (
     "\n"
     "Install it from source:\n"
     "\n"
-    "    git clone https://github.com/CWorthy-ocean/PyESPER\n"
+    f"    git clone --branch {_PYESPER_FORK_TAG} https://github.com/CWorthy-ocean/PyESPER\n"
     "    cd PyESPER\n"
     "    pip install -e .\n"
     "\n"
@@ -291,6 +325,60 @@ def validate_esper_source(source: dict) -> None:
             f"(salinity only), got {equation!r}."
         )
     _ensure_pyesper(source.get("path"))
+    _salinity_conditioning(source)
+
+
+def _salinity_conditioning(source: dict) -> SalinityConditioning | None:
+    """The ``PyESPER.salinity_conditioning.SalinityConditioning`` for ``source``, or
+    ``None`` when the source does not ask for it.
+
+    ``source["salinity_conditioning"]`` is a mapping with ``woa_salinity_path`` (the
+    WOA23 1-degree annual-mean salinity file, ``woa23_decav_s00_01.nc``) and optional
+    ``low``/``high`` band edges in PSU (PyESPER's defaults: 31 and 34). PyESPER does
+    not download the file; a missing one raises ``FileNotFoundError`` naming the NCEI
+    URL. ``None``/``False``/an empty mapping mean off.
+
+    ESPER's nets have no training data at river-plume salinities and extrapolate
+    unphysically there (silicate > 100 µmol/kg, negative nutrients, DIC above TA);
+    conditioning blends the salinity *they see* toward climatology below the band and
+    leaves everything above it bit-identical. The rationale and measurements are in
+    PyESPER's module docstring.
+    """
+    spec = source.get("salinity_conditioning")
+    if not spec:
+        return None
+    if not isinstance(spec, dict):
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' must be a mapping with "
+            "'woa_salinity_path' (and optional 'low'/'high' band edges in PSU), "
+            f"got {spec!r}."
+        )
+    unknown = set(spec) - {"woa_salinity_path", "low", "high"}
+    if unknown:
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' has unknown key(s) "
+            f"{sorted(unknown)}; allowed: 'woa_salinity_path', 'low', 'high'."
+        )
+    if not spec.get("woa_salinity_path"):
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' needs 'woa_salinity_path': the WOA23 "
+            "1-degree annual-mean salinity file (woa23_decav_s00_01.nc). PyESPER does "
+            "not download it: roms_tools.datasets.download.download_woa23_bgc("
+            "variables=['salt_bgc']) fetches it into pooch.os_cache('roms-tools')/WOA23, "
+            "or see PyESPER.salinity_conditioning.WOA23_SALINITY_URL."
+        )
+    try:
+        from PyESPER.salinity_conditioning import SalinityConditioning
+    except ImportError as exc:
+        raise ImportError(
+            "The installed PyESPER has no `salinity_conditioning` module. Salinity "
+            f"conditioning needs the CWorthy fork at tag {_PYESPER_FORK_TAG} or later "
+            f"(git clone --branch {_PYESPER_FORK_TAG} "
+            "https://github.com/CWorthy-ocean/PyESPER; pip install -e .)."
+        ) from exc
+    band = {k: float(spec[k]) for k in ("low", "high") if k in spec}
+    # FileNotFoundError (with the download URL) and band ValueError propagate as-is.
+    return SalinityConditioning(spec["woa_salinity_path"], **band)
 
 
 def estimate_bgc_fields(
@@ -320,6 +408,9 @@ def estimate_bgc_fields(
         (default ``"nn"``), ``equation`` (default 8). ``path`` points at a PyESPER
         repository checkout; omit it when PyESPER is installed in the environment
         (``pip install -e <checkout>``), in which case PyESPER finds its own data.
+        ``salinity_conditioning`` (optional mapping, see :func:`_salinity_conditioning`)
+        makes PyESPER evaluate the nets at a climatological salinity wherever the
+        model salinity is below the nets' training support.
     roms_variables : sequence of str
         ROMS/MARBL tracer names to derive (subset of :data:`ESPER_SUPPORTED_VARS`).
     est_dates : float or xarray.DataArray, optional
@@ -336,6 +427,7 @@ def estimate_bgc_fields(
     method = str(source.get("method", "nn")).lower()
     equation = source.get("equation", 8)
     path = source.get("path") or ""
+    conditioning = _salinity_conditioning(source)
 
     unknown = [v for v in roms_variables if v not in ROMS_TO_ESPER]
     if unknown:
@@ -381,6 +473,11 @@ def estimate_bgc_fields(
         path=str(path),
         equation=equation,
         est_dates=est_dates,
+        # Only when asked for: a PyESPER fork that predates the keyword must keep
+        # working with conditioning off (the convention _pyesper_point_budget's
+        # fallback follows too), and passing it explicitly as None broke exactly
+        # that, after the physics regrid had already run.
+        **({} if conditioning is None else {"salinity_conditioning": conditioning}),
     )
 
     # Results are deliberately left lazy: PyESPER's own kernel lock keeps its
@@ -390,8 +487,8 @@ def estimate_bgc_fields(
     # share this call's per-chunk upstream work (they are all one graph).
 
     # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
-    # depth), matching the GLODAP/WOA adapters' convention; then clamp
-    # physically non-negative tracers at 0.
+    # depth), matching the GLODAP/WOA adapters' convention; then clamp each tracer
+    # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 2.0 for O2).
     density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()
@@ -399,11 +496,34 @@ def estimate_bgc_fields(
     out: dict[str, xr.DataArray] = {}
     for roms_name in roms_variables:
         da = est[ROMS_TO_ESPER[roms_name]] * factor
-        da = da.clip(min=0.0)
+        floor = ESPER_FLOORS[roms_name]
+        da = da.clip(min=floor)
         meta = d_meta.get(roms_name, {})
         if "long_name" in meta:
             da.attrs["long_name"] = meta["long_name"]
         if "units" in meta:
             da.attrs["units"] = meta["units"]
+        if floor > 0:
+            da.attrs["esper_floor"] = (
+                f"PyESPER estimate clamped at {floor:g} mmol/m^3 (see "
+                "roms_tools.setup.esper.ESPER_FLOORS)"
+            )
+        if conditioning is not None:
+            da.attrs["esper_salinity_conditioning"] = (
+                f"salinity fed to PyESPER blended (raised cosine, "
+                f"{conditioning.low:g}-{conditioning.high:g} PSU) toward "
+                f"{os.path.basename(conditioning.woa_salinity_path)}"
+            )
+            if roms_name in ("ALK", "DIC"):
+                endmember = (
+                    conditioning.ta_endmember
+                    if roms_name == "ALK"
+                    else conditioning.dic_endmember
+                )
+                da.attrs["esper_salinity_conditioning"] += (
+                    "; estimate diluted back to the model salinity along a "
+                    f"conservative mixing line (freshwater endmember {endmember:g} "
+                    "umol/kg)"
+                )
         out[roms_name] = da
     return out

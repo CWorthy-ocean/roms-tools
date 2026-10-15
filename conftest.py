@@ -1,6 +1,7 @@
 import enum
 import hashlib
 import os
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -128,6 +129,84 @@ def pytest_collection_modifyitems(
             missing = f"--{marks.pop()}"
 
         item.add_marker(pytest.mark.skip(reason=f"need `{missing}` option(s) to run"))
+
+
+# A healthy credential check takes a few seconds. copernicusmarine's own retry
+# loop needs ~90 s to give up on a refused connection and ~20 min on connect
+# timeouts, so the probe stops waiting well before either.
+_COPERNICUS_AUTH_PROBE_TIMEOUT_S = 60
+
+
+@pytest.fixture(scope="session")
+def copernicus_auth() -> None:
+    """Check the Copernicus Marine credentials once per test session.
+
+    If the authentication server is unreachable (a Copernicus outage, or the CI
+    runner being refused), every ``use_copernicus`` test is skipped instead of
+    each one retrying for minutes and then failing. Missing or invalid
+    credentials still fail hard: those are ours to fix, not an outage.
+    """
+    try:
+        import copernicusmarine  # type: ignore
+    except ImportError:
+        return  # the tests' own `skipif(copernicusmarine is None)` marks apply
+
+    valid: list[bool] = []
+    errors: list[Exception] = []
+
+    def check() -> None:
+        try:
+            valid.append(copernicusmarine.login(check_credentials_valid=True))
+        except Exception as e:
+            errors.append(e)
+
+    # Daemon thread, so a check that is still hanging cannot block interpreter exit.
+    thread = threading.Thread(target=check, daemon=True)
+    thread.start()
+    thread.join(_COPERNICUS_AUTH_PROBE_TIMEOUT_S)
+
+    if thread.is_alive():
+        pytest.skip(
+            "Copernicus Marine authentication server did not respond within "
+            f"{_COPERNICUS_AUTH_PROBE_TIMEOUT_S} s"
+        )
+    if errors and not isinstance(
+        errors[0], copernicusmarine.CouldNotConnectToAuthenticationSystem
+    ):
+        raise errors[0]
+    # copernicusmarine<2.5 also raises CouldNotConnectToAuthenticationSystem for
+    # rejected credentials (it expects a 401, the server sends a 400), so ask the
+    # server directly whether it is up before calling this an outage.
+    if errors and not _copernicus_auth_server_is_up():
+        pytest.skip("Could not connect to the Copernicus Marine authentication server")
+    if errors or not valid[0]:
+        pytest.fail(
+            "Copernicus Marine credentials are missing or invalid: set "
+            "COPERNICUSMARINE_SERVICE_USERNAME and COPERNICUSMARINE_SERVICE_PASSWORD, "
+            "or run `copernicusmarine login`",
+            pytrace=False,
+        )
+
+
+def _copernicus_auth_server_is_up() -> bool:
+    """Whether the Copernicus Marine auth server answers its OpenID discovery URL."""
+    import requests
+    from copernicusmarine.core_functions.credentials_utils import (  # type: ignore
+        COPERNICUS_MARINE_AUTH_SYSTEM_URL,
+    )
+
+    url = f"{COPERNICUS_MARINE_AUTH_SYSTEM_URL}realms/MIS/.well-known/openid-configuration"
+    try:
+        return requests.get(url, timeout=15).ok
+    except requests.RequestException:
+        return False
+
+
+@pytest.fixture(autouse=True)
+def _require_copernicus_auth(request: pytest.FixtureRequest) -> None:
+    """Run the session's Copernicus auth probe before any ``use_copernicus`` test."""
+    if request.node.get_closest_marker(SkippableOptions.USE_COPERNICUS):
+        request.getfixturevalue("copernicus_auth")
 
 
 @pytest.fixture(scope="session")

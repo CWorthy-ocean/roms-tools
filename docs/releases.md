@@ -4,12 +4,17 @@
 
 ### Breaking Changes
 
+* ESPER-derived `O2` is now floored at 2.0 mmol/m³ instead of 0 (every ESPER estimate, with or without conditioning): the nets go negative inside the oxygen minimum zones where the WOA23 climatology sits at 3–10 mmol/m³ on the boundaries measured, so the old clip handed MARBL anoxic boundary water. Points ESPER put in [0, 2) now read 2.0; MARBL's suboxic behaviour (`parm_o2_min` = 5) is unchanged by it. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+
 ### New Features
+
+* ESPER sources take `salinity_conditioning: {"woa_salinity_path": ..., "low": 31, "high": 34}` (needs the PyESPER fork at tag `v1.1.1+cworthy.1` or later): PyESPER evaluates the nets at a salinity blended toward the WOA23 annual climatology below the band (raised cosine), then dilutes TA and DIC back to the model salinity along a conservative mixing line. Above the band nothing changes. The file is `woa23_decav_s00_01.nc`, which `download_woa23_bgc(variables=["salt_bgc"])` fetches; a missing file fails before any regridding, naming the URL. Output variables record the conditioning and floor in `esper_salinity_conditioning` / `esper_floor` attributes. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 
 ### Bug Fixes
 
 * Loading a kerchunk `.parquet` reference with `use_dask=False` no longer fails (`GroupNotFoundError`: the directory was taken for a zarr store), and kerchunk references opened without dask no longer come back as dask arrays. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 * Boundary forcing and initial conditions with an ESPER or density-interpolated BGC source no longer re-run the physics regrid for every BGC variable at save time, which grew memory without bound (~12 GB/h on a 12 km ESPER boundary month, the signature that ended a 5-year run at >112 GB). The physics temperature and salinity are computed once when the object is built, one time chunk at a time, and held in memory until saved; the footprint scales with the run length (order 16 GB per year on a 100-level 1858×962 grid). ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* A source dict with nested paths (the conditioning key) now survives `to_yaml` → `from_yaml` → `to_yaml`: `serialize_source_dict` / `deserialize_source_dict` convert paths anywhere in the dict, not only under `path`. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 
 ### Improvements
 
@@ -18,6 +23,8 @@
   * Missing or rejected credentials make every Copernicus test error with a message naming the environment variables to set.
 * `materialize_physics_ts` logs when the whole-run physics T/S read starts (naming what is read and that it can take hours), every 10 % of the time chunks with the elapsed time, and when it is done, so a multi-hour boundary build is no longer silent. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 * Kerchunk reference files (e.g. Forge's GLORYS subchunk references) are read through a single dask layer and keep the reference's own lateral chunking, so a boundary crop reads the slabs it needs instead of decoding whole global levels: one day's 12 km crop went from 19.7 s to 0.8 s. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* `estimate_bgc_fields` forwards `salinity_conditioning` to PyESPER only when set, so a PyESPER fork that predates the keyword keeps working with conditioning off. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* The PyESPER install guidance (import error, missing-module error, docs) clones the fork at tag `v1.1.1+cworthy.1`; the tag lives in one constant, bumped with each fork tag. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 
 ### Miscellaneous
 
@@ -25,6 +32,8 @@
 * CI no longer runs `copernicusmarine login` before the Copernicus tests; credentials come from the `COPERNICUSMARINE_SERVICE_*` environment variables. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
 * CI test steps for the two Copernicus jobs stop on the first failing command, print skip reasons, and the GLORYS invariance step is capped at 30 minutes. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
 * `kerchunk` and `fastparquet` are dev/CI dependencies, so the kerchunk reference tests now run in CI over both `.json` and `.parquet` references. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* `docs/datasets_overview.rst` gains an ESPER section (keys, conditioning, floors, attributes). ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* Two ESPER tests that stub the PyESPER entry points no longer need PyESPER, so the floor and the keyword contract have CI coverage. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 
 ## 5.1.1
 

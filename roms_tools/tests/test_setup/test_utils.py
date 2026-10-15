@@ -1430,6 +1430,8 @@ class TestSourceDictNestedPaths:
             "salinity_conditioning": {"woa_salinity_path": Path("/x/s00.nc")},
         }
         yaml.safe_dump(serialize_source_dict(src))  # no RepresenterError
+
+
 # ---------------------------------------------------------------------------
 # companions_derive_from_physics_ts: which bgc companions read the physics T/S
 # ---------------------------------------------------------------------------

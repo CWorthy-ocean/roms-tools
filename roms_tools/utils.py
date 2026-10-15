@@ -1,6 +1,8 @@
 import contextlib
 import glob
+import json
 import logging
+import os
 import re
 import textwrap
 import time
@@ -406,6 +408,7 @@ def _load_data_dask(
     chunks: dict[str, int] | None = None,
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
     initial_slice_bounds_use_isel: bool = False,
+    storage_options: dict | None = None,
 ) -> xr.Dataset:
     """Load dataset from the specified file using Dask.
 
@@ -443,6 +446,9 @@ def _load_data_dask(
     initial_slice_bounds_use_isel : bool, optional
         Passed to :class:`DaskInitalSliceLoader`. Use ``True`` for inclusive integer
         index bounds on ROMS rho dimensions.
+    storage_options : dict, optional
+        fsspec storage options for kerchunk references, merged over the detected
+        ``remote_protocol``. Ignored for other files.
 
     Returns
     -------
@@ -485,7 +491,9 @@ def _load_data_dask(
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
-        kwargs.update(_kerchunk_open_kwargs(filenames[0]))
+        # open_mfdataset takes one set of open keywords, so the first reference's
+        # remote protocol stands for all of them.
+        kwargs.update(_kerchunk_open_kwargs(filenames[0], storage_options))
         if _is_kerchunk_reference(filenames[0]):
             chunks = _without_lateral_chunks(chunks, dim_names)
 
@@ -512,8 +520,93 @@ def _is_kerchunk_reference(path: str | Path) -> bool:
     directory. Wider than ``KerchunkBackend.guess_can_open`` (kerchunk 0.2.10 does not
     list ``.json.zstd``), so a zstd-compressed reference is still opened explicitly
     through the kerchunk engine instead of falling to xarray's engine guessing.
+
+    A local directory holding ``.zmetadata`` plus ``<var>/refs.<n>.parq`` files is
+    also a parquet reference, whatever its name.
     """
-    return str(path).endswith(_KERCHUNK_SUFFIXES)
+    if str(path).rstrip("/").endswith(_KERCHUNK_SUFFIXES):
+        return True
+    p = Path(path)
+    return (
+        p.is_dir()
+        and (p / ".zmetadata").is_file()
+        and next(p.glob("*/refs.*.parq"), None) is not None
+    )
+
+
+# `_reference_protocol` memo: the answer costs a file read (a remote one for a remote
+# reference), and every open of the same reference would otherwise pay it again.
+_REFERENCE_PROTOCOLS: dict[object, str] = {}
+
+
+def _reference_protocol(path: str | Path) -> str | None:
+    """Return the protocol of the files a kerchunk reference points at.
+
+    This is not the protocol of the reference itself: a reference on local disk can
+    index ``s3://`` files. fsspec's ``ReferenceFileSystem`` guesses it when it is not
+    given, by scanning every reference value. A parquet reference pads each partition
+    to its record size, the padding rows read back as missing paths, and with pandas 3
+    that scan raises ``TypeError`` for some hash seeds (whichever row it meets first).
+    Passing the protocol skips the scan.
+
+    Only the first file path is read: the first list-valued reference of a JSON
+    reference, or the first non-empty ``path`` of the first ``<var>/refs.0.parq`` of a
+    parquet reference. The answer is memoised per (path, mtime, size) for a local
+    reference and per path for a remote one. Anything unexpected gives `None`, leaving
+    fsspec to guess as before; this never raises.
+
+    Parameters
+    ----------
+    path : str | Path
+        A kerchunk reference (see `_is_kerchunk_reference`).
+    """
+    try:
+        locator = str(path).rstrip("/")
+        key: object = locator
+        if "://" not in locator:
+            st = os.stat(os.path.expanduser(locator))
+            key = (locator, st.st_mtime_ns, st.st_size)
+        if key in _REFERENCE_PROTOCOLS:
+            return _REFERENCE_PROTOCOLS[key]
+
+        import fsspec
+        from fsspec.core import split_protocol
+
+        found = None
+        if locator.endswith((".json", ".json.zstd")):
+            compression = "zstd" if locator.endswith(".zstd") else None
+            with fsspec.open(locator, "rt", compression=compression) as fh:
+                refs = json.load(fh)
+            refs = refs.get("refs", refs)
+            for value in refs.values():
+                if isinstance(value, list) and value:
+                    if isinstance(value[0], str) and value[0]:
+                        found = value[0]
+                        break
+        else:
+            with fsspec.open(f"{locator}/.zmetadata", "rt") as fh:
+                meta = json.load(fh).get("metadata", {})
+            fs, _, _ = fsspec.get_fs_token_paths(locator)
+            for name in meta:
+                if not name.endswith("/.zarray"):
+                    continue
+                part = f"{locator}/{name[: -len('/.zarray')]}/refs.0.parq"
+                if not fs.exists(part):
+                    continue
+                with fsspec.open(part, "rb") as fh:
+                    column = pd.read_parquet(fh, columns=["path"])["path"].dropna()
+                column = column[column.astype(str).str.len() > 0]
+                if len(column):
+                    found = str(column.iloc[0])
+                    break
+
+        if found is None:
+            return None
+        protocol = split_protocol(found)[0] or "file"
+        _REFERENCE_PROTOCOLS[key] = protocol
+        return protocol
+    except Exception:
+        return None
 
 
 def _without_lateral_chunks(
@@ -539,7 +632,9 @@ def _without_lateral_chunks(
     return {dim: size for dim, size in chunks.items() if dim not in lateral}
 
 
-def _kerchunk_open_kwargs(path: str | Path) -> dict:
+def _kerchunk_open_kwargs(
+    path: str | Path, storage_options: dict | None = None
+) -> dict:
     """Extra ``xr.open_dataset`` kwargs so a kerchunk reference is read through ONE dask layer.
 
     The kerchunk backend implements ``open_dataset`` as ``xr.open_zarr(store, ...)``,
@@ -567,12 +662,24 @@ def _kerchunk_open_kwargs(path: str | Path) -> dict:
     zarr wrappers, so the outer ``chunks=`` builds the only dask layer. The engine is
     pinned too: ``open_mfdataset`` would otherwise re-run xarray's engine guessing per
     file. Returns ``{}`` for anything that is not a reference file.
+
+    The ``remote_protocol`` storage option is filled in from the reference (see
+    `_reference_protocol`) so fsspec does not have to guess it; one in the caller's
+    `storage_options` wins.
     """
     if not _is_kerchunk_reference(path):
         return {}
+    protocol = _reference_protocol(path)
+    so = {
+        **({"remote_protocol": protocol} if protocol else {}),
+        **(storage_options or {}),
+    }
     return {
         "engine": "kerchunk",
-        "backend_kwargs": {"open_dataset_options": {"chunks": None}},
+        "backend_kwargs": {
+            "open_dataset_options": {"chunks": None},
+            "storage_options": so or None,
+        },
     }
 
 
@@ -675,6 +782,7 @@ def load_data(
     chunks: dict[str, int] | None = None,
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
     initial_slice_bounds_use_isel: bool = False,
+    storage_options: dict | None = None,
 ):
     """Load dataset from the specified file.
 
@@ -721,6 +829,11 @@ def load_data(
         When ``use_dask=True``, if True apply ``initial_slice_bounds`` with
         :meth:`xarray.Dataset.isel` so integer pairs are inclusive index ranges (ROMS).
         Lat/lon datasets should leave this False (default).
+    storage_options : dict, optional
+        fsspec storage options used only when opening kerchunk references, e.g.
+        ``{"remote_protocol": "s3", "remote_options": {"anon": True}}``. A
+        ``remote_protocol`` given here overrides the one read from the reference.
+        Defaults to None.
 
     Returns
     -------
@@ -732,7 +845,8 @@ def load_data(
     FileNotFoundError
         If the specified file does not exist.
     ValueError
-        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+        If a list of files is provided but dim_names["time"] is not available or use_dask=False,
+        or if kerchunk references are mixed with other files.
     RuntimeError
         If loading the dataset fails
     """
@@ -743,6 +857,11 @@ def load_data(
     _check_load_data_filename(filename, dim_names.keys())
 
     match_result = _get_file_matches(filename)
+
+    is_reference = [_is_kerchunk_reference(f) for f in match_result.matches]
+    if any(is_reference) and not all(is_reference):
+        msg = "kerchunk references cannot be combined with other files in one load."
+        raise ValueError(msg)
 
     load_kwargs = _get_ds_combination_params(
         force_combine_nested,
@@ -766,6 +885,7 @@ def load_data(
             chunks,
             initial_slice_bounds,
             initial_slice_bounds_use_isel,
+            storage_options,
         )
     else:
         ds_list = []
@@ -780,7 +900,7 @@ def load_data(
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
                 chunks=None,
-                **({"engine": engine} | _kerchunk_open_kwargs(file)),
+                **({"engine": engine} | _kerchunk_open_kwargs(file, storage_options)),
             )
             ds_list.append(ds)
 

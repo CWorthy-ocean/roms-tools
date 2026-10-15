@@ -8,17 +8,23 @@
 
 ### Bug Fixes
 
+* Loading a kerchunk `.parquet` reference with `use_dask=False` no longer fails (`GroupNotFoundError`: the directory was taken for a zarr store), and kerchunk references opened without dask no longer come back as dask arrays. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* Boundary forcing and initial conditions with an ESPER or density-interpolated BGC source no longer re-run the physics regrid for every BGC variable at save time, which grew memory without bound (~12 GB/h on a 12 km ESPER boundary month, the signature that ended a 5-year run at >112 GB). The physics temperature and salinity are computed once when the object is built, one time chunk at a time, and held in memory until saved; the footprint scales with the run length (order 16 GB per year on a 100-level 1858×962 grid). ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+
 ### Improvements
 
 * Tests run with `--use_copernicus` now check the Copernicus Marine credentials once per session instead of failing test by test. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
   * If the Copernicus auth server is unreachable or doesn't answer within 60 s, every Copernicus test is skipped with the reason shown.
   * Missing or rejected credentials make every Copernicus test error with a message naming the environment variables to set.
+* `materialize_physics_ts` logs when the whole-run physics T/S read starts (naming what is read and that it can take hours), every 10 % of the time chunks with the elapsed time, and when it is done, so a multi-hour boundary build is no longer silent. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* Kerchunk reference files (e.g. Forge's GLORYS subchunk references) are read through a single dask layer and keep the reference's own lateral chunking, so a boundary crop reads the slabs it needs instead of decoding whole global levels: one day's 12 km crop went from 19.7 s to 0.8 s. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 
 ### Miscellaneous
 
 * The CDR forcing docs and API docstrings now refer to the ucla-roms CDR-LiTE CPP option by its new name, `CDR_LITE`. ([#691](https://github.com/CWorthy-ocean/roms-tools/pull/691))
 * CI no longer runs `copernicusmarine login` before the Copernicus tests; credentials come from the `COPERNICUSMARINE_SERVICE_*` environment variables. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
 * CI test steps for the two Copernicus jobs stop on the first failing command, print skip reasons, and the GLORYS invariance step is capped at 30 minutes. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
+* `kerchunk` and `fastparquet` are dev/CI dependencies, so the kerchunk reference tests now run in CI over both `.json` and `.parquet` references. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 
 ## 5.1.1
 

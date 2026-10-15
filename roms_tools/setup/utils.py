@@ -1,9 +1,10 @@
 import importlib.metadata
+import itertools
 import logging
 import time
 import typing
 import warnings
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -354,6 +355,149 @@ def materialize_before_check(ds, var_names, materialize: bool) -> None:
     realized = dask.compute(*(ds[v] for v in names))
     for v, value in zip(names, realized):
         ds[v] = value
+
+
+def bgc_source_has_own_ts(bgc_dataset_map: Mapping[str, Any], name: str | None) -> bool:
+    """Whether the dataset class registered for BGC source ``name`` carries its own
+    temperature/salinity pair (``bgc_source_ts``), which density interpolation needs
+    as the source coordinate. ``bgc_dataset_map`` is a wrapper module's
+    ``_DATASET_MAP["bgc"]``: name -> {"external"/"default": class} (a ``defaultdict``
+    when one class serves both). Unknown names (``constants``, ``ESPER``) are False.
+    """
+    entry = bgc_dataset_map.get(name) if name else None
+    if entry is None:
+        return False
+    factory = getattr(entry, "default_factory", None)
+    cls = factory() if factory is not None else entry.get("default")
+    return bool(getattr(cls, "bgc_source_ts", ()))
+
+
+def companions_derive_from_physics_ts(
+    bgc_sources: Sequence[Mapping[str, Any]] | None,
+    default_interpolation: str,
+    has_source_ts: Callable[[str | None], bool],
+) -> bool:
+    """True when any bgc companion will actually read the physics temperature/salinity.
+
+    Two kinds do: an ``ESPER`` source (PyESPER's inputs *are* T/S) and a dataset source
+    whose *effective* interpolation is not ``"depth"`` -- ``"density"`` and
+    ``"density_mld"`` need sigma-0 from T/S. "Effective" is the point: a ``constants``
+    source never interpolates at all, and a dataset without its own T/S falls back to
+    depth (:func:`resolve_bgc_interp_method`), so neither reads the physics whatever
+    method the item asks for. ``has_source_ts`` answers that per source name (the
+    wrappers pass :func:`bgc_source_has_own_ts` over their dataset map).
+    """
+    for item in bgc_sources or ():
+        name = (item.get("source") or {}).get("name")
+        if name == "ESPER":
+            return True
+        if name == "constants":
+            continue
+        method = BgcInterpMethod(
+            item.get("bgc_interpolation_method") or default_interpolation
+        )
+        if method != BgcInterpMethod.depth and has_source_ts(name):
+            return True
+    return False
+
+
+def materialize_physics_ts(ds, var_names: Iterable[str]) -> None:
+    """Realize the physics T/S fields the bgc companions derive from, in place.
+
+    Called by the ``BoundaryForcing``/``InitialConditions`` wrappers *before*
+    ``build_bgc_companions``, so that ESPER's inputs and every density-based
+    interpolation are built on data already in memory rather than on the lazy
+    source regrid graph.
+
+    Why: a companion's own ``.save()`` computes all of its variables in one graph
+    (18 per monthly boundary file for ESPER: six tracers, three directions). Left
+    lazy, every one of them reaches back through the same per-day regrids of the
+    source slabs, and dask's ordering over that wide, shared graph materialises
+    many days of ~190 MB domain-bbox temp+salt slabs before their consumers run.
+    Measured on a 12 km ESPER boundary month under the synchronous scheduler: RSS
+    rose linearly at ~12 GB/h through the save and no monthly file completed in
+    the time a single variable took to compute alone (which stayed flat) -- the
+    same signature that ended a 5-year run at >112 GB. Realizing the regridded
+    strips here severs the companions' graphs from the source entirely, and the
+    physics save writes T/S from memory too. Every other physics variable stays
+    lazy.
+
+    How: the strips are computed **one of their own time chunks at a time** and
+    written into a preallocated array. The chunk, not the whole span, bounds peak
+    memory: realizing a 34-day month in one compute peaked at 25 GB, because the
+    regrid reads whole global GLORYS slabs and one decoded day of temp+salt is ~7 GB
+    whatever the ROMS grid looks like, and dask holds several days' intermediates at
+    once; one day at a time peaked at 18.6 GB and built faster (392 s vs 583 s). The
+    physics regrid leaves the strips chunked per source day, so iterating the strip's
+    own chunks is the per-day loop -- and never recomputes an upstream chunk, which
+    slicing at a finer step than the chunking would (a chunk of four steps sliced one
+    step at a time runs its upstream four times).
+
+    The realized strips are re-wrapped as dask arrays carrying the chunks they had,
+    because ``estimate_bgc_fields`` only applies PyESPER's chunk plan and point budget
+    to dask inputs; numpy would make PyESPER run eagerly on the full span, bypassing
+    the ``_max_points_per_chunk`` guard that exists because a 4 km / 100-level grid
+    OOM-killed a 251 GB machine.
+
+    **What it costs, and the trade it makes.** The strips are held in memory from
+    construction until the physics and companion saves are done, and they scale with
+    the run length: 1.8 MB per variable per direction per month at 12 km (about 0.5 GB
+    for five years of three boundaries), order 16 GB per year on a 100-level 1858x962
+    grid. That is the data the physics save writes regardless, held earlier -- and it
+    is paid by density-interpolated companions too, which until this change were
+    built fully lazily (at the cost of the unbounded save above). A wrapper that only
+    needs the companions' YAML still pays it. If a very long high-resolution run finds
+    this too much, realizing per save group (month) at write time is the next step;
+    it is not done here.
+
+    A no-op for names that are absent or not dask-backed.
+    """
+    names = [v for v in var_names if v in ds and ds[v].chunks is not None]
+    if not names:
+        return
+    original_chunks = {v: dict(ds[v].chunksizes) for v in names}
+    time_dims = {
+        v: next((d for d in ds[v].dims if "time" in str(d)), None) for v in names
+    }
+
+    started = time.time()
+    logging.info(
+        f"Reading the physics {', '.join(names)} from the source for the whole run "
+        "(the BGC sources derive from them). The source is read once, end to end, "
+        "before anything is written -- this can take hours for a multi-year run."
+    )
+    # Group by time dimension so one compute slices every strip on the same axis;
+    # the first strip's own chunks along it set the block boundaries.
+    for time_dim in {*time_dims.values()}:
+        group = [v for v in names if time_dims[v] == time_dim]
+        out = {v: np.empty(ds[v].shape, dtype=ds[v].dtype) for v in group}
+        if time_dim is None:
+            for v, val in zip(group, dask.compute(*(ds[v].data for v in group))):
+                out[v][...] = val
+        else:
+            axis = ds[group[0]].dims.index(time_dim)
+            bounds = np.cumsum((0, *ds[group[0]].chunks[axis]))
+            n_blocks = len(bounds) - 1
+            next_report = 0.1  # progress every 10 % of the chunks (ten lines at most)
+            for i, (start, stop) in enumerate(itertools.pairwise(bounds), 1):
+                block = slice(int(start), int(stop))
+                vals = dask.compute(
+                    *(ds[v].isel({time_dim: block}).data for v in group)
+                )
+                for v, val in zip(group, vals):
+                    out[v][(slice(None),) * axis + (block,)] = val
+                if i == n_blocks or i >= next_report * n_blocks:
+                    logging.info(
+                        f"  {', '.join(group)}: {int(stop)}/{int(bounds[-1])} time "
+                        f"steps read in {(time.time() - started) / 60:.1f} min"
+                    )
+                    while next_report * n_blocks <= i:
+                        next_report += 0.1
+        for v in group:
+            ds[v] = ds[v].copy(data=out[v]).chunk(original_chunks[v])
+    logging.info(
+        f"Physics {', '.join(names)} realized in {(time.time() - started) / 60:.1f} min."
+    )
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:

@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -206,6 +207,137 @@ def test_load_data_open_dataset(
         assert fn_od.called
 
     assert expected_dim in ds.dims
+
+
+def _from_array_source_chain(dask_array) -> list:
+    """The objects ``dask.from_array`` wrapped, outermost first, for each source key."""
+    import dask
+
+    chain = []
+    for key, task in dict(dask_array.dask).items():
+        if isinstance(key, tuple) or callable(task):
+            continue
+        obj = getattr(task, "value", task)
+        while obj is not None:
+            chain.append(obj)
+            if dask.is_dask_collection(obj):
+                break
+            obj = getattr(obj, "array", None)
+    return chain
+
+
+@pytest.fixture(params=["json", "parquet"])
+def kerchunk_reference(tmp_path: Path, request) -> tuple[Path, xr.Dataset]:
+    """A kerchunk reference to a small netCDF file, plus the source dataset.
+
+    Parametrised over the two reference formats: a ``.json`` file and a ``.parquet``
+    *directory* (what Forge writes by default). The directory form matters because
+    ``_is_zarr_store`` takes any directory for a zarr store.
+    """
+    kerchunk = pytest.importorskip("kerchunk")  # in the dev extras; CI runs these
+    from kerchunk.hdf import SingleHdf5ToZarr
+
+    rng = np.random.default_rng(0)
+    src = xr.Dataset(
+        {"temp": (("time", "lat", "lon"), rng.random((4, 5, 6), dtype="float32"))},
+        coords={
+            "time": np.arange(4, dtype="int64"),
+            "lat": np.linspace(-2, 2, 5, dtype="float32"),
+            "lon": np.linspace(0, 5, 6, dtype="float32"),
+        },
+    )
+    nc = tmp_path / "src.nc"
+    src.to_netcdf(nc, engine="h5netcdf")
+    refs = SingleHdf5ToZarr(str(nc), inline_threshold=0).translate()
+    if request.param == "json":
+        ref = tmp_path / "src.json"
+        ref.write_text(json.dumps(refs))
+    else:
+        pytest.importorskip("fastparquet")
+        from kerchunk.df import refs_to_dataframe
+
+        ref = tmp_path / "src.parquet"
+        refs_to_dataframe(refs, str(ref))
+    del kerchunk
+    return ref, src
+
+
+def test_kerchunk_parquet_reference_wins_over_the_zarr_directory_guess(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """A ``.parquet`` reference is a directory, so ``_is_zarr_store`` says "zarr" --
+    and opening it with the zarr engine raises ``GroupNotFoundError``. The eager path
+    must let the kerchunk engine take precedence (``{"engine": engine} |
+    _kerchunk_open_kwargs(file)``); this pins that order.
+    """
+    from roms_tools.utils import _is_kerchunk_reference, _is_zarr_store
+
+    ref, src = kerchunk_reference
+    if ref.suffix != ".parquet":
+        pytest.skip("the precedence only matters for the directory form")
+    assert _is_zarr_store(ref) and _is_kerchunk_reference(ref)
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=False
+    )
+    xr.testing.assert_allclose(ds["temp"], src["temp"])
+
+
+def test_load_data_kerchunk_reference_uses_a_single_dask_layer(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """A kerchunk reference must not come back as dask-inside-dask.
+
+    The kerchunk backend's ``open_zarr`` defaults to ``chunks="auto"``, and xarray
+    wraps whatever the backend returns before applying the outer ``chunks=`` -- so
+    without ``_kerchunk_open_kwargs`` every outer chunk hides a nested ``compute()``
+    of an inner dask array. Walk the objects ``from_array`` wrapped and require that
+    none of them is a dask collection.
+    """
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=True
+    )
+    data = ds["temp"].data
+    assert hasattr(data, "dask"), "expected a dask-backed variable with use_dask=True"
+
+    chain = _from_array_source_chain(data)
+    assert chain, "no from_array source found in the graph"
+    nested = [type(o).__name__ for o in chain if hasattr(o, "dask")]
+    assert not nested, f"kerchunk reference is wrapped dask-inside-dask via {nested}"
+
+    xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
+
+
+def test_load_data_kerchunk_reference_ignores_lateral_chunks(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """Lateral dask tiles over a reference would re-read every source chunk per
+    tile; the loader keeps time chunking and inherits the source's lateral extent.
+    """
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref,
+        {"time": "time", "latitude": "lat", "longitude": "lon"},
+        use_dask=True,
+        chunks={"time": 1, "lat": 2, "lon": 2},
+    )
+    chunks = ds["temp"].chunksizes
+    assert chunks["time"] == (1, 1, 1, 1)  # time chunking honoured
+    assert chunks["lat"] == (src.sizes["lat"],)  # lateral tiles dropped
+    assert chunks["lon"] == (src.sizes["lon"],)
+    xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
+
+
+def test_load_data_kerchunk_reference_eager_is_not_dask(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """With ``use_dask=False`` the backend must not smuggle dask arrays in either."""
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=False
+    )
+    assert not hasattr(ds["temp"].data, "dask")
+    xr.testing.assert_allclose(ds["temp"], src["temp"])
 
 
 # test get_dask_chunks

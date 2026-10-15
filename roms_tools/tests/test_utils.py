@@ -430,48 +430,78 @@ def test_load_data_parquet_reference_opens_under_any_hash_seed(
 def test_reference_protocol(
     kerchunk_reference: tuple[Path, xr.Dataset], tmp_path: Path
 ) -> None:
-    """The protocol is that of the files the reference points at."""
+    """A parquet reference gives the protocol of the files it points at, and the
+    kerchunk open passes it on; a JSON reference is left to fsspec, unread.
+    """
+    from roms_tools.utils import _kerchunk_open_kwargs, _reference_protocol
+
+    ref, _ = kerchunk_reference
+    backend_kwargs = _kerchunk_open_kwargs(ref)["backend_kwargs"]
+    if ref.suffix == ".parquet":
+        assert _reference_protocol(ref) == "file"
+        assert backend_kwargs["storage_options"] == {"remote_protocol": "file"}
+    else:
+        with mock.patch("fsspec.open") as fsspec_open:
+            assert _reference_protocol(ref) is None
+        fsspec_open.assert_not_called()
+        assert "storage_options" not in backend_kwargs
+    assert _reference_protocol(tmp_path / "missing.parquet") is None
+
+
+def test_reference_protocol_logs_unreadable_reference(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unreadable reference falls back to fsspec's guess, and says why at debug level."""
+    from roms_tools.utils import _reference_protocol
+
+    ref = tmp_path / "broken.parquet"
+    ref.mkdir()
+    (ref / ".zmetadata").write_text("not json")
+    with caplog.at_level("DEBUG"):
+        assert _reference_protocol(ref) is None
+    assert any(str(ref) in r.getMessage() and r.exc_info for r in caplog.records)
+
+
+def test_reference_protocol_rereads_rewritten_reference(
+    kerchunk_reference: tuple[Path, xr.Dataset], tmp_path: Path
+) -> None:
+    """The memo is keyed on ``.zmetadata``, which changes whenever the reference is
+    rewritten; the directory's own mtime does not change when files inside it are.
+    """
     from roms_tools.utils import _reference_protocol
 
     ref, _ = kerchunk_reference
-    assert _reference_protocol(ref) == "file"
-    assert _reference_protocol(tmp_path / "missing.json") is None
+    if ref.suffix != ".parquet":
+        pytest.skip("only parquet references are read")
+    copy = tmp_path / "copy.parquet"
+    shutil.copytree(ref, copy)
+    assert _reference_protocol(copy) == "file"
+
+    with mock.patch("roms_tools.utils.pd.read_parquet", wraps=pd.read_parquet) as rp:
+        assert _reference_protocol(copy) == "file"
+        assert rp.call_count == 0  # memoised
+        with (copy / ".zmetadata").open("a") as fh:
+            fh.write("\n")
+        assert _reference_protocol(copy) == "file"
+        assert rp.call_count == 1  # read again after the rewrite
 
 
-def test_kerchunk_open_kwargs_caller_remote_protocol_wins(
-    kerchunk_reference: tuple[Path, xr.Dataset],
+def test_load_data_rejects_kerchunk_references_on_different_filesystems(
+    tmp_path: Path,
 ) -> None:
-    """A caller's ``remote_protocol`` overrides the one read from the reference."""
-    from roms_tools.utils import _kerchunk_open_kwargs
-
-    ref, _ = kerchunk_reference
-    with mock.patch("roms_tools.utils._reference_protocol", return_value="s3"):
-        detected = _kerchunk_open_kwargs(ref)
-        given = _kerchunk_open_kwargs(ref, {"remote_protocol": "file"})
-    assert detected["backend_kwargs"]["storage_options"] == {"remote_protocol": "s3"}
-    assert given["backend_kwargs"]["storage_options"] == {"remote_protocol": "file"}
-
-
-@pytest.mark.parametrize("use_dask", [True, False])
-def test_load_data_passes_storage_options_to_kerchunk(
-    kerchunk_reference: tuple[Path, xr.Dataset], use_dask: bool
-) -> None:
-    """``load_data(storage_options=...)`` reaches the kerchunk backend."""
-    ref, src = kerchunk_reference
-    opener = "open_mfdataset" if use_dask else "open_dataset"
+    """``open_mfdataset`` passes one ``remote_protocol`` to every reference, so
+    references that point at different filesystems cannot be loaded together.
+    """
+    local, remote = tmp_path / "local.parquet", tmp_path / "remote.parquet"
+    protocols = {str(local): "file", str(remote): "s3"}
     with (
-        mock.patch("roms_tools.utils._reference_protocol", return_value="s3"),
-        mock.patch(f"roms_tools.utils.xr.{opener}", wraps=getattr(xr, opener)) as fn,
+        mock.patch(
+            "roms_tools.utils._reference_protocol",
+            side_effect=lambda p: protocols.get(str(p)),
+        ),
+        pytest.raises(ValueError, match="one filesystem"),
     ):
-        ds = load_data(
-            ref,
-            {"time": "time", "latitude": "lat", "longitude": "lon"},
-            use_dask=use_dask,
-            storage_options={"remote_protocol": "file"},
-        )
-    backend_kwargs = fn.call_args.kwargs["backend_kwargs"]
-    assert backend_kwargs["storage_options"] == {"remote_protocol": "file"}
-    xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
+        load_data([local, remote], {"time": "time"}, use_dask=True)
 
 
 def test_kerchunk_parquet_reference_without_suffix(

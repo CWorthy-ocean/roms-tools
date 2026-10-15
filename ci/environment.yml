@@ -14,3 +14,4 @@ dependencies:
   - esmf=*=nompi*
   - threadpoolctl
   - pip
+  - pyco2sys

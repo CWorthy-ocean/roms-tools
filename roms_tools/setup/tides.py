@@ -2,7 +2,7 @@ import importlib.metadata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import numpy as np
 import xarray as xr
@@ -37,6 +37,9 @@ from roms_tools.utils import (
     rotate_velocities,
     save_datasets,
 )
+
+# ROMS flavor a TidalForcing is written for
+Convention = Literal["ucla", "rutgers"]
 
 
 @dataclass(kw_only=True)
@@ -193,7 +196,7 @@ class TidalForcing:
     masked. Ignored when ``prefill`` is set or on the scipy path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
-    convention: Literal["ucla", "rutgers"] = "ucla"
+    convention: Convention = "ucla"
     """ROMS flavor the tidal forcing is written for: ``"ucla"`` (complex harmonics) or
     ``"rutgers"`` (amplitude/phase and current ellipses)."""
 
@@ -255,19 +258,16 @@ class TidalForcing:
                             data.ds[data.var_names[var_name]]
                         )
 
+        omega = tidal_data.datasets["omega"]
         if self.convention == "rutgers":
-            ds = self._to_rutgers(processed_fields, tidal_data.datasets["omega"])
+            ds = self._to_rutgers(processed_fields, omega)
         else:
-            ds = self._to_ucla(processed_fields, target_coords["angle"])
+            ds = self._to_ucla(processed_fields, target_coords["angle"], omega)
 
         ds = self._add_global_metadata(ds)
 
         if not self.bypass_validation:
             self._validate(ds)
-
-        if self.convention == "ucla":
-            ds = ds.assign_coords({"omega": tidal_data.datasets["omega"]})
-            ds["ntides"].attrs["long_name"] = "constituent label"
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -303,9 +303,10 @@ class TidalForcing:
             raise ValueError("`source` must include a 'path'.")
         if self.ntides > 15:
             raise ValueError("`ntides` must be at most 15.")
-        if self.convention not in ("ucla", "rutgers"):
+        if self.convention not in get_args(Convention):
             raise ValueError(
-                f"`convention` must be 'ucla' or 'rutgers', got {self.convention!r}."
+                f"`convention` must be one of {get_args(Convention)}, "
+                f"got {self.convention!r}."
             )
 
     def _get_data(self):
@@ -398,7 +399,7 @@ class TidalForcing:
         for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
             processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
 
-    def _to_ucla(self, processed_fields, angle):
+    def _to_ucla(self, processed_fields, angle, omega):
         """UCLA-ROMS output: complex harmonics with velocities rotated to the grid and
         staggered to u- and v-points.
         """
@@ -426,7 +427,12 @@ class TidalForcing:
             processed_fields[vname] = interpolate_from_rho_to_v(processed_fields[vname])
 
         d_meta = get_variable_metadata()
-        return self._write_into_dataset(processed_fields, d_meta)
+        ds = self._write_into_dataset(processed_fields, d_meta)
+        ds.attrs["title"] = "ROMS tidal forcing created by ROMS-Tools"
+
+        ds = ds.assign_coords({"omega": omega})
+        ds["ntides"].attrs["long_name"] = "constituent label"
+        return ds
 
     def _to_rutgers(self, processed_fields, omega):
         """Rutgers ROMS output: elevation amplitude/phase and current ellipses on
@@ -452,10 +458,6 @@ class TidalForcing:
         return ds
 
     def _add_global_metadata(self, ds):
-        if self.convention == "rutgers":
-            ds.attrs["title"] = "Rutgers ROMS tidal forcing created by ROMS-Tools"
-        else:
-            ds.attrs["title"] = "ROMS tidal forcing created by ROMS-Tools"
         # Include the version of roms-tools
         try:
             roms_tools_version = importlib.metadata.version("roms-tools")
@@ -563,7 +565,8 @@ class TidalForcing:
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        tidal_dim = "tide_period" if self.convention == "rutgers" else "ntides"
+        # the constituent dimension (ntides or tide_period) comes first
+        tidal_dim = self.ds[var_name].dims[0]
         field = self.ds[var_name].isel({tidal_dim: ntides})
 
         if self.use_dask:

@@ -171,6 +171,7 @@ def complex_to_rutgers(
         },
     )
 
+    ds.attrs["title"] = "Rutgers ROMS tidal forcing created by ROMS-Tools"
     ds.attrs["type"] = "ROMS Forcing File"
     ds.attrs["tidal_constituents"] = ", ".join(labels)
 

@@ -255,6 +255,13 @@ def test_parent_crossing_greenwich_still_checks_nesting(members):
         UpscaledCDR({"child": distant, "mid": mid})
 
 
+def test_member_name_clashing_with_combined_variable_raises(members):
+    # "cdr" + "_carbon_uptake_from_flux" is the combined total's name.
+    renamed = {"cdr": members["child"], "mid": members["mid"]}
+    with pytest.raises(ValueError, match="cdr_carbon_uptake_from_flux"):
+        UpscaledCDR(renamed)
+
+
 def test_missing_role_raises(members):
     del members["mid"].attrs["cdr_source_role"]
     with pytest.raises(ValueError, match="'mid'.*cdr_source_role"):

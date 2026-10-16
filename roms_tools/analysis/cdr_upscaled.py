@@ -1,5 +1,6 @@
 import logging
 import operator
+from collections import Counter
 from dataclasses import dataclass, field
 from functools import reduce
 from itertools import pairwise
@@ -20,6 +21,22 @@ _CUMULATIVE_SOURCE = "cdr_cumulative_source"
 _SERIES_VARS = (_CUMULATIVE_SOURCE, _FLUX_UPTAKE, _DIC_UPTAKE)
 _REQUIRED_VARS = (*_SERIES_VARS, "area", "hDIC", "hDIC_ALT_CO2", "window_length")
 _REQUIRED_COORDS = ("time", "lat_rho", "lon_rho")
+
+_FLUX_EFFICIENCY = "cdr_efficiency_from_flux"
+_DIC_EFFICIENCY = "cdr_efficiency_from_DIC_difference"
+_CLOSURE_RESIDUAL = "closure_residual"
+# Variables of the combined dataset whose names do not depend on the members.
+_COMBINED_VARS = (*_SERIES_VARS, _FLUX_EFFICIENCY, _DIC_EFFICIENCY, _CLOSURE_RESIDUAL)
+
+
+def _member_var(member: str, var: str) -> str:
+    """Name of a member's own `var` series in the combined dataset."""
+    return f"{member}_{var.removeprefix('cdr_')}"
+
+
+def _footprint_var(parent: str, child: str) -> str:
+    """Name of the DIC perturbation of `parent` inside `child`'s footprint."""
+    return f"{parent}_DIC_difference_inside_{child}"
 
 
 def _unwrap_lon(lon: np.ndarray, ref: float) -> np.ndarray:
@@ -91,7 +108,9 @@ class UpscaledCDR:
         If fewer than two members are given, a member lacks required variables,
         coordinates or attributes, no member is a release, the members are not
         nested in the given order or share the same grid, the averaging windows
-        differ, or the release members' source units differ.
+        differ, the release members' source units differ, or a member name would
+        give a variable name that clashes with another one in the combined dataset
+        (e.g. a member called ``"cdr"``).
     """
 
     members: dict[str, str | Path | xr.Dataset]
@@ -166,6 +185,25 @@ class UpscaledCDR:
             raise ValueError(
                 "At least one member must have cdr_source_role='release'; got "
                 f"{ {n: d.attrs['cdr_source_role'] for n, d in datasets.items()} }."
+            )
+
+        names = list(datasets)
+        var_names = Counter(
+            [
+                *_COMBINED_VARS,
+                *(
+                    _member_var(n, v)
+                    for n in names
+                    for v in (_FLUX_UPTAKE, _DIC_UPTAKE)
+                ),
+                *(_footprint_var(p, c) for c, p in pairwise(names)),
+            ]
+        )
+        clashes = sorted(v for v, count in var_names.items() if count > 1)
+        if clashes:
+            raise ValueError(
+                f"Member names {names} give clashing variable names {clashes} in "
+                "the combined dataset; rename the members."
             )
 
         self._validate_geometry(datasets)
@@ -417,8 +455,8 @@ class UpscaledCDR:
 
         # Back to native units, so the ratio to the native source holds.
         for eff_var, uptake_var in (
-            ("cdr_efficiency_from_flux", _FLUX_UPTAKE),
-            ("cdr_efficiency_from_DIC_difference", _DIC_UPTAKE),
+            (_FLUX_EFFICIENCY, _FLUX_UPTAKE),
+            (_DIC_EFFICIENCY, _DIC_UPTAKE),
         ):
             native = (
                 out[uptake_var] / out[uptake_var].attrs["tonnes_co2_per_native_unit"]
@@ -426,7 +464,7 @@ class UpscaledCDR:
             with np.errstate(divide="ignore", invalid="ignore"):
                 ratio = native / out[_CUMULATIVE_SOURCE]
                 out[eff_var] = ratio.where(np.isfinite(ratio))
-        out["cdr_efficiency_from_flux"].attrs.update(
+        out[_FLUX_EFFICIENCY].attrs.update(
             long_name="CDR uptake efficiency (from flux differences)",
             units="nondimensional",
             description=(
@@ -434,7 +472,7 @@ class UpscaledCDR:
                 "differences) divided by the cumulative source of the release members"
             ),
         )
-        out["cdr_efficiency_from_DIC_difference"].attrs.update(
+        out[_DIC_EFFICIENCY].attrs.update(
             long_name="CDR uptake efficiency (from DIC differences)",
             units="nondimensional",
             description=(
@@ -445,13 +483,11 @@ class UpscaledCDR:
 
         for n in names:
             for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
-                out[f"{n}_{var.removeprefix('cdr_')}"] = aligned[n][var]
-                out[f"{n}_{var.removeprefix('cdr_')}"].attrs = dict(
-                    datasets[n][var].attrs
-                )
+                out[_member_var(n, var)] = aligned[n][var]
+                out[_member_var(n, var)].attrs = dict(datasets[n][var].attrs)
 
-        out["closure_residual"] = out[_FLUX_UPTAKE] - out[_DIC_UPTAKE]
-        out["closure_residual"].attrs.update(
+        out[_CLOSURE_RESIDUAL] = out[_FLUX_UPTAKE] - out[_DIC_UPTAKE]
+        out[_CLOSURE_RESIDUAL].attrs.update(
             long_name="Closure residual (flux-based minus DIC-based uptake)",
             units="tonnes CO2",
             description=(
@@ -459,10 +495,10 @@ class UpscaledCDR:
                 "bookkeeping views of the same perturbation, so this should be small"
             ),
         )
-        diagnostics = {"closure_residual": out["closure_residual"]}
+        diagnostics = {_CLOSURE_RESIDUAL: out[_CLOSURE_RESIDUAL]}
 
         for child, parent in pairwise(names):
-            var = f"{parent}_DIC_difference_inside_{child}"
+            var = _footprint_var(parent, child)
             out[var] = self._footprint_dic_difference(
                 datasets[child], datasets[parent], all_times
             )
@@ -514,15 +550,8 @@ class UpscaledCDR:
         )
         time = self.ds["time"].values
 
-        ax_eff.plot(
-            time, self.ds["cdr_efficiency_from_flux"], lw=2, label="flux differences"
-        )
-        ax_eff.plot(
-            time,
-            self.ds["cdr_efficiency_from_DIC_difference"],
-            lw=2,
-            label="DIC differences",
-        )
+        ax_eff.plot(time, self.ds[_FLUX_EFFICIENCY], lw=2, label="flux differences")
+        ax_eff.plot(time, self.ds[_DIC_EFFICIENCY], lw=2, label="DIC differences")
         ax_eff.set_ylabel("CDR efficiency")
         ax_eff.set_title("Combined CDR efficiency")
         ax_eff.grid()
@@ -537,7 +566,7 @@ class UpscaledCDR:
         for name in self.members:
             ax_uptake.plot(
                 time,
-                self.ds[f"{name}_carbon_uptake_from_flux"],
+                self.ds[_member_var(name, _FLUX_UPTAKE)],
                 lw=1,
                 alpha=0.8,
                 label=f"{name} (flux differences)",

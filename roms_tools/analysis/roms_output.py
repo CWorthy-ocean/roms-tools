@@ -76,7 +76,7 @@ class ROMSOutput(ROMSDataset):
           - Grid cell area
           - Selected tracer and flux variables
           - Uptake efficiency computed from flux differences and DIC differences
-            (all-NaN for a ``"transfer"`` member)
+            (all-NaN for a ``"transfer"`` domain)
           - Total carbon uptake from the same flux and DIC constructions (not
             normalized by the alkalinity/DIC source)
           - Cumulative source (``cdr_cumulative_source``)

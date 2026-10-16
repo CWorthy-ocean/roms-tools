@@ -198,6 +198,42 @@ def test_ensemble_post_init(identical_members: dict[str, xr.Dataset]) -> None:
     np.testing.assert_allclose(ens.ds.ensemble_uptake_std.values, 0.0)
 
 
+def test_transfer_member_raises(identical_members: dict[str, xr.Dataset]) -> None:
+    identical_members["member2"] = identical_members["member2"].assign_attrs(
+        cdr_source_role="transfer"
+    )
+    with pytest.raises(ValueError, match=r"Members \['member2'\].*UpscaledCDR"):
+        Ensemble(identical_members)
+
+
+def test_all_transfer_members_named_in_one_error(
+    identical_members: dict[str, xr.Dataset],
+) -> None:
+    identical_members = {
+        name: ds.assign_attrs(cdr_source_role="transfer")
+        for name, ds in identical_members.items()
+    }
+    with pytest.raises(ValueError) as excinfo:
+        Ensemble(identical_members)
+    assert "['member1', 'member2']" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "attrs",
+    [
+        {},
+        {"cdr_source_role": "release"},
+        {"cdr_source_role": "release", "domains": "child:release, mid:transfer"},
+    ],
+    ids=["no_role", "release", "upscaled_combined"],
+)
+def test_non_transfer_members_accepted(
+    identical_members: dict[str, xr.Dataset], attrs: dict[str, str]
+) -> None:
+    members = {name: ds.assign_attrs(attrs) for name, ds in identical_members.items()}
+    assert "ensemble_efficiency_mean" in Ensemble(members).ds
+
+
 def test_plot(identical_members: dict[str, xr.Dataset], tmp_path: Path) -> None:
     ens = Ensemble(identical_members)
     save_path = tmp_path / "plot.png"

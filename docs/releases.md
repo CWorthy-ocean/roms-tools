@@ -19,6 +19,7 @@
 * Boundary forcing and initial conditions with an ESPER or density-interpolated BGC source no longer re-run the physics regrid for every BGC variable at save time, which grew memory without bound (~12 GB/h on a 12 km ESPER boundary month, the signature that ended a 5-year run at >112 GB). The physics temperature and salinity are computed once when the object is built, one time chunk at a time, and held in memory until saved; the footprint scales with the run length (order 16 GB per year on a 100-level 1858×962 grid). ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 * A source dict with nested paths (the conditioning key) now survives `to_yaml` → `from_yaml` → `to_yaml`: `serialize_source_dict` / `deserialize_source_dict` convert paths anywhere in the dict, not only under `path`. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 * Density-interpolated BGC boundaries no longer place every year of a run on the density structure of a single sampled physics day. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* Opening a parquet kerchunk reference no longer fails intermittently with `TypeError` under pandas 3. The `remote_protocol` is read from the reference and passed to the kerchunk backend, so fsspec no longer guesses it from padding rows. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
 
 ### Improvements
 
@@ -30,6 +31,8 @@
 * `estimate_bgc_fields` forwards `salinity_conditioning` to PyESPER only when set, so a PyESPER fork that predates the keyword keeps working with conditioning off. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 * The PyESPER install guidance (import error, missing-module error, docs) clones the fork at tag `v1.1.1+cworthy.1`; the tag lives in one constant, bumped with each fork tag. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 * The physics-time helpers the ESPER path grew (`time_dim_of`, `month_aligned_time_chunks`, `apply_chunk_plan`, `physics_time_view`) live in `roms_tools.setup.utils` and are shared by both companions. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* A parquet kerchunk reference directory is recognised by its contents (`.zmetadata` plus `<var>/refs.*.parq`), not only by a `.parquet` suffix. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+* `load_data` raises a clear `ValueError` when kerchunk references are mixed with other files in one call, or when references loaded together point at files on different filesystems. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
 
 ### Miscellaneous
 
@@ -39,6 +42,13 @@
 * `kerchunk` and `fastparquet` are dev/CI dependencies, so the kerchunk reference tests now run in CI over both `.json` and `.parquet` references. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
 * `docs/datasets_overview.rst` gains an ESPER section (keys, conditioning, floors, attributes). ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 * Two ESPER tests that stub the PyESPER entry points no longer need PyESPER, so the floor and the keyword contract have CI coverage. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* The GLORYS subchunking recipe in `docs/datasets_read.ipynb` now opens the reference with `engine="kerchunk"`, `open_dataset_options={"chunks": None}` and `storage_options={"remote_protocol": "file"}`. A new note explains each option and that ROMS-Tools does this automatically when the reference is given as the source `path`. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+* New tests: ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+  * A parquet fixture with padding rows is opened under several hash seeds in subprocesses. Each seed fails without the fix.
+  * Protocol detection, and that JSON references are not read for it.
+  * The protocol cache re-reads a rewritten reference.
+  * An unreadable reference falls back with a debug log.
+  * A parquet directory without the suffix, and the mixed-input and mixed-filesystem errors.
 
 ## 5.1.1
 

@@ -376,18 +376,30 @@ class UpscaledCDR:
         DIC perturbation (tonnes CO2) of `parent` inside `child`'s footprint.
 
         Sums ``(hDIC - hDIC_ALT_CO2) * area`` over the parent cells whose centre
-        lies within the child's area (see `_footprint`).
+        lies within the child's area (see `_footprint`). The parent is cropped to
+        the rows and columns holding those cells before the arithmetic, so only
+        that slab of its (lazy) 3-D fields is read, not the whole parent.
         """
         ref = self._centre_lon(child)
         plon = _unwrap_lon(parent["lon_rho"].values, ref)
         plat = parent["lat_rho"].values
-        inside_values = self._footprint(child, ref).contains_points(
-            np.column_stack([plon.ravel(), plat.ravel()])
+        inside_values = (
+            self._footprint(child, ref)
+            .contains_points(np.column_stack([plon.ravel(), plat.ravel()]))
+            .reshape(plon.shape)
         )
+        dims = parent["lon_rho"].dims
+        window = {
+            dim: slice(int(idx.min()), int(idx.max()) + 1) if idx.size else slice(0, 0)
+            for dim, idx in zip(dims, np.nonzero(inside_values), strict=True)
+        }
         inside = xr.DataArray(
-            inside_values.reshape(plon.shape), dims=parent["lon_rho"].dims
+            inside_values[window[dims[0]], window[dims[1]]], dims=dims
         )
-        diff = ((parent["hDIC"] - parent["hDIC_ALT_CO2"]) * parent["area"]).sum("s_rho")
+        cropped = parent[["hDIC", "hDIC_ALT_CO2", "area"]].isel(window)
+        diff = ((cropped["hDIC"] - cropped["hDIC_ALT_CO2"]) * cropped["area"]).sum(
+            "s_rho"
+        )
         scale = parent[_DIC_UPTAKE].attrs["tonnes_co2_per_native_unit"]
         footprint = (
             diff.where(inside).sum(["eta_rho", "xi_rho"]).compute() * scale

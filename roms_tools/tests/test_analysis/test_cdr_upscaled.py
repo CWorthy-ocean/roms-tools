@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from unittest.mock import patch
 
+import dask.array
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -353,6 +354,31 @@ def test_footprint_follows_rotated_child(members):
     ds = UpscaledCDR(members).ds
 
     np.testing.assert_allclose(ds["mid_DIC_difference_inside_child"], 0.0)
+
+
+def test_footprint_reads_only_the_child_window(members):
+    # Give the mid hDIC fields one dask block per cell column, and fail any block
+    # outside eta/xi 1..2, the mid cells inside the child (see the hand-computed
+    # test). Cropping before the arithmetic means those blocks are never computed.
+    def poisoned(da: xr.DataArray) -> xr.DataArray:
+        def check(block, block_info=None):
+            if block_info is not None:
+                (eta, _), (xi, _) = block_info[0]["array-location"][2:]
+                if not (1 <= eta <= 2 and 1 <= xi <= 2):
+                    raise AssertionError(f"read {da.name} at eta={eta}, xi={xi}")
+            return block
+
+        data = dask.array.from_array(da.values, chunks=(-1, -1, 1, 1))
+        return da.copy(data=data.map_blocks(check, meta=np.array((), dtype=float)))
+
+    mid = members["mid"]
+    members["mid"] = mid.assign(
+        hDIC=poisoned(mid["hDIC"]), hDIC_ALT_CO2=poisoned(mid["hDIC_ALT_CO2"])
+    )
+    ds = UpscaledCDR(members).ds
+
+    expected = (2 + 3) * 2 * 4 * np.arange(1, NT + 1) * SCALE
+    np.testing.assert_allclose(ds["mid_DIC_difference_inside_child"], expected)
 
 
 def test_closure_residual(members):

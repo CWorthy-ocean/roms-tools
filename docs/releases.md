@@ -12,6 +12,13 @@
 * ESPER sources take `salinity_conditioning: {"woa_salinity_path": ..., "low": 31, "high": 34}` (needs the PyESPER fork at tag `v1.1.1+cworthy.1` or later): PyESPER evaluates the nets at a salinity blended toward the WOA23 annual climatology below the band (raised cosine), then dilutes TA and DIC back to the model salinity along a conservative mixing line. Above the band nothing changes. The file is `woa23_decav_s00_01.nc`, which `download_woa23_bgc(variables=["salt_bgc"])` fetches; a missing file fails before any regridding, naming the URL. Output variables record the conditioning and floor in `esper_salinity_conditioning` / `esper_floor` attributes. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
 * `roms_tools.setup.utils.cycle_to_times` puts a climatology (or a dated BGC series, or a static field) on a physics time axis by linear interpolation in day of year with the December→January wrap, blocked one calendar month per chunk. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
 * BGC boundary datasets record `bgc_interpolation_method` (the method actually used, after any fallback to depth) and `bgc_time_axis` (`physics`, `source` or `static`). ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* `compute_cdr_metrics` and `ROMSOutput.cdr_metrics` take `source_role="release"` (default) or `"transfer"` for a parent domain that receives a child's boundary perturbation. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+  * For a transfer the sign checks on `ALK_source`/`DIC_source` are skipped and the efficiency curves are NaN (the member's source is not a release); uptake in tonnes CO₂ is computed as before.
+  * `ds_cdr` now also contains `cdr_cumulative_source`, a `tonnes_co2_per_native_unit` attribute on both uptake variables, and a `cdr_source_role` dataset attribute, so saved metrics can be recombined later.
+* `roms_tools.UpscaledCDR(members)` combines the `ds_cdr` of a child → parent chain of domains into a single CDR efficiency and CO₂ uptake dataset with the same variable names as `ds_cdr`, plus per-member uptake series and a `plot()` method. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+  * Uptake is summed over all members; the efficiency denominator is the cumulative source of the release members only.
+  * Construction fails with a clear error if two members share a grid, members are not strictly nested in the given order, no member is a release, or members differ in averaging window or native carbon units.
+  * Two diagnostics are emitted: `closure_residual` (flux-based minus inventory-based uptake) and `{parent}_DIC_difference_inside_{child}` (parent perturbation inside the child's footprint, i.e. double counting if nonzero).
 
 ### Bug Fixes
 
@@ -33,6 +40,7 @@
 * The physics-time helpers the ESPER path grew (`time_dim_of`, `month_aligned_time_chunks`, `apply_chunk_plan`, `physics_time_view`) live in `roms_tools.setup.utils` and are shared by both companions. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
 * A parquet kerchunk reference directory is recognised by its contents (`.zmetadata` plus `<var>/refs.*.parq`), not only by a `.parquet` suffix. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
 * `load_data` raises a clear `ValueError` when kerchunk references are mixed with other files in one call, or when references loaded together point at files on different filesystems. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+* A `ds_cdr` produced before source roles existed is treated as a release by `ROMSOutput.cdr_metrics`. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
 
 ### Miscellaneous
 
@@ -49,6 +57,8 @@
   * The protocol cache re-reads a rewritten reference.
   * An unreadable reference falls back with a debug log.
   * A parquet directory without the suffix, and the mixed-input and mixed-filesystem errors.
+* The CDR analysis notebook gains a section on nested (upscaled) experiments: per-domain metrics with source roles, `UpscaledCDR`, its diagnostics and the wrong-grid error, executed on a three-domain test case. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+* `UpscaledCDR` is listed in the API reference. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
 
 ## 5.1.1
 

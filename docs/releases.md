@@ -1,5 +1,29 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+* `UpscaledCDR` takes its per-domain metrics as `domains=` instead of `members=`, and writes the domain list to the `domains` attribute instead of `members`. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+
+### New Features
+
+* `UpscaledCDR.plot_domains()` maps the outline of every nested domain, labelled with its role, on a map with coastlines, zoomed out around the outermost domain so the location of the experiment is clear. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+
+### Bug Fixes
+
+### Improvements
+
+* `Ensemble` rejects the metrics of a parent ("transfer") domain of a nested experiment, with an error pointing to the combined `UpscaledCDR` dataset; previously this failed later with an unclear error. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+* The `closure_residual` description of `UpscaledCDR` no longer claims the residual should be small, which does not hold once the perturbation leaves a domain. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+
+### Miscellaneous
+
+* The CDR analysis notebook's nested-experiment section is revised. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+  * It maps the nested domains with `plot_domains()`.
+  * It corrects where the uptake and the DIC perturbation sit at the end of the example run.
+  * It explains that the combined `UpscaledCDR` dataset, not a single domain, represents a nested experiment in an `Ensemble`.
+
 ## 5.2.0
 
 ### Breaking Changes

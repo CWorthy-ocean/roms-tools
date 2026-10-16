@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 5.2.0
 
 ### Breaking Changes
 

@@ -1,6 +1,8 @@
 import contextlib
 import glob
+import json
 import logging
+import os
 import re
 import textwrap
 import time
@@ -485,8 +487,12 @@ def _load_data_dask(
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
-        kwargs.update(_kerchunk_open_kwargs(filenames[0]))
         if _is_kerchunk_reference(filenames[0]):
+            # open_mfdataset takes one set of open keywords for every file. load_data
+            # has checked that the references agree on their remote protocol, so take
+            # the keywords from the first one whose protocol is known.
+            known = next((f for f in filenames if _reference_protocol(f)), filenames[0])
+            kwargs.update(_kerchunk_open_kwargs(known))
             chunks = _without_lateral_chunks(chunks, dim_names)
 
         preprocessor = (
@@ -512,8 +518,93 @@ def _is_kerchunk_reference(path: str | Path) -> bool:
     directory. Wider than ``KerchunkBackend.guess_can_open`` (kerchunk 0.2.10 does not
     list ``.json.zstd``), so a zstd-compressed reference is still opened explicitly
     through the kerchunk engine instead of falling to xarray's engine guessing.
+
+    A local directory holding ``.zmetadata`` plus ``<var>/refs.<n>.parq`` files is
+    also a parquet reference, whatever its name.
     """
-    return str(path).endswith(_KERCHUNK_SUFFIXES)
+    if str(path).rstrip("/").endswith(_KERCHUNK_SUFFIXES):
+        return True
+    p = Path(path)
+    return (
+        p.is_dir()
+        and (p / ".zmetadata").is_file()
+        and next(p.glob("*/refs.*.parq"), None) is not None
+    )
+
+
+# `_reference_protocol` memo: the answer costs a parquet read (a remote one for a
+# remote reference), and every open of the same reference would otherwise pay it again.
+_REFERENCE_PROTOCOLS: dict[object, str] = {}
+
+
+def _reference_protocol(path: str | Path) -> str | None:
+    """Return the protocol of the files a parquet kerchunk reference points at.
+
+    This is not the protocol of the reference itself: a reference on local disk can
+    index ``s3://`` files. fsspec's ``ReferenceFileSystem`` guesses it when it is not
+    given, by scanning every reference value. A parquet reference pads each partition
+    to its record size, the padding rows read back as missing paths, and with pandas 3
+    that scan raises ``TypeError`` for some hash seeds (whichever row it meets first).
+    Passing the protocol skips the scan.
+
+    JSON references give `None` without being read: they have no padding rows, so
+    fsspec's guess is safe, and reading one here would parse the whole reference a
+    second time.
+
+    For a parquet reference only the first non-empty ``path`` of the first
+    ``<var>/refs.0.parq`` is read. The answer is memoised per path plus the mtime and
+    size of ``.zmetadata`` for a local reference (``.zmetadata`` is rewritten whenever
+    the reference is), and per path for a remote one. Anything unexpected gives `None`,
+    leaving fsspec to guess as before; this never raises.
+
+    Parameters
+    ----------
+    path : str | Path
+        A kerchunk reference (see `_is_kerchunk_reference`).
+    """
+    locator = str(path).rstrip("/")
+    if locator.endswith((".json", ".json.zstd")):
+        return None
+    try:
+        key: object = locator
+        if "://" not in locator:
+            st = os.stat(os.path.join(os.path.expanduser(locator), ".zmetadata"))
+            key = (locator, st.st_mtime_ns, st.st_size)
+        if key in _REFERENCE_PROTOCOLS:
+            return _REFERENCE_PROTOCOLS[key]
+
+        import fsspec
+        from fsspec.core import split_protocol
+
+        found = None
+        with fsspec.open(f"{locator}/.zmetadata", "rt") as fh:
+            meta = json.load(fh).get("metadata", {})
+        fs, _, _ = fsspec.get_fs_token_paths(locator)
+        for name in meta:
+            if not name.endswith("/.zarray"):
+                continue
+            part = f"{locator}/{name[: -len('/.zarray')]}/refs.0.parq"
+            if not fs.exists(part):
+                continue
+            with fsspec.open(part, "rb") as fh:
+                column = pd.read_parquet(fh, columns=["path"])["path"].dropna()
+            column = column[column.astype(str).str.len() > 0]
+            if len(column):
+                found = str(column.iloc[0])
+                break
+
+        if found is None:
+            return None
+        protocol = split_protocol(found)[0] or "file"
+        _REFERENCE_PROTOCOLS[key] = protocol
+        return protocol
+    except Exception:
+        logging.debug(
+            "Could not read the remote protocol of %s; fsspec will guess it.",
+            locator,
+            exc_info=True,
+        )
+        return None
 
 
 def _without_lateral_chunks(
@@ -567,13 +658,17 @@ def _kerchunk_open_kwargs(path: str | Path) -> dict:
     zarr wrappers, so the outer ``chunks=`` builds the only dask layer. The engine is
     pinned too: ``open_mfdataset`` would otherwise re-run xarray's engine guessing per
     file. Returns ``{}`` for anything that is not a reference file.
+
+    For a parquet reference the ``remote_protocol`` storage option is filled in from
+    the reference (see `_reference_protocol`), so fsspec does not have to guess it.
     """
     if not _is_kerchunk_reference(path):
         return {}
-    return {
-        "engine": "kerchunk",
-        "backend_kwargs": {"open_dataset_options": {"chunks": None}},
-    }
+    backend_kwargs: dict = {"open_dataset_options": {"chunks": None}}
+    protocol = _reference_protocol(path)
+    if protocol:
+        backend_kwargs["storage_options"] = {"remote_protocol": protocol}
+    return {"engine": "kerchunk", "backend_kwargs": backend_kwargs}
 
 
 def _check_load_data_dask(use_dask: bool) -> None:
@@ -732,7 +827,9 @@ def load_data(
     FileNotFoundError
         If the specified file does not exist.
     ValueError
-        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+        If a list of files is provided but dim_names["time"] is not available or use_dask=False,
+        or if kerchunk references are mixed with other files or point at files on
+        different filesystems.
     RuntimeError
         If loading the dataset fails
     """
@@ -743,6 +840,21 @@ def load_data(
     _check_load_data_filename(filename, dim_names.keys())
 
     match_result = _get_file_matches(filename)
+
+    is_reference = [_is_kerchunk_reference(f) for f in match_result.matches]
+    if any(is_reference) and not all(is_reference):
+        msg = "kerchunk references cannot be combined with other files in one load."
+        raise ValueError(msg)
+    if all(is_reference) and len(match_result.matches) > 1:
+        protocols = {
+            p for f in match_result.matches if (p := _reference_protocol(f)) is not None
+        }
+        if len(protocols) > 1:
+            msg = (
+                "kerchunk references loaded together must point at files on one "
+                f"filesystem, but these use {sorted(protocols)}."
+            )
+            raise ValueError(msg)
 
     load_kwargs = _get_ds_combination_params(
         force_combine_nested,

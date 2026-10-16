@@ -424,6 +424,101 @@ def test_plot_saves_file(domains, tmp_path: Path):
     plt.close("all")
 
 
+@pytest.fixture
+def domains_axes():
+    """Return a function that plots the domains with ``show`` patched out."""
+
+    def plot_domains(up: UpscaledCDR, **kwargs):
+        with patch("matplotlib.pyplot.show") as show:
+            up.plot_domains(**kwargs)
+        show.assert_called_once()
+        return plt.gcf().axes[0]
+
+    yield plot_domains
+    plt.close("all")
+
+
+def test_plot_domains_saves_file(domains, tmp_path: Path):
+    up = UpscaledCDR(domains)
+    for margin in (10.0, 0.0):
+        path = tmp_path / f"margin_{margin}.png"
+        up.plot_domains(margin=margin, save_path=str(path))
+        assert path.exists() and path.stat().st_size > 0
+        plt.close("all")
+
+
+def test_plot_domains_legend_lists_domains_and_roles(domains, domains_axes):
+    ax = domains_axes(UpscaledCDR(domains))
+    _, labels = ax.get_legend_handles_labels()
+    assert labels == ["child (release)", "mid (transfer)", "outer (transfer)"]
+    assert ax.get_title() == "Nested domains"
+
+
+def test_plot_domains_margin_widens_the_map(domains, domains_axes):
+    up = UpscaledCDR(domains)
+
+    def width(**kwargs) -> float:
+        x0, x1, _, _ = domains_axes(up, **kwargs).get_extent()
+        plt.close("all")
+        return x1 - x0
+
+    assert width(margin=0) < width(margin=10) < width(margin=20)
+
+
+def test_plot_domains_negative_margin_raises(domains):
+    with pytest.raises(ValueError, match="margin must be non-negative"):
+        UpscaledCDR(domains).plot_domains(margin=-1)
+
+
+@pytest.mark.parametrize("convention", ["0_360", "-180_180", "mixed"])
+@pytest.mark.parametrize("centre", [0.0, 180.0])
+def test_plot_domains_across_greenwich_and_dateline(
+    domains, domains_axes, tmp_path: Path, centre, convention
+):
+    # Centre the child on `centre` and store each domain's longitudes in either
+    # convention ("mixed": child in [-180, 180), the others in [0, 360)).
+    def shift(ds: xr.Dataset, name: str) -> xr.Dataset:
+        lon = ds["lon_rho"] + centre - 10.5
+        negative = convention == "-180_180" or (
+            convention == "mixed" and name == "child"
+        )
+        lon = (lon + 180) % 360 - 180 if negative else lon % 360
+        return ds.assign_coords(lon_rho=lon)
+
+    shifted = {name: shift(ds, name) for name, ds in domains.items()}
+    up = UpscaledCDR(shifted)
+    ax = domains_axes(up)
+
+    # Every outline is continuous (no 360 degree jumps) and lies in the outermost
+    # domain's longitude range.
+    outer_x = np.concatenate([line.get_xdata() for line in ax.lines[-4:]])
+    for line in ax.lines:
+        x = np.asarray(line.get_xdata())
+        assert x.min() >= outer_x.min() - 1e-6 and x.max() <= outer_x.max() + 1e-6
+    assert np.ptp(outer_x) == pytest.approx(30.0)
+
+    up.plot_domains(save_path=str(tmp_path / "x.png"))
+    assert (tmp_path / "x.png").stat().st_size > 0
+
+
+def test_plot_domains_from_netcdf_paths(domains, domains_axes, tmp_path: Path):
+    paths: dict[str, str | Path | xr.Dataset] = {}
+    for i, (name, ds) in enumerate(domains.items()):
+        path = tmp_path / f"{name}.nc"
+        ds.to_netcdf(path)
+        paths[name] = path if i % 2 else str(path)
+
+    ax = domains_axes(UpscaledCDR(paths))
+    _, labels = ax.get_legend_handles_labels()
+    assert labels == ["child (release)", "mid (transfer)", "outer (transfer)"]
+    plt.close("all")
+
+    reference = domains_axes(UpscaledCDR(domains))
+    for line, ref_line in zip(ax.lines, reference.lines, strict=True):
+        np.testing.assert_allclose(line.get_xdata(), ref_line.get_xdata())
+        np.testing.assert_allclose(line.get_ydata(), ref_line.get_ydata())
+
+
 def test_domains_from_netcdf_paths(domains, tmp_path: Path):
     paths: dict[str, str | Path | xr.Dataset] = {}
     for i, (name, ds) in enumerate(domains.items()):

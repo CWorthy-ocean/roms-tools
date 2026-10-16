@@ -6,12 +6,14 @@ from functools import reduce
 from itertools import pairwise
 from pathlib import Path
 
+import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib.path import Path as MplPath
 
 from roms_tools.analysis.cdr_analysis import SOURCE_ROLES
+from roms_tools.plot import _add_boundary_to_ax, _add_gridlines, get_projection
 
 _FLUX_UPTAKE = "cdr_carbon_uptake_from_flux"
 _DIC_UPTAKE = "cdr_carbon_uptake_from_DIC_difference"
@@ -584,6 +586,86 @@ class UpscaledCDR:
         ax_uptake.set_title(r"Combined CO$_2$ uptake")
         ax_uptake.grid()
         ax_uptake.legend(loc="best")
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        else:
+            plt.show()
+
+    def plot_domains(self, margin: float = 10.0, save_path: str | None = None) -> None:
+        """
+        Plot the outline of every domain on a map with coastlines.
+
+        Shows how the domains are nested and where in the world the experiment
+        takes place. Each outline is labelled ``"<name> (<role>)"``, where the role
+        is the domain's ``cdr_source_role``, and drawn in the colour cycle's next
+        colour in the order of `domains`. The map is centred on the outermost
+        (last) domain.
+
+        The release site itself is not marked, because ``ds_cdr`` carries no source
+        fields; the release domain is identified by its label.
+
+        Parameters
+        ----------
+        margin : float, optional
+            Extent of the map beyond the outermost domain, in degrees of longitude
+            and latitude. The default is chosen large enough for nearby coastlines
+            to show; ``0`` fits the outermost domain. Default is 10.
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
+
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+
+        Raises
+        ------
+        ValueError
+            If `margin` is negative.
+        NotImplementedError
+            If the outermost domain contains the North or South pole.
+        """
+        if margin < 0:
+            raise ValueError(f"margin must be non-negative; got {margin}.")
+
+        datasets = self._load_domains()
+        outer_name = list(datasets)[-1]
+        outer = datasets[outer_name]
+        # All outlines share the outermost domain's longitude convention.
+        ref = self._centre_lon(outer)
+        lon_min, lon_max, lat_min, lat_max = self._bbox(outer, ref)
+
+        lons = {
+            name: ds["lon_rho"].copy(data=_unwrap_lon(ds["lon_rho"].values, ref))
+            for name, ds in datasets.items()
+        }
+        trans = get_projection(lons[outer_name], outer["lat_rho"])
+
+        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+        for i, (name, ds) in enumerate(datasets.items()):
+            _add_boundary_to_ax(
+                ax,
+                lons[name],
+                ds["lat_rho"],
+                trans,
+                c=f"C{i}",
+                label=f"{name} ({ds.attrs['cdr_source_role']})",
+            )
+        _add_gridlines(ax)
+        ax.coastlines()
+        ax.set_extent(
+            [
+                lon_min - margin,
+                lon_max + margin,
+                max(lat_min - margin, -90.0),
+                min(lat_max + margin, 90.0),
+            ],
+            crs=ccrs.PlateCarree(),
+        )
+        ax.set_title("Nested domains")
+        ax.legend(loc="best")
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")

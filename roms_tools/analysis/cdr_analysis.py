@@ -46,7 +46,7 @@ def compute_cdr_metrics(
         normalised by the cumulative source. ``"transfer"`` marks a parent domain
         that receives the child's boundary perturbation re-injected as a source
         (signed, not a new release): the sign checks are skipped and the efficiency
-        variables are all-NaN, because the member's source is not a release. Uptake
+        variables are all-NaN, because the domain's source is not a release. Uptake
         (tonnes CO2) is computed identically for both roles.
 
     Returns
@@ -171,7 +171,7 @@ def compute_cdr_metrics(
         uptake_efficiency_flux = xr.full_like(source, np.nan, dtype=float)
         uptake_efficiency_diff = xr.full_like(source, np.nan, dtype=float)
         description_suffix = (
-            " (not defined for source_role='transfer': the member's source is a "
+            " (not defined for source_role='transfer': the domain's source is a "
             "transfer, not a release)"
         )
 

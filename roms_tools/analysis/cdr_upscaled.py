@@ -25,13 +25,13 @@ _REQUIRED_COORDS = ("time", "lat_rho", "lon_rho")
 _FLUX_EFFICIENCY = "cdr_efficiency_from_flux"
 _DIC_EFFICIENCY = "cdr_efficiency_from_DIC_difference"
 _CLOSURE_RESIDUAL = "closure_residual"
-# Variables of the combined dataset whose names do not depend on the members.
+# Variables of the combined dataset whose names do not depend on the domains.
 _COMBINED_VARS = (*_SERIES_VARS, _FLUX_EFFICIENCY, _DIC_EFFICIENCY, _CLOSURE_RESIDUAL)
 
 
-def _member_var(member: str, var: str) -> str:
-    """Name of a member's own `var` series in the combined dataset."""
-    return f"{member}_{var.removeprefix('cdr_')}"
+def _domain_var(domain: str, var: str) -> str:
+    """Name of a domain's own `var` series in the combined dataset."""
+    return f"{domain}_{var.removeprefix('cdr_')}"
 
 
 def _footprint_var(parent: str, child: str) -> str:
@@ -51,41 +51,40 @@ class UpscaledCDR:
 
     In a nested (upscaled) CDR experiment the actual release happens in a child
     domain; each parent domain receives the child's boundary perturbation
-    re-injected as a source. Every member is a ``ds_cdr`` as produced by
-    :func:`roms_tools.analysis.cdr_analysis.compute_cdr_metrics` (or
-    ``ROMSOutput.cdr_metrics``) for its own domain, computed with that domain's
-    own grid and the matching ``source_role``.
+    re-injected as a source. Every domain is described by a ``ds_cdr`` as produced
+    by :func:`roms_tools.analysis.cdr_analysis.compute_cdr_metrics` (or
+    ``ROMSOutput.cdr_metrics``), computed with that domain's own grid and the
+    matching ``source_role``.
 
     Methodology:
 
-    - Members are ordered child -> parent, i.e. each member's footprint must lie
+    - Domains are ordered child -> parent, i.e. each domain's footprint must lie
       strictly inside the next one's.
-    - The total carbon uptake is the sum of the members' uptakes (flux-based and
+    - The total carbon uptake is the sum of the domains' uptakes (flux-based and
       DIC-difference-based separately): each domain removes the part of the
       perturbation that is in it.
     - The only real source is the release. The denominator of the combined
-      efficiency is therefore the cumulative source of the members with
+      efficiency is therefore the cumulative source of the domains with
       ``cdr_source_role == "release"`` only. The source of a ``"transfer"``
-      member is the child's perturbation passed on to the parent (it is signed,
+      domain is the child's perturbation passed on to the parent (it is signed,
       ``ALK_add = ALK_rate - ALK_alt_rate``), not new alkalinity, so adding it to
       the denominator would count the same release twice.
-    - The summed uptake is converted back to native units with the members'
+    - The summed uptake is converted back to native units with the domains'
       shared ``tonnes_co2_per_native_unit`` before dividing, so the efficiency is
       the native-unit uptake over the native-unit source.
 
-    Members must share the same averaging window (``window_length``) and the same
+    Domains must share the same averaging window (``window_length``) and the same
     native carbon units (``tonnes_co2_per_native_unit``). Longitudes are compared
     after shifting them by multiples of 360 degrees to within 180 degrees of the
     child's centre, so domains may cross the Greenwich meridian or the dateline
-    and members may store longitudes in either [0, 360) or [-180, 180).
-    Members are aligned on the union of their absolute times; where any member
+    and domains may store longitudes in either [0, 360) or [-180, 180).
+    Domains are aligned on the union of their absolute times; where any domain
     lacks a record the combined series are NaN there, and a warning is logged.
 
-    Two diagnostics help to judge the result:
+    The combined dataset also carries two diagnostics:
 
     - ``closure_residual``: combined flux-based uptake minus combined
-      DIC-difference-based uptake (tonnes CO2). The two are bookkeeping views of
-      the same perturbation, so this should be small.
+      DIC-difference-based uptake (tonnes CO2).
     - ``{parent}_DIC_difference_inside_{child}``: the DIC perturbation (tonnes CO2)
       that a parent carries in the cells whose centre lies inside its child's
       area (the child's rho points extended by half a cell, following the
@@ -94,72 +93,72 @@ class UpscaledCDR:
 
     Parameters
     ----------
-    members : dict[str, str | Path | xr.Dataset]
-        Dictionary mapping member names to either file paths (NetCDF) or
-        xarray.Dataset objects holding the member's ``ds_cdr``. Order matters:
+    domains : dict[str, str | Path | xr.Dataset]
+        Dictionary mapping domain names to either file paths (NetCDF) or
+        xarray.Dataset objects holding the domain's ``ds_cdr``. Order matters:
         child first, then its parent, then the parent's parent, and so on. At
-        least two members are required, and at least one must have the role
+        least two domains are required, and at least one must have the role
         ``"release"``. The datasets need the ``lat_rho``/``lon_rho`` coordinates
         and the variables and attributes written by ``compute_cdr_metrics``.
 
     Raises
     ------
     ValueError
-        If fewer than two members are given, a member lacks required variables,
-        coordinates or attributes, no member is a release, the members are not
+        If fewer than two domains are given, a domain lacks required variables,
+        coordinates or attributes, no domain is a release, the domains are not
         nested in the given order or share the same grid, the averaging windows
-        differ, the release members' source units differ, or a member name would
+        differ, the release domains' source units differ, or a domain name would
         give a variable name that clashes with another one in the combined dataset
-        (e.g. a member called ``"cdr"``).
+        (e.g. a domain called ``"cdr"``).
     """
 
-    members: dict[str, str | Path | xr.Dataset]
-    """Dictionary mapping member names (child first) to their CDR metrics."""
+    domains: dict[str, str | Path | xr.Dataset]
+    """Dictionary mapping domain names (child first) to their CDR metrics."""
     ds: xr.Dataset = field(init=False)
-    """Combined uptake, efficiency, per-member series and diagnostics."""
+    """Combined uptake, efficiency, per-domain series and diagnostics."""
 
     def __post_init__(self):
-        """Load and validate the members, align their times, and build ``self.ds``."""
-        datasets = self._load_members()
-        self._validate_members(datasets)
+        """Load and validate the domains, align their times, and build ``self.ds``."""
+        datasets = self._load_domains()
+        self._validate_domains(datasets)
         aligned = self._align_times(datasets)
         self.ds = self._build_dataset(datasets, aligned)
 
-    def _load_members(self) -> dict[str, xr.Dataset]:
+    def _load_domains(self) -> dict[str, xr.Dataset]:
         """
-        Load the member datasets.
+        Load the domain datasets.
 
-        Converts any file paths in `self.members` to xarray Datasets. Members that
+        Converts any file paths in `self.domains` to xarray Datasets. Domains that
         are already xarray Datasets are left unchanged.
 
         Returns
         -------
         dict[str, xr.Dataset]
-            Dictionary mapping member names to xarray.Dataset objects.
+            Dictionary mapping domain names to xarray.Dataset objects.
         """
         return {
             name: xr.open_dataset(path) if isinstance(path, str | Path) else path
-            for name, path in self.members.items()
+            for name, path in self.domains.items()
         }
 
-    def _validate_members(self, datasets: dict[str, xr.Dataset]) -> None:
+    def _validate_domains(self, datasets: dict[str, xr.Dataset]) -> None:
         """
-        Check that the members form a consistent child -> parent chain.
+        Check that the domains form a consistent child -> parent chain.
 
         Raises
         ------
         ValueError
-            On any misconfiguration; the message names the offending member(s).
+            On any misconfiguration; the message names the offending domain(s).
         """
         if len(datasets) < 2:
             raise ValueError(
-                "UpscaledCDR needs a child and at least one parent member, "
+                "UpscaledCDR needs a child and at least one parent domain, "
                 f"got {len(datasets)}."
             )
 
         hint = (
-            "recompute the member with `compute_cdr_metrics` from a roms-tools "
-            "version that writes these"
+            "recompute the domain's metrics with `compute_cdr_metrics` from a "
+            "roms-tools version that writes these"
         )
         for name, ds in datasets.items():
             missing = [v for v in _REQUIRED_VARS if v not in ds.data_vars]
@@ -172,10 +171,10 @@ class UpscaledCDR:
                 if v in ds and "tonnes_co2_per_native_unit" not in ds[v].attrs
             ]
             if missing:
-                raise ValueError(f"Member {name!r} is missing {missing}; {hint}.")
+                raise ValueError(f"Domain {name!r} is missing {missing}; {hint}.")
             if ds.attrs["cdr_source_role"] not in SOURCE_ROLES:
                 raise ValueError(
-                    f"Member {name!r} has cdr_source_role="
+                    f"Domain {name!r} has cdr_source_role="
                     f"{ds.attrs['cdr_source_role']!r}; expected one of {SOURCE_ROLES}."
                 )
 
@@ -183,7 +182,7 @@ class UpscaledCDR:
             ds.attrs["cdr_source_role"] == "release" for ds in datasets.values()
         ):
             raise ValueError(
-                "At least one member must have cdr_source_role='release'; got "
+                "At least one domain must have cdr_source_role='release'; got "
                 f"{ {n: d.attrs['cdr_source_role'] for n, d in datasets.items()} }."
             )
 
@@ -192,7 +191,7 @@ class UpscaledCDR:
             [
                 *_COMBINED_VARS,
                 *(
-                    _member_var(n, v)
+                    _domain_var(n, v)
                     for n in names
                     for v in (_FLUX_UPTAKE, _DIC_UPTAKE)
                 ),
@@ -202,8 +201,8 @@ class UpscaledCDR:
         clashes = sorted(v for v, count in var_names.items() if count > 1)
         if clashes:
             raise ValueError(
-                f"Member names {names} give clashing variable names {clashes} in "
-                "the combined dataset; rename the members."
+                f"Domain names {names} give clashing variable names {clashes} in "
+                "the combined dataset; rename the domains."
             )
 
         self._validate_geometry(datasets)
@@ -211,19 +210,19 @@ class UpscaledCDR:
         window_lengths = {}
         for name, ds in datasets.items():
             values = ds["window_length"].values
-            # A member read back from NetCDF may have been decoded to timedelta64.
+            # A domain read back from NetCDF may have been decoded to timedelta64.
             if np.issubdtype(values.dtype, np.timedelta64):
                 values = values / np.timedelta64(1, "s")
             if not np.allclose(values, values[0]):
                 raise ValueError(
-                    f"Member {name!r} must have a single unique window_length, "
+                    f"Domain {name!r} must have a single unique window_length, "
                     f"got {np.unique(values)}."
                 )
             window_lengths[name] = float(values[0])
         first = next(iter(window_lengths.values()))
         if not np.allclose(list(window_lengths.values()), first):
             raise ValueError(
-                f"Members must share the same averaging window; got {window_lengths}."
+                f"Domains must share the same averaging window; got {window_lengths}."
             )
 
         for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
@@ -233,20 +232,20 @@ class UpscaledCDR:
             }
             if not np.allclose(list(scales.values()), next(iter(scales.values()))):
                 raise ValueError(
-                    f"Members must share the same native carbon units for {var!r} "
+                    f"Domains must share the same native carbon units for {var!r} "
                     f"(tonnes_co2_per_native_unit); got {scales}."
                 )
 
     @staticmethod
     def _centre_lon(ds: xr.Dataset) -> float:
-        """Longitude of the rho point at the centre of a member's grid."""
+        """Longitude of the rho point at the centre of a domain's grid."""
         lon = ds["lon_rho"].values
         return float(lon[lon.shape[0] // 2, lon.shape[1] // 2])
 
     @staticmethod
     def _bbox(ds: xr.Dataset, ref: float) -> tuple[float, float, float, float]:
         """
-        Return (lon_min, lon_max, lat_min, lat_max) of a member's rho points.
+        Return (lon_min, lon_max, lat_min, lat_max) of a domain's rho points.
 
         Longitudes are unwrapped to within 180 degrees of `ref` first.
         """
@@ -260,9 +259,9 @@ class UpscaledCDR:
 
     def _validate_geometry(self, datasets: dict[str, xr.Dataset]) -> None:
         """
-        Check that members have distinct grids and are nested child -> parent.
+        Check that domains have distinct grids and are nested child -> parent.
 
-        Longitudes are unwrapped to within 180 degrees of the (smaller) member's
+        Longitudes are unwrapped to within 180 degrees of the (smaller) domain's
         centre before comparing, so grids crossing 0E or 180E are handled.
         """
         names = list(datasets)
@@ -280,9 +279,9 @@ class UpscaledCDR:
                 )
                 if same:
                     raise ValueError(
-                        f"Members {a!r} and {b!r} have identical lon_rho/lat_rho: "
-                        "the same grid appears to have been used for both members. "
-                        "Compute each member's metrics with its own grid."
+                        f"Domains {a!r} and {b!r} have identical lon_rho/lat_rho: "
+                        "the same grid appears to have been used for both domains. "
+                        "Compute each domain's metrics with its own grid."
                     )
 
         for child, parent in pairwise(names):
@@ -296,23 +295,23 @@ class UpscaledCDR:
                 and p_lat1 > c_lat1
             ):
                 raise ValueError(
-                    f"Member {parent!r} must strictly contain the lon/lat bounding "
-                    f"box of {child!r}; members must be ordered child -> parent. "
+                    f"Domain {parent!r} must strictly contain the lon/lat bounding "
+                    f"box of {child!r}; domains must be ordered child -> parent. "
                     f"{parent!r}: lon [{p_lon0}, {p_lon1}], lat [{p_lat0}, {p_lat1}]; "
                     f"{child!r}: lon [{c_lon0}, {c_lon1}], lat [{c_lat0}, {c_lat1}]."
                 )
 
     def _align_times(self, datasets: dict[str, xr.Dataset]) -> dict[str, xr.Dataset]:
         """
-        Align the members' time series on the union of their absolute times.
+        Align the domains' time series on the union of their absolute times.
 
-        Records that some member lacks are NaN for that member; a single warning
-        reports how many records are affected and which members are shorter.
+        Records that some domain lacks are NaN for that domain; a single warning
+        reports how many records are affected and which domains are shorter.
 
         Returns
         -------
         dict[str, xr.Dataset]
-            For each member, its cumulative source and uptake series on the common
+            For each domain, its cumulative source and uptake series on the common
             time axis.
         """
         all_times = np.unique(
@@ -327,8 +326,8 @@ class UpscaledCDR:
                 n for n, ds in datasets.items() if ds["time"].size < all_times.size
             ]
             logging.warning(
-                "%d time record(s) are missing from at least one member; combined "
-                "series are NaN there. Members with fewer records: %s.",
+                "%d time record(s) are missing from at least one domain; combined "
+                "series are NaN there. Domains with fewer records: %s.",
                 n_incomplete,
                 ", ".join(shorter),
             )
@@ -340,7 +339,7 @@ class UpscaledCDR:
     @staticmethod
     def _footprint(ds: xr.Dataset, ref: float) -> MplPath:
         """
-        Perimeter of a member's area as a lon/lat polygon.
+        Perimeter of a domain's area as a lon/lat polygon.
 
         Longitudes are unwrapped to within 180 degrees of `ref`. The rho points
         are cell centres, so each row and column is extrapolated by half a step to
@@ -409,21 +408,21 @@ class UpscaledCDR:
     def _build_dataset(
         self, datasets: dict[str, xr.Dataset], aligned: dict[str, xr.Dataset]
     ) -> xr.Dataset:
-        """Assemble the combined dataset from the aligned member series."""
+        """Assemble the combined dataset from the aligned domain series."""
         names = list(datasets)
         roles = {n: datasets[n].attrs["cdr_source_role"] for n in names}
         releases = [n for n in names if roles[n] == "release"]
         all_times = aligned[names[0]]["time"].values
 
-        def total(var: str, members: list[str]) -> xr.DataArray:
-            return reduce(operator.add, [aligned[n][var] for n in members])
+        def total(var: str, domains: list[str]) -> xr.DataArray:
+            return reduce(operator.add, [aligned[n][var] for n in domains])
 
         source_units = {
             datasets[n][_CUMULATIVE_SOURCE].attrs.get("units") for n in releases
         }
         if len(source_units) != 1:
             raise ValueError(
-                f"Release members must share the same {_CUMULATIVE_SOURCE} units, "
+                f"Release domains must share the same {_CUMULATIVE_SOURCE} units, "
                 f"got {sorted(map(str, source_units))}."
             )
 
@@ -431,10 +430,10 @@ class UpscaledCDR:
 
         out[_CUMULATIVE_SOURCE] = total(_CUMULATIVE_SOURCE, releases)
         out[_CUMULATIVE_SOURCE].attrs.update(
-            long_name="Cumulative CDR source (release members)",
+            long_name="Cumulative CDR source (release domains)",
             description=(
                 "Time-cumulative volume-integrated (ALK_source - DIC_source) of the "
-                "release members only; the denominator of the combined efficiency"
+                "release domains only; the denominator of the combined efficiency"
             ),
         )
         units = source_units.pop()
@@ -443,23 +442,23 @@ class UpscaledCDR:
 
         out[_FLUX_UPTAKE] = total(_FLUX_UPTAKE, names)
         out[_FLUX_UPTAKE].attrs.update(
-            long_name="CDR carbon uptake (cumulative flux differences, all members)",
+            long_name="CDR carbon uptake (cumulative flux differences, all domains)",
             units="tonnes CO2",
             description=(
                 "Time-cumulative CO2 uptake mass from area-integrated CO2 flux "
-                "differences, summed over all members"
+                "differences, summed over all domains"
             ),
         )
         out[_DIC_UPTAKE] = total(_DIC_UPTAKE, names)
         out[_DIC_UPTAKE].attrs.update(
-            long_name="CDR carbon uptake (from DIC differences, all members)",
+            long_name="CDR carbon uptake (from DIC differences, all domains)",
             units="tonnes CO2",
             description=(
                 "CO2-equivalent mass from the volume-integrated DIC difference, "
-                "summed over all members"
+                "summed over all domains"
             ),
         )
-        # Validation guarantees all members share the scale, so the sum keeps it.
+        # Validation guarantees all domains share the scale, so the sum keeps it.
         for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
             out[var].attrs["tonnes_co2_per_native_unit"] = datasets[names[0]][
                 var
@@ -480,32 +479,29 @@ class UpscaledCDR:
             long_name="CDR uptake efficiency (from flux differences)",
             units="nondimensional",
             description=(
-                "Total uptake over all members (area-integrated CO2 flux "
-                "differences) divided by the cumulative source of the release members"
+                "Total uptake over all domains (area-integrated CO2 flux "
+                "differences) divided by the cumulative source of the release domains"
             ),
         )
         out[_DIC_EFFICIENCY].attrs.update(
             long_name="CDR uptake efficiency (from DIC differences)",
             units="nondimensional",
             description=(
-                "Total uptake over all members (volume-integrated DIC differences) "
-                "divided by the cumulative source of the release members"
+                "Total uptake over all domains (volume-integrated DIC differences) "
+                "divided by the cumulative source of the release domains"
             ),
         )
 
         for n in names:
             for var in (_FLUX_UPTAKE, _DIC_UPTAKE):
-                out[_member_var(n, var)] = aligned[n][var]
-                out[_member_var(n, var)].attrs = dict(datasets[n][var].attrs)
+                out[_domain_var(n, var)] = aligned[n][var]
+                out[_domain_var(n, var)].attrs = dict(datasets[n][var].attrs)
 
         out[_CLOSURE_RESIDUAL] = out[_FLUX_UPTAKE] - out[_DIC_UPTAKE]
         out[_CLOSURE_RESIDUAL].attrs.update(
             long_name="Closure residual (flux-based minus DIC-based uptake)",
             units="tonnes CO2",
-            description=(
-                "Combined flux-based minus DIC-difference-based uptake; the two are "
-                "bookkeeping views of the same perturbation, so this should be small"
-            ),
+            description="Combined flux-based minus DIC-difference-based uptake",
         )
         diagnostics = {_CLOSURE_RESIDUAL: out[_CLOSURE_RESIDUAL]}
 
@@ -532,7 +528,7 @@ class UpscaledCDR:
                 )
 
         out.attrs["cdr_source_role"] = "release"
-        out.attrs["members"] = ", ".join(f"{n}:{roles[n]}" for n in names)
+        out.attrs["domains"] = ", ".join(f"{n}:{roles[n]}" for n in names)
         return out
 
     def plot(
@@ -543,7 +539,7 @@ class UpscaledCDR:
         Plot the combined CDR efficiency and CO2 uptake in two subplots.
 
         The top panel shows the combined efficiency (flux-based and DIC-based); the
-        bottom panel the combined uptake (both methods) with each member's
+        bottom panel the combined uptake (both methods) with each domain's
         flux-based uptake as a thinner line.
 
         Parameters
@@ -575,10 +571,10 @@ class UpscaledCDR:
         ax_uptake.plot(
             time, self.ds[_DIC_UPTAKE], lw=2, label="total (DIC differences)"
         )
-        for name in self.members:
+        for name in self.domains:
             ax_uptake.plot(
                 time,
-                self.ds[_member_var(name, _FLUX_UPTAKE)],
+                self.ds[_domain_var(name, _FLUX_UPTAKE)],
                 lw=1,
                 alpha=0.8,
                 label=f"{name} (flux differences)",

@@ -22,6 +22,11 @@ _REQUIRED_VARS = (*_SERIES_VARS, "area", "hDIC", "hDIC_ALT_CO2", "window_length"
 _REQUIRED_COORDS = ("time", "lat_rho", "lon_rho")
 
 
+def _unwrap_lon(lon: np.ndarray, ref: float) -> np.ndarray:
+    """Shift longitudes by multiples of 360 degrees into ``[ref - 180, ref + 180)``."""
+    return (lon - ref + 180) % 360 - 180 + ref
+
+
 @dataclass
 class UpscaledCDR:
     """
@@ -51,9 +56,11 @@ class UpscaledCDR:
       shared ``tonnes_co2_per_native_unit`` before dividing, so the efficiency is
       the native-unit uptake over the native-unit source.
 
-    Members must share the same longitude convention (longitudes are compared as
-    stored, without wrapping), the same averaging window (``window_length``) and
-    the same native carbon units (``tonnes_co2_per_native_unit``).
+    Members must share the same averaging window (``window_length``) and the same
+    native carbon units (``tonnes_co2_per_native_unit``). Longitudes are compared
+    after shifting them by multiples of 360 degrees to within 180 degrees of the
+    child's centre, so domains may cross the Greenwich meridian or the dateline
+    and members may store longitudes in either [0, 360) or [-180, 180).
     Members are aligned on the union of their absolute times; where any member
     lacks a record the combined series are NaN there, and a warning is logged.
 
@@ -193,9 +200,19 @@ class UpscaledCDR:
                 )
 
     @staticmethod
-    def _bbox(ds: xr.Dataset) -> tuple[float, float, float, float]:
-        """Return (lon_min, lon_max, lat_min, lat_max) of a member's rho points."""
-        lon, lat = ds["lon_rho"].values, ds["lat_rho"].values
+    def _centre_lon(ds: xr.Dataset) -> float:
+        """Longitude of the rho point at the centre of a member's grid."""
+        lon = ds["lon_rho"].values
+        return float(lon[lon.shape[0] // 2, lon.shape[1] // 2])
+
+    @staticmethod
+    def _bbox(ds: xr.Dataset, ref: float) -> tuple[float, float, float, float]:
+        """
+        Return (lon_min, lon_max, lat_min, lat_max) of a member's rho points.
+
+        Longitudes are unwrapped to within 180 degrees of `ref` first.
+        """
+        lon, lat = _unwrap_lon(ds["lon_rho"].values, ref), ds["lat_rho"].values
         return (
             float(np.nanmin(lon)),
             float(np.nanmax(lon)),
@@ -207,16 +224,21 @@ class UpscaledCDR:
         """
         Check that members have distinct grids and are nested child -> parent.
 
-        Longitudes are compared as stored, so members must share the longitude
-        convention.
+        Longitudes are unwrapped to within 180 degrees of the (smaller) member's
+        centre before comparing, so grids crossing 0E or 180E are handled.
         """
         names = list(datasets)
         for i, a in enumerate(names):
+            ref = self._centre_lon(datasets[a])
             for b in names[i + 1 :]:
-                same = all(
-                    datasets[a][c].shape == datasets[b][c].shape
-                    and np.allclose(datasets[a][c].values, datasets[b][c].values)
-                    for c in ("lon_rho", "lat_rho")
+                da, db = datasets[a], datasets[b]
+                same = (
+                    da["lon_rho"].shape == db["lon_rho"].shape
+                    and np.allclose(
+                        _unwrap_lon(da["lon_rho"].values, ref),
+                        _unwrap_lon(db["lon_rho"].values, ref),
+                    )
+                    and np.allclose(da["lat_rho"].values, db["lat_rho"].values)
                 )
                 if same:
                     raise ValueError(
@@ -226,8 +248,9 @@ class UpscaledCDR:
                     )
 
         for child, parent in pairwise(names):
-            c_lon0, c_lon1, c_lat0, c_lat1 = self._bbox(datasets[child])
-            p_lon0, p_lon1, p_lat0, p_lat1 = self._bbox(datasets[parent])
+            ref = self._centre_lon(datasets[child])
+            c_lon0, c_lon1, c_lat0, c_lat1 = self._bbox(datasets[child], ref)
+            p_lon0, p_lon1, p_lat0, p_lat1 = self._bbox(datasets[parent], ref)
             if not (
                 p_lon0 < c_lon0
                 and p_lon1 > c_lon1
@@ -236,8 +259,7 @@ class UpscaledCDR:
             ):
                 raise ValueError(
                     f"Member {parent!r} must strictly contain the lon/lat bounding "
-                    f"box of {child!r}; members must be ordered child -> parent and "
-                    "share the longitude convention. "
+                    f"box of {child!r}; members must be ordered child -> parent. "
                     f"{parent!r}: lon [{p_lon0}, {p_lon1}], lat [{p_lat0}, {p_lat1}]; "
                     f"{child!r}: lon [{c_lon0}, {c_lon1}], lat [{c_lat0}, {c_lat1}]."
                 )
@@ -278,13 +300,14 @@ class UpscaledCDR:
         }
 
     @staticmethod
-    def _footprint(ds: xr.Dataset) -> MplPath:
+    def _footprint(ds: xr.Dataset, ref: float) -> MplPath:
         """
         Perimeter of a member's area as a lon/lat polygon.
 
-        The rho points are cell centres, so each row and column is extrapolated by
-        half a step to reach the cell edges before the outer ring is traced. This
-        follows the grid's own orientation, unlike a lon/lat bounding box.
+        Longitudes are unwrapped to within 180 degrees of `ref`. The rho points
+        are cell centres, so each row and column is extrapolated by half a step to
+        reach the cell edges before the outer ring is traced. This follows the
+        grid's own orientation, unlike a lon/lat bounding box.
         """
 
         def extend(a: np.ndarray) -> np.ndarray:
@@ -300,7 +323,8 @@ class UpscaledCDR:
                 axis=1,
             )
 
-        lon, lat = extend(ds["lon_rho"].values), extend(ds["lat_rho"].values)
+        lon = extend(_unwrap_lon(ds["lon_rho"].values, ref))
+        lat = extend(ds["lat_rho"].values)
 
         def ring(a: np.ndarray) -> np.ndarray:
             return np.concatenate([a[0, :], a[1:, -1], a[-1, -2::-1], a[-2:0:-1, 0]])
@@ -316,8 +340,10 @@ class UpscaledCDR:
         Sums ``(hDIC - hDIC_ALT_CO2) * area`` over the parent cells whose centre
         lies within the child's area (see `_footprint`).
         """
-        plon, plat = parent["lon_rho"].values, parent["lat_rho"].values
-        inside_values = self._footprint(child).contains_points(
+        ref = self._centre_lon(child)
+        plon = _unwrap_lon(parent["lon_rho"].values, ref)
+        plat = parent["lat_rho"].values
+        inside_values = self._footprint(child, ref).contains_points(
             np.column_stack([plon.ravel(), plat.ravel()])
         )
         inside = xr.DataArray(

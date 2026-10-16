@@ -225,6 +225,36 @@ def test_parent_not_strictly_containing_raises(members):
         UpscaledCDR({"child": members["child"], "mid": mid})
 
 
+@pytest.mark.parametrize("child_convention", ["0_360", "-180_180"])
+def test_domains_crossing_greenwich(members, child_convention):
+    # Shift every domain so the child is centred near 0E. Grid stores lon in
+    # [0, 360), so the child's longitudes wrap from ~359.8 to ~0.2.
+    def shift(ds: xr.Dataset, convention: str) -> xr.Dataset:
+        lon = ds["lon_rho"] - 10.5
+        lon = lon % 360 if convention == "0_360" else (lon + 180) % 360 - 180
+        return ds.assign_coords(lon_rho=lon)
+
+    shifted = {
+        name: shift(ds, child_convention if name == "child" else "0_360")
+        for name, ds in members.items()
+    }
+    assert float(shifted["outer"]["lon_rho"].max()) > 300
+
+    xr.testing.assert_allclose(UpscaledCDR(shifted).ds, UpscaledCDR(members).ds)
+
+
+def test_parent_crossing_greenwich_still_checks_nesting(members):
+    # The parent wraps from 359.6 to 0.6, so its stored lon range spans almost
+    # 360 degrees; a child 150 degrees away must still be rejected.
+    mid = members["mid"].assign_coords(lon_rho=(members["mid"]["lon_rho"] - 9.4) % 360)
+    child = members["child"].assign_coords(lon_rho=members["child"]["lon_rho"] - 9.3)
+    UpscaledCDR({"child": child, "mid": mid})
+
+    distant = child.assign_coords(lon_rho=child["lon_rho"] + 150)
+    with pytest.raises(ValueError, match="strictly contain"):
+        UpscaledCDR({"child": distant, "mid": mid})
+
+
 def test_missing_role_raises(members):
     del members["mid"].attrs["cdr_source_role"]
     with pytest.raises(ValueError, match="'mid'.*cdr_source_role"):

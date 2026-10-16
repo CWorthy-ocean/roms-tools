@@ -1,4 +1,5 @@
 import logging
+import typing as t
 
 import numpy as np
 import xarray as xr
@@ -6,8 +7,17 @@ import xarray as xr
 # Molar mass of CO2 (kg mol^-1), 44.0095 g mol^-1 (IUPAC-style value for conversions).
 _MOLAR_MASS_CO2_KG_PER_MOL = 44.0095e-3
 
+# "release" is the CDR intervention itself; "transfer" is a parent domain receiving
+# the child's boundary perturbation (ucla-roms ``upscale_output.F90`` writes
+# ``ALK_add = ALK_rate - ALK_alt_rate``, same for DIC, so transfer sources
+# legitimately take both signs).
+SourceRole = t.Literal["release", "transfer"]
+SOURCE_ROLES: t.Final[tuple[str, ...]] = t.get_args(SourceRole)
 
-def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
+
+def compute_cdr_metrics(
+    ds: xr.Dataset, grid_ds: xr.Dataset, source_role: SourceRole = "release"
+) -> xr.Dataset:
     """
     Compute Carbon Dioxide Removal (CDR) metrics from model output.
 
@@ -29,21 +39,48 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
     grid_ds : xr.Dataset
         Grid dataset with 'pm', 'pn' (inverse grid spacing).
 
+    source_role : {"release", "transfer"}, optional
+        Role of ``ALK_source``/``DIC_source`` in this domain. ``"release"`` (default)
+        is the CDR intervention itself: the source must satisfy
+        ``ALK_source >= 0`` and ``DIC_source <= 0``, and efficiencies are the uptake
+        normalised by the cumulative source. ``"transfer"`` marks a parent domain
+        that receives the child's boundary perturbation re-injected as a source
+        (signed, not a new release): the sign checks are skipped and the efficiency
+        variables are all-NaN, because the member's source is not a release. Uptake
+        (tonnes CO2) is computed identically for both roles.
+
     Returns
     -------
     ds_cdr : xr.Dataset
         Dataset containing:
         - 'area', 'window_length'
         - copied flux/tracer variables
-        - 'cdr_efficiency_from_flux' and 'cdr_efficiency_from_DIC_difference' (dimensionless)
+        - 'cdr_efficiency_from_flux' and 'cdr_efficiency_from_DIC_difference'
+          (dimensionless; all-NaN for ``source_role="transfer"``)
+        - 'cdr_cumulative_source' (time-cumulative volume-integrated
+          ``ALK_source - DIC_source``; the efficiency denominator for a release,
+          the net perturbation received for a transfer)
         - 'cdr_carbon_uptake_from_flux' (cumulative flux-based uptake, tonnes CO2)
         - 'cdr_carbon_uptake_from_DIC_difference' (DIC-difference-based uptake, tonnes CO2)
 
+        Both uptake variables carry a ``tonnes_co2_per_native_unit`` attribute (the
+        scale applied to the native integrated carbon amount), and
+        ``ds_cdr.attrs["cdr_source_role"]`` records `source_role`, so the dataset
+        is self-describing for downstream combination.
+
     Raises
     ------
+    ValueError
+        If `source_role` is not one of ``SOURCE_ROLES``, or if ``source_role="release"``
+        and the source violates the release sign constraints.
     KeyError
         If required variables are missing from `ds` or `grid_ds`.
     """
+    if source_role not in SOURCE_ROLES:
+        raise ValueError(
+            f"source_role must be one of {SOURCE_ROLES}, got {source_role!r}"
+        )
+
     # Define required variables
     ds_vars = [
         "avg_begin_time",
@@ -87,7 +124,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         units="s",
     )
 
-    _validate_source(ds)
+    _validate_source(ds, source_role)
 
     # Cumulative alkalinity source
     source = (
@@ -120,34 +157,59 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         .compute()
     )
 
-    # Normalize by cumulative source with safe division (NaN where source=0)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        uptake_efficiency_flux = (flux / source).where(np.isfinite(flux / source))
-        uptake_efficiency_diff = (diff_DIC / source).where(
-            np.isfinite(diff_DIC / source)
-        )
+    if source_role == "release":
+        # Normalize by cumulative source with safe division (NaN where source=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            uptake_efficiency_flux = (flux / source).where(np.isfinite(flux / source))
+            uptake_efficiency_diff = (diff_DIC / source).where(
+                np.isfinite(diff_DIC / source)
+            )
 
-    _validate_uptake_efficiency(uptake_efficiency_flux, uptake_efficiency_diff)
+        _validate_uptake_efficiency(uptake_efficiency_flux, uptake_efficiency_diff)
+        description_suffix = ""
+    else:
+        uptake_efficiency_flux = xr.full_like(source, np.nan, dtype=float)
+        uptake_efficiency_diff = xr.full_like(source, np.nan, dtype=float)
+        description_suffix = (
+            " (not defined for source_role='transfer': the member's source is a "
+            "transfer, not a release)"
+        )
 
     flux_units = ds["FG_CO2"].attrs.get("units")
     hdic_units = ds["hDIC"].attrs.get("units")
-    flux_tonnes_co2 = flux * _native_carbon_amount_to_tonnes_co2_scale(flux_units)
-    diff_dic_tonnes_co2 = diff_DIC * _native_carbon_amount_to_tonnes_co2_scale(
-        hdic_units
-    )
+    flux_scale = _native_carbon_amount_to_tonnes_co2_scale(flux_units)
+    dic_scale = _native_carbon_amount_to_tonnes_co2_scale(hdic_units)
+    flux_tonnes_co2 = flux * flux_scale
+    diff_dic_tonnes_co2 = diff_DIC * dic_scale
+
+    source_units = ds["ALK_source"].attrs.get("units") or "mmol"
+    source_units = source_units.removesuffix("/s")
 
     # Store results with metadata
+    ds_cdr["cdr_cumulative_source"] = source
+    ds_cdr["cdr_cumulative_source"].attrs.update(
+        long_name="Cumulative CDR source",
+        units=source_units,
+        description=(
+            "Time-cumulative volume-integrated (ALK_source - DIC_source); for "
+            "source_role='release' this is the denominator of the efficiency, for "
+            "'transfer' it is the net perturbation received from a child domain"
+        ),
+    )
+
     ds_cdr["cdr_efficiency_from_flux"] = uptake_efficiency_flux
     ds_cdr["cdr_efficiency_from_flux"].attrs.update(
         long_name="CDR uptake efficiency (from flux differences)",
         units="nondimensional",
-        description="Carbon Dioxide Removal efficiency computed using area-integrated CO2 flux differences",
+        description="Carbon Dioxide Removal efficiency computed using area-integrated CO2 flux differences"
+        + description_suffix,
     )
     ds_cdr["cdr_efficiency_from_DIC_difference"] = uptake_efficiency_diff
     ds_cdr["cdr_efficiency_from_DIC_difference"].attrs.update(
         long_name="CDR uptake efficiency (from DIC differences)",
         units="nondimensional",
-        description="Carbon Dioxide Removal efficiency computed using volume-integrated DIC differences",
+        description="Carbon Dioxide Removal efficiency computed using volume-integrated DIC differences"
+        + description_suffix,
     )
 
     ds_cdr["cdr_carbon_uptake_from_flux"] = flux_tonnes_co2
@@ -155,6 +217,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         long_name="CDR carbon uptake (cumulative flux differences)",
         units="tonnes CO2",
         description="Time-cumulative CO2 uptake mass from area-integrated CO2 flux differences",
+        tonnes_co2_per_native_unit=flux_scale,
     )
 
     ds_cdr["cdr_carbon_uptake_from_DIC_difference"] = diff_dic_tonnes_co2
@@ -162,7 +225,10 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         long_name="CDR carbon uptake (from DIC differences)",
         units="tonnes CO2",
         description=("CO2-equivalent mass from the volume-integrated DIC difference"),
+        tonnes_co2_per_native_unit=dic_scale,
     )
+
+    ds_cdr.attrs["cdr_source_role"] = source_role
 
     return ds_cdr
 
@@ -197,24 +263,32 @@ def _validate_uptake_efficiency(
     return max_abs_diff
 
 
-def _validate_source(ds: xr.Dataset):
+def _validate_source(ds: xr.Dataset, source_role: SourceRole):
     """
-    Validate that ALK_source and DIC_source in a ROMS dataset respect release constraints.
+    Validate ALK_source and DIC_source in a ROMS dataset for the given source role.
+
+    The presence of both variables is always checked. For ``source_role="release"``
+    the release sign constraints are also enforced:
 
     - 'ALK_source' must be non-negative (≥ 0).
     - 'DIC_source' must be non-positive (≤ 0).
+
+    A ``"transfer"`` source is signed, so no sign check is applied.
 
     Parameters
     ----------
     ds : xr.Dataset
         Dataset expected to contain 'ALK_source' and 'DIC_source'.
+    source_role : {"release", "transfer"}
+        Role of the source; the sign constraints apply only to ``"release"``.
 
     Raises
     ------
     KeyError
         If 'ALK_source' or 'DIC_source' are missing from the dataset.
     ValueError
-        If 'ALK_source' or 'DIC_source' violate the release constraints.
+        If ``source_role="release"`` and 'ALK_source' or 'DIC_source' violate the
+        release constraints.
     """
     constraints = {
         "ALK_source": lambda x: x >= 0,
@@ -224,7 +298,7 @@ def _validate_source(ds: xr.Dataset):
     for var, check in constraints.items():
         if var not in ds.data_vars:
             raise KeyError(f"Dataset is missing required variable '{var}'.")
-        if not check(ds[var]).all():
+        if source_role == "release" and not check(ds[var]).all():
             sign = "negative" if var == "ALK_source" else "positive"
             raise ValueError(
                 f"'{var}' contains {sign} values, which violates release constraints."

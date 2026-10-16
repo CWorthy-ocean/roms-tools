@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 5.2.1
 
 ### Breaking Changes
 
@@ -9,8 +9,6 @@
 ### New Features
 
 * `UpscaledCDR.plot_domains()` maps the outline of every nested domain, labelled with its role, on a map with coastlines, zoomed out around the outermost domain so the location of the experiment is clear. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
-
-### Bug Fixes
 
 ### Improvements
 

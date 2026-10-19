@@ -317,6 +317,16 @@ class TestMapChildBoundaries:
                         )
 
 
+# The ROMS convention used everywhere else in roms-tools (see `get_boundary_coords`):
+# south/north are the first/last eta_rho rows, west/east the first/last xi_rho columns.
+ROMS_EDGES = {
+    "south": {"eta_rho": 0},
+    "north": {"eta_rho": -1},
+    "west": {"xi_rho": 0},
+    "east": {"xi_rho": -1},
+}
+
+
 class TestBoundaryDistance:
     @pytest.mark.parametrize(
         "grid_fixture",
@@ -355,6 +365,74 @@ class TestBoundaryDistance:
         assert (alpha.isel(eta_rho=-1) == 1).any()
         assert (alpha.isel(xi_rho=0) == 1).any()
         assert (alpha.isel(xi_rho=-1) == 1).any()
+
+    @pytest.mark.parametrize("land_edge", ["south", "east", "north", "west"])
+    def test_open_edges_are_blended_when_one_edge_is_land(self, land_edge):
+        """Regression test for #703.
+
+        When one child edge is entirely land, `check_and_set_boundaries` infers it as
+        closed. Every *other* edge is open and must have alpha == 0 along it. Before
+        the fix, `compute_boundary_distance` labelled the edges in a rotated
+        convention, so closing one boundary silently skipped blending on a different,
+        open edge.
+        """
+        # Non-square so that eta/xi confusion is detectable.
+        mask = xr.DataArray(
+            np.ones((40, 20), dtype="int32"), dims=("eta_rho", "xi_rho")
+        )
+        mask[ROMS_EDGES[land_edge]] = 0
+
+        boundaries = check_and_set_boundaries(None, mask)
+        assert boundaries == {
+            d: (d != land_edge) for d in ["south", "east", "north", "west"]
+        }
+
+        alpha = compute_boundary_distance(mask, boundaries)
+
+        # Transition width in cells: 5% of the longer dimension.
+        width = int(np.ceil(0.05 * max(mask.shape)))
+
+        for direction in ["south", "east", "north", "west"]:
+            edge = alpha.isel(**ROMS_EDGES[direction])
+            (other_dim,) = edge.dims
+            if direction == land_edge:
+                # Land points are never blended. Away from the corners the
+                # neighbouring open edges' transition bands do not reach.
+                inner = edge.isel({other_dim: slice(width, -width)})
+                assert (inner == 1).all(), f"{direction} edge (land) should be 1"
+            else:
+                inner = edge.isel({other_dim: slice(1, -1)})
+                assert (inner == 0).all(), f"{direction} edge (open) should be 0"
+
+        # Interior is untouched.
+        assert alpha.isel(eta_rho=20, xi_rho=10) == 1
+
+    @pytest.mark.parametrize("closed_edge", ["south", "east", "north", "west"])
+    def test_user_closed_boundary_is_not_blended(self, closed_edge):
+        """A user-supplied `boundaries` dict closing one edge of an all-ocean grid must
+        leave that edge unblended (alpha == 1 away from the corners) and blend the
+        other three (alpha == 0).
+        """
+        mask = xr.DataArray(
+            np.ones((40, 20), dtype="int32"), dims=("eta_rho", "xi_rho")
+        )
+        boundaries = {d: (d != closed_edge) for d in ["south", "east", "north", "west"]}
+
+        alpha = compute_boundary_distance(mask, boundaries)
+
+        # Transition width in cells: 5% of the longer dimension.
+        width = int(np.ceil(0.05 * max(mask.shape)))
+
+        for direction in ["south", "east", "north", "west"]:
+            edge = alpha.isel(**ROMS_EDGES[direction])
+            (other_dim,) = edge.dims
+            if direction == closed_edge:
+                # Away from the corners the neighbouring open edges' bands do not reach.
+                inner = edge.isel({other_dim: slice(width, -width)})
+                assert (inner == 1).all(), f"{direction} edge (closed) should be 1"
+            else:
+                inner = edge.isel({other_dim: slice(1, -1)})
+                assert (inner == 0).all(), f"{direction} edge (open) should be 0"
 
 
 class TestModifyChid:

@@ -512,47 +512,54 @@ def compute_boundary_distance(
         A 2D DataArray with normalized distance values.
     """
     dist = np.full_like(child_mask, 1e6, dtype=float)
-    nx, ny = child_mask.shape
-    n = max(nx, ny)
+    n_eta, n_xi = child_mask.shape
+    n = max(n_eta, n_xi)
 
-    x = np.arange(nx) / n
-    y = np.arange(ny) / n
+    x = np.arange(n_eta) / n
+    y = np.arange(n_xi) / n
     x, y = np.meshgrid(x, y, indexing="ij")
 
     trans = 0.05
     width = int(np.ceil(n * trans))
 
+    # Edges follow the ROMS convention used by `get_boundary_coords`:
+    # south/north are the first/last eta_rho rows, west/east the first/last
+    # xi_rho columns.
     if boundaries["south"]:
-        bx = x[:, 0][child_mask[:, 0] > 0]
-        by = y[:, 0][child_mask[:, 0] > 0]
-        for i in range(len(bx)):
-            dtmp = (x[:, :width] - bx[i]) ** 2 + (y[:, :width] - by[i]) ** 2
-            dist[:, :width] = np.minimum(dist[:, :width], dtmp)
-
-    if boundaries["east"]:
-        bx = x[-1, :][child_mask[-1, :] > 0]
-        by = y[-1, :][child_mask[-1, :] > 0]
-        for i in range(len(bx)):
-            dtmp = (x[nx - width : nx, :] - bx[i]) ** 2 + (
-                y[nx - width : nx, :] - by[i]
-            ) ** 2
-            dist[nx - width : nx, :] = np.minimum(dist[nx - width : nx, :], dtmp)
-
-    if boundaries["north"]:
-        bx = x[:, -1][child_mask[:, -1] > 0]
-        by = y[:, -1][child_mask[:, -1] > 0]
-        for i in range(len(bx)):
-            dtmp = (x[:, ny - width : ny] - bx[i]) ** 2 + (
-                y[:, ny - width : ny] - by[i]
-            ) ** 2
-            dist[:, ny - width : ny] = np.minimum(dist[:, ny - width : ny], dtmp)
-
-    if boundaries["west"]:
         bx = x[0, :][child_mask[0, :] > 0]
         by = y[0, :][child_mask[0, :] > 0]
         for i in range(len(bx)):
             dtmp = (x[:width, :] - bx[i]) ** 2 + (y[:width, :] - by[i]) ** 2
             dist[:width, :] = np.minimum(dist[:width, :], dtmp)
+
+    if boundaries["east"]:
+        bx = x[:, -1][child_mask[:, -1] > 0]
+        by = y[:, -1][child_mask[:, -1] > 0]
+        for i in range(len(bx)):
+            dtmp = (x[:, n_xi - width : n_xi] - bx[i]) ** 2 + (
+                y[:, n_xi - width : n_xi] - by[i]
+            ) ** 2
+            dist[:, n_xi - width : n_xi] = np.minimum(
+                dist[:, n_xi - width : n_xi], dtmp
+            )
+
+    if boundaries["north"]:
+        bx = x[-1, :][child_mask[-1, :] > 0]
+        by = y[-1, :][child_mask[-1, :] > 0]
+        for i in range(len(bx)):
+            dtmp = (x[n_eta - width : n_eta, :] - bx[i]) ** 2 + (
+                y[n_eta - width : n_eta, :] - by[i]
+            ) ** 2
+            dist[n_eta - width : n_eta, :] = np.minimum(
+                dist[n_eta - width : n_eta, :], dtmp
+            )
+
+    if boundaries["west"]:
+        bx = x[:, 0][child_mask[:, 0] > 0]
+        by = y[:, 0][child_mask[:, 0] > 0]
+        for i in range(len(bx)):
+            dtmp = (x[:, :width] - bx[i]) ** 2 + (y[:, :width] - by[i]) ** 2
+            dist[:, :width] = np.minimum(dist[:, :width], dtmp)
 
     dist = np.sqrt(dist)
     dist[dist > trans] = trans

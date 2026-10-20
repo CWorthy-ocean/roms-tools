@@ -233,6 +233,14 @@ def test_ic_without_salinity_raises(grid, clean):
         bgc_check(ds, grid)
 
 
+def test_steep_smooth_gradient_is_not_a_spike(grid, clean):
+    """Each cell differs from its neighbours by more than max_jump, but lies between them."""
+    ramp = 1000.0 + 110.0 * np.arange(NX)[None, None, None, :]  # 110 per cell along x
+    clean["DIC"] = np.where(clean["salt"] > 0, ramp, 0.0)
+    flags = bgc_check(_ic(clean), grid, variables=["DIC"])["DIC"].values
+    assert not (flags & FLAG_JUMP).any()
+
+
 def test_bad_column_is_flagged_at_every_level_and_fixed(grid, clean):
     """A whole column off its neighbours: its vertical neighbours agree with it."""
     clean["DIC"][0, :, 10, 10] -= 160.0

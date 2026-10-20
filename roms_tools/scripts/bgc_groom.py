@@ -12,12 +12,13 @@ Each tracer gets a :class:`BgcCheck`:
 - ``floor_jump``: a value at its floor (``floor``) next to a neighbour at or above this,
   i.e. the zero-next-to-normal artefact. Used for nutrients and O2, whose zeros can be
   real, so a plain gradient limit would also flag natural nutriclines;
-- ``max_jump``: a cell is flagged when it differs by more than this from a strict majority
-  (at least two) of its eligible horizontal neighbours, or from both vertical neighbours (salinity-normalized values ``E + (x - E) * 35 / S``, E the
-  freshwater endmember, when ``normalize_by_salinity`` is set, so river-plume fronts that follow salinity pass). A
-  spike among agreeing neighbours is caught; a cell on one side of a real front, or a
-  healthy cell next to a bad one, is not. The interior of a large bad region agrees with
-  itself and is not a jump either: bounds and ``physical_reality`` must catch that;
+- ``max_jump``: a cell is flagged as a spike when it lies outside the range of its
+  eligible horizontal neighbours (at least two) by more than this, or outside the range of
+  its two vertical neighbours. Values are salinity-normalized (``E + (x - E) * 35 / S``,
+  E the freshwater endmember) when ``normalize_by_salinity`` is set, so river-plume fronts
+  that follow salinity pass. A cell inside a steep but smooth gradient, on one side of a
+  front, or next to a bad cell is not a spike. Neither is the interior of a large bad
+  region, which agrees with itself: bounds and ``physical_reality`` must catch that;
 - ``physical_reality``: an optional check returning where the value is plausible, e.g.
   ALK against the salinity mixing line, DIC against ALK.
 
@@ -269,15 +270,23 @@ def _detect(
                     for e, (axis, step) in zip(elig, _DIRS, strict=True)
                 ]
             )
-            big = np.abs(nbrs - x) > chk.max_jump  # NaN compares False
+            # A spike lies outside the range of its neighbours by more than max_jump; a
+            # cell inside a steep but smooth gradient, or beside a front, does not.
+            # Vertical (rows 0-1 of _DIRS) and horizontal (rows 2-5) are judged apart, so
+            # a bad column (whose vertical neighbours agree with it) is still a
+            # horizontal spike at every level, and a bad layer a vertical one.
             ok = ~np.isnan(nbrs)
-            # Vertical (rows 0-1 of _DIRS) and horizontal (rows 2-5) are judged apart, so a
-            # bad column (whose vertical neighbours agree with it) is still a horizontal
-            # outlier at every level, and a bad layer a vertical one.
-            h_ok, h_big = ok[2:].sum(axis=0), big[2:].sum(axis=0)
-            v_ok, v_big = ok[:2].sum(axis=0), big[:2].sum(axis=0)
+            hi = np.where(ok, nbrs, -np.inf)
+            lo = np.where(ok, nbrs, np.inf)
+            h_ok = ok[2:].sum(axis=0)
+            h_spike = (x - chk.max_jump > hi[2:].max(axis=0)) | (
+                x + chk.max_jump < lo[2:].min(axis=0)
+            )
+            v_spike = (x - chk.max_jump > hi[:2].max(axis=0)) | (
+                x + chk.max_jump < lo[:2].min(axis=0)
+            )
             jump = valid & (
-                ((h_ok >= 2) & (2 * h_big > h_ok)) | ((v_ok == 2) & (v_big == 2))
+                ((h_ok >= 2) & h_spike) | ((ok[:2].sum(axis=0) == 2) & v_spike)
             )
             flags |= np.uint8(FLAG_JUMP) * jump
         if chk.physical_reality is not None:

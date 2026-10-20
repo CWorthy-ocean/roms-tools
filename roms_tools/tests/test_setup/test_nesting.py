@@ -12,6 +12,7 @@ from roms_tools import Grid
 from roms_tools.plot import plot_nesting
 from roms_tools.setup.nesting import (
     _check_child_outside_parent,
+    _interpolate_parent,
     _prepare_grid_datasets,
     align_grids,
     compute_boundary_distance,
@@ -21,6 +22,7 @@ from roms_tools.setup.nesting import (
     modify_child_mask,
     modify_child_topography,
 )
+from roms_tools.setup.topography import clip_depth
 from roms_tools.setup.utils import check_and_set_boundaries, get_boundary_coords
 from roms_tools.utils import wrap_longitudes
 
@@ -317,6 +319,16 @@ class TestMapChildBoundaries:
                         )
 
 
+# The ROMS convention used everywhere else in roms-tools (see `get_boundary_coords`):
+# south/north are the first/last eta_rho rows, west/east the first/last xi_rho columns.
+ROMS_EDGES = {
+    "south": {"eta_rho": 0},
+    "north": {"eta_rho": -1},
+    "west": {"xi_rho": 0},
+    "east": {"xi_rho": -1},
+}
+
+
 class TestBoundaryDistance:
     @pytest.mark.parametrize(
         "grid_fixture",
@@ -355,6 +367,74 @@ class TestBoundaryDistance:
         assert (alpha.isel(eta_rho=-1) == 1).any()
         assert (alpha.isel(xi_rho=0) == 1).any()
         assert (alpha.isel(xi_rho=-1) == 1).any()
+
+    @pytest.mark.parametrize("land_edge", ["south", "east", "north", "west"])
+    def test_open_edges_are_blended_when_one_edge_is_land(self, land_edge):
+        """Regression test for #703.
+
+        When one child edge is entirely land, `check_and_set_boundaries` infers it as
+        closed. Every *other* edge is open and must have alpha == 0 along it. Before
+        the fix, `compute_boundary_distance` labelled the edges in a rotated
+        convention, so closing one boundary silently skipped blending on a different,
+        open edge.
+        """
+        # Non-square so that eta/xi confusion is detectable.
+        mask = xr.DataArray(
+            np.ones((40, 20), dtype="int32"), dims=("eta_rho", "xi_rho")
+        )
+        mask[ROMS_EDGES[land_edge]] = 0
+
+        boundaries = check_and_set_boundaries(None, mask)
+        assert boundaries == {
+            d: (d != land_edge) for d in ["south", "east", "north", "west"]
+        }
+
+        alpha = compute_boundary_distance(mask, boundaries)
+
+        # Transition width in cells: 5% of the longer dimension.
+        width = int(np.ceil(0.05 * max(mask.shape)))
+
+        for direction in ["south", "east", "north", "west"]:
+            edge = alpha.isel(**ROMS_EDGES[direction])
+            (other_dim,) = edge.dims
+            if direction == land_edge:
+                # Land points are never blended. Away from the corners the
+                # neighbouring open edges' transition bands do not reach.
+                inner = edge.isel({other_dim: slice(width, -width)})
+                assert (inner == 1).all(), f"{direction} edge (land) should be 1"
+            else:
+                inner = edge.isel({other_dim: slice(1, -1)})
+                assert (inner == 0).all(), f"{direction} edge (open) should be 0"
+
+        # Interior is untouched.
+        assert alpha.isel(eta_rho=20, xi_rho=10) == 1
+
+    @pytest.mark.parametrize("closed_edge", ["south", "east", "north", "west"])
+    def test_user_closed_boundary_is_not_blended(self, closed_edge):
+        """A user-supplied `boundaries` dict closing one edge of an all-ocean grid must
+        leave that edge unblended (alpha == 1 away from the corners) and blend the
+        other three (alpha == 0).
+        """
+        mask = xr.DataArray(
+            np.ones((40, 20), dtype="int32"), dims=("eta_rho", "xi_rho")
+        )
+        boundaries = {d: (d != closed_edge) for d in ["south", "east", "north", "west"]}
+
+        alpha = compute_boundary_distance(mask, boundaries)
+
+        # Transition width in cells: 5% of the longer dimension.
+        width = int(np.ceil(0.05 * max(mask.shape)))
+
+        for direction in ["south", "east", "north", "west"]:
+            edge = alpha.isel(**ROMS_EDGES[direction])
+            (other_dim,) = edge.dims
+            if direction == closed_edge:
+                # Away from the corners the neighbouring open edges' bands do not reach.
+                inner = edge.isel({other_dim: slice(width, -width)})
+                assert (inner == 1).all(), f"{direction} edge (closed) should be 1"
+            else:
+                inner = edge.isel({other_dim: slice(1, -1)})
+                assert (inner == 0).all(), f"{direction} edge (open) should be 0"
 
 
 class TestModifyChid:
@@ -571,6 +651,49 @@ class TestNesting:
 
         assert isinstance(child_grid.ds, xr.Dataset)
         assert isinstance(ds_nesting, xr.Dataset)
+
+    def test_open_boundaries_match_parent_when_one_edge_is_land(self):
+        """Regression test for #703 through the full `align_grids` chain.
+
+        The child's east edge lies over Oregon and is entirely land, so `align_grids`
+        infers that boundary as closed. Along every open edge, the aligned child's wet
+        points must carry the parent's (interpolated) topography. Before the fix the
+        north edge was left unblended whenever the east boundary was closed.
+        """
+        parent_grid = Grid(
+            nx=25, ny=25, center_lon=-127, center_lat=45, rot=0, size_x=900, size_y=900
+        )
+        child_grid = Grid(
+            nx=20,
+            ny=20,
+            center_lon=-125.5,
+            center_lat=44.5,
+            rot=0,
+            size_x=500,
+            size_y=300,
+        )
+        boundaries = check_and_set_boundaries(None, child_grid.ds.mask_rho)
+        assert boundaries == {"south": True, "east": False, "north": True, "west": True}
+
+        h_parent = clip_depth(
+            _interpolate_parent(parent_grid.ds["h"], child_grid.ds["h"]),
+            child_grid.hmin,
+        )
+        aligned = align_grids(parent_grid, child_grid)
+
+        for direction, sel in ROMS_EDGES.items():
+            if not boundaries[direction]:
+                continue
+            edge_h = aligned.ds["h"].isel(**sel)
+            (along,) = edge_h.dims
+            interior = {along: slice(1, -1)}
+            wet = aligned.ds["mask_rho"].isel(**sel).isel(interior) == 1
+            assert wet.any(), f"{direction} edge has no wet points"
+            np.testing.assert_allclose(
+                edge_h.isel(interior).where(wet).values,
+                h_parent.isel(**sel).isel(interior).where(wet).values,
+                err_msg=f"{direction} edge was not blended into the parent",
+            )
 
     @pytest.mark.parametrize(
         "child_grid_fixture, parent_grid_fixture",

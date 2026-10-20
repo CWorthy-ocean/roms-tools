@@ -1887,3 +1887,58 @@ def test_conditioned_source_survives_yaml_round_trips(
         .ds[next(v for v in reloaded.bgc[0].ds.data_vars if str(v).startswith("ALK"))]
         .attrs
     )
+
+
+# --------------------------------------------------------------------------------------
+# Grooming of ESPER-derived tracers (roms_tools.scripts.bgc_groom)
+# --------------------------------------------------------------------------------------
+
+
+def _esper_ic(source: dict) -> InitialConditions:
+    return InitialConditions(
+        grid=_small_grid(),
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[{"source": source, "use_vars": ["NO3", "PO4"]}],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+    )
+
+
+def test_esper_groom_is_on_by_default_and_recorded(monkeypatch):
+    _mock_estimate_bgc_fields(monkeypatch)
+    source = {"name": "ESPER", "path": "unused"}
+    ic = _esper_ic(source)
+    assert "bgc_groom" in ic.ds.attrs
+    assert "bgc_groom" in ic.ds["NO3"].attrs
+    assert ic.bgc_sources[0]["source"]["groom"] is True  # recorded for the YAML
+    assert "groom" not in source  # the caller's dict is not modified
+
+
+def test_esper_groom_false_leaves_fields_untouched(monkeypatch):
+    _mock_estimate_bgc_fields(monkeypatch)
+    ic = _esper_ic({"name": "ESPER", "path": "unused", "groom": False})
+    assert "bgc_groom" not in ic.ds.attrs
+    assert "bgc_groom" not in ic.ds["NO3"].attrs
+
+
+def test_esper_groom_must_be_a_bool():
+    with pytest.raises(ValueError, match="'groom' must be True or False"):
+        esper_module.validate_esper_source({"name": "ESPER", "groom": "yes"})
+
+
+def test_with_esper_groom_default_only_touches_esper_sources():
+    items = [
+        {"source": {"name": "ESPER"}},
+        {"source": {"name": "ESPER", "groom": False}},
+        {"source": {"name": "UNIFIED"}},
+    ]
+    out = esper_module.with_esper_groom_default(items)
+    assert out[0]["source"]["groom"] is esper_module.ESPER_GROOM_DEFAULT
+    assert out[1]["source"]["groom"] is False
+    assert "groom" not in out[2]["source"]
+    assert "groom" not in items[0]["source"]

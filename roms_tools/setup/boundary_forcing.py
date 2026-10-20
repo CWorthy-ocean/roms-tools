@@ -1963,7 +1963,15 @@ class BoundaryForcing:
         # Validate `bgc_model` BEFORE building the physics source: a wrong value
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
-        bgc_sources = self.bgc_sources or []
+        from roms_tools.setup.esper import (
+            groom_esper_boundary,
+            with_esper_groom_default,
+        )
+
+        bgc_sources = with_esper_groom_default(self.bgc_sources or [])
+        if self.bgc_sources is not None:
+            # Store the effective ESPER `groom` setting so the YAML records it.
+            self.bgc_sources = bgc_sources
         if bgc_sources:
             if self.bgc_model is None:
                 raise ValueError(
@@ -2013,6 +2021,8 @@ class BoundaryForcing:
                 type_="bgc",
             )
             self.bgc_model().process_bgc_fields(self.bgc)
+            for b in self.bgc:
+                b.ds = groom_esper_boundary(b, self.grid, self.physics.ds)
         else:
             self.bgc = []
 

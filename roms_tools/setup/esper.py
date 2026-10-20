@@ -46,9 +46,11 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sys
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import xarray as xr
@@ -145,6 +147,13 @@ ESPER_FLOORS: dict[str, float] = {
 }
 
 _VALID_METHODS = ("lir", "nn", "mixed")
+
+#: Whether ESPER-derived tracers are groomed by default: implausible values (spikes,
+#: zeros beside ordinary water, DIC inconsistent with ALK, ...) are detected and refilled
+#: from the surrounding water by ``roms_tools.scripts.bgc_groom``. An ESPER source turns
+#: it off with ``"groom": False``. The wrappers write the effective value into the source
+#: they store, so a YAML records it.
+ESPER_GROOM_DEFAULT = True
 
 #: Shared install guidance. ``{problem}`` names which of the two failure modes was hit
 #: -- nothing importable at all, versus an importable PyESPER that turns out to be
@@ -325,8 +334,91 @@ def validate_esper_source(source: dict) -> None:
             "ESPER source 'equation' must be 8 (salinity+temperature) or 16 "
             f"(salinity only), got {equation!r}."
         )
+    groom = source.get("groom", ESPER_GROOM_DEFAULT)
+    if not isinstance(groom, bool):
+        raise ValueError(f"ESPER source 'groom' must be True or False, got {groom!r}.")
     _ensure_pyesper(source.get("path"))
     _salinity_conditioning(source)
+
+
+def with_esper_groom_default(bgc_sources: list[dict]) -> list[dict]:
+    """``bgc_sources`` with ``groom`` set explicitly on every ESPER source (copies; the
+    caller's dicts are not modified), so the effective value is recorded.
+    """
+    out = []
+    for item in bgc_sources:
+        src = item.get("source") if isinstance(item, dict) else None
+        if isinstance(src, dict) and src.get("name") == "ESPER" and "groom" not in src:
+            item = {**item, "source": {**src, "groom": ESPER_GROOM_DEFAULT}}
+        out.append(item)
+    return out
+
+
+def _groomed_esper_vars(companions: Iterable[Any], ds_vars: Iterable[str]) -> list[str]:
+    """ESPER-derived tracers present in ``ds_vars`` (bare or ``_<side>`` names) from the
+    companions whose source asks for grooming.
+    """
+    want = {
+        v
+        for c in companions
+        if c.source.get("name") == "ESPER"
+        and c.source.get("groom", ESPER_GROOM_DEFAULT)
+        for v in (c.use_vars or ESPER_SUPPORTED_VARS)
+    }
+    present = set(ds_vars)
+    return [
+        v
+        for v in ESPER_SUPPORTED_VARS
+        if v in want and (v in present or any(n.startswith(f"{v}_") for n in present))
+    ]
+
+
+def _groom_checks(variables: list[str], ds_vars: Iterable[str]) -> dict:
+    """Default checks for ``variables``; DIC drops its ALK-based check when no ALK is
+    available (e.g. an ESPER boundary file without ALK).
+    """
+    from roms_tools.scripts.bgc_groom import DEFAULT_CHECKS
+
+    checks = {v: DEFAULT_CHECKS[v] for v in variables}
+    names = set(ds_vars)
+    has_alk = "ALK" in names or any(n.startswith("ALK_") for n in names)
+    if "DIC" in checks and not has_alk:
+        checks["DIC"] = dataclasses.replace(
+            checks["DIC"], physical_reality=None, requires=()
+        )
+    return checks
+
+
+def groom_esper_initial_conditions(
+    ds: xr.Dataset, grid: Any, bgc: Iterable[Any]
+) -> xr.Dataset:
+    """Lazily groom the ESPER-derived tracers of a merged initial-conditions dataset."""
+    variables = _groomed_esper_vars(bgc, ds.data_vars)
+    if not variables:
+        return ds
+    from roms_tools.scripts.bgc_groom import bgc_groom
+
+    return bgc_groom(
+        ds, grid, checks=_groom_checks(variables, ds.data_vars), variables=variables
+    )
+
+
+def groom_esper_boundary(
+    companion: Any, grid: Any, physics_ds: xr.Dataset
+) -> xr.Dataset:
+    """Lazily groomed copy of one ESPER boundary source's dataset (unchanged if off)."""
+    variables = _groomed_esper_vars([companion], companion.ds.data_vars)
+    if not variables:
+        return companion.ds
+    from roms_tools.scripts.bgc_groom import bgc_groom
+
+    return bgc_groom(
+        companion.ds,
+        grid,
+        physics_ds,
+        checks=_groom_checks(variables, companion.ds.data_vars),
+        variables=variables,
+    )
 
 
 def _salinity_conditioning(source: dict) -> SalinityConditioning | None:

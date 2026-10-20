@@ -1979,7 +1979,17 @@ class InitialConditions:
         bgc_sources = self.bgc_sources
         if self.bgc_source is not None:
             bgc_sources = [{"source": self.bgc_source, "use_vars": self.use_vars}]
-        bgc_sources = bgc_sources or []
+        from roms_tools.setup.esper import (
+            groom_esper_initial_conditions,
+            with_esper_groom_default,
+        )
+
+        bgc_sources = with_esper_groom_default(bgc_sources or [])
+        # Store the effective ESPER `groom` setting so the YAML records it.
+        if self.bgc_source is not None:
+            self.bgc_source = bgc_sources[0]["source"]
+        elif self.bgc_sources is not None:
+            self.bgc_sources = bgc_sources
         # Validate `bgc_model` BEFORE building the physics source: a wrong value
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
@@ -2035,6 +2045,7 @@ class InitialConditions:
 
         if self.bgc:
             self.ds = InitialConditionsSource.merge(self.physics, self.bgc)
+            self.ds = groom_esper_initial_conditions(self.ds, self.grid, self.bgc)
         else:
             self.ds = self.physics.ds
 

@@ -12,10 +12,12 @@ Each tracer gets a :class:`BgcCheck`:
 - ``floor_jump``: a value at its floor (``floor``) next to a neighbour at or above this,
   i.e. the zero-next-to-normal artefact. Used for nutrients and O2, whose zeros can be
   real, so a plain gradient limit would also flag natural nutriclines;
-- ``max_jump``: the largest allowed difference from the median of a cell's neighbours, on
-  salinity-normalized values (``x * 35 / S``) when ``normalize_by_salinity`` is set, so
-  river-plume fronts that follow salinity are not flagged. Using the neighbour median flags
-  the outlier only, not the healthy cells around it;
+- ``max_jump``: a cell is flagged when it differs by more than this from a strict majority
+  of its eligible neighbours (salinity-normalized values ``x * 35 / S`` when
+  ``normalize_by_salinity`` is set, so river-plume fronts that follow salinity pass). A
+  spike among agreeing neighbours is caught; a cell on one side of a real front, or a
+  healthy cell next to a bad one, is not. The interior of a large bad region agrees with
+  itself and is not a jump either: bounds and ``physical_reality`` must catch that;
 - ``physical_reality``: an optional check returning where the value is plausible, e.g.
   ALK against the salinity mixing line, DIC against ALK.
 
@@ -40,7 +42,6 @@ the result is written or computed; :func:`summarize_flags` is the explicit eager
 from __future__ import annotations
 
 import json
-import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -98,7 +99,7 @@ COLUMN_REACH = 8
 TILE = 128
 
 #: Default bry_time chunk for boundary forcing; an execution setting only.
-BRY_TIME_CHUNK = 31
+BRY_TIME_CHUNK = 4
 
 #: Flag bits returned by bgc_check.
 FLAG_BOUNDS = 1
@@ -251,10 +252,8 @@ def _detect(
             flags |= np.uint8(FLAG_FLOOR_JUMP) * (at_floor & high)
         if chk.max_jump is not None:
             if chk.normalize_by_salinity:
-                valid = wet & (block.salt >= S_MIN_NORMALIZE)
-                x = np.where(
-                    valid, a * S_REF / np.where(valid, block.salt, 1.0), np.nan
-                )
+                x, valid = _normalize(a, block.salt, wet)
+                x = np.where(valid, x, np.nan)
             else:
                 valid = wet
                 x = a
@@ -269,17 +268,23 @@ def _detect(
                 ]
             )
             n_ok = np.sum(~np.isnan(nbrs), axis=0)
-            with warnings.catch_warnings():
-                warnings.simplefilter(
-                    "ignore", RuntimeWarning
-                )  # all-NaN neighbour sets
-                med = np.nanmedian(nbrs, axis=0)
-            jump = valid & (n_ok >= 2) & (np.abs(x - med) > chk.max_jump)
+            n_big = np.sum(
+                np.abs(nbrs - x) > chk.max_jump, axis=0
+            )  # NaN compares False
+            jump = valid & (n_ok >= 2) & (2 * n_big > n_ok)
             flags |= np.uint8(FLAG_JUMP) * jump
         if chk.physical_reality is not None:
             ok = chk.physical_reality(block)
             flags |= np.uint8(FLAG_PHYSICAL) * (wet & ~ok)
     return flags
+
+
+def _normalize(
+    a: np.ndarray, salt: np.ndarray, wet: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Salinity-normalized ``a * S_REF / S`` where S >= S_MIN_NORMALIZE (raw elsewhere)."""
+    valid = wet & (salt >= S_MIN_NORMALIZE)
+    return np.where(valid, a * S_REF / np.where(valid, salt, 1.0), a), valid
 
 
 def _neighbour_mean(
@@ -401,7 +406,17 @@ def _kernel(
     for n in stage:
         block = Block(values, salt, temp, wet)
         holes = _detect(n, checks[n], block, elig) > 0
-        values[n] = _fill(values[n], holes, wet, z, elig, column_reach, relax_sweeps)
+        if checks[n].normalize_by_salinity:
+            # Fill the salinity-normalized field, so the infill follows salinity and meets
+            # the same normalized jump test; only the hole cells are replaced.
+            x, valid = _normalize(values[n], salt, wet)
+            x = _fill(x, holes, wet, z, elig, column_reach, relax_sweeps)
+            back = np.where(valid, x * np.where(valid, salt, S_REF) / S_REF, x)
+            values[n] = np.where(holes, back, values[n])
+        else:
+            values[n] = _fill(
+                values[n], holes, wet, z, elig, column_reach, relax_sweeps
+            )
         out[names.index(n)] = values[n]
     return out
 

@@ -96,7 +96,7 @@ RHO0 = 1025.0
 FLOOR_TOL = 1.0e-6
 
 #: Default fill parameters. They define the result, so a run is reproducible from them.
-PASSES = 5
+PASSES = 8
 RELAX_SWEEPS = 10
 COLUMN_REACH = 8
 
@@ -319,6 +319,29 @@ def _spike_envelope(
     return lo, hi
 
 
+def _grow_infeasible(
+    a: np.ndarray,
+    holes: np.ndarray,
+    salt: np.ndarray,
+    wet: np.ndarray,
+    elig: list[np.ndarray],
+    max_jump: float,
+    normalize: bool,
+) -> np.ndarray:
+    """Add the vertical neighbours of holes that no value can fix to the holes.
+
+    A hole whose horizontal and vertical ranges do not overlap sits in a column offset
+    from its surroundings by more than twice ``max_jump``; its column neighbours share the
+    offset, so they are filled too and the fill spreads along the column over the passes.
+    Vertical only: the s axis is never split, so this adds no tile overlap.
+    """
+    x, valid = _normalize(a, salt, wet) if normalize else (a, wet)
+    lo, hi = _spike_envelope(x, valid, elig, max_jump)
+    stuck = holes & (lo > hi)
+    up_down = _shift(stuck, -3, 1, False) | _shift(stuck, -3, -1, False)
+    return holes | (up_down & valid)
+
+
 def _project_into_envelope(
     x: np.ndarray,
     holes: np.ndarray,
@@ -456,6 +479,10 @@ def _kernel(
     for n in stage:
         block = Block(values, salt, temp, wet)
         holes = _detect(n, checks[n], block, elig) > 0
+        if (jmp := checks[n].max_jump) is not None:
+            holes = _grow_infeasible(
+                values[n], holes, salt, wet, elig, jmp, checks[n].normalize_by_salinity
+            )
         if checks[n].normalize_by_salinity:
             # Fill the salinity-normalized field, so the infill follows salinity and meets
             # the same normalized jump test; only the hole cells are replaced.

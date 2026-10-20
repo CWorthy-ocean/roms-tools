@@ -13,8 +13,8 @@ Each tracer gets a :class:`BgcCheck`:
   i.e. the zero-next-to-normal artefact. Used for nutrients and O2, whose zeros can be
   real, so a plain gradient limit would also flag natural nutriclines;
 - ``max_jump``: a cell is flagged when it differs by more than this from a strict majority
-  of its eligible neighbours (salinity-normalized values ``x * 35 / S`` when
-  ``normalize_by_salinity`` is set, so river-plume fronts that follow salinity pass). A
+  of its eligible neighbours (salinity-normalized values ``E + (x - E) * 35 / S``, E the
+  freshwater endmember, when ``normalize_by_salinity`` is set, so river-plume fronts that follow salinity pass). A
   spike among agreeing neighbours is caught; a cell on one side of a real front, or a
   healthy cell next to a bad one, is not. The interior of a large bad region agrees with
   itself and is not a jump either: bounds and ``physical_reality`` must catch that;
@@ -71,12 +71,16 @@ S_REF = 35.0
 #: Below this salinity, normalized jumps are not evaluated (fresh or land water).
 S_MIN_NORMALIZE = 5.0
 
-#: Open-ocean salinity-normalized alkalinity range (mmol/m3 at S = 35).
-NALK_RANGE = (2150.0, 2550.0)
+#: Open-ocean salinity-normalized alkalinity range (mmol/m3 at S = 35). The upper end
+#: allows for in-situ density: tracers are per m3 at in-situ density, about 4-5% above
+#: surface density at 4-5 km, so deep water near 2450 umol/kg reads about 2560 mmol/m3.
+NALK_RANGE = (2150.0, 2650.0)
 
-#: River TA endmembers bracketing the ALK-salinity mixing band (mmol/m3). PyESPER's
-#: salinity conditioning mixes toward 770, inside this range.
-TA_RIVER_RANGE = (0.0, 3000.0)
+#: Freshwater ALK and DIC endmember (mmol/m3) for salinity normalization: the value
+#: PyESPER's salinity conditioning dilutes TA and DIC toward. Normalizing against it
+#: (``E + (x - E) * S_REF / S``) removes both dilution and evaporative concentration, so
+#: conditioned plume and hypersaline water normalize to open-ocean values.
+FRESHWATER_ENDMEMBER = 770.0
 
 #: Plausible DIC/ALK ratio.
 DIC_ALK_RATIO = (0.80, 1.05)
@@ -125,14 +129,12 @@ class Block:
 
 
 def alk_reality(block: Block) -> np.ndarray:
-    """ALK within the band between conservative mixing lines from the river endmember
-    range (``TA_RIVER_RANGE``) to the open-ocean nALK range (``NALK_RANGE``).
+    """Salinity-normalized ALK (against ``FRESHWATER_ENDMEMBER``) within ``NALK_RANGE``:
+    ALK lies in the band of mixing lines from the freshwater endmember to open-ocean water.
+    Water fresher than ``S_MIN_NORMALIZE`` is not judged.
     """
-    s = block.salt / S_REF
-    lo = TA_RIVER_RANGE[0] + (NALK_RANGE[0] - TA_RIVER_RANGE[0]) * s
-    hi = TA_RIVER_RANGE[1] + (NALK_RANGE[1] - TA_RIVER_RANGE[1]) * s
-    a = block.values["ALK"]
-    return (a >= lo) & (a <= hi)
+    n, valid = _normalize(block.values["ALK"], block.salt, block.wet)
+    return ~valid | ((n >= NALK_RANGE[0]) & (n <= NALK_RANGE[1]))
 
 
 def dic_reality(block: Block) -> np.ndarray:
@@ -282,9 +284,12 @@ def _detect(
 def _normalize(
     a: np.ndarray, salt: np.ndarray, wet: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Salinity-normalized ``a * S_REF / S`` where S >= S_MIN_NORMALIZE (raw elsewhere)."""
+    """``E + (a - E) * S_REF / S`` with E = FRESHWATER_ENDMEMBER where S >= S_MIN_NORMALIZE
+    (raw elsewhere), and the mask of where it applies.
+    """
     valid = wet & (salt >= S_MIN_NORMALIZE)
-    return np.where(valid, a * S_REF / np.where(valid, salt, 1.0), a), valid
+    e = FRESHWATER_ENDMEMBER
+    return np.where(valid, e + (a - e) * S_REF / np.where(valid, salt, 1.0), a), valid
 
 
 def _neighbour_mean(
@@ -378,6 +383,7 @@ def _kernel(
     combo: np.ndarray,
     *,
     names: tuple[str, ...],
+    targets: tuple[str, ...],
     checks: Mapping[str, BgcCheck],
     mode: str,
     stage: tuple[str, ...] = (),
@@ -388,8 +394,9 @@ def _kernel(
     """Check (mode="check": uint8 flags) or groom ``stage`` (mode="groom": values).
 
     ``combo`` is (tracers..., salt, temp, z, wet) stacked on axis 0, each (time, s, y, x).
-    The output has the same shape: groomed tracers followed by the unchanged aux rows
-    (mode="groom"), or tracer flags followed by zeros (mode="check").
+    ``names`` are all tracers in the stack; ``targets`` the ones checked (the rest are
+    inputs a check requires). The output has the same shape: groomed tracers followed by
+    the unchanged aux rows (mode="groom"), or flags (zero for non-targets) (mode="check").
     """
     nv = len(names)
     stack, (salt, temp, z, wetf) = combo[:nv], combo[nv:]
@@ -399,8 +406,8 @@ def _kernel(
     if mode == "check":
         block = Block(values, salt, temp, wet)
         flags = np.zeros(combo.shape, dtype=np.uint8)
-        for i, n in enumerate(names):
-            flags[i] = _detect(n, checks[n], block, elig)
+        for n in targets:
+            flags[names.index(n)] = _detect(n, checks[n], block, elig)
         return flags
     out = combo.copy()
     for n in stage:
@@ -411,7 +418,10 @@ def _kernel(
             # the same normalized jump test; only the hole cells are replaced.
             x, valid = _normalize(values[n], salt, wet)
             x = _fill(x, holes, wet, z, elig, column_reach, relax_sweeps)
-            back = np.where(valid, x * np.where(valid, salt, S_REF) / S_REF, x)
+            e = FRESHWATER_ENDMEMBER
+            back = np.where(
+                valid, e + (x - e) * np.where(valid, salt, S_REF) / S_REF, x
+            )
             values[n] = np.where(holes, back, values[n])
         else:
             values[n] = _fill(
@@ -474,6 +484,26 @@ def _select(
     return tuple(v for v in variables if v in present)
 
 
+def _with_requires(
+    ds: xr.Dataset,
+    checks: Mapping[str, BgcCheck],
+    targets: tuple[str, ...],
+    suffix: str = "",
+) -> tuple[str, ...]:
+    """Targets plus the tracers their checks require (inputs only, never groomed)."""
+    extra = []
+    for t in targets:
+        for r in checks[t].requires:
+            if r in targets or r in extra:
+                continue
+            if f"{r}{suffix}" not in ds:
+                raise ValueError(
+                    f"The {t} check requires {r}{suffix}, which is not in the data."
+                )
+            extra.append(r)
+    return targets + tuple(extra)
+
+
 def _as_dask(da: xr.DataArray) -> dsa.Array:
     data = da.data
     if not isinstance(data, dsa.Array):
@@ -493,6 +523,7 @@ def _run(
     stack: dsa.Array,
     aux: dsa.Array,
     names: tuple[str, ...],
+    targets: tuple[str, ...],
     checks: Mapping[str, BgcCheck],
     *,
     mode: str,
@@ -507,6 +538,7 @@ def _run(
     kernel = partial(
         _kernel,
         names=names,
+        targets=targets,
         checks=checks,
         dz_max=dz_max,
         column_reach=column_reach,
@@ -533,7 +565,7 @@ def _run(
         return flags[:nv]
     depth = depth_for(_overlap_reach(column_reach, relax_sweeps))
     for _ in range(passes):
-        for stage in _stages(names, checks):
+        for stage in _stages(targets, checks):
             combo = dsa.map_overlap(
                 partial(kernel, mode="groom", stage=tuple(stage)),
                 combo,
@@ -659,14 +691,15 @@ def _process(
     out = ds.copy() if mode == "groom" else xr.Dataset(coords=ds.coords, attrs=ds.attrs)
 
     if not _is_boundary(ds, checks):
-        names = _select(ds, checks, variables)
-        if not names:
+        targets = _select(ds, checks, variables)
+        if not targets:
             raise ValueError("No checkable BGC variables found in the dataset.")
-        params = _params(checks, names, dz_max, passes, column_reach, relax_sweeps)
+        names = _with_requires(ds, checks, targets)
+        params = _params(checks, targets, dz_max, passes, column_reach, relax_sweeps)
         stack, aux, dims = _ic_arrays(ds, physics, grid_ds, names, tile)
-        res = _run(stack, aux, names, checks, **run)
-        for i, n in enumerate(names):
-            _store(out, ds, n, res[i], dims, mode, checks, n, params)
+        res = _run(stack, aux, names, targets, checks, **run)
+        for n in targets:
+            _store(out, ds, n, res[names.index(n)], dims, mode, checks, n, params)
     else:
         if physics is None:
             physics = getattr(getattr(source, "physics_forcing", None), "ds", None)
@@ -677,18 +710,19 @@ def _process(
         phys = _open(physics, "physics")
         all_names: set[str] = set()
         for side in SIDES:
-            names = _select(ds, checks, variables, suffix=f"_{side}")
-            if not names:
+            targets = _select(ds, checks, variables, suffix=f"_{side}")
+            if not targets:
                 continue
-            all_names.update(names)
+            all_names.update(targets)
+            names = _with_requires(ds, checks, targets, suffix=f"_{side}")
             stack, aux, dims = _bry_arrays(ds, phys, grid_ds, names, side, time_chunk)
-            res = _run(stack, aux, names, checks, **run)
-            for i, n in enumerate(names):
+            res = _run(stack, aux, names, targets, checks, **run)
+            for n in targets:
                 _store(
                     out,
                     ds,
                     f"{n}_{side}",
-                    res[i][:, :, 0, :],
+                    res[names.index(n)][:, :, 0, :],
                     dims,
                     mode,
                     checks,

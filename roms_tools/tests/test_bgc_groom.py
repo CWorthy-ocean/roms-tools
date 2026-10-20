@@ -97,6 +97,19 @@ def test_clean_fields_have_no_flags_including_the_shelf_step(grid, clean):
     assert all(c["total"] == 0 for c in counts.values()), counts
 
 
+def test_plume_front_and_hypersaline_water_on_the_mixing_line_pass(grid, clean):
+    """Water on the 770 mixing line is consistent, however sharp the salinity front."""
+    salt = clean["salt"].copy()
+    salt[..., :, :8] = 8.0  # plume, with an abrupt front at x = 8
+    salt[..., :, 8:12] = 39.0  # hypersaline band next to it
+    wet = clean["salt"] > 0
+    for v, n in (("ALK", 2300.0), ("DIC", 2050.0)):
+        clean[v] = np.where(wet, 770 + (n - 770) * salt / 35, 0.0)
+    clean["salt"] = np.where(wet, salt, 0.0)
+    counts = summarize_flags(bgc_check(_ic(clean), grid, variables=["ALK", "DIC"]))
+    assert counts["ALK"]["total"] == 0 and counts["DIC"]["total"] == 0, counts
+
+
 def test_check_flags_each_planted_defect(grid, clean):
     planted = _plant(clean)
     flags = bgc_check(_ic(clean), grid).compute()
@@ -218,6 +231,29 @@ def test_ic_without_salinity_raises(grid, clean):
     ds = _ic(clean).drop_vars("salt")
     with pytest.raises(ValueError, match="salt"):
         bgc_check(ds, grid)
+
+
+def test_dic_alone_uses_alk_as_input_without_grooming_it(grid, clean):
+    clean["DIC"][0, 5, 10, 8] = 1.2 * clean["ALK"][0, 5, 10, 8]
+    clean["ALK"][0, 0:3, 5, 5] = 0.0  # bad ALK must stay untouched: not a target
+    flags = bgc_check(_ic(clean), grid, variables=["DIC"])
+    assert list(flags.data_vars) == ["DIC"]
+    assert int((flags["DIC"] > 0).sum()) >= 1
+    out = bgc_groom(_ic(clean), grid, variables=["DIC"]).compute()
+    np.testing.assert_array_equal(out["ALK"].values, clean["ALK"].astype(np.float32))
+    # DIC is fixed everywhere except where its required input (ALK) is itself bad.
+    left = bgc_check(out, grid, variables=["DIC"])["DIC"].values > 0
+    assert set(map(tuple, np.argwhere(left))) == {(0, k, 5, 5) for k in range(3)}
+
+
+def test_deep_water_alkalinity_at_in_situ_density_passes(grid, clean):
+    clean["ALK"] = np.where(clean["salt"] > 0, 2560.0, 0.0)  # deep water, mmol/m3
+    clean["salt"] = np.where(clean["salt"] > 0, 34.68, 0.0)
+    clean["DIC"] = np.where(clean["salt"] > 0, 2450.0, 0.0)
+    assert (
+        summarize_flags(bgc_check(_ic(clean), grid, variables=["ALK"]))["ALK"]["total"]
+        == 0
+    )
 
 
 def test_unknown_variable_and_bad_parameters_raise(grid, clean):

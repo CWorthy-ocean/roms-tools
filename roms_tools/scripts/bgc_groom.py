@@ -260,34 +260,8 @@ def _detect(
             else:
                 valid = wet
                 x = a
-            nbrs = np.stack(
-                [
-                    np.where(
-                        e & _shift(valid, axis, step, False),
-                        _shift(x, axis, step, np.nan),
-                        np.nan,
-                    )
-                    for e, (axis, step) in zip(elig, _DIRS, strict=True)
-                ]
-            )
-            # A spike lies outside the range of its neighbours by more than max_jump; a
-            # cell inside a steep but smooth gradient, or beside a front, does not.
-            # Vertical (rows 0-1 of _DIRS) and horizontal (rows 2-5) are judged apart, so
-            # a bad column (whose vertical neighbours agree with it) is still a
-            # horizontal spike at every level, and a bad layer a vertical one.
-            ok = ~np.isnan(nbrs)
-            hi = np.where(ok, nbrs, -np.inf)
-            lo = np.where(ok, nbrs, np.inf)
-            h_ok = ok[2:].sum(axis=0)
-            h_spike = (x - chk.max_jump > hi[2:].max(axis=0)) | (
-                x + chk.max_jump < lo[2:].min(axis=0)
-            )
-            v_spike = (x - chk.max_jump > hi[:2].max(axis=0)) | (
-                x + chk.max_jump < lo[:2].min(axis=0)
-            )
-            jump = valid & (
-                ((h_ok >= 2) & h_spike) | ((ok[:2].sum(axis=0) == 2) & v_spike)
-            )
+            lo, hi = _spike_envelope(x, valid, elig, chk.max_jump)
+            jump = valid & ((x < lo) | (x > hi))
             flags |= np.uint8(FLAG_JUMP) * jump
         if chk.physical_reality is not None:
             ok = chk.physical_reality(block)
@@ -304,6 +278,61 @@ def _normalize(
     valid = wet & (salt >= S_MIN_NORMALIZE)
     e = FRESHWATER_ENDMEMBER
     return np.where(valid, e + (a - e) * S_REF / np.where(valid, salt, 1.0), a), valid
+
+
+def _spike_envelope(
+    x: np.ndarray, valid: np.ndarray, elig: list[np.ndarray], max_jump: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Range a cell may take without being a spike: within ``max_jump`` of the range of its
+    eligible horizontal neighbours (when there are at least two) and of its two vertical
+    neighbours (when both exist). Unconstrained directions give -inf/inf.
+
+    A spike lies outside the range of its neighbours by more than max_jump; a cell inside a
+    steep but smooth gradient, or beside a front, does not. Vertical (rows 0-1 of _DIRS)
+    and horizontal (rows 2-5) are judged apart, so a bad column (whose vertical neighbours
+    agree with it) is still a horizontal spike at every level, and a bad layer a vertical
+    one.
+    """
+    nbrs = np.stack(
+        [
+            np.where(
+                e & _shift(valid, axis, step, False),
+                _shift(x, axis, step, np.nan),
+                np.nan,
+            )
+            for e, (axis, step) in zip(elig, _DIRS, strict=True)
+        ]
+    )
+    ok = ~np.isnan(nbrs)
+    top = np.where(ok, nbrs, -np.inf)
+    bot = np.where(ok, nbrs, np.inf)
+    h_on = ok[2:].sum(axis=0) >= 2
+    v_on = ok[:2].sum(axis=0) == 2
+    lo = np.maximum(
+        np.where(h_on, bot[2:].min(axis=0) - max_jump, -np.inf),
+        np.where(v_on, bot[:2].min(axis=0) - max_jump, -np.inf),
+    )
+    hi = np.minimum(
+        np.where(h_on, top[2:].max(axis=0) + max_jump, np.inf),
+        np.where(v_on, top[:2].max(axis=0) + max_jump, np.inf),
+    )
+    return lo, hi
+
+
+def _project_into_envelope(
+    x: np.ndarray,
+    holes: np.ndarray,
+    valid: np.ndarray,
+    elig: list[np.ndarray],
+    max_jump: float,
+) -> np.ndarray:
+    """Clip filled cells into their spike envelope (its midpoint when the horizontal and
+    vertical ranges do not overlap, which minimises the larger violation).
+    """
+    lo, hi = _spike_envelope(x, valid, elig, max_jump)
+    with np.errstate(invalid="ignore"):  # -inf + inf where nothing constrains a cell
+        target = np.where(lo <= hi, np.clip(x, lo, hi), 0.5 * (lo + hi))
+    return np.where(holes & valid & np.isfinite(target), target, x)
 
 
 def _neighbour_mean(
@@ -432,6 +461,8 @@ def _kernel(
             # the same normalized jump test; only the hole cells are replaced.
             x, valid = _normalize(values[n], salt, wet)
             x = _fill(x, holes, wet, z, elig, column_reach, relax_sweeps)
+            if (jmp := checks[n].max_jump) is not None:
+                x = _project_into_envelope(x, holes, valid, elig, jmp)
             e = FRESHWATER_ENDMEMBER
             back = np.where(
                 valid, e + (x - e) * np.where(valid, salt, S_REF) / S_REF, x
@@ -441,6 +472,8 @@ def _kernel(
             values[n] = _fill(
                 values[n], holes, wet, z, elig, column_reach, relax_sweeps
             )
+            if (jmp := checks[n].max_jump) is not None:
+                values[n] = _project_into_envelope(values[n], holes, wet, elig, jmp)
         out[names.index(n)] = values[n]
     return out
 
@@ -529,8 +562,10 @@ def _as_dask(da: xr.DataArray) -> dsa.Array:
 
 
 def _overlap_reach(column_reach: int, relax_sweeps: int) -> int:
-    """Cells a groom pass can reach: detection (1) + column reach + relaxation."""
-    return 1 + column_reach + relax_sweeps
+    """Cells a groom pass can reach: detection (1) + column reach + relaxation +
+    envelope projection (1).
+    """
+    return 2 + column_reach + relax_sweeps
 
 
 def _run(

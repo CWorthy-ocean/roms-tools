@@ -233,6 +233,15 @@ def test_ic_without_salinity_raises(grid, clean):
         bgc_check(ds, grid)
 
 
+def test_bad_column_is_flagged_at_every_level_and_fixed(grid, clean):
+    """A whole column off its neighbours: its vertical neighbours agree with it."""
+    clean["DIC"][0, :, 10, 10] -= 160.0
+    flags = bgc_check(_ic(clean), grid, variables=["DIC"])["DIC"].values
+    assert (flags[0, :, 10, 10] & FLAG_JUMP).all()
+    out = bgc_groom(_ic(clean), grid, variables=["DIC"])
+    assert summarize_flags(bgc_check(out, grid, variables=["DIC"]))["DIC"]["total"] == 0
+
+
 def test_dic_alone_uses_alk_as_input_without_grooming_it(grid, clean):
     clean["DIC"][0, 5, 10, 8] = 1.2 * clean["ALK"][0, 5, 10, 8]
     clean["ALK"][0, 0:3, 5, 5] = 0.0  # bad ALK must stay untouched: not a target

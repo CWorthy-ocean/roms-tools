@@ -13,7 +13,7 @@ Each tracer gets a :class:`BgcCheck`:
   i.e. the zero-next-to-normal artefact. Used for nutrients and O2, whose zeros can be
   real, so a plain gradient limit would also flag natural nutriclines;
 - ``max_jump``: a cell is flagged when it differs by more than this from a strict majority
-  of its eligible neighbours (salinity-normalized values ``E + (x - E) * 35 / S``, E the
+  (at least two) of its eligible horizontal neighbours, or from both vertical neighbours (salinity-normalized values ``E + (x - E) * 35 / S``, E the
   freshwater endmember, when ``normalize_by_salinity`` is set, so river-plume fronts that follow salinity pass). A
   spike among agreeing neighbours is caught; a cell on one side of a real front, or a
   healthy cell next to a bad one, is not. The interior of a large bad region agrees with
@@ -269,11 +269,16 @@ def _detect(
                     for e, (axis, step) in zip(elig, _DIRS, strict=True)
                 ]
             )
-            n_ok = np.sum(~np.isnan(nbrs), axis=0)
-            n_big = np.sum(
-                np.abs(nbrs - x) > chk.max_jump, axis=0
-            )  # NaN compares False
-            jump = valid & (n_ok >= 2) & (2 * n_big > n_ok)
+            big = np.abs(nbrs - x) > chk.max_jump  # NaN compares False
+            ok = ~np.isnan(nbrs)
+            # Vertical (rows 0-1 of _DIRS) and horizontal (rows 2-5) are judged apart, so a
+            # bad column (whose vertical neighbours agree with it) is still a horizontal
+            # outlier at every level, and a bad layer a vertical one.
+            h_ok, h_big = ok[2:].sum(axis=0), big[2:].sum(axis=0)
+            v_ok, v_big = ok[:2].sum(axis=0), big[:2].sum(axis=0)
+            jump = valid & (
+                ((h_ok >= 2) & (2 * h_big > h_ok)) | ((v_ok == 2) & (v_big == 2))
+            )
             flags |= np.uint8(FLAG_JUMP) * jump
         if chk.physical_reality is not None:
             ok = chk.physical_reality(block)

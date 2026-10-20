@@ -389,10 +389,12 @@ companion physics object (``physics_forcing``; the ``InitialConditions`` /
 
 Estimates are converted to mmol m⁻³ like the gridded sources and clamped at a per-variable
 floor (``roms_tools.setup.esper.ESPER_FLOORS``), with or without salinity conditioning:
-0 for the nutrients, alkalinity and DIC, 2.0 mmol m⁻³ for oxygen, because the nets go
-negative inside the oxygen minimum zones where the WOA23 climatology stays at 3-10 on the
-boundaries measured (12 km Indo-Pacific and California Current; it does reach zero in a few
-OMZ cores elsewhere). The output variables record what was applied in their
+0 for the nutrients, alkalinity and DIC, 5.0 mmol m⁻³ for oxygen. The nets go negative
+inside the oxygen minimum zones, and 5.0 is MARBL's default ``parm_o2_min``: below it
+MARBL's O2 consumption is off and denitrification fully on, so its biology cannot take
+oxygen lower, and lower values in the inputs change no rate, only the O2 inventory (the
+WOA23 climatology sits at 3-10 there on the boundaries measured, 12 km Indo-Pacific and
+California Current). The output variables record what was applied in their
 ``esper_salinity_conditioning`` and ``esper_floor`` attributes.
 
 :Required for: BGC Initial Conditions, BGC Boundary Forcing

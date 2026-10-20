@@ -121,26 +121,27 @@ ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 #: Lower bound (mmol/m³) applied to EVERY estimate after the unit conversion, with or
 #: without salinity conditioning. The nets are unconstrained regressions, so they
 #: overshoot below the physical range at the low end: nutrients and oxygen go negative.
-#: Zero is the obvious floor for the nutrients; oxygen gets 2.0 because ESPER's negative
-#: excursions sit in the oxygen minimum zones (Bay of Bengal, eastern tropical Pacific,
-#: ~300-700 m), where the WOA23 climatology is 3-10 µmol/kg and never below 2.75 at any
-#: of those points on the 12 km Indo-Pacific and California Current boundaries measured
-#: (2010/2014) -- WOA23 does reach zero in a few OMZ cores elsewhere. Clipping to zero
-#: there would hand MARBL exactly anoxic boundary water that no observation supports;
-#: 2.0 is below WOA's own value everywhere ESPER needs it on those boundaries, so it
-#: removes the artefact without inventing oxygen. For MARBL the choice is inert:
-#: ``parm_o2_min`` = 5 and ``parm_o2_min_delta`` = 5 (mmol/m³) make its denitrification
-#: weight and O2-consumption clamp identical at O2 = 0 and O2 = 2, so the floor changes
-#: the O2 inventory handed in, not MARBL's suboxic behaviour. ALK and DIC never approach
-#: zero and keep the generic floor. Any point that ESPER put in [0, 2) now reads 2.0 --
-#: an output change relative to the old clip at zero.
+#: Zero is the obvious floor for the nutrients. Oxygen gets 5.0, MARBL's default
+#: ``parm_o2_min``: ESPER's negative excursions sit in the oxygen minimum zones (Bay of
+#: Bengal, eastern tropical Pacific, ~300-700 m), and below ``parm_o2_min`` MARBL's
+#: biology is flat -- O2 consumption is fully off and denitrification fully on for any
+#: O2 in [0, 5] (``parm_o2_min_delta`` = 5 ramps both between 5 and 10) -- so no interior
+#: tendency can take O2 below 5. Values under it in ICs or boundary forcing are water
+#: the model cannot produce: they change no rate, only the inventory, and a boundary
+#: that keeps feeding them holds water suboxic longer as it mixes (more mixing is needed
+#: to cross 5 and 10), widening the denitrifying volume. WOA23 sits at 3-10 µmol/kg at
+#: these points on the 12 km Indo-Pacific and California Current boundaries measured
+#: (2010/2014), so the floor is at or above observations there; match it to
+#: ``parm_o2_min`` if a run changes that setting. ALK and DIC never approach zero and
+#: keep the generic floor. Any point that ESPER put below 5.0 now reads 5.0 -- an
+#: output change relative to the earlier floors (0, then 2.0).
 ESPER_FLOORS: dict[str, float] = {
     "ALK": 0.0,
     "DIC": 0.0,
     "NO3": 0.0,
     "PO4": 0.0,
     "SiO3": 0.0,
-    "O2": 2.0,
+    "O2": 5.0,
 }
 
 _VALID_METHODS = ("lir", "nn", "mixed")
@@ -488,7 +489,7 @@ def estimate_bgc_fields(
 
     # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
     # depth), matching the GLODAP/WOA adapters' convention; then clamp each tracer
-    # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 2.0 for O2).
+    # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 5.0 for O2).
     density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()

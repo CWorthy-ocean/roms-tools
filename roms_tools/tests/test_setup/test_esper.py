@@ -1793,15 +1793,15 @@ def test_boundary_forcing_esper_with_salinity_conditioning(woa_salinity_file):
 
 def test_every_supported_variable_has_a_floor():
     assert set(ESPER_FLOORS) == set(ESPER_SUPPORTED_VARS)
-    assert ESPER_FLOORS["O2"] == 2.0
+    assert ESPER_FLOORS["O2"] == 5.0
     assert all(ESPER_FLOORS[v] == 0.0 for v in ESPER_SUPPORTED_VARS if v != "O2")
 
 
-def test_estimate_bgc_fields_floors_oxygen_at_two_and_nutrients_at_zero(monkeypatch):
+def test_estimate_bgc_fields_floors_oxygen_at_five_and_nutrients_at_zero(monkeypatch):
     """The nets overshoot below the physical range at the low end (OMZ oxygen,
-    oligotrophic nutrients). Nutrients clamp at 0; O2 at 2.0 mmol/m3, below WOA23's
-    own value everywhere ESPER needs the floor on the measured boundaries. The attr
-    records the floor on O2 only.
+    oligotrophic nutrients). Nutrients clamp at 0; O2 at 5.0 mmol/m3, MARBL's
+    ``parm_o2_min``, below which its biology cannot take O2. The attr records the
+    floor on O2 only.
     """
     calls = _spy_pyesper(monkeypatch)
 
@@ -1824,8 +1824,8 @@ def test_estimate_bgc_fields_floors_oxygen_at_two_and_nutrients_at_zero(monkeypa
     )
     assert float(out["NO3"].min()) == 0.0 and float(out["NO3"].max()) == 0.0
     assert float(out["ALK"].min()) == 0.0
-    assert float(out["O2"].min()) == 2.0 and float(out["O2"].max()) == 2.0
-    assert "2 mmol/m^3" in out["O2"].attrs["esper_floor"]
+    assert float(out["O2"].min()) == 5.0 and float(out["O2"].max()) == 5.0
+    assert "5 mmol/m^3" in out["O2"].attrs["esper_floor"]
     assert "esper_floor" not in out["NO3"].attrs
 
 

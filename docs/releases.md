@@ -1,5 +1,19 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+* Fixed `align_grids` blending the wrong child edge when a boundary is closed: with one boundary closed (by the user, or inferred because that edge is entirely land), the child's topography and mask on a different, open boundary were left unblended and could differ substantially from the parent's there. ([#705](https://github.com/CWorthy-ocean/roms-tools/pull/705))
+
+### Improvements
+
+### Miscellaneous
+
 ## 5.2.1
 
 ### Breaking Changes

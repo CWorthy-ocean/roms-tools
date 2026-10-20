@@ -95,6 +95,10 @@ RHO0 = 1025.0
 #: A value counts as "at its floor" within this tolerance.
 FLOOR_TOL = 1.0e-6
 
+#: Projected cells land this fraction of max_jump inside their envelope, so writing as
+#: float32 (rounding ~1e-4 mmol/m3 at these values) cannot push them back outside it.
+PROJECT_MARGIN = 1.0e-3
+
 #: Default fill parameters. They define the result, so a run is reproducible from them.
 PASSES = 8
 RELAX_SWEEPS = 10
@@ -353,8 +357,9 @@ def _project_into_envelope(
     vertical ranges do not overlap, which minimises the larger violation).
     """
     lo, hi = _spike_envelope(x, valid, elig, max_jump)
+    m = PROJECT_MARGIN * max_jump
     with np.errstate(invalid="ignore"):  # -inf + inf where nothing constrains a cell
-        target = np.where(lo <= hi, np.clip(x, lo, hi), 0.5 * (lo + hi))
+        target = np.where(lo + 2 * m <= hi, np.clip(x, lo + m, hi - m), 0.5 * (lo + hi))
     return np.where(holes & valid & np.isfinite(target), target, x)
 
 

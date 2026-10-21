@@ -1,4 +1,5 @@
 import textwrap
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,7 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, TidalForcing
 from roms_tools.datasets.download import download_test_data
+from roms_tools.utils import interpolate_from_rho_to_u, rotate_velocities
 
 try:
     import xesmf  # type: ignore
@@ -83,6 +85,18 @@ def tidal_forcing_from_global_data(use_dask):
         grid=grid,
         source={"name": "TPXO", "path": fname_dict},
         ntides=1,
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def tidal_forcing_rutgers(use_dask):
+    return TidalForcing(
+        grid=_tides_grid(),
+        source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+        ntides=3,
+        model_reference_date=datetime(2012, 1, 1, 12),
+        convention="rutgers",
         use_dask=use_dask,
     )
 
@@ -269,7 +283,7 @@ def test_tidal_forcing_save(tidal_forcing, tmp_path):
 
 @pytest.mark.parametrize(
     "tidal_forcing_fixture",
-    ["tidal_forcing", "tidal_forcing_from_global_data"],
+    ["tidal_forcing", "tidal_forcing_from_global_data", "tidal_forcing_rutgers"],
 )
 def test_roundtrip_yaml(tidal_forcing_fixture, tmp_path, use_dask, request):
     """Test that creating a TidalForcing object, saving its parameters to yaml file, and
@@ -295,7 +309,7 @@ def test_roundtrip_yaml(tidal_forcing_fixture, tmp_path, use_dask, request):
 
 @pytest.mark.parametrize(
     "tidal_forcing_fixture",
-    ["tidal_forcing", "tidal_forcing_from_global_data"],
+    ["tidal_forcing", "tidal_forcing_from_global_data", "tidal_forcing_rutgers"],
 )
 def test_files_have_same_hash(tidal_forcing_fixture, tmp_path, use_dask, request):
     tidal_forcing = request.getfixturevalue(tidal_forcing_fixture)
@@ -490,3 +504,55 @@ def test_tides_regrid_options_roundtrip_yaml(tmp_path, use_dask):
     assert tidal_forcing == tidal_forcing_from_file
 
     yaml_filepath.unlink()
+
+
+def test_rutgers_convention_matches_ucla(tidal_forcing_rutgers, use_dask):
+    """The Rutgers amplitudes, phases and current ellipses describe the same tide as the
+    UCLA complex harmonics.
+    """
+    ucla = TidalForcing(
+        grid=tidal_forcing_rutgers.grid,
+        source=tidal_forcing_rutgers.source,
+        ntides=3,
+        model_reference_date=datetime(2012, 1, 1, 12),
+        use_dask=use_dask,
+    ).ds
+    rutgers = tidal_forcing_rutgers.ds.rename({"tide_period": "ntides"})
+    grid_ds = tidal_forcing_rutgers.grid.ds
+
+    assert rutgers.zero_phase_date.item() == 20120101.5
+    assert rutgers.attrs["tidal_constituents"] == "m2, s2, n2"
+
+    # UCLA-ROMS reconstructs Re cos(wt) - Im sin(wt), Rutgers ROMS A cos(wt - phase)
+    wt = xr.DataArray(np.linspace(0, 2 * np.pi, 13), dims="time")
+    zeta = ucla.ssh_Re * np.cos(wt) - ucla.ssh_Im * np.sin(wt)
+    zeta_rutgers = rutgers.tide_Eamp * np.cos(wt - np.deg2rad(rutgers.tide_Ephase))
+    np.testing.assert_allclose(
+        zeta_rutgers.transpose(*zeta.dims).values, zeta.values, atol=1e-5
+    )
+
+    # Rutgers ellipses (set_tides.F) rotated to the grid and staggered to u-points
+    cmax, cmin = rutgers.tide_Cmax, rutgers.tide_Cmin
+    angle = np.deg2rad(rutgers.tide_Cangle)
+    phase = wt - np.deg2rad(rutgers.tide_Cphase)
+    cos, sin = np.cos(phase), np.sin(phase)
+    u_east = cmax * np.cos(angle) * cos - cmin * np.sin(angle) * sin
+    v_north = cmax * np.sin(angle) * cos + cmin * np.cos(angle) * sin
+    u_grid, _ = rotate_velocities(u_east, v_north, grid_ds.angle)
+    u_rutgers = interpolate_from_rho_to_u(u_grid)
+    u = ucla.u_Re * np.cos(wt) - ucla.u_Im * np.sin(wt)
+    wet = grid_ds.mask_u == 1
+    np.testing.assert_allclose(
+        u_rutgers.where(wet).transpose(*u.dims).values, u.where(wet).values, atol=1e-6
+    )
+
+    tidal_forcing_rutgers.plot("tide_Eamp", ntides=0)
+
+
+def test_invalid_convention():
+    with pytest.raises(ValueError, match="`convention` must be"):
+        TidalForcing(
+            grid=_tides_grid(),
+            source={"name": "TPXO", "path": _regional_tpxo10v2_files()},
+            convention="coawst",
+        )

@@ -2,7 +2,7 @@ import importlib.metadata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal
 
 import numpy as np
 import xarray as xr
@@ -15,7 +15,6 @@ from roms_tools.regrid import (
     build_lateral_regridder,
     select_source_mask,
 )
-from roms_tools.setup.tides_rutgers import RUTGERS_VALIDATED_VARS, complex_to_rutgers
 from roms_tools.setup.utils import (
     apply_scipy_fallback_fill,
     apply_source_prefill,
@@ -37,9 +36,6 @@ from roms_tools.utils import (
     rotate_velocities,
     save_datasets,
 )
-
-# ROMS flavor a TidalForcing is written for
-Convention = Literal["ucla", "rutgers"]
 
 
 @dataclass(kw_only=True)
@@ -128,20 +124,10 @@ class TidalForcing:
         Method-specific options for ``extrap_method``: ``num_src_pnts`` /
         ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
     convention : {"ucla", "rutgers"}, optional
-        ROMS flavor the tidal forcing is written for:
-
-          - ``"ucla"`` (default) -- UCLA-ROMS: complex harmonics ``ssh_Re/Im``,
-            ``pot_Re/Im`` on rho-points and ``u_Re/Im``, ``v_Re/Im`` rotated to
-            the grid and staggered to u- and v-points.
-          - ``"rutgers"`` -- Rutgers ROMS (``frc_tides.cdl``): ``tide_period``,
-            elevation amplitude/phase ``tide_Eamp``, ``tide_Ephase`` and current
-            ellipse parameters ``tide_Cmax``, ``tide_Cmin``, ``tide_Cangle``,
-            ``tide_Cphase`` on rho-points, plus ``zero_phase_date`` set to
-            ``model_reference_date``. Phases already include the nodal
-            corrections for ``model_reference_date``. The tidal potential is
-            not included.
-
-        Defaults to ``"ucla"``.
+        ROMS version the tidal forcing is written for. ``"rutgers"`` writes tidal
+        elevation amplitude/phase and current ellipses on rho-points, as read by Rutgers
+        ROMS, with ``zero_phase_date`` set to ``model_reference_date``. The tidal
+        potential is not included. Defaults to ``"ucla"``.
 
     Examples
     --------
@@ -196,9 +182,8 @@ class TidalForcing:
     masked. Ignored when ``prefill`` is set or on the scipy path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
-    convention: Convention = "ucla"
-    """ROMS flavor the tidal forcing is written for: ``"ucla"`` (complex harmonics) or
-    ``"rutgers"`` (amplitude/phase and current ellipses)."""
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the tidal forcing is written for."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -258,11 +243,43 @@ class TidalForcing:
                             data.ds[data.var_names[var_name]]
                         )
 
-        omega = tidal_data.datasets["omega"]
         if self.convention == "rutgers":
-            ds = self._to_rutgers(processed_fields, omega)
+            ds = self._to_rutgers(processed_fields, tidal_data.datasets["omega"])
         else:
-            ds = self._to_ucla(processed_fields, target_coords["angle"], omega)
+            # rotation of velocities and interpolation to u/v points
+            vector_pairs = get_vector_pairs(self.variable_info)
+            for pair in vector_pairs:
+                u_component = pair[0]
+                v_component = pair[1]
+                if u_component in processed_fields and v_component in processed_fields:
+                    (
+                        processed_fields[u_component],
+                        processed_fields[v_component],
+                    ) = rotate_velocities(
+                        processed_fields[u_component],
+                        processed_fields[v_component],
+                        target_coords["angle"],
+                    )
+
+            # convert to barotropic velocity
+            for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+                processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
+
+            # interpolate from rho- to velocity points
+            for uname in ["u_Re", "u_Im"]:
+                processed_fields[uname] = interpolate_from_rho_to_u(
+                    processed_fields[uname]
+                )
+            for vname in ["v_Re", "v_Im"]:
+                processed_fields[vname] = interpolate_from_rho_to_v(
+                    processed_fields[vname]
+                )
+
+            d_meta = get_variable_metadata()
+            ds = self._write_into_dataset(processed_fields, d_meta)
+
+            ds = ds.assign_coords({"omega": tidal_data.datasets["omega"]})
+            ds["ntides"].attrs["long_name"] = "constituent label"
 
         ds = self._add_global_metadata(ds)
 
@@ -303,11 +320,8 @@ class TidalForcing:
             raise ValueError("`source` must include a 'path'.")
         if self.ntides > 15:
             raise ValueError("`ntides` must be at most 15.")
-        if self.convention not in get_args(Convention):
-            raise ValueError(
-                f"`convention` must be one of {get_args(Convention)}, "
-                f"got {self.convention!r}."
-            )
+        if self.convention not in ["ucla", "rutgers"]:
+            raise ValueError("`convention` must be 'ucla' or 'rutgers'.")
 
     def _get_data(self):
         """Loads tidal forcing data based on the specified source."""
@@ -394,55 +408,61 @@ class TidalForcing:
 
         self.variable_info = variable_info
 
-    def _to_barotropic_velocity(self, processed_fields):
-        """Divide the regridded tidal transports by depth to get velocities in m/s."""
+    def _to_rutgers(self, processed_fields, omega):
+        """Convert the complex harmonics to tidal elevation amplitude/phase and current
+        ellipses (following Rutgers' ``ap2ep.m``), as read by Rutgers ROMS.
+
+        UCLA-ROMS reconstructs a constituent as ``Re cos(wt) - Im sin(wt)`` and Rutgers
+        ROMS as ``A cos(wt - phase)``. Currents stay eastward/northward because Rutgers
+        ROMS rotates the ellipses to the grid itself.
+        """
         for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
             processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
 
-    def _to_ucla(self, processed_fields, angle, omega):
-        """UCLA-ROMS output: complex harmonics with velocities rotated to the grid and
-        staggered to u- and v-points.
-        """
-        # rotation of velocities
-        vector_pairs = get_vector_pairs(self.variable_info)
-        for pair in vector_pairs:
-            u_component = pair[0]
-            v_component = pair[1]
-            if u_component in processed_fields and v_component in processed_fields:
-                (
-                    processed_fields[u_component],
-                    processed_fields[v_component],
-                ) = rotate_velocities(
-                    processed_fields[u_component],
-                    processed_fields[v_component],
-                    angle,
-                )
-
-        self._to_barotropic_velocity(processed_fields)
-
-        # interpolate from rho- to velocity points
-        for uname in ["u_Re", "u_Im"]:
-            processed_fields[uname] = interpolate_from_rho_to_u(processed_fields[uname])
-        for vname in ["v_Re", "v_Im"]:
-            processed_fields[vname] = interpolate_from_rho_to_v(processed_fields[vname])
-
-        d_meta = get_variable_metadata()
-        ds = self._write_into_dataset(processed_fields, d_meta)
-        ds.attrs["title"] = "ROMS tidal forcing created by ROMS-Tools"
-
-        ds = ds.assign_coords({"omega": omega})
-        ds["ntides"].attrs["long_name"] = "constituent label"
-        return ds
-
-    def _to_rutgers(self, processed_fields, omega):
-        """Rutgers ROMS output: elevation amplitude/phase and current ellipses on
-        rho-points, with currents relative to East (Rutgers ROMS rotates them to the
-        grid itself).
-        """
-        self._to_barotropic_velocity(processed_fields)
-        return complex_to_rutgers(
-            processed_fields, omega, zero_phase_date=self.model_reference_date
+        zeta, u, v = (
+            processed_fields[f"{name}_Re"] + 1j * processed_fields[f"{name}_Im"]
+            for name in ["ssh", "u", "v"]
         )
+        # counterclockwise and clockwise rotating components
+        wp = (u + 1j * v) / 2
+        wm = np.conj(u - 1j * v) / 2
+        theta_p = np.arctan2(wp.imag, wp.real)
+        theta_m = np.arctan2(wm.imag, wm.real)
+        inclination = np.rad2deg(0.5 * (theta_m + theta_p))
+        phase = np.rad2deg(0.5 * (theta_m - theta_p))
+        # flipping the semi-major axis by 180 degrees shifts the phase by half a cycle
+        flip = inclination < 0
+
+        fields = {
+            "tide_Eamp": abs(zeta),
+            "tide_Ephase": np.mod(-np.rad2deg(np.arctan2(zeta.imag, zeta.real)), 360.0),
+            "tide_Cmax": abs(wp) + abs(wm),
+            "tide_Cmin": abs(wp) - abs(wm),
+            "tide_Cangle": xr.where(flip, inclination + 180.0, inclination),
+            "tide_Cphase": np.mod(xr.where(flip, phase + 180.0, phase), 360.0),
+        }
+        ds = self._write_into_dataset(fields, get_variable_metadata())
+
+        ds.attrs["tidal_constituents"] = ", ".join(
+            label.decode() for label in ds["ntides"].values
+        )
+        ds = ds.drop_vars("ntides").rename_dims(ntides="tide_period")
+        ds = ds.assign_coords(
+            tide_period=("tide_period", 2 * np.pi / omega.values / 3600)
+        )
+        ds["tide_period"].attrs = {"long_name": "Tidal period", "units": "hours"}
+
+        date = self.model_reference_date
+        midnight = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        ds["zero_phase_date"] = (
+            float(date.strftime("%Y%m%d")) + (date - midnight).total_seconds() / 86400
+        )
+        ds["zero_phase_date"].attrs = {
+            "long_name": "Tidal reference date for zero phase",
+            "units": "days as %Y%m%d.%f",
+        }
+
+        return ds
 
     def _write_into_dataset(self, processed_fields, d_meta):
         # save in new dataset
@@ -458,6 +478,7 @@ class TidalForcing:
         return ds
 
     def _add_global_metadata(self, ds):
+        ds.attrs["title"] = "ROMS tidal forcing created by ROMS-Tools"
         # Include the version of roms-tools
         try:
             roms_tools_version = importlib.metadata.version("roms-tools")
@@ -497,7 +518,7 @@ class TidalForcing:
         The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
         """
         if self.convention == "rutgers":
-            for var_name in RUTGERS_VALIDATED_VARS:
+            for var_name in ["tide_Eamp", "tide_Cmax"]:
                 nan_check(ds[var_name].isel(tide_period=0), self.grid.ds.mask_rho)
             return
 
@@ -536,7 +557,7 @@ class TidalForcing:
             - "v_Im": Imaginary part of tidal velocity in the y-direction.
 
             For ``convention="rutgers"``: "tide_Eamp", "tide_Ephase", "tide_Cmax",
-            "tide_Cmin", "tide_Cangle", "tide_Cphase".
+            "tide_Cmin", "tide_Cangle" or "tide_Cphase".
 
         ntides : int, optional
             The index of the tidal constituent to plot. Default is 0, which corresponds
@@ -565,9 +586,7 @@ class TidalForcing:
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        # the constituent dimension (ntides or tide_period) comes first
-        tidal_dim = self.ds[var_name].dims[0]
-        field = self.ds[var_name].isel({tidal_dim: ntides})
+        field = self.ds[var_name].isel({self.ds[var_name].dims[0]: ntides})
 
         if self.use_dask:
             from dask.diagnostics import ProgressBar

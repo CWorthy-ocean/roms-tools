@@ -691,7 +691,7 @@ def test_choose_subdomain_dataset_and_grid(use_dask):
 
 def test_choose_subdomain_does_not_mutate_shared_grid(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid(filename=fname_grid)
+    grid = Grid(filename=fname_grid, N=100, theta_s=5.0, theta_b=2.0, hc=300.0)
 
     rd1 = ROMSDataset(
         grid=grid,

@@ -76,6 +76,7 @@ from roms_tools.utils import (
 )
 from roms_tools.vertical_coordinate import (
     compute_depth,
+    get_vertical_coordinate,
 )
 
 #: Which dataset class implements each ``source["name"]``, per forcing type. Single
@@ -1217,18 +1218,9 @@ class InitialConditionsSource:
         key = f"{depth_type}_depth_{location}"
 
         if key not in self.ds_depth_coords:
-            # Select the appropriate depth computation parameters
-            if depth_type == "layer":
-                Cs = self.grid.ds["Cs_r"]
-                sigma = self.grid.ds["sigma_r"]
-            elif depth_type == "interface":
-                Cs = self.grid.ds["Cs_w"]
-                sigma = self.grid.ds["sigma_w"]
-            else:
-                raise ValueError(
-                    f"Invalid depth_type: {depth_type}. Choose 'layer' or 'interface'."
-                )
-
+            Cs, sigma, hc, vtransform = get_vertical_coordinate(
+                self.grid.ds, depth_type
+            )
             h = self.grid.ds["h"]
 
             # Interpolate h and zeta to the specified location
@@ -1241,7 +1233,7 @@ class InitialConditionsSource:
                 if isinstance(zeta, xr.DataArray):
                     zeta = interpolate_from_rho_to_v(zeta)
 
-            depth = compute_depth(zeta, h, self.grid.ds.attrs["hc"], Cs, sigma)
+            depth = compute_depth(zeta, h, hc, Cs, sigma, vtransform)
             self.ds_depth_coords[key] = depth
 
     def _write_into_dataset(self, processed_fields, d_meta):

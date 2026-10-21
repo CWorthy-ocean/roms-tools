@@ -80,7 +80,7 @@ from roms_tools.utils import (
     save_datasets,
     transpose_dimensions,
 )
-from roms_tools.vertical_coordinate import compute_depth
+from roms_tools.vertical_coordinate import compute_depth, get_vertical_coordinate
 
 #: Which dataset class implements each ``source["name"]``, per forcing type. This is the
 #: single source of truth for *which source names BoundaryForcing supports*: both
@@ -1380,14 +1380,8 @@ class BoundaryForcingSource:
             else:
                 h = self.grid.ds["h"].isel(**self.bdry_coords["rho"][direction])
 
-            if depth_type == "layer":
-                depth = compute_depth(
-                    zeta, h, self.grid.hc, self.grid.ds.Cs_r, self.grid.ds.sigma_r
-                )
-            else:
-                depth = compute_depth(
-                    zeta, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
-                )
+            Cs, sigma, _, vtransform = get_vertical_coordinate(self.grid.ds, depth_type)
+            depth = compute_depth(zeta, h, self.grid.hc, Cs, sigma, vtransform)
 
             # Add metadata
             depth.attrs.update(

@@ -9,9 +9,10 @@ from roms_tools.utils import (
 )
 
 
-def compute_cs(sigma, theta_s, theta_b):
-    """Compute the S-coordinate stretching curves according to Shchepetkin and
-    McWilliams (2009).
+def compute_cs(sigma, theta_s, theta_b, vstretching=4):
+    """Compute the S-coordinate stretching curves for the ROMS vertical stretching
+    function ``Vstretching`` (see Rutgers ROMS ``set_scoord.F``). UCLA-ROMS uses
+    ``Vstretching = 4`` (Shchepetkin and McWilliams, 2009).
 
     Parameters
     ----------
@@ -21,6 +22,8 @@ def compute_cs(sigma, theta_s, theta_b):
         The surface control parameter.
     theta_b : float
         The bottom control parameter.
+    vstretching : int, optional
+        The vertical stretching function, 1 to 5. Defaults to 4.
 
     Returns
     -------
@@ -32,6 +35,29 @@ def compute_cs(sigma, theta_s, theta_b):
     ValueError
         If theta_s or theta_b are not within the valid range.
     """
+    if vstretching == 1:  # Song and Haidvogel (1994)
+        if theta_s == 0:
+            return sigma
+        return (1 - theta_b) * np.sinh(theta_s * sigma) / np.sinh(theta_s) + theta_b * (
+            0.5 * np.tanh(theta_s * (sigma + 0.5)) / np.tanh(0.5 * theta_s) - 0.5
+        )
+    if vstretching == 2:  # Shchepetkin (2005)
+        if theta_s <= 0:
+            return sigma
+        C = (1 - np.cosh(theta_s * sigma)) / (np.cosh(theta_s) - 1)
+        if theta_b <= 0:
+            return C
+        Cbot = np.sinh(theta_b * (sigma + 1)) / np.sinh(theta_b) - 1
+        weight = (sigma + 1) * (1 - sigma)
+        return weight * C + (1 - weight) * Cbot
+    if vstretching == 3:  # Geyer, for shallow bottom boundary layers
+        Cbot = np.log(np.cosh(3 * (sigma + 1) ** theta_b)) / np.log(np.cosh(3)) - 1
+        Csur = -np.log(np.cosh(3 * abs(sigma) ** theta_s)) / np.log(np.cosh(3))
+        weight = 0.5 * (1 - np.tanh(3 * (sigma + 0.5)))
+        return weight * Cbot + (1 - weight) * Csur
+
+    if vstretching not in [4, 5]:
+        raise ValueError("vstretching must be 1 to 5.")
     if not (0 < theta_s <= UPPER_BOUND_THETA_S):
         raise ValueError(f"theta_s must be between 0 and {UPPER_BOUND_THETA_S}.")
     if not (0 < theta_b <= UPPER_BOUND_THETA_B):
@@ -43,7 +69,7 @@ def compute_cs(sigma, theta_s, theta_b):
     return C
 
 
-def sigma_stretch(theta_s, theta_b, N, type):
+def sigma_stretch(theta_s, theta_b, N, type, vstretching=4):
     """Compute sigma and stretching curves based on the type and parameters.
 
     Parameters
@@ -56,6 +82,8 @@ def sigma_stretch(theta_s, theta_b, N, type):
         The number of vertical levels.
     type : str
         The type of sigma ('w' for vertical velocity points, 'r' for rho-points).
+    vstretching : int, optional
+        The vertical stretching function, 1 to 5. Defaults to 4.
 
     Returns
     -------
@@ -80,12 +108,18 @@ def sigma_stretch(theta_s, theta_b, N, type):
             "Type must be either 'w' for vertical velocity points or 'r' for rho-points."
         )
 
-    cs = compute_cs(sigma, theta_s, theta_b)
+    if vstretching == 5:  # quadratic Legendre polynomial (Souza et al., 2015)
+        k = k - 0.5 if type == "r" else k
+        sigma = -(k * k - 2 * k * N + k + N * N - N) / (N * N - N) - 0.01 * (
+            k * k - k * N
+        ) / (1 - N)
+
+    cs = compute_cs(sigma, theta_s, theta_b, vstretching)
 
     return cs, sigma
 
 
-def compute_depth(zeta, h, hc, cs, sigma):
+def compute_depth(zeta, h, hc, cs, sigma, vtransform=2):
     """Compute the depth at different sigma levels.
 
     Parameters
@@ -100,18 +134,69 @@ def compute_depth(zeta, h, hc, cs, sigma):
         The stretching curve values.
     sigma : xr.DataArray
         The sigma-coordinate values.
+    vtransform : int, optional
+        The ROMS vertical transformation equation, 1 or 2. Defaults to 2, as in
+        UCLA-ROMS.
 
     Returns
     -------
     z : xr.DataArray
         The depth at different sigma levels.
     """
-    z = (hc * sigma + h * cs) / (hc + h)
-    z = zeta + (zeta + h) * z
+    if vtransform == 1:
+        z = hc * sigma + (h - hc) * cs
+        z = z + zeta * (1 + z / h)
+    else:
+        z = (hc * sigma + h * cs) / (hc + h)
+        z = zeta + (zeta + h) * z
 
     z = -transpose_dimensions(z)
 
     return z
+
+
+def get_vertical_coordinate(grid_ds, depth_type="layer"):
+    """Get the vertical coordinate parameters of a grid at layers or interfaces.
+
+    Parameters
+    ----------
+    grid_ds : xr.Dataset
+        ROMS grid dataset containing the stretching curves (`Cs`), sigma-layers (`sigma`)
+        and the critical depth (`hc`) attribute.
+    depth_type : str, optional
+        `"layer"` (default) or `"interface"`.
+
+    Returns
+    -------
+    Cs : xr.DataArray
+        The stretching curve values.
+    sigma : xr.DataArray
+        The sigma-coordinate values.
+    hc : float
+        The critical depth.
+    vtransform : int
+        The ROMS vertical transformation equation.
+
+    Raises
+    ------
+    ValueError
+        If the grid has no vertical coordinate or `depth_type` is invalid.
+    """
+    if "hc" not in grid_ds.attrs or "Cs_r" not in grid_ds:
+        raise ValueError(
+            "The grid has no vertical coordinate. Provide N, theta_s, theta_b and hc "
+            "(and vtransform and vstretching for Rutgers ROMS) when creating the Grid, "
+            "or call Grid.update_vertical_coordinate."
+        )
+    if depth_type == "layer":
+        Cs, sigma = grid_ds["Cs_r"], grid_ds["sigma_r"]
+    elif depth_type == "interface":
+        Cs, sigma = grid_ds["Cs_w"], grid_ds["sigma_w"]
+    else:
+        raise ValueError(
+            f"Invalid depth_type: {depth_type}. Choose 'layer' or 'interface'."
+        )
+    return Cs, sigma, grid_ds.attrs["hc"], grid_ds.attrs.get("Vtransform", 2)
 
 
 def compute_depth_coordinates(
@@ -179,18 +264,7 @@ def compute_depth_coordinates(
             f"Invalid location: {location}. Must be one of {valid_locations}."
         )
 
-    # Select the appropriate depth computation parameters
-    if depth_type == "layer":
-        Cs = grid_ds["Cs_r"]
-        sigma = grid_ds["sigma_r"]
-    elif depth_type == "interface":
-        Cs = grid_ds["Cs_w"]
-        sigma = grid_ds["sigma_w"]
-    else:
-        raise ValueError(
-            f"Invalid depth_type: {depth_type}. Choose 'layer' or 'interface'."
-        )
-
+    Cs, sigma, hc, vtransform = get_vertical_coordinate(grid_ds, depth_type)
     h = grid_ds["h"]
 
     # Interpolate h and zeta to the specified location
@@ -224,7 +298,7 @@ def compute_depth_coordinates(
             if isinstance(zeta, xr.DataArray):
                 zeta = zeta.isel(xi_rho=xi)
 
-    depth = compute_depth(zeta, h, grid_ds.attrs["hc"], Cs, sigma)
+    depth = compute_depth(zeta, h, hc, Cs, sigma, vtransform)
 
     # Add metadata
     depth.name = f"{depth_type}_depth_{location}"

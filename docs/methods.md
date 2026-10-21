@@ -121,6 +121,8 @@ Following {cite}`shchepetkin_correction_2009` (see also Figure 2 in {cite}`lemar
 
 Here, $\zeta(x,y,t)$ is the time-varying sea surface height, and $h(x,y)$ is the unperturbed water column thickness, given by the topography. $z = -h(x,y)$ corresponds to the ocean bottom.
 
+These are the vertical stretching function and transformation used by UCLA-ROMS (`Vstretching = 4` and `Vtransform = 2` in Rutgers ROMS terms). For Rutgers ROMS grids, `ROMS-Tools` also supports the other Rutgers ROMS options through the `vtransform` and `vstretching` grid parameters, following Rutgers ROMS `set_scoord.F` and `set_depth.F`.
+
 Example plots of the vertical stretching functions and layer depths can be found [here](grid.ipynb#The-vertical-coordinate-system).
 
 `ROMS-Tools` executes steps 1 and 2 during grid generation, when an instance of the {py:obj}`roms_tools.Grid` class is created.

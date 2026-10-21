@@ -2995,6 +2995,10 @@ def pop_grid_data(grid_data: dict[str, Any]) -> dict[str, Any]:
     """
     for key in ("ds", "straddle", "verbose"):
         grid_data.pop(key, None)
+    # Vtransform and Vstretching are only recorded if they differ from UCLA-ROMS's
+    for key, default in [("vtransform", 2), ("vstretching", 4)]:
+        if grid_data.get(key) in (None, default):
+            grid_data.pop(key, None)
     return grid_data
 
 

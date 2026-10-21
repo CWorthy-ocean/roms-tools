@@ -1,3 +1,4 @@
+import copy
 import logging
 import re
 from dataclasses import dataclass, field
@@ -446,6 +447,17 @@ class ROMSDataset:
         """
         required_exact = ["theta_s", "theta_b", "hc"]
         required_close = ["Cs_r", "Cs_w"]
+
+        # A grid without a vertical coordinate takes it from the model output
+        if self.grid.hc is None and all(p in ds.attrs for p in required_exact):
+            logging.info("Using the vertical coordinate of the model output.")
+            self.grid = copy.deepcopy(self.grid)
+            self.grid.update_vertical_coordinate(
+                N=ds.sizes["s_rho"],
+                theta_s=ds.attrs["theta_s"],
+                theta_b=ds.attrs["theta_b"],
+                hc=ds.attrs["hc"],
+            )
 
         # Check exact equality
         for param in required_exact:

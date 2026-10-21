@@ -21,6 +21,7 @@ from roms_tools.constants import (
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.mask import _close_narrow_channels
 from roms_tools.setup.topography import _compute_rfactor
+from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
 
 try:
     import xesmf  # type: ignore
@@ -1016,10 +1017,10 @@ def test_compatability_with_matlab_grid(tmp_path):
     grid = Grid(filename=fname)
 
     assert not grid.straddle
-    assert grid.theta_s == 5.0
-    assert grid.theta_b == 2.0
-    assert grid.hc == 300.0
-    assert grid.N == 100
+    # no vertical coordinate in the file, and none assumed
+    assert grid.N is None
+    assert grid.theta_s is None
+    assert "Cs_r" not in grid.ds
     assert grid.nx == 24
     assert grid.ny == 24
     assert grid.center_lon == -4.1
@@ -1114,3 +1115,45 @@ def test_from_file_partial_parameters_raises_error(grid, tmp_path):
 
     with pytest.raises(ValueError, match="must provide all of"):
         Grid(filename=path, theta_s=5.0)
+
+
+def test_rutgers_grid(grid, tmp_path, caplog):
+    # UCLA-ROMS Vtransform and Vstretching are not written to YAML
+    assert "vtransform" not in grid.grid_to_dict()
+
+    # Mimic a Rutgers ROMS grid file: no vertical coordinate, xl/el and psi-point
+    # variables, and a descriptive title
+    ds = grid.ds.drop_vars(["Cs_r", "Cs_w", "sigma_r", "sigma_w"])
+    ds.attrs = {"title": "Rutgers ROMS grid"}
+    ds["xl"] = 1.0
+    ds["el"] = 1.0
+    ds["mask_psi"] = 1.0
+    path = tmp_path / "rutgers_grid.nc"
+    ds.to_netcdf(path)
+
+    with caplog.at_level(logging.WARNING):
+        rutgers_grid = Grid(filename=path)
+    assert "classic ROMS grid layout" in caplog.text
+    assert rutgers_grid.N is None
+    with pytest.raises(ValueError, match="no vertical coordinate"):
+        compute_depth_coordinates(rutgers_grid.ds)
+    with pytest.raises(ValueError, match="no vertical coordinate"):
+        rutgers_grid.plot_vertical_coordinate(eta=0)
+    with pytest.raises(ValueError, match="together with"):
+        Grid(filename=path, vtransform=1)
+
+    params = {"N": 5, "theta_s": 4.5, "theta_b": 0.95, "hc": 1e4}
+    assert Grid(filename=path, **params).vtransform == 2
+
+    rutgers_grid = Grid(filename=path, **params, vtransform=1, vstretching=1)
+    # ROMS uses hc = min(hmin, Tcline) with Vtransform 1
+    assert rutgers_grid.hc == pytest.approx(float(ds.h.min()))
+    assert rutgers_grid.ds.attrs["Vtransform"] == 1
+    npt.assert_allclose(
+        rutgers_grid.ds.Cs_r, sigma_stretch(4.5, 0.95, 5, "r", 1)[0], rtol=1e-6
+    )
+    compute_depth_coordinates(rutgers_grid.ds)
+
+    # theta_b = 0 is valid with Vstretching 1
+    kwargs = {"size_x": 100, "size_y": 100, "center_lon": -20, "center_lat": 0}
+    assert Grid(nx=1, ny=1, **kwargs, vstretching=1, theta_b=0.0).theta_b == 0.0

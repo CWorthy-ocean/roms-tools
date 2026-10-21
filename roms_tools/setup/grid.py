@@ -31,7 +31,11 @@ from roms_tools.utils import (
     interpolate_from_rho_to_v,
     save_datasets,
 )
-from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
+from roms_tools.vertical_coordinate import (
+    compute_depth_coordinates,
+    get_vertical_coordinate,
+    sigma_stretch,
+)
 
 
 @dataclass(kw_only=True)
@@ -86,6 +90,12 @@ class Grid:
         The bottom control parameter. Must satisfy 0 < theta_b <= 10. The default is 2.0.
     hc : float, optional
         The critical depth (in meters). The default is 300.0.
+    vtransform : int, optional
+        The ROMS vertical transformation equation (``Vtransform``), 1 or 2. The default
+        is 2, the only option in UCLA-ROMS.
+    vstretching : int, optional
+        The ROMS vertical stretching function (``Vstretching``), 1 to 5. The default is
+        4, the only option in UCLA-ROMS.
     verbose: bool, optional
         Indicates whether to print grid generation steps with timing. Defaults to False.
 
@@ -118,6 +128,10 @@ class Grid:
     """The bottom control parameter."""
     hc: float | None = None
     """The critical depth (in meters)."""
+    vtransform: int | None = None
+    """The ROMS vertical transformation equation (``Vtransform``)."""
+    vstretching: int | None = None
+    """The ROMS vertical stretching function (``Vstretching``)."""
     topography_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the topography data."""
     mask_shapefile: str | Path | None = None
@@ -164,6 +178,8 @@ class Grid:
                 theta_b=self.theta_b,
                 hc=self.hc,
                 N=self.N,
+                vtransform=self.vtransform,
+                vstretching=self.vstretching,
                 verbose=self.verbose,
             )
 
@@ -172,9 +188,11 @@ class Grid:
         else:
             # assign defaults here for non-required params
             self.N = self.N or 100
-            self.theta_s = self.theta_s or 5.0
-            self.theta_b = self.theta_b or 2.0
-            self.hc = self.hc or 300.0
+            self.theta_s = 5.0 if self.theta_s is None else self.theta_s
+            self.theta_b = 2.0 if self.theta_b is None else self.theta_b
+            self.hc = 300.0 if self.hc is None else self.hc
+            self.vtransform = self.vtransform or 2
+            self.vstretching = self.vstretching or 4
 
             self._input_checks()
 
@@ -208,6 +226,8 @@ class Grid:
                 theta_b=self.theta_b,
                 hc=self.hc,
                 verbose=self.verbose,
+                vtransform=self.vtransform,
+                vstretching=self.vstretching,
             )
 
             self.parent_info = None
@@ -368,7 +388,14 @@ class Grid:
             self.hmin = hmin
 
     def update_vertical_coordinate(
-        self, N=None, theta_s=None, theta_b=None, hc=None, verbose=False
+        self,
+        N=None,
+        theta_s=None,
+        theta_b=None,
+        hc=None,
+        verbose=False,
+        vtransform=None,
+        vstretching=None,
     ) -> None:
         """Create vertical coordinate variables for the ROMS grid.
 
@@ -387,23 +414,43 @@ class Grid:
             S-coordinate bottom control parameter.
             If not provided, `theta_b` will remain unchanged (i.e., the existing value will not be overwritten).
         hc : float
-            Critical depth (m) used in ROMS vertical coordinate stretching.
+            Critical depth (m) used in ROMS vertical coordinate stretching. With
+            `vtransform` 1, ROMS uses the smaller of `hc` (``Tcline``) and the minimum depth.
             If not provided, `hc` will remain unchanged (i.e., the existing value will not be overwritten).
         verbose: bool, optional
             Indicates whether to print vertical coordinate generation steps with timing. Defaults to False.
+        vtransform : int, optional
+            ROMS vertical transformation equation, 1 or 2.
+            If not provided, `vtransform` will remain unchanged.
+        vstretching : int, optional
+            ROMS vertical stretching function, 1 to 5.
+            If not provided, `vstretching` will remain unchanged.
 
         Returns
         -------
         None
             This method modifies the dataset in place by adding vertical coordinate variables.
         """
-        N = N or self.N
-        theta_s = theta_s or self.theta_s
-        theta_b = theta_b or self.theta_b
-        hc = hc or self.hc
+        N = self.N if N is None else N
+        theta_s = self.theta_s if theta_s is None else theta_s
+        theta_b = self.theta_b if theta_b is None else theta_b
+        hc = self.hc if hc is None else hc
+        vtransform = self.vtransform if vtransform is None else vtransform
+        vstretching = self.vstretching if vstretching is None else vstretching
+        if vtransform not in [1, 2] or vstretching not in [1, 2, 3, 4, 5]:
+            raise ValueError("vtransform must be 1 or 2, and vstretching 1 to 5.")
+
+        if vtransform == 1:
+            # ROMS uses hc = min(hmin, Tcline) with Vtransform 1
+            min_depth = max(float(self.ds.h.min()), 0.0)
+            if hc > min_depth:
+                logging.info(
+                    f"Using hc = {min_depth} (the minimum depth) since vtransform = 1."
+                )
+                hc = min_depth
 
         with Timed(
-            f"=== Preparing the vertical coordinate system using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ===",
+            f"=== Preparing the vertical coordinate system using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc}, vtransform = {vtransform}, vstretching = {vstretching} ===",
             verbose=verbose,
         ):
             ds = self.ds
@@ -425,8 +472,8 @@ class Grid:
                 if var in ds.variables:
                     ds = ds.drop_vars(var)
 
-            cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
-            cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
+            cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r", vstretching)
+            cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w", vstretching)
 
             ds["sigma_r"] = sigma_r.astype(np.float32)
             ds["sigma_r"].attrs["long_name"] = (
@@ -451,12 +498,16 @@ class Grid:
             ds.attrs["theta_s"] = np.float32(theta_s)
             ds.attrs["theta_b"] = np.float32(theta_b)
             ds.attrs["hc"] = np.float32(hc)
+            ds.attrs["Vtransform"] = vtransform
+            ds.attrs["Vstretching"] = vstretching
 
             self.ds = ds
             self.theta_s = theta_s
             self.theta_b = theta_b
             self.hc = hc
             self.N = N
+            self.vtransform = vtransform
+            self.vstretching = vstretching
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.
@@ -627,6 +678,9 @@ class Grid:
             layer_contours = False
             add_colorbar = True
         else:
+            get_vertical_coordinate(
+                self.ds
+            )  # raises if there is no vertical coordinate
             field = xr.zeros_like(self.ds.s_rho * self.ds["h"])
             field.attrs["long_name"] = "layer depth at rho-points"
             layer_contours = True
@@ -685,6 +739,8 @@ class Grid:
         theta_b: float | None = None,
         hc: float | None = None,
         N: int | None = None,
+        vtransform: int | None = None,
+        vstretching: int | None = None,
         **kwargs,
     ) -> "Grid":
         """Create a Grid instance from an existing file.
@@ -701,6 +757,12 @@ class Grid:
             Critical depth for vertical coordinate.
         N : int, optional
             Number of vertical levels for vertical coordinate.
+        vtransform : int, optional
+            ROMS vertical transformation equation, given with the other vertical
+            coordinate parameters. Defaults to the file's value, or 2.
+        vstretching : int, optional
+            ROMS vertical stretching function, given with the other vertical
+            coordinate parameters. Defaults to the file's value, or 4.
         verbose: bool, optional
             Indicates whether to print grid generation steps with timing. Defaults to False.
 
@@ -716,6 +778,11 @@ class Grid:
             raise ValueError(
                 "If specifying vertical coordinate parameters, you must provide all of: "
                 "theta_s, theta_b, hc, and N."
+            )
+        if num_provided == 0 and (vtransform is not None or vstretching is not None):
+            raise ValueError(
+                "vtransform and vstretching must be provided together with theta_s, "
+                "theta_b, hc, and N."
             )
 
         # Load the dataset from the file. Grid files are small, so eagerly load
@@ -762,6 +829,21 @@ class Grid:
                 ds = grid.ds.set_coords(var)
                 grid.ds = ds
 
+        if (
+            {"xl", "el"} <= set(ds.variables)
+            and any(var in ds for var in ["lat_psi", "mask_psi", "dmde", "dndx"])
+            and "roms_tools_version" not in ds.attrs
+        ):
+            logging.warning(
+                "This grid file was not made by ROMS-Tools and uses the classic ROMS grid "
+                "layout (as made by Rutgers ROMS tools). If it is for Rutgers ROMS, pass "
+                "vtransform and vstretching with the vertical coordinate parameters "
+                "(defaults are 2 and 4), and note that ROMS-Tools writes input files for "
+                "UCLA-ROMS, except TidalForcing with convention='rutgers'."
+            )
+        grid.vtransform = vtransform or int(grid.ds.attrs.get("Vtransform", 2))
+        grid.vstretching = vstretching or int(grid.ds.attrs.get("Vstretching", 4))
+
         # Check if vertical coordinates already exist
         if all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
             prior_Cs_r = grid.ds.Cs_r.copy(deep=True)
@@ -807,20 +889,22 @@ class Grid:
 
         # Case: user did not provide vertical coordinate parameters
         else:
-            logging.warning(
-                "Vertical coordinates (Cs_r, Cs_w) not found in grid file and were not provided, using defaults."
-            )
-
-            # Use fallback parameters
-            grid.update_vertical_coordinate(
-                N=100, theta_s=5.0, theta_b=2.0, hc=300.0, verbose=True
+            logging.info(
+                "The grid file has no vertical coordinate parameters (theta_s, theta_b, hc). "
+                "Provide N, theta_s, theta_b and hc if the vertical coordinate is needed."
             )
 
         # Assign vertical coordinate metadata
-        grid.theta_s = grid.ds.attrs["theta_s"].item()
-        grid.theta_b = grid.ds.attrs["theta_b"].item()
-        grid.hc = grid.ds.attrs["hc"].item()
-        grid.N = len(grid.ds.s_rho)
+        if all(attr in grid.ds.attrs for attr in ["theta_s", "theta_b", "hc"]):
+            grid.theta_s = grid.ds.attrs["theta_s"].item()
+            grid.theta_b = grid.ds.attrs["theta_b"].item()
+            grid.hc = grid.ds.attrs["hc"].item()
+            grid.N = len(grid.ds.s_rho)
+        else:
+            grid.theta_s = None
+            grid.theta_b = None
+            grid.hc = None
+            grid.N = None
 
         # Manually set the remaining attributes by extracting parameters from dataset
         grid.nx = ds.sizes["xi_rho"] - 2
@@ -841,11 +925,6 @@ class Grid:
                 )
                 if match:
                     return float(match.group(1))
-                else:
-                    raise ValueError(
-                        f"Could not extract '{attr_name}' from title attribute. "
-                        f"Expected format: '... {title_key} <value> ...'"
-                    )
             if filename is not None:
                 return default
 

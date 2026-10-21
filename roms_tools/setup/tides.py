@@ -2,6 +2,7 @@ import importlib.metadata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import xarray as xr
@@ -122,6 +123,11 @@ class TidalForcing:
     extrap_kwargs : dict, optional
         Method-specific options for ``extrap_method``: ``num_src_pnts`` /
         ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
+    convention : {"ucla", "rutgers"}, optional
+        ROMS version the tidal forcing is written for. ``"rutgers"`` writes tidal
+        elevation amplitude/phase and current ellipses on rho-points, as read by Rutgers
+        ROMS, with ``zero_phase_date`` set to ``model_reference_date``. The tidal
+        potential is not included. Defaults to ``"ucla"``.
 
     Examples
     --------
@@ -176,6 +182,8 @@ class TidalForcing:
     masked. Ignored when ``prefill`` is set or on the scipy path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the tidal forcing is written for."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -235,41 +243,48 @@ class TidalForcing:
                             data.ds[data.var_names[var_name]]
                         )
 
-        # rotation of velocities and interpolation to u/v points
-        vector_pairs = get_vector_pairs(self.variable_info)
-        for pair in vector_pairs:
-            u_component = pair[0]
-            v_component = pair[1]
-            if u_component in processed_fields and v_component in processed_fields:
-                (
-                    processed_fields[u_component],
-                    processed_fields[v_component],
-                ) = rotate_velocities(
-                    processed_fields[u_component],
-                    processed_fields[v_component],
-                    target_coords["angle"],
+        if self.convention == "rutgers":
+            ds = self._to_rutgers(processed_fields, tidal_data.datasets["omega"])
+        else:
+            # rotation of velocities and interpolation to u/v points
+            vector_pairs = get_vector_pairs(self.variable_info)
+            for pair in vector_pairs:
+                u_component = pair[0]
+                v_component = pair[1]
+                if u_component in processed_fields and v_component in processed_fields:
+                    (
+                        processed_fields[u_component],
+                        processed_fields[v_component],
+                    ) = rotate_velocities(
+                        processed_fields[u_component],
+                        processed_fields[v_component],
+                        target_coords["angle"],
+                    )
+
+            # convert to barotropic velocity
+            for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+                processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
+
+            # interpolate from rho- to velocity points
+            for uname in ["u_Re", "u_Im"]:
+                processed_fields[uname] = interpolate_from_rho_to_u(
+                    processed_fields[uname]
+                )
+            for vname in ["v_Re", "v_Im"]:
+                processed_fields[vname] = interpolate_from_rho_to_v(
+                    processed_fields[vname]
                 )
 
-        # convert to barotropic velocity
-        for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
-            processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
+            d_meta = get_variable_metadata()
+            ds = self._write_into_dataset(processed_fields, d_meta)
 
-        # interpolate from rho- to velocity points
-        for uname in ["u_Re", "u_Im"]:
-            processed_fields[uname] = interpolate_from_rho_to_u(processed_fields[uname])
-        for vname in ["v_Re", "v_Im"]:
-            processed_fields[vname] = interpolate_from_rho_to_v(processed_fields[vname])
-
-        d_meta = get_variable_metadata()
-        ds = self._write_into_dataset(processed_fields, d_meta)
+            ds = ds.assign_coords({"omega": tidal_data.datasets["omega"]})
+            ds["ntides"].attrs["long_name"] = "constituent label"
 
         ds = self._add_global_metadata(ds)
 
         if not self.bypass_validation:
             self._validate(ds)
-
-        ds = ds.assign_coords({"omega": tidal_data.datasets["omega"]})
-        ds["ntides"].attrs["long_name"] = "constituent label"
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -305,6 +320,8 @@ class TidalForcing:
             raise ValueError("`source` must include a 'path'.")
         if self.ntides > 15:
             raise ValueError("`ntides` must be at most 15.")
+        if self.convention not in ["ucla", "rutgers"]:
+            raise ValueError("`convention` must be 'ucla' or 'rutgers'.")
 
     def _get_data(self):
         """Loads tidal forcing data based on the specified source."""
@@ -391,6 +408,62 @@ class TidalForcing:
 
         self.variable_info = variable_info
 
+    def _to_rutgers(self, processed_fields, omega):
+        """Convert the complex harmonics to tidal elevation amplitude/phase and current
+        ellipses (following Rutgers' ``ap2ep.m``), as read by Rutgers ROMS.
+
+        UCLA-ROMS reconstructs a constituent as ``Re cos(wt) - Im sin(wt)`` and Rutgers
+        ROMS as ``A cos(wt - phase)``. Currents stay eastward/northward because Rutgers
+        ROMS rotates the ellipses to the grid itself.
+        """
+        for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+            processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
+
+        zeta, u, v = (
+            processed_fields[f"{name}_Re"] + 1j * processed_fields[f"{name}_Im"]
+            for name in ["ssh", "u", "v"]
+        )
+        # counterclockwise and clockwise rotating components
+        wp = (u + 1j * v) / 2
+        wm = np.conj(u - 1j * v) / 2
+        theta_p = np.arctan2(wp.imag, wp.real)
+        theta_m = np.arctan2(wm.imag, wm.real)
+        inclination = np.rad2deg(0.5 * (theta_m + theta_p))
+        phase = np.rad2deg(0.5 * (theta_m - theta_p))
+        # flipping the semi-major axis by 180 degrees shifts the phase by half a cycle
+        flip = inclination < 0
+
+        fields = {
+            "tide_Eamp": abs(zeta),
+            "tide_Ephase": np.mod(-np.rad2deg(np.arctan2(zeta.imag, zeta.real)), 360.0),
+            "tide_Cmax": abs(wp) + abs(wm),
+            "tide_Cmin": abs(wp) - abs(wm),
+            "tide_Cangle": xr.where(flip, inclination + 180.0, inclination),
+            "tide_Cphase": np.mod(xr.where(flip, phase + 180.0, phase), 360.0),
+        }
+        ds = self._write_into_dataset(fields, get_variable_metadata())
+
+        ds.attrs["tidal_constituents"] = ", ".join(
+            label.decode() for label in ds["ntides"].values
+        )
+        ds = ds.drop_vars("ntides").rename_dims(ntides="tide_period")
+        ds = ds.assign_coords(
+            tide_period=("tide_period", 2 * np.pi / omega.values / 3600)
+        )
+        ds["tide_period"].attrs = {"long_name": "Tidal period", "units": "hours"}
+
+        date = self.model_reference_date
+        midnight = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        ds["zero_phase_date"] = (
+            float(date.strftime("%Y%m%d")) + (date - midnight).total_seconds() / 86400
+        )
+        ds["zero_phase_date"].attrs = {
+            "long_name": "Tidal reference date for zero phase",
+            "units": "days as %Y%m%d.%f",
+        }
+
+        return ds
+
     def _write_into_dataset(self, processed_fields, d_meta):
         # save in new dataset
         ds = xr.Dataset()
@@ -444,6 +517,11 @@ class TidalForcing:
         This check is applied to the first constituent (`ntides=0`) of each variable in the dataset.
         The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
         """
+        if self.convention == "rutgers":
+            for var_name in ["tide_Eamp", "tide_Cmax"]:
+                nan_check(ds[var_name].isel(tide_period=0), self.grid.ds.mask_rho)
+            return
+
         for var_name in ds.data_vars:
             if self.variable_info[var_name]["validate"]:
                 if self.variable_info[var_name]["location"] == "rho":
@@ -478,6 +556,9 @@ class TidalForcing:
             - "v_Re": Real part of tidal velocity in the y-direction.
             - "v_Im": Imaginary part of tidal velocity in the y-direction.
 
+            For ``convention="rutgers"``: "tide_Eamp", "tide_Ephase", "tide_Cmax",
+            "tide_Cmin", "tide_Cangle" or "tide_Cphase".
+
         ntides : int, optional
             The index of the tidal constituent to plot. Default is 0, which corresponds
             to the first constituent.
@@ -505,7 +586,7 @@ class TidalForcing:
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        field = self.ds[var_name].isel(ntides=ntides)
+        field = self.ds[var_name].isel({self.ds[var_name].dims[0]: ntides})
 
         if self.use_dask:
             from dask.diagnostics import ProgressBar

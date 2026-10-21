@@ -570,6 +570,17 @@ class RiverDataset:
 
         self.climatology = True
 
+    def static_river_size(self) -> dict[str, float]:
+        """Time-independent size of each river (the ``vol`` variable), keyed by
+        river name. Missing values count as 0; empty if ``vol`` is absent.
+        """
+        var = (self.opt_var_names or {}).get("vol")
+        if var is None or var not in self.ds:
+            return {}
+        names = self.ds[self.var_names["name"]].values
+        sizes = np.nan_to_num(self.ds[var].values.astype(np.float64))
+        return {str(n): float(s) for n, s in zip(names, sizes)}
+
     def sort_by_river_volume(self, ds: xr.Dataset) -> xr.Dataset:
         """Sorts the dataset by river volume in descending order (largest rivers first),
         if the volume variable is available.

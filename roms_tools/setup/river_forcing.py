@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +64,8 @@ MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
 VALID_CONVERT_TO_CLIMATOLOGY = ("never", "if_any_missing", "always")
 AIR_TEMP_COVERAGE_TOLERANCE_DAYS = 1.0
+# Name prefix of the synthetic rivers that merge rivers sharing a grid cell.
+OVERLAP_RIVER_PREFIX = "overlap_"
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
@@ -476,8 +478,7 @@ class RiverForcing:
         The default is the Dai and Trenberth global river dataset (updated in May 2019), which does not require a path.
 
         Rivers whose final mean discharge is below the source's
-        minimum-discharge default are dropped entirely; see
-        ``min_discharge_m3s``.
+        minimum-discharge default get zero discharge; see ``min_discharge_m3s``.
 
     convert_to_climatology : str, optional
         Determines when to compute climatology for river forcing. Options are:
@@ -569,11 +570,10 @@ class RiverForcing:
         high-resolution domains, a smaller value (e.g. 5) may be more
         appropriate.
     min_discharge_m3s : float, optional
-        Minimum time-mean discharge (m3/s) a river must have to be kept;
-        rivers below this are dropped entirely. Defaults to ``None``, which
-        uses the source dataset's own ``MIN_DISCHARGE_M3S`` class default
-        (currently 1.0 m3/s for GloFAS, matching its station-catalog
-        preprocessing; disabled for Dai). Set to 0 to keep every river.
+        Minimum time-mean discharge (m3/s); rivers below it are kept with
+        zero discharge. Defaults to ``None``, which uses the source dataset's
+        ``MIN_DISCHARGE_M3S`` (1.0 m3/s for GloFAS, disabled for Dai). Set to
+        0 to disable.
     """
 
     grid: Grid
@@ -640,10 +640,9 @@ class RiverForcing:
     domains, a smaller value (e.g. 5) may be more appropriate."""
 
     min_discharge_m3s: float | None = None
-    """Minimum time-mean discharge (m3/s) a river must have to be kept;
-    rivers below this are dropped entirely. ``None`` uses the source
-    dataset's own ``MIN_DISCHARGE_M3S`` class default; 0 keeps every river.
-    See ``_resolve_min_discharge``."""
+    """Minimum time-mean discharge (m3/s); rivers below it are kept with zero
+    discharge. ``None`` uses the source dataset's ``MIN_DISCHARGE_M3S``; 0
+    disables it. See ``_resolve_min_discharge``."""
 
     _bgc_dataset: RiverBGCDataset | None = field(
         default=None, init=False, repr=False, compare=False
@@ -698,7 +697,9 @@ class RiverForcing:
             # Strip synthetic overlap rivers — they are recreated by
             # _handle_overlapping_rivers and don't exist in the source dataset.
             source_indices = {
-                k: v for k, v in self.indices.items() if not k.startswith("overlap_")
+                k: v
+                for k, v in self.indices.items()
+                if not k.startswith(OVERLAP_RIVER_PREFIX)
             }
             self.indices = source_indices
             check_river_locations_are_along_coast(self.grid.ds.mask_rho, source_indices)
@@ -706,11 +707,15 @@ class RiverForcing:
 
         ds = self._create_river_forcing(data)
         ds, exempt_names = self._handle_overlapping_rivers(ds)
-        # Re-sort by final volume after overlap handling — absorbed rivers now have
-        # zero discharge so the original sort order is no longer meaningful
+        # Largest rivers first, by a time-independent size, so the order and
+        # river IDs do not depend on the requested time window.
         volume_means = ds["river_volume"].mean(dim="river_time")
-        sorted_nriver = np.argsort(volume_means.values)[::-1]
-        sorted_names = [str(ds.river_name.values[i]) for i in sorted_nriver]
+        names = [str(n) for n in ds.river_name.values]
+        sort_keys = self._static_sort_keys(names, data.static_river_size())
+        sorted_nriver = sorted(
+            range(len(names)), key=lambda i: (-sort_keys[i], names[i])
+        )
+        sorted_names = [names[i] for i in sorted_nriver]
         self.indices = {
             name: self.indices[name] for name in sorted_names if name in self.indices
         }
@@ -721,7 +726,7 @@ class RiverForcing:
         # Per-river means are unchanged by the nriver reorder -- reuse them
         # instead of recomputing the reduction over river_time.
         mean_discharge = volume_means.values[sorted_nriver]
-        ds = self._drop_rivers_below_min_discharge(
+        ds = self._zero_rivers_below_min_discharge(
             ds, data, exempt_names, mean_discharge
         )
 
@@ -1578,8 +1583,10 @@ class RiverForcing:
         """Detect and resolve overlapping river grid cell assignments.
 
         If multiple rivers are assigned to the same grid cell (i.e., overlapping index pairs),
-        this method creates new uniquely named rivers ('overlap_1', 'overlap_2', ...)
-        that consolidate the contributions from all original rivers sharing that location.
+        this method creates new uniquely named rivers that consolidate the contributions
+        from all original rivers sharing that location. Each is named after its
+        alphabetically first member ("overlap_<river>"), with "_2", "_3", ... added
+        when that name repeats.
 
         For each overlapping grid cell:
         - A new river is created using a volume-weighted sum of the original rivers' volume and tracer.
@@ -1599,9 +1606,9 @@ class RiverForcing:
         tuple[xr.Dataset, set[str]]
             A new dataset with overlapping rivers resolved and new entries
             added, plus the set of original contributing river names exempt
-            from the downstream min-discharge filter (the synthetic
+            from the downstream min-discharge floor (the synthetic
             "overlap_*" rivers are not exempt) -- see
-            ``_drop_rivers_below_min_discharge`` for the rationale.
+            ``_zero_rivers_below_min_discharge``.
         """
         overlapping_rivers = self._get_overlapping_rivers()
 
@@ -1619,13 +1626,21 @@ class RiverForcing:
             combined_river_tracers = []
 
             name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
-            for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
-                # Sort so the synthetic name doesn't depend on dict-iteration
-                # order, which differs between auto-discovery and the
-                # YAML-roundtrip path even for the same set of overlapping rivers.
-                name = "overlap_" + sorted(river_list)[0].replace(
+            # Fixed group order so names match between auto-discovery and the
+            # YAML-roundtrip path, whose dict-iteration orders differ.
+            groups = sorted(
+                overlapping_rivers.items(), key=lambda kv: (sorted(kv[1]), kv[0])
+            )
+            used_names = {str(n) for n in ds.river_name.values}
+            for i, (idx_pair, river_list) in enumerate(groups):
+                base = OVERLAP_RIVER_PREFIX + sorted(river_list)[0].replace(
                     self._river_name_prefix, ""
                 )
+                name, k = base, 1
+                while name in used_names:
+                    k += 1
+                    name = f"{base}_{k}"
+                used_names.add(name)
                 logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
                 new_nriver = ds.sizes["nriver"] + i + 1
                 (
@@ -1653,6 +1668,31 @@ class RiverForcing:
 
         return ds_updated, exempt_names
 
+    def _static_sort_keys(self, names: list[str], size: dict[str, float]) -> np.ndarray:
+        """Time-independent size of each river in ``names`` after overlap merging.
+
+        An original river keeps the share of its ``size`` on cells it does not
+        share; an overlap river gets ``size / n_cells`` from each member. Rivers
+        missing from ``size`` count as 0.
+        """
+        assert self.indices is not None
+        overlap_cells = {
+            tuple(cell): name
+            for name, cells in self.indices.items()
+            if name.startswith(OVERLAP_RIVER_PREFIX)
+            for cell in cells
+        }
+        keys = dict.fromkeys(names, 0.0)
+        for name, cells in self.indices.items():
+            if name.startswith(OVERLAP_RIVER_PREFIX) or name not in keys:
+                continue
+            per_cell = size.get(name, 0.0) / len(cells)
+            for cell in cells:
+                owner = overlap_cells.get(tuple(cell), name)
+                if owner in keys:
+                    keys[owner] += per_cell
+        return np.array([keys[n] for n in names])
+
     def _resolve_min_discharge(self, data: RiverDataset) -> float | None:
         """Resolve the min-discharge floor (m3/s), or ``None`` if disabled.
 
@@ -1665,49 +1705,37 @@ class RiverForcing:
             return self.min_discharge_m3s
         return data.MIN_DISCHARGE_M3S
 
-    def _drop_rivers_below_min_discharge(
+    def _zero_rivers_below_min_discharge(
         self,
         ds: xr.Dataset,
         data: RiverDataset,
         exempt_names: set[str],
         mean_discharge: np.ndarray,
     ) -> xr.Dataset:
-        """Drop rivers whose ``mean_discharge`` is below the resolved
-        min-discharge floor (see ``_resolve_min_discharge``).
+        """Set ``river_volume`` to 0 for rivers whose ``mean_discharge`` is below
+        the resolved min-discharge floor (see ``_resolve_min_discharge``).
 
-        Rivers in ``exempt_names`` (the original participants of an overlap
-        merge, from ``_handle_overlapping_rivers``) are kept regardless:
-        dropping an overlap participant would remove its indices, which would
-        change the recomputed merge on ``from_yaml`` reload and break
-        round-trip equality. Fully-absorbed originals carry zero volume
-        (bookkeeping, not a real low-discharge river); partially-overlapping
-        rivers keep their reduced-but-real volume and are likewise exempt.
-        The synthetic ``overlap_*`` rivers are NOT exempt and are subject to
-        the floor like any other river.
+        Rivers are kept, so river IDs and indices do not change. Original
+        participants of an overlap merge (``exempt_names``) keep their volume;
+        their merged ``overlap_*`` river is subject to the floor.
         """
         min_discharge = self._resolve_min_discharge(data)
         if min_discharge is None:
             return ds
 
-        # self.indices is always set (auto-discovered or user-provided) by
-        # this point in __post_init__'s control flow.
-        assert self.indices is not None
         is_exempt = np.array([str(n) in exempt_names for n in ds.river_name.values])
-        keep = (mean_discharge >= min_discharge) | is_exempt
-        if keep.all():
-            return ds
-
-        dropped_names = [str(n) for n in ds.river_name.values[~keep]]
-        logging.info(
-            "Dropping %d river(s) with mean discharge below %.2f m3/s.",
-            len(dropped_names),
-            min_discharge,
-        )
-        ds = ds.isel(nriver=keep)
-        ds = self._reindex_nriver(ds)
-        self.indices = {
-            name: idx for name, idx in self.indices.items() if name not in dropped_names
-        }
+        low = (mean_discharge < min_discharge) & ~is_exempt
+        if low.any():
+            logging.info(
+                "Zeroing discharge of %d river(s) with mean discharge below %.2f m3/s.",
+                int(low.sum()),
+                min_discharge,
+            )
+            attrs = ds["river_volume"].attrs
+            ds["river_volume"] = ds["river_volume"].where(
+                ~xr.DataArray(low, dims="nriver"), 0.0
+            )
+            ds["river_volume"].attrs = attrs
         return ds
 
     @staticmethod
@@ -1909,6 +1937,10 @@ class RiverForcing:
         from `self.indices` and assigns them to the dataset. Builds numpy arrays first and wraps in
         xr.DataArray at the end, avoiding repeated xarray indexing overhead in the assignment loop.
 
+        A cell shared by several rivers belongs to the synthetic overlap river that
+        merges them; each original river spreads its volume evenly over its
+        remaining cells, and a river with none left is not placed.
+
         Parameters
         ----------
         ds : xarray.Dataset
@@ -1925,9 +1957,23 @@ class RiverForcing:
         river_names = ds["river_name"].values
         nriver_vals = ds["nriver"].values
 
-        for i, (river_name, nriver_val) in enumerate(zip(river_names, nriver_vals)):
+        # Cells listed by more than one source river (kept even if their overlap
+        # river was dropped).
+        cell_counts = Counter(
+            tuple(cell)
+            for name, cells in self.indices.items()
+            if not name.startswith(OVERLAP_RIVER_PREFIX)
+            for cell in cells
+        )
+        overlap_cells = {cell for cell, n in cell_counts.items() if n > 1}
+
+        for river_name, nriver_val in zip(river_names, nriver_vals):
             river_name_str = str(river_name)
             indices = self.indices[river_name_str]
+            if not river_name_str.startswith(OVERLAP_RIVER_PREFIX):
+                indices = [c for c in indices if tuple(c) not in overlap_cells]
+            if not indices:
+                continue
             fraction = 1.0 / len(indices)
             for eta_index, xi_index in indices:
                 river_index_arr[eta_index, xi_index] = nriver_val

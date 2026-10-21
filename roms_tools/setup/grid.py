@@ -83,13 +83,15 @@ class Grid:
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
-        The number of vertical levels. The default is 100.
+        The number of vertical levels. The default for a new grid is 100.
     theta_s : float, optional
-        The surface control parameter. Must satisfy 0 < theta_s <= 10. The default is 5.0.
+        The surface control parameter. Must satisfy 0 < theta_s <= 10 for `vstretching`
+        4 and 5. The default for a new grid is 5.0.
     theta_b : float, optional
-        The bottom control parameter. Must satisfy 0 < theta_b <= 10. The default is 2.0.
+        The bottom control parameter. Must satisfy 0 < theta_b <= 10 for `vstretching`
+        4 and 5. The default for a new grid is 2.0.
     hc : float, optional
-        The critical depth (in meters). The default is 300.0.
+        The critical depth (in meters). The default for a new grid is 300.0.
     vtransform : int, optional
         The ROMS vertical transformation equation (``Vtransform``), 1 or 2. The default
         is 2, the only option in UCLA-ROMS.
@@ -98,6 +100,11 @@ class Grid:
         4, the only option in UCLA-ROMS.
     verbose: bool, optional
         Indicates whether to print grid generation steps with timing. Defaults to False.
+    filename : str or Path, optional
+        An existing grid file to load instead of generating a new grid. The vertical
+        coordinate parameters are then read from the file. If the file has none, they
+        are not assumed: pass `N`, `theta_s`, `theta_b` and `hc` (and `vtransform` and
+        `vstretching` for Rutgers ROMS) if the vertical coordinate is needed.
 
     Raises
     ------

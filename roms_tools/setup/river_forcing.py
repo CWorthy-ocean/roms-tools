@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
@@ -1957,15 +1957,12 @@ class RiverForcing:
         river_names = ds["river_name"].values
         nriver_vals = ds["nriver"].values
 
-        # Cells listed by more than one source river (kept even if their overlap
-        # river was dropped).
-        cell_counts = Counter(
+        overlap_cells = {
             tuple(cell)
             for name, cells in self.indices.items()
-            if not name.startswith(OVERLAP_RIVER_PREFIX)
+            if name.startswith(OVERLAP_RIVER_PREFIX)
             for cell in cells
-        )
-        overlap_cells = {cell for cell, n in cell_counts.items() if n > 1}
+        }
 
         for river_name, nriver_val in zip(river_names, nriver_vals):
             river_name_str = str(river_name)

@@ -1067,37 +1067,6 @@ class TestRiverForcingWithOverlappingIndices:
         assert len(set(out_names)) == len(out_names)
         assert sum(n.startswith(OVERLAP_RIVER_PREFIX) for n in out_names) == 3
 
-    def test_dropped_overlap_cell_stays_unclaimed(
-        self, mock_river_dataset_with_simple_overlap
-    ):
-        """After an overlap river is dropped (min-discharge floor), its members
-        still do not write to the shared cell.
-        """
-        ds, indices = mock_river_dataset_with_simple_overlap
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = {name: list(cells) for name, cells in indices.items()}
-        rf._river_name_prefix = ""
-        rf.grid = SimpleNamespace(
-            ds=xr.Dataset({"h": (("eta_rho", "xi_rho"), np.zeros((20, 30)))})
-        )
-        ds_out, _ = rf._handle_overlapping_rivers(ds)
-        keep = [
-            not str(n).startswith(OVERLAP_RIVER_PREFIX)
-            for n in ds_out.river_name.values
-        ]
-        ds_out = rf._reindex_nriver(ds_out.isel(nriver=keep))
-        rf.indices = {
-            n: c
-            for n, c in rf.indices.items()
-            if not n.startswith(OVERLAP_RIVER_PREFIX)
-        }
-
-        ds_out = rf._write_indices_into_dataset(ds_out)
-
-        assert ds_out["river_index"].values[10, 20] == 0
-        # RiverA keeps one of its two cells and puts all its remaining volume there.
-        assert ds_out["river_fraction"].values[10, 21] == pytest.approx(1.0)
-
     def test_overlap_strip_from_provided_indices(
         self, iceland_test_grid, single_cell_indices
     ):

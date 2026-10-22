@@ -50,6 +50,20 @@ To generate the model inputs, ``ROMS-Tools`` automates several intermediate proc
 
 * **Data streaming**: ERA5 atmospheric data can be accessed directly from the cloud, removing the need for users to pre-download large datasets locally. Similar streaming capabilities may be implemented for other datasets in the future.
 
+.. _rutgers-roms:
+
+Rutgers ROMS
+~~~~~~~~~~~~
+
+``ROMS-Tools`` writes input files for UCLA-ROMS by default. Grids made by Rutgers ROMS tools can be loaded with ``Grid(filename=...)``, including the Rutgers ROMS vertical coordinate options (``vtransform``, ``vstretching``). Set ``convention="rutgers"`` to write these inputs as read by Rutgers ROMS:
+
+* ``InitialConditions`` and ``BoundaryForcing`` (physics only).
+* ``SurfaceForcing`` (``type="physics"`` and ``"sss"`` restoring): ``Uwind``, ``Vwind``, ``Qair`` as relative humidity, ``rain`` in kg m\ :sup:`-2` s\ :sup:`-1`, and ``lwrad_down``, which requires ``LONGWAVE_OUT``. Air pressure ``Pair`` is not written, so use ``ANA_PAIR`` or provide it separately.
+* ``TidalForcing``: tidal elevation and current ellipses, following ``frc_tides.cdl``.
+* ``RiverForcing``: point sources on the faces between river and ocean cells, for ``LuvSrc``, following ``frc_rivers.cdl``, with a uniform vertical profile.
+
+Time units include ``model_reference_date``, so ``TIME_REF`` in ``ocean.in`` does not need to match it. Climatologies are cycled from ``TIME_REF``, as in Rutgers ROMS climatology files, so for them ``TIME_REF`` must fall on the same day of the year as ``model_reference_date`` (e.g. both on January 1). BGC inputs, CDR forcing and nesting are for UCLA-ROMS (MARBL) only.
+
 Postprocessing and Analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

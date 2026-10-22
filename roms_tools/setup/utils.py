@@ -2269,7 +2269,7 @@ def latlon_to_xyz(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     )
 
 
-def find_coastal_cells(mask: np.ndarray) -> np.ndarray:
+def find_coastal_cells(mask: np.ndarray, interior_only: bool = False) -> np.ndarray:
     """Identify coastal grid cells using a 4-neighbor convolution.
 
     A coastal cell is defined as a land cell (mask=0) that is adjacent to
@@ -2283,6 +2283,9 @@ def find_coastal_cells(mask: np.ndarray) -> np.ndarray:
     ----------
     mask : np.ndarray
         2D array of shape (eta_rho, xi_rho) where 1=ocean and 0=land.
+    interior_only : bool, optional
+        Whether to count only ocean cells inside the domain, not on its outer rows
+        and columns (as for Rutgers ROMS point sources). Defaults to False.
 
     Returns
     -------
@@ -2291,8 +2294,13 @@ def find_coastal_cells(mask: np.ndarray) -> np.ndarray:
     """
     from scipy.ndimage import convolve
 
+    ocean = mask
+    if interior_only:
+        ocean = np.zeros_like(mask)
+        ocean[1:-1, 1:-1] = mask[1:-1, 1:-1]
+
     kernel = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
-    faces = convolve(mask, kernel, mode="constant", cval=0.0)
+    faces = convolve(ocean, kernel, mode="constant", cval=0.0)
     return (1 - mask) * (faces > 0)
 
 

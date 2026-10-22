@@ -52,6 +52,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     interpolate_dynamic_bgc_by_calendar_year,
     serialize_paths,
+    set_rutgers_time,
     substitute_nans_by_fillvalue,
     to_dict,
     validate_names,
@@ -574,6 +575,17 @@ class RiverForcing:
         uses the source dataset's own ``MIN_DISCHARGE_M3S`` class default
         (currently 1.0 m3/s for GloFAS, matching its station-catalog
         preprocessing; disabled for Dai). Set to 0 to keep every river.
+    convention : {"ucla", "rutgers"}, optional
+        ROMS version the river forcing is written for. ``"rutgers"`` writes the point
+        sources read by Rutgers ROMS (``frc_rivers.cdl``), for ``LuvSrc``: as in
+        UCLA-ROMS, a river cell's discharge flows equally through its faces with ocean
+        cells, and each face is a source on a u-face (``river_direction`` 0) or v-face
+        (1) with signed ``river_transport``. Only ocean cells inside the domain (not on
+        its outer rows and columns) count as coast for placing rivers, since Rutgers
+        ROMS sources cannot be on the outermost rows and columns. ``river_Vshape`` is uniform over the
+        vertical levels and can be replaced in ``ds`` before saving. Needs the grid's
+        number of vertical levels ``N``. BGC tracers are not supported, and ``plot``
+        is not available. Defaults to ``"ucla"``.
     """
 
     grid: Grid
@@ -645,6 +657,9 @@ class RiverForcing:
     dataset's own ``MIN_DISCHARGE_M3S`` class default; 0 keeps every river.
     See ``_resolve_min_discharge``."""
 
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the river forcing is written for."""
+
     _bgc_dataset: RiverBGCDataset | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -701,7 +716,11 @@ class RiverForcing:
                 k: v for k, v in self.indices.items() if not k.startswith("overlap_")
             }
             self.indices = source_indices
-            check_river_locations_are_along_coast(self.grid.ds.mask_rho, source_indices)
+            check_river_locations_are_along_coast(
+                self.grid.ds.mask_rho,
+                source_indices,
+                interior_only=self.convention == "rutgers",
+            )
             data.extract_named_rivers(source_indices)
 
         ds = self._create_river_forcing(data)
@@ -737,6 +756,9 @@ class RiverForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name], fill_value=0.0)
 
+        if self.convention == "rutgers":
+            ds = self._to_rutgers(ds)
+
         self.ds = ds
 
     def _input_checks(self):
@@ -745,6 +767,16 @@ class RiverForcing:
                 f'Invalid convert_to_climatology "{self.convert_to_climatology}". '
                 f"Valid options: {', '.join(VALID_CONVERT_TO_CLIMATOLOGY)}."
             )
+        if self.convention not in ["ucla", "rutgers"]:
+            raise ValueError("`convention` must be 'ucla' or 'rutgers'.")
+        if self.convention == "rutgers":
+            if self.include_bgc:
+                raise ValueError("convention='rutgers' does not support BGC tracers.")
+            if self.grid.N is None:
+                raise ValueError(
+                    "convention='rutgers' needs the number of vertical levels; "
+                    "provide N (and the other vertical coordinate parameters) for the grid."
+                )
         self.bgc_model = validate_bgc_model(self.bgc_model)
         self.source = self._normalized_source()
         self.bgc_source = self._normalized_bgc_source()
@@ -1390,7 +1422,9 @@ class RiverForcing:
         # Identify coastal grid cells — land cells adjacent to ocean. Must use the
         # same definition as check_river_locations_are_along_coast so that a
         # YAML round-trip accepts every location chosen here.
-        coast = find_coastal_cells(self.grid.ds.mask_rho.values)
+        coast = find_coastal_cells(
+            self.grid.ds.mask_rho.values, interior_only=self.convention == "rutgers"
+        )
 
         # Get eta, xi indices and lat/lon of coastal cells
         coast_eta, coast_xi = np.where(coast)
@@ -1950,6 +1984,106 @@ class RiverForcing:
 
         return ds
 
+    def _to_rutgers(self, ds):
+        """Convert to the point sources read by Rutgers ROMS (``frc_rivers.cdl``).
+
+        As in UCLA-ROMS, each river cell is a land cell whose share of the river's
+        volume flux flows equally through its faces with ocean cells. Each face becomes
+        a Rutgers point source, located by the face's u- or v-point indices, which
+        number the faces between rho-points i-1 and i (or j-1 and j) as i (or j).
+        """
+        river_index = ds["river_index"].values
+        river_fraction = ds["river_fraction"].values
+        eta, xi = np.nonzero(river_index)
+        # interior ocean cells (river placement uses only these for Rutgers ROMS),
+        # padded with land
+        wet = np.pad(self.grid.ds.mask_rho.values[1:-1, 1:-1], 2) == 1
+
+        # west, east, south and north neighbors: (d_eta, d_xi, direction)
+        neighbors = [(0, -1, 0), (0, 1, 0), (-1, 0, 1), (1, 0, 1)]
+        is_wet = [wet[eta + 1 + d_eta, xi + 1 + d_xi] for d_eta, d_xi, _ in neighbors]
+        faces = np.sum(is_wet, axis=0)
+
+        cell, xpos, epos, direction, sign = [], [], [], [], []
+        for (d_eta, d_xi, dir_flag), wet_face in zip(neighbors, is_wet):
+            cell.append(np.flatnonzero(wet_face))
+            xpos.append(xi[wet_face] + max(d_xi, 0))
+            epos.append(eta[wet_face] + max(d_eta, 0))
+            direction.append(np.full(wet_face.sum(), dir_flag))
+            sign.append(np.full(wet_face.sum(), d_eta + d_xi))
+        cell, xpos, epos, direction, sign = (
+            np.concatenate(a) for a in [cell, xpos, epos, direction, sign]
+        )
+        order = np.lexsort((xpos, epos, river_index[eta[cell], xi[cell]]))
+        cell, xpos, epos, direction, sign = (
+            a[order] for a in [cell, xpos, epos, direction, sign]
+        )
+
+        ids = river_index[eta[cell], xi[cell]].astype(int)
+        weight = sign * river_fraction[eta[cell], xi[cell]] / faces[cell]
+        sources = ds.sel(nriver=ids).transpose("river_time", "ntracers", "nriver", ...)
+        N = self.grid.N
+        dims = ("river_time", "s_rho", "river")
+
+        # keep the time coordinates and global attributes
+        ds_rutgers = ds.drop_vars(list(ds.data_vars)).drop_dims(["nriver", "ntracers"])
+        ds_rutgers["river"] = ("river", np.arange(1.0, len(ids) + 1))
+        ds_rutgers["river"].attrs["long_name"] = "river runoff identification number"
+        ds_rutgers["river_name"] = ("river", sources["river_name"].values.astype(str))
+        ds_rutgers["river_name"].attrs["long_name"] = "River name"
+        ds_rutgers["river_direction"] = ("river", direction.astype(float))
+        ds_rutgers["river_direction"].attrs = {
+            "long_name": "river runoff grid-cell face flag",
+            "flag_values": "0, 1",
+            "flag_meanings": "flow across U-face, flow across V-face",
+        }
+        ds_rutgers["river_Xposition"] = ("river", xpos.astype(float))
+        ds_rutgers["river_Xposition"].attrs["long_name"] = (
+            "river XI-position (i-index of the U- or V-face)"
+        )
+        ds_rutgers["river_Eposition"] = ("river", epos.astype(float))
+        ds_rutgers["river_Eposition"].attrs["long_name"] = (
+            "river ETA-position (j-index of the U- or V-face)"
+        )
+        ds_rutgers["river_Vshape"] = (("s_rho", "river"), np.full((N, len(ids)), 1 / N))
+        ds_rutgers["river_Vshape"].attrs = {
+            "long_name": "river runoff mass transport vertical profile",
+            "requires": "must sum to 1 over the s_rho coordinate",
+        }
+        ds_rutgers["river_transport"] = (
+            ("river_time", "river"),
+            sources["river_volume"].values * weight,
+        )
+        ds_rutgers["river_transport"].attrs = {
+            "long_name": "river runoff vertically integrated mass transport",
+            "units": "meter3 second-1",
+            "positive": "flow in positive u,v direction",
+        }
+        tracer_names = ds["tracer_name"].values
+        for tracer_name, long_name in [
+            ("temp", "river runoff potential temperature"),
+            ("salt", "river runoff salinity"),
+        ]:
+            tracer = sources["river_tracer"].values[
+                :, _tracer_index(tracer_names, tracer_name)
+            ]
+            ds_rutgers[f"river_{tracer_name}"] = (
+                dims,
+                np.repeat(tracer[:, np.newaxis, :], N, axis=1),
+            )
+            ds_rutgers[f"river_{tracer_name}"].attrs = {"long_name": long_name}
+        ds_rutgers["river_temp"].attrs["units"] = "Celsius"
+
+        ds_rutgers = set_rutgers_time(
+            ds_rutgers,
+            "river_time",
+            self.model_reference_date,
+            ["river_transport", "river_temp", "river_salt"],
+        )
+        ds_rutgers.encoding = ds.encoding
+
+        return ds_rutgers
+
     def _validate(self, ds):
         """Validates the dataset by checking for NaN values in river forcing data.
 
@@ -2095,6 +2229,10 @@ class RiverForcing:
             Defaults to "all".
 
         """
+        if self.convention == "rutgers":
+            raise NotImplementedError(
+                "`plot` is not available for convention='rutgers'."
+            )
         valid_river_names = list(self.indices or [])
 
         river_names = _validate_river_names(river_names, valid_river_names)
@@ -2263,7 +2401,7 @@ class RiverForcing:
         return cls(grid=grid, **params)
 
 
-def check_river_locations_are_along_coast(mask, indices):
+def check_river_locations_are_along_coast(mask, indices, interior_only=False):
     """Check if the river locations are along the coast.
 
     This function checks if the river locations specified in the `indices` dictionary are located on coastal grid cells.
@@ -2278,6 +2416,10 @@ def check_river_locations_are_along_coast(mask, indices):
         A dictionary where the keys are river names, and the values are dictionaries containing the river's grid locations (`eta_rho` and `xi_rho`).
         Each entry should have keys `"eta_rho"` and `"xi_rho"`, which are lists of grid cell indices representing river mouth locations.
 
+    interior_only : bool, optional
+        Whether the adjacent ocean grid cell must be inside the domain, not on its
+        outer rows and columns (as for Rutgers ROMS). Defaults to False.
+
     Raises
     ------
     ValueError
@@ -2288,7 +2430,7 @@ def check_river_locations_are_along_coast(mask, indices):
     # produced NaN along the domain edges, so edge cells were never counted as
     # coast and RiverForcing.from_yaml rejected rivers that the auto-discovery
     # path had legitimately placed there.
-    coast = find_coastal_cells(np.asarray(mask))
+    coast = find_coastal_cells(np.asarray(mask), interior_only=interior_only)
 
     for key, river_data in indices.items():
         for idx_pair in river_data:

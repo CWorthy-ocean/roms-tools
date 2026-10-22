@@ -2104,3 +2104,91 @@ class TestRiverForcingTotalDischargeMode:
         dic_vals = rf.ds["river_tracer"].isel(ntracers=dic_idx).values
         flowing_col = river_names.index("GloFAS_63.72N_17.53W")
         assert np.allclose(dic_vals[:, flowing_col], 20.0)
+
+
+def test_rutgers_convention(iceland_test_grid, multi_cell_indices, tmp_path):
+    kwargs = {
+        "grid": iceland_test_grid,
+        "start_time": datetime(1998, 1, 1),
+        "end_time": datetime(1998, 3, 1),
+        "indices": multi_cell_indices,
+    }
+    ds = RiverForcing(**kwargs).ds
+    river_forcing = RiverForcing(**kwargs, convention="rutgers")
+    ds_rutgers = river_forcing.ds
+
+    # each source is on the face between a river cell and an ocean cell, with positive
+    # transport when the ocean cell is on the positive side
+    mask = iceland_test_grid.ds.mask_rho.values
+    river_index = ds["river_index"].values
+    for i, j, direction, transport in zip(
+        ds_rutgers["river_Xposition"].values.astype(int),
+        ds_rutgers["river_Eposition"].values.astype(int),
+        ds_rutgers["river_direction"].values,
+        ds_rutgers["river_transport"].isel(river_time=0).values,
+    ):
+        if direction == 0:
+            negative_side, positive_side = (j, i - 1), (j, i)
+        else:
+            negative_side, positive_side = (j - 1, i), (j, i)
+        if mask[positive_side] == 1:
+            assert mask[negative_side] == 0 and river_index[negative_side] > 0
+            assert transport >= 0
+        else:
+            assert mask[negative_side] == 1 and river_index[positive_side] > 0
+            assert transport <= 0
+
+    # the sources of each river carry its discharge through its cells
+    river_fraction = ds["river_fraction"].values
+    for name, nriver in zip(ds["river_name"].values, ds["nriver"].values):
+        is_river = ds_rutgers["river_name"] == str(name)
+        np.testing.assert_allclose(
+            abs(ds_rutgers["river_transport"].where(is_river)).sum("river"),
+            ds["river_volume"].sel(nriver=nriver)
+            * river_fraction[river_index == nriver].sum(),
+        )
+
+    np.testing.assert_allclose(ds_rutgers["river_Vshape"].sum("s_rho"), 1)
+    assert ds_rutgers["river_temp"].dims == ("river_time", "s_rho", "river")
+    # climatology, cycled from TIME_REF in Rutgers ROMS
+    assert ds_rutgers["river_time"].attrs["units"] == "days"
+    assert ds_rutgers["river_time"].attrs["cycle_length"] == 365.25
+    assert ds_rutgers["river_transport"].attrs["time"] == "river_time"
+
+    with pytest.raises(NotImplementedError):
+        river_forcing.plot()
+
+    filepath = tmp_path / "river_forcing.yaml"
+    river_forcing.to_yaml(filepath)
+    xr.testing.assert_identical(RiverForcing.from_yaml(filepath).ds, ds_rutgers)
+
+
+def test_rutgers_convention_domain_edge():
+    """Rutgers ROMS sources can't be on the outermost rows and columns, so rivers are
+    only placed next to ocean cells inside the domain.
+    """
+    grid = Grid(
+        nx=18, ny=18, size_x=1500, size_y=1500, center_lon=-20, center_lat=65, N=3
+    )
+    kwargs = {
+        "grid": grid,
+        "start_time": datetime(1998, 1, 1),
+        "end_time": datetime(1998, 3, 1),
+        # a land cell on the domain edge whose only ocean neighbor is also on the edge
+        "indices": {"Thjorsa": [(13, 0)]},
+    }
+    RiverForcing(**kwargs)
+    with pytest.raises(ValueError, match="not located on the coast"):
+        RiverForcing(**kwargs, convention="rutgers")
+
+
+def test_rutgers_convention_errors(iceland_test_grid):
+    kwargs = {
+        "grid": iceland_test_grid,
+        "start_time": datetime(1998, 1, 1),
+        "end_time": datetime(1998, 3, 1),
+    }
+    with pytest.raises(ValueError, match="must be 'ucla' or 'rutgers'"):
+        RiverForcing(**kwargs, convention="Rutgers")
+    with pytest.raises(ValueError, match="does not support BGC tracers"):
+        RiverForcing(**kwargs, convention="rutgers", include_bgc=True)

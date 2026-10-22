@@ -1325,6 +1325,7 @@ class TestForwardableFields:
             "regrid_method",
             "extrap_method",
             "extrap_kwargs",
+            "convention",
         }
     )
 

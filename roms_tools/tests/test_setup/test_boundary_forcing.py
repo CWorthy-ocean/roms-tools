@@ -1926,3 +1926,32 @@ class TestBoundaryForcingWrapper:
         assert len(bf_from_file.bgc) == len(bf.bgc)
         for original, reloaded in zip(bf.bgc, bf_from_file.bgc):
             xr.testing.assert_allclose(original.ds, reloaded.ds)
+
+
+def test_rutgers_convention(use_dask, tmp_path):
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    bf = BoundaryForcingSource(**kwargs)
+    bf_rutgers = BoundaryForcing(**kwargs, convention="rutgers")
+    ds = bf_rutgers.physics.ds
+
+    xr.testing.assert_allclose(ds.drop_attrs(), bf.ds.drop_attrs())
+    assert ds["bry_time"].attrs["units"] == "days since 2000-01-01 00:00:00"
+    for var_name in ds.data_vars:
+        assert ds[var_name].attrs["time"] == "bry_time"
+
+    filepath = tmp_path / "bf.yaml"
+    bf_rutgers.to_yaml(filepath)
+    assert BoundaryForcing.from_yaml(filepath, use_dask=use_dask) == bf_rutgers
+
+
+def test_rutgers_convention_errors(use_dask):
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    with pytest.raises(ValueError, match="must be 'ucla' or 'rutgers'"):
+        BoundaryForcingSource(**kwargs, convention="Rutgers")
+    with pytest.raises(ValueError, match="does not support BGC sources"):
+        BoundaryForcing(
+            **kwargs,
+            convention="rutgers",
+            bgc_sources=[{"source": {"name": "constants", "constants": {"NO3": 24.0}}}],
+            bgc_model=BGCMarbl,
+        )

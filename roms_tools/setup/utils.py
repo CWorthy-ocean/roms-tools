@@ -2530,6 +2530,51 @@ def add_time_info_to_ds(
     return ds, time
 
 
+def set_rutgers_time(
+    ds: xr.Dataset,
+    time_name: str,
+    model_reference_date: datetime,
+    var_names: list[str] | None = None,
+) -> xr.Dataset:
+    """Set the time units and attributes read by Rutgers ROMS.
+
+    Rutgers ROMS only uses the reference date of time units containing "since", and
+    finds the time variable of each field from its ``time`` attribute. Climatologies
+    (with ``cycle_length``) keep units without a reference date, as in Rutgers ROMS
+    climatology files, since Rutgers ROMS cycles them from ``TIME_REF``.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset to update.
+    time_name : str
+        Name of the relative time variable, with units "days" or "seconds".
+    model_reference_date : datetime
+        The reference date of the relative time.
+    var_names : list of str, optional
+        Variables to point to ``time_name``. Defaults to all data variables along the
+        dimension of ``time_name``.
+
+    Returns
+    -------
+    xarray.Dataset
+        The updated dataset.
+    """
+    if "cycle_length" not in ds[time_name].attrs:
+        ref = pd.Timestamp(model_reference_date)
+        units = f"{ds[time_name].attrs['units']} since {ref:%Y-%m-%d %H:%M:%S}"
+        ds[time_name].attrs["units"] = units
+        ds[time_name].encoding["units"] = units
+
+    if var_names is None:
+        time_dim = ds[time_name].dims[0]
+        var_names = [name for name in ds.data_vars if time_dim in ds[name].dims]
+    for name in var_names:
+        ds[name].attrs["time"] = time_name
+
+    return ds
+
+
 class NoAliasDumper(yaml.SafeDumper):
     def ignore_aliases(self, data):
         return True

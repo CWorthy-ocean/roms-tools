@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import xarray as xr
@@ -38,6 +39,7 @@ from roms_tools.setup.utils import (
     group_dataset,
     min_dist_to_land,
     nan_check,
+    set_rutgers_time,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -134,6 +136,14 @@ class SurfaceForcing:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    convention : {"ucla", "rutgers"}, optional
+        ROMS version the surface forcing is written for. ``"rutgers"`` writes the names,
+        units and time attributes read by Rutgers ROMS: ``Uwind``, ``Vwind``, ``Qair``
+        (relative humidity as a fraction), ``rain`` (kg m-2 s-1), ``lwrad_down``
+        (downward longwave radiation, which needs ``LONGWAVE_OUT``) and, for restoring,
+        ``SSS``. Air pressure ``Pair`` is not written, so Rutgers ROMS needs ``ANA_PAIR``
+        or a separate ``Pair`` file. Only ``"physics"`` and ``"sss"`` restoring are
+        supported, without the coarse grid. Defaults to ``"ucla"``.
 
 
     Examples
@@ -203,6 +213,8 @@ class SurfaceForcing:
     ``"inverse_dist"``. Ignored when a ``prefill`` is set or on the scipy path."""
     extrap_kwargs: dict | None = None
     """Method-specific keyword arguments for ``extrap_method``."""
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the surface forcing is written for."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -231,7 +243,7 @@ class SurfaceForcing:
 
         if self.coarse_grid_mode == "always":
             use_coarse_grid = True
-        elif self.coarse_grid_mode == "never":
+        elif self.coarse_grid_mode == "never" or self.convention == "rutgers":
             use_coarse_grid = False
         elif self.coarse_grid_mode == "auto":
             use_coarse_grid = self._determine_coarse_grid_usage(data)
@@ -255,7 +267,7 @@ class SurfaceForcing:
 
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
 
-        if self.type in ["physics", "bgc"]:
+        if self.convention == "ucla" and self.type in ["physics", "bgc"]:
             if self.type == "physics":
                 nml_key, nml_group = "interp_bulk_frc", "SURF_FRC_SETTINGS"
             else:
@@ -275,7 +287,7 @@ class SurfaceForcing:
                     "Remember to define the following flags in your `cppdefs.opt` file: %s`.",
                     cppdefs_flags,
                 )
-        elif self.type == "restoring":
+        elif self.convention == "ucla" and self.type == "restoring":
             logging.info(
                 "Data will be interpolated onto the %s. "
                 "Restoring data being created for %s. "
@@ -298,6 +310,24 @@ class SurfaceForcing:
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
+
+        if self.convention == "rutgers" and self.type == "physics":
+            # Rutgers ROMS reads relative humidity. Computing it on the source grid,
+            # inverting the conversion from it done with a fixed air pressure when
+            # reading the source data, keeps it within the source range when regridded.
+            qair, tair = (
+                data.ds[data.var_names["qair"]],
+                data.ds[data.var_names["Tair"]],
+            )
+            patm = 1010.0
+            cff = (
+                (1.0007 + 3.46e-6 * patm)
+                * 6.1121
+                * np.exp(17.502 * tair / (240.97 + tair))
+            )
+            data.ds[data.var_names["qair"]] = (
+                qair * patm / (0.62197 + 0.378 * qair) / cff
+            )
 
         # On the no-prefill xESMF path, destination extrapolation would silently fill
         # points outside the source coverage. Guard against a grid that outruns the
@@ -378,6 +408,9 @@ class SurfaceForcing:
         # Shift radiation time for hourly ERA5 data
         if self.type == "physics" and self.source["name"] == "ERA5":
             ds = self._apply_rad_time(ds)
+
+        if self.convention == "rutgers":
+            ds = self._to_rutgers(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -475,6 +508,20 @@ class SurfaceForcing:
             if self.source["climatology"]:
                 raise ValueError(
                     "When 'name' is 'SODA', monthly `dic` and `talk` data is expected. 'climatology' must be 'False'"
+                )
+
+        if self.convention not in ["ucla", "rutgers"]:
+            raise ValueError("`convention` must be 'ucla' or 'rutgers'.")
+        if self.convention == "rutgers":
+            if self.type == "bgc" or (
+                self.type == "restoring" and list(self.restoring_forces) != ["sss"]
+            ):
+                raise ValueError(
+                    "convention='rutgers' supports type='physics' and 'sss' restoring only."
+                )
+            if self.coarse_grid_mode == "always":
+                raise ValueError(
+                    "convention='rutgers' does not support the coarse grid; use coarse_grid_mode='never'."
                 )
 
     def _determine_coarse_grid_usage(self, data):
@@ -926,6 +973,48 @@ class SurfaceForcing:
 
         return ds
 
+    def _to_rutgers(self, ds):
+        """Convert to the variable names, units and time attributes read by Rutgers
+        ROMS.
+        """
+        if self.type == "physics":
+            # qair holds relative humidity, computed before regridding
+            ds["qair"].attrs = {
+                "long_name": "relative humidity at 2m",
+                "units": "fraction",
+            }
+            # cm/day to kg m-2 s-1
+            ds["rain"] = ds["rain"] * 10 / (24 * 3600)
+            ds["rain"].attrs = {
+                "long_name": "total precipitation",
+                "units": "kg m-2 s-1",
+            }
+            ds = ds.rename(
+                {
+                    "uwnd": "Uwind",
+                    "vwnd": "Vwind",
+                    "qair": "Qair",
+                    "lwrad": "lwrad_down",
+                }
+            )
+            if "rad_time" in ds:
+                ds = set_rutgers_time(
+                    ds,
+                    "time",
+                    self.model_reference_date,
+                    ["Uwind", "Vwind", "Tair", "Qair", "rain"],
+                )
+                ds = set_rutgers_time(
+                    ds, "rad_time", self.model_reference_date, ["swrad", "lwrad_down"]
+                )
+            else:
+                ds = set_rutgers_time(ds, "time", self.model_reference_date)
+        else:
+            ds = ds.rename({"sss": "SSS"})
+            ds = set_rutgers_time(ds, "sss_time", self.model_reference_date)
+
+        return ds
+
     def _add_global_metadata(self, ds=None):
         if ds is None:
             ds = xr.Dataset()
@@ -1013,9 +1102,9 @@ class SurfaceForcing:
             with ProgressBar():
                 field = field.load()
 
-        if var_name in ["uwnd", "vwnd"]:
+        if var_name in ["uwnd", "vwnd", "Uwind", "Vwind"]:
             cmap_name = "RdBu_r"
-        elif var_name in ["swrad", "lwrad", "Tair", "qair"]:
+        elif var_name in ["swrad", "lwrad", "lwrad_down", "Tair", "qair", "Qair"]:
             cmap_name = "YlOrRd"
         else:
             cmap_name = "YlGnBu"

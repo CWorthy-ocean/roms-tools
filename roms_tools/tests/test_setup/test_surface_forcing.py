@@ -1089,6 +1089,7 @@ def test_surface_forcing_restoring_DIC_ALK_save(
         "restoring_surface_forcing_from_woa_climatology",
         "restoring_surface_forcing_from_soda",
         "bgc_surface_forcing_from_mbl_co2",
+        "rutgers_surface_forcing",
     ],
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
@@ -1333,3 +1334,99 @@ def test_era5_default_path_requires_dask(small_grid: Grid, caplog) -> None:
             )
 
     assert "defaulting to ARCO ERA5 dataset on Google Cloud" in caplog.text
+
+
+@pytest.fixture
+def rutgers_surface_forcing(surface_forcing, use_dask):
+    """The `surface_forcing` fixture written for Rutgers ROMS."""
+    return SurfaceForcing(
+        grid=surface_forcing.grid,
+        start_time=surface_forcing.start_time,
+        end_time=surface_forcing.end_time,
+        source=surface_forcing.source,
+        correct_radiation=False,
+        coarse_grid_mode="never",
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        convention="rutgers",
+        use_dask=use_dask,
+    )
+
+
+def test_rutgers_convention(surface_forcing, rutgers_surface_forcing, tmp_path):
+    ds = surface_forcing.ds
+    ds_rutgers = rutgers_surface_forcing.ds
+
+    for var_name in ["uwnd", "vwnd", "qair", "lwrad"]:
+        assert var_name not in ds_rutgers
+    np.testing.assert_allclose(ds_rutgers["Uwind"], ds["uwnd"])
+    np.testing.assert_allclose(ds_rutgers["Vwind"], ds["vwnd"])
+    np.testing.assert_allclose(ds_rutgers["lwrad_down"], ds["lwrad"])
+    np.testing.assert_allclose(ds_rutgers["rain"], ds["rain"] * 10 / 86400, rtol=1e-6)
+
+    # relative humidity as a fraction, computed before regridding so that it stays
+    # within the source range (at most about 1) where regridding absolute humidity
+    # and air temperature separately would not
+    assert 0 <= ds_rutgers["Qair"].min() and ds_rutgers["Qair"].max() <= 1.001
+
+    # time units with the reference date, and the time variable of each field
+    filepath = rutgers_surface_forcing.save(tmp_path / "rutgers_frc.nc", group=False)[0]
+    with xr.open_dataset(filepath, decode_times=False) as saved:
+        for time_name in ["time", "rad_time"]:
+            assert saved[time_name].attrs["units"] == "days since 2000-01-01 00:00:00"
+        for var_name in ["Uwind", "Vwind", "Tair", "Qair", "rain"]:
+            assert saved[var_name].attrs["time"] == "time"
+        for var_name in ["swrad", "lwrad_down"]:
+            assert saved[var_name].attrs["time"] == "rad_time"
+
+
+def test_rutgers_convention_restoring(use_dask):
+    sfc_forcing = SurfaceForcing(
+        grid=Grid(
+            nx=5,
+            ny=5,
+            size_x=1800,
+            size_y=2400,
+            center_lon=180,
+            center_lat=61,
+            rot=20,
+        ),
+        start_time=datetime(2020, 2, 1),
+        end_time=datetime(2020, 2, 1),
+        source={
+            "name": "WOA",
+            "path": Path(download_test_data("WOA_2018_quarterDeg_coarsened.nc")),
+            "climatology": True,
+        },
+        type="restoring",
+        restoring_forces=["sss"],
+        convention="rutgers",
+        use_dask=use_dask,
+    )
+
+    assert "sss" not in sfc_forcing.ds
+    assert sfc_forcing.ds["SSS"].attrs["time"] == "sss_time"
+    # climatology, cycled from TIME_REF in Rutgers ROMS
+    assert sfc_forcing.ds["sss_time"].attrs["units"] == "days"
+    assert sfc_forcing.ds["sss_time"].attrs["cycle_length"] == 365.25
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"convention": "Rutgers"}, "must be 'ucla' or 'rutgers'"),
+        ({"convention": "rutgers", "type": "bgc"}, "supports type='physics'"),
+        ({"convention": "rutgers", "coarse_grid_mode": "always"}, "coarse grid"),
+    ],
+)
+def test_rutgers_convention_errors(kwargs, match, use_dask):
+    grid = Grid(nx=2, ny=2, size_x=500, size_y=500, center_lon=0, center_lat=55, rot=10)
+    with pytest.raises(ValueError, match=match):
+        SurfaceForcing(
+            grid=grid,
+            start_time=datetime(2020, 2, 1),
+            end_time=datetime(2020, 2, 2),
+            source={"name": "ERA5", "path": "era5.nc"},
+            use_dask=use_dask,
+            **kwargs,
+        )

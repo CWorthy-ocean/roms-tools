@@ -1513,3 +1513,36 @@ def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, c
 
     got_alk = float(ds["TAlk"].isel(depth=2, latitude=10, longitude=5))
     assert got_alk == pytest.approx(2300.0 * 1025.0 / 1000.0, rel=1e-6)
+
+
+def test_rutgers_convention(initial_conditions, use_dask, tmp_path):
+    kwargs = {
+        "grid": initial_conditions.grid,
+        "ini_time": initial_conditions.ini_time,
+        "source": initial_conditions.source,
+        "prefill": "2d_lateral_fill",
+        "regrid_method": "scipy",
+        "use_dask": use_dask,
+    }
+    ic_rutgers = InitialConditions(**kwargs, convention="rutgers")
+    ds = ic_rutgers.ds
+
+    for var_name in initial_conditions.ds.data_vars:
+        np.testing.assert_allclose(ds[var_name], initial_conditions.ds[var_name])
+    assert ds["ocean_time"].attrs["units"] == "seconds since 2000-01-01 00:00:00"
+    assert ds["temp"].attrs["time"] == "ocean_time"
+    assert ds["Vtransform"] == 2 and ds["Vtransform"].dtype.kind == "i"
+    assert ds["Vstretching"] == 4 and ds["Vstretching"].dtype.kind == "i"
+    assert ds["hc"] == 250.0
+
+    filepath = tmp_path / "ic.yaml"
+    ic_rutgers.to_yaml(filepath)
+    assert InitialConditions.from_yaml(filepath, use_dask=use_dask) == ic_rutgers
+
+    with pytest.raises(ValueError, match="does not support BGC sources"):
+        InitialConditions(
+            **kwargs,
+            convention="rutgers",
+            bgc_sources=[{"source": {"name": "constants", "constants": {"NO3": 24.0}}}],
+            bgc_model=BGCMarbl,
+        )

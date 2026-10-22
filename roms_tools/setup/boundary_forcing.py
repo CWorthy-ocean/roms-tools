@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -67,6 +67,7 @@ from roms_tools.setup.utils import (
     physics_time_view,
     pop_grid_data,
     preflight_esper_sources,
+    set_rutgers_time,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -227,6 +228,11 @@ class BoundaryForcingSource:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    convention : {"ucla", "rutgers"}, optional
+        ROMS version the boundary forcing is written for. ``"rutgers"`` writes ``bry_time``
+        in "days since ``model_reference_date``" and a ``time`` attribute on each
+        variable, as read by Rutgers ROMS. Only ``type="physics"`` is supported.
+        Defaults to ``"ucla"``.
     bgc_interpolation_method : str, optional
         Vertical interpolation method for BGC tracers (only used when ``type='bgc'``).
         One of:
@@ -304,6 +310,8 @@ class BoundaryForcingSource:
     treated as ``"inverse_dist"``. Ignored when ``prefill`` is set."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method`` (e.g. ``num_src_pnts``/``dist_exponent``)."""
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the boundary forcing is written for."""
     apply_2d_horizontal_fill: bool | None = None
     """Deprecated alias for ``prefill`` (sentinel ``None`` = unset). ``True`` ->
     ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``; emits a DeprecationWarning."""
@@ -724,6 +732,9 @@ class BoundaryForcingSource:
         if not self.bypass_validation:
             self._validate(ds)
 
+        if self.convention == "rutgers":
+            ds = set_rutgers_time(ds, "bry_time", self.model_reference_date)
+
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
@@ -1059,6 +1070,11 @@ class BoundaryForcingSource:
         # -------------------------------------------------------
         if self.type not in {"physics", "bgc"}:
             raise ValueError("`type` must be either 'physics' or 'bgc'.")
+
+        if self.convention not in ["ucla", "rutgers"]:
+            raise ValueError("`convention` must be 'ucla' or 'rutgers'.")
+        if self.convention == "rutgers" and self.type == "bgc":
+            raise ValueError("convention='rutgers' supports type='physics' only.")
 
         if self.type == "physics" and self.use_vars is not None:
             raise ValueError("`use_vars` only applies when `type='bgc'`.")
@@ -1833,7 +1849,7 @@ class BoundaryForcing:
     grid, start_time, end_time, boundaries, prefill, prefill_kwargs, regrid_method,
     extrap_method, extrap_kwargs, apply_2d_horizontal_fill, model_reference_date,
     use_dask, chunks, initial_slice_bounds, bypass_validation, start_time_pad,
-    end_time_pad
+    end_time_pad, convention
         Forwarded to the internal physics :class:`BoundaryForcingSource` (and, for
         the fields that apply to a lat/lon bgc source too, to each bgc companion).
         See :class:`BoundaryForcingSource` for the full description of each.
@@ -1937,6 +1953,8 @@ class BoundaryForcing:
     bgc_interpolation_method: str = "depth"
     """Wrapper-level default vertical interpolation method for BGC tracers;
     overridden per-source by that source's own entry in ``bgc_sources``."""
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the boundary forcing is written for."""
 
     # `compare=False`: these hold constituent `BoundaryForcingSource` objects,
     # each carrying a computed `xr.Dataset` -- see the `ds` field's own comment
@@ -1958,6 +1976,8 @@ class BoundaryForcing:
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
         bgc_sources = self.bgc_sources or []
+        if self.convention == "rutgers" and bgc_sources:
+            raise ValueError("convention='rutgers' does not support BGC sources.")
         if bgc_sources:
             if self.bgc_model is None:
                 raise ValueError(

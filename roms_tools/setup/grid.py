@@ -845,8 +845,8 @@ class Grid:
                 "This grid file was not made by ROMS-Tools and uses the classic ROMS grid "
                 "layout (as made by Rutgers ROMS tools). If it is for Rutgers ROMS, pass "
                 "vtransform and vstretching with the vertical coordinate parameters "
-                "(defaults are 2 and 4), and note that ROMS-Tools writes input files for "
-                "UCLA-ROMS, except TidalForcing with convention='rutgers'."
+                "(defaults are 2 and 4), and pass convention='rutgers' to the forcing "
+                "classes, since ROMS-Tools writes input files for UCLA-ROMS by default."
             )
         grid.vtransform = vtransform or int(grid.ds.attrs.get("Vtransform", 2))
         grid.vstretching = vstretching or int(grid.ds.attrs.get("Vstretching", 4))

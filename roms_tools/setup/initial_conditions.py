@@ -61,6 +61,7 @@ from roms_tools.setup.utils import (
     nan_check_batch,
     pop_grid_data,
     preflight_esper_sources,
+    set_rutgers_time,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -204,6 +205,12 @@ class InitialConditionsSource:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    convention : {"ucla", "rutgers"}, optional
+        ROMS version the initial conditions are written for. ``"rutgers"`` writes
+        ``ocean_time`` in "seconds since ``model_reference_date``" and the vertical
+        coordinate parameters (``Vtransform``, ``Vstretching``, ``theta_s``, ``theta_b``,
+        ``hc``) as scalar variables, as in Rutgers ROMS files. Only ``type="physics"``
+        is supported. Defaults to ``"ucla"``.
     bgc_interpolation_method : str, optional
         Vertical interpolation method for BGC tracers. One of:
 
@@ -368,6 +375,8 @@ class InitialConditionsSource:
     source."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``. Applies only to lat/lon sources."""
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the initial conditions are written for."""
     # `compare=False`: `xr.Dataset.__eq__` returns an elementwise Dataset (truthy in
     # a way that makes `==` comparisons on this dataclass vacuously true/broken)
     # rather than a bool, so equality between two objects of this class is defined
@@ -459,6 +468,14 @@ class InitialConditionsSource:
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+
+        if self.convention == "rutgers":
+            ds = set_rutgers_time(ds, "ocean_time", self.model_reference_date)
+            # vertical coordinate parameters, as in Rutgers ROMS files
+            ds["Vtransform"] = self.grid.vtransform
+            ds["Vstretching"] = self.grid.vstretching
+            for name in ["theta_s", "theta_b", "hc"]:
+                ds[name] = self.grid.ds.attrs[name]
 
         self.ds = ds
 
@@ -945,6 +962,10 @@ class InitialConditionsSource:
     def _input_checks(self):
         if self.type not in ("physics", "bgc"):
             raise ValueError(f"`type` must be 'physics' or 'bgc', got {self.type!r}.")
+        if self.convention not in ["ucla", "rutgers"]:
+            raise ValueError("`convention` must be 'ucla' or 'rutgers'.")
+        if self.convention == "rutgers" and self.type == "bgc":
+            raise ValueError("convention='rutgers' supports type='physics' only.")
 
         # -------------------------------------------------------
         # type / physics_forcing checks
@@ -1819,7 +1840,7 @@ class InitialConditions:
     ----------
     grid, ini_time, model_reference_date, allow_flex_time, use_dask, chunks,
     initial_slice_bounds, bypass_validation, prefill, prefill_kwargs,
-    regrid_method, extrap_method, extrap_kwargs
+    regrid_method, extrap_method, extrap_kwargs, convention
         Forwarded to the internal physics :class:`InitialConditionsSource` (and, for
         the fields that apply to a lat/lon bgc source too, to each bgc companion).
         See :class:`InitialConditionsSource` for the full description of each.
@@ -1932,6 +1953,8 @@ class InitialConditions:
     """xESMF destination extrapolation used on the default no-prefill path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
+    convention: Literal["ucla", "rutgers"] = "ucla"
+    """ROMS version the initial conditions are written for."""
 
     # `compare=False` on all three: `physics`/`bgc` hold constituent
     # `InitialConditionsSource` objects and `ds` is the merged `xr.Dataset` itself
@@ -1972,6 +1995,8 @@ class InitialConditions:
         if self.bgc_source is not None:
             bgc_sources = [{"source": self.bgc_source, "use_vars": self.use_vars}]
         bgc_sources = bgc_sources or []
+        if self.convention == "rutgers" and bgc_sources:
+            raise ValueError("convention='rutgers' does not support BGC sources.")
         # Validate `bgc_model` BEFORE building the physics source: a wrong value
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.

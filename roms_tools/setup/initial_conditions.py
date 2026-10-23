@@ -383,6 +383,9 @@ class InitialConditionsSource:
     def __post_init__(self):
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
+        # Donor map for levels below a ROMS source's bottom, kept for a BGC companion
+        # (see _get_source_bottom_fill).
+        self._source_bottom_fill: SourceBottomFill | None = None
 
         self._resolve_prefill_options()
         self._input_checks()
@@ -796,6 +799,50 @@ class InitialConditionsSource:
 
         return processed_fields
 
+    def _get_source_bottom_fill(
+        self, processed_fields: dict[str, xr.DataArray]
+    ) -> SourceBottomFill:
+        """Return the fill for levels below the ROMS source's bottom.
+
+        The fill depends only on the target depths and on the source's depths and
+        bottom, so a BGC companion that draws on the same parent grid and restart as
+        its physics object reuses the physics object's fill instead of building the
+        (costly) donor map again. Any other source builds its own.
+        """
+        physics = self.physics_forcing
+        if (
+            physics is not None
+            and physics._source_bottom_fill is not None
+            and self._same_roms_source_as(physics)
+        ):
+            return physics._source_bottom_fill
+        fill = SourceBottomFill(
+            target_depth=self.ds_depth_coords["layer_depth_rho"],
+            source_depth=processed_fields["layer_depth_rho"],
+            source_bottom=processed_fields["bottom_depth_rho"],
+            lon=self.grid.ds["lon_rho"],
+            lat=self.grid.ds["lat_rho"],
+            mask=self.grid.ds["mask_rho"],
+        )
+        if self.type == "physics":
+            self._source_bottom_fill = fill
+        return fill
+
+    def _same_roms_source_as(self, other: "InitialConditionsSource") -> bool:
+        """Whether ``other`` reads the same restart on the same parent grid."""
+        mine, theirs = self.source, other.source
+        if mine is None or theirs is None:
+            return False
+        grid, other_grid = mine.get("grid"), theirs.get("grid")
+        return (
+            isinstance(grid, Grid)
+            and isinstance(other_grid, Grid)
+            and mine["path"] == theirs["path"]
+            and grid.ds.equals(other_grid.ds)
+            and self.adjust_depth_for_sea_surface_height
+            == other.adjust_depth_for_sea_surface_height
+        )
+
     def _regrid_vertically(
         self,
         data: ROMSDataset | LatLonDataset,
@@ -863,14 +910,7 @@ class InitialConditionsSource:
                 # from the nearest deep-enough source column. Velocities are not
                 # filled.
                 fill_below_bottom = (
-                    SourceBottomFill(
-                        target_depth=self.ds_depth_coords["layer_depth_rho"],
-                        source_depth=processed_fields["layer_depth_rho"],
-                        source_bottom=processed_fields["bottom_depth_rho"],
-                        lon=self.grid.ds["lon_rho"],
-                        lat=self.grid.ds["lat_rho"],
-                        mask=self.grid.ds["mask_rho"],
-                    )
+                    self._get_source_bottom_fill(processed_fields)
                     if location == "rho"
                     else None
                 )
@@ -2061,6 +2101,8 @@ class InitialConditions:
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
+        # The donor map has served every object that can use it.
+        self.physics._source_bottom_fill = None
 
         if self.bgc:
             self.ds = InitialConditionsSource.merge(self.physics, self.bgc)

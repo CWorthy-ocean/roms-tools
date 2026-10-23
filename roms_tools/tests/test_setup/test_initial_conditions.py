@@ -19,7 +19,7 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.setup import initial_conditions as ic_module
 from roms_tools.setup.initial_conditions import _set_required_vars
-from roms_tools.setup.utils import latlon_to_xyz
+from roms_tools.setup.utils import _fill_bin_edges, latlon_to_xyz
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -546,12 +546,12 @@ def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(
         use_dask=use_dask,
     )
 
-    # One fill per object: physics, then the BGC companion.
-    assert len(fills) == 2
+    # The BGC companion shares the physics object's fill: it has the same parent grid,
+    # restart and target depths, so the donor map is built once.
+    assert len(fills) == 1
     fill = fills[0]
     assert fill.n_filled > 0
     assert fill.n_unfilled == 0
-    assert (fills[1].n_filled, fills[1].n_unfilled) == (fill.n_filled, 0)
 
     # The reference: the parent's own columns at the child's points, which is what
     # an object whose bottom is the regridded parent bottom (so that it has no cell
@@ -568,7 +568,7 @@ def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(
         model_reference_date=datetime(2000, 1, 1),
         use_dask=use_dask,
     )
-    assert len(fills) == 4 and fills[2].n_filled == 0
+    assert len(fills) == 2 and fills[1].n_filled == 0
     ref_depth = (
         ic_ref.physics.ds_depth_coords["layer_depth_rho"].squeeze().load().values
     )
@@ -583,10 +583,10 @@ def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(
     assert not below[:, lat_ < 34.0].any()
 
     # Brute-force donor search: the nearest wet column deeper than the deepest cell
-    # of the cell's 50 m depth bin (any of the nearest, where the grid is symmetric
+    # of the cell's depth bin (any of the nearest, where the grid is symmetric
     # enough for several to be equally near).
     xyz = latlon_to_xyz(lat_.ravel(), lon.ravel()).reshape(*lon.shape, 3)
-    bins = np.floor(depth / 50.0)
+    bins = np.searchsorted(_fill_bin_edges(depth.max()), depth, side="right")
     cells = list(zip(*np.nonzero(below), strict=True))
     for name in ["temp", "salt", "NO3"]:
         out = ic.ds[name].squeeze().values
@@ -620,6 +620,39 @@ def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(
         ]
         assert columns
         assert any(len(np.unique(out[below[:, j, i], j, i])) > 1 for j, i in columns)
+
+
+@skip_xesmf
+def test_roms_bgc_source_on_another_parent_grid_gets_its_own_fill(
+    use_dask, monkeypatch
+):
+    """The physics object's donor map is only reused by a BGC source that reads the
+    same restart on the same parent grid; any other BGC source builds its own.
+    """
+    _RecordingFill.instances.clear()
+    monkeypatch.setattr(ic_module, "SourceBottomFill", _RecordingFill)
+
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    other_parent_grid = _sloping_parent_grid()
+    other_parent_grid.ds["h"] = other_parent_grid.ds["h"] + 200.0
+    child_grid = Grid(
+        nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=30
+    )
+    lat = child_grid.ds["lat_rho"]
+    parent_h = 4000.0 - 1300.0 * (lat - 33.0)
+    child_grid.ds["h"] = parent_h.where(lat < 34.0, parent_h + 600.0)
+
+    InitialConditions(
+        grid=child_grid,
+        ini_time=datetime(1998, 1, 6),
+        source={"name": "ROMS", "grid": _sloping_parent_grid(), "path": restart_file},  # type: ignore
+        bgc_source={"name": "ROMS", "grid": other_parent_grid, "path": restart_file},  # type: ignore
+        bgc_model=BGCMarbl,
+        model_reference_date=datetime(2000, 1, 1),
+        use_dask=use_dask,
+    )
+
+    assert len(_RecordingFill.instances) == 2
 
 
 # Test initialization with missing 'name' in source

@@ -12,6 +12,7 @@ from roms_tools.setup.utils import (
     SourceBottomFill,
     _compute_density_coord,
     _compute_mld_warp,
+    _fill_bin_edges,
     _infer_valid_boundaries_from_mask,
     build_bgc_vertical_coords,
     build_kdtree_from_latlon,
@@ -1813,6 +1814,18 @@ class TestSourceBottomFill:
         }
         return kwargs, da
 
+    def test_depth_bins_are_50_m_wide_then_proportional_to_the_depth(self):
+        edges = _fill_bin_edges(4000.0)
+        assert edges[0] == 0.0 and edges[-1] > 4000.0
+        assert (np.diff(edges) > 0).all()
+        # 50 m wide down to 2000 m, then 2.5 % of the depth.
+        np.testing.assert_allclose(np.diff(edges[edges <= 2000.0]), 50.0)
+        assert 2000.0 in edges
+        deep = edges[edges >= 2000.0]
+        np.testing.assert_allclose(deep[1:] / deep[:-1], 1.025)
+        # Few bins, hence few KD-tree builds, even for a deep ocean.
+        assert len(edges) < 100
+
     def test_below_bottom_cells_take_the_deeper_columns_value_at_that_depth(self):
         kwargs, da = self._case()
         fill = SourceBottomFill(**kwargs)
@@ -2006,9 +2019,9 @@ class TestSourceBottomFill:
         assert (out[~fillable] == -1.0).all()
 
         # Brute force: donors must be deeper than the deepest filled cell of the
-        # cell's 50 m depth bin, and the nearest of them wins.
+        # cell's depth bin, and the nearest of them wins.
         xyz = latlon_to_xyz(lat.ravel(), lon.ravel())
-        bins = np.floor(tdepth / 50.0)
+        bins = np.searchsorted(_fill_bin_edges(tdepth.max()), tdepth, side="right")
         for k, j, i in zip(*np.nonzero(fillable), strict=True):
             in_bin = fillable & (bins == bins[k, j, i])
             eligible = wet & (bottom > tdepth[in_bin].max())

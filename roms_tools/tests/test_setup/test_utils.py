@@ -1814,17 +1814,10 @@ class TestSourceBottomFill:
         }
         return kwargs, da
 
-    def test_depth_bins_are_50_m_wide_then_proportional_to_the_depth(self):
+    def test_depth_bins_are_50_m_wide_at_every_depth(self):
         edges = _fill_bin_edges(4000.0)
         assert edges[0] == 0.0 and edges[-1] > 4000.0
-        assert (np.diff(edges) > 0).all()
-        # 50 m wide down to 2000 m, then 2.5 % of the depth.
-        np.testing.assert_allclose(np.diff(edges[edges <= 2000.0]), 50.0)
-        assert 2000.0 in edges
-        deep = edges[edges >= 2000.0]
-        np.testing.assert_allclose(deep[1:] / deep[:-1], 1.025)
-        # Few bins, hence few KD-tree builds, even for a deep ocean.
-        assert len(edges) < 100
+        np.testing.assert_allclose(np.diff(edges), 50.0)
 
     def test_below_bottom_cells_take_the_deeper_columns_value_at_that_depth(self):
         kwargs, da = self._case()

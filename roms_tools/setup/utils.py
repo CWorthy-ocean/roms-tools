@@ -2090,11 +2090,10 @@ _CORE_DIMS = ("s_rho", "eta_rho", "xi_rho")
 # never clashes with the target's ``s_rho`` when the two differ in size.
 _SOURCE_VERTICAL_DIM = "s_rho_source"
 
-# SourceBottomFill groups cells into depth bins that share one donor search. A bin is
-# 50 m wide down to 2000 m, where 2.5 % of the depth reaches 50 m, and 2.5 % of the
-# depth wide below that.
-_FILL_BIN_MIN_M = 50.0
-_FILL_BIN_REL = 0.025
+# SourceBottomFill groups cells into depth bins of this width (m) that share one donor
+# search. A donor must be deeper than the deepest cell of the bin, so a wider bin
+# sends the shallowest cells of the bin to donors farther away.
+_FILL_BIN_M = 50.0
 
 # Most cells of a 3-D array that SourceBottomFill holds in memory at once while it
 # reads depths, level by level, and most map entries it handles at once.
@@ -2104,11 +2103,7 @@ _FILL_ENTRY_CHUNK = 1_000_000
 
 def _fill_bin_edges(max_depth: float) -> np.ndarray:
     """Ascending depth-bin edges (m), the last of them deeper than ``max_depth``."""
-    switch = _FILL_BIN_MIN_M / _FILL_BIN_REL
-    linear = np.arange(0.0, switch, _FILL_BIN_MIN_M)
-    n_steps = np.log(max(max_depth, switch) / switch) / np.log1p(_FILL_BIN_REL)
-    proportional = switch * (1.0 + _FILL_BIN_REL) ** np.arange(int(n_steps) + 2)
-    return np.concatenate([linear, proportional])
+    return np.arange(0.0, max_depth + 2 * _FILL_BIN_M, _FILL_BIN_M)
 
 
 def _core_depths(depth: xr.DataArray, name: str) -> xr.DataArray:
@@ -2160,9 +2155,9 @@ class SourceBottomFill:
     The cell -> (donor column, level, weight) map is built once, in the constructor,
     and then applied to any number of 3-D fields with :meth:`apply`. Each field needs
     its source columns (the field on the source's own levels, before vertical
-    regridding) alongside its regridded counterpart. Cells are grouped into depth
-    bins (50 m wide, or 2.5 % of the depth where that is more), with one KD-tree per
-    bin, rebuilt only when the donors deep enough for the bin change. A donor must be
+    regridding) alongside its regridded counterpart. Cells are grouped into 50 m depth
+    bins, with one KD-tree per bin, rebuilt only when the donors deep enough for the
+    bin change. A donor must be
     deeper than the deepest cell of the bin, so it holds every depth the bin serves.
     Values are copied from the source, so the result is NaN-free wherever the input
     was.

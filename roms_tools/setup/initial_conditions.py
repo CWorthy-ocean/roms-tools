@@ -21,6 +21,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     WOABGCDataset,
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
+from roms_tools.fill import fill_below_source_bottom
 from roms_tools.plot import plot
 from roms_tools.processing_methods import RegridConfig, _xesmf_available
 from roms_tools.regrid import (
@@ -41,7 +42,6 @@ from roms_tools.setup.utils import (
     _SELF_DOWNLOADING_BGC,
     BGC_INTERPOLATION_METHODS,
     RawDataSource,
-    SourceBottomFill,
     apply_scipy_fallback_fill,
     apply_source_prefill,
     bgc_source_extra_kwargs,
@@ -383,9 +383,6 @@ class InitialConditionsSource:
     def __post_init__(self):
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
-        # Donor map for levels below a ROMS source's bottom, kept for a BGC companion
-        # (see _get_source_bottom_fill).
-        self._source_bottom_fill: SourceBottomFill | None = None
 
         self._resolve_prefill_options()
         self._input_checks()
@@ -799,50 +796,6 @@ class InitialConditionsSource:
 
         return processed_fields
 
-    def _get_source_bottom_fill(
-        self, processed_fields: dict[str, xr.DataArray]
-    ) -> SourceBottomFill:
-        """Return the fill for levels below the ROMS source's bottom.
-
-        The fill depends only on the target depths and on the source's depths and
-        bottom, so a BGC companion that draws on the same parent grid and restart as
-        its physics object reuses the physics object's fill instead of building the
-        (costly) donor map again. Any other source builds its own.
-        """
-        physics = self.physics_forcing
-        if (
-            physics is not None
-            and physics._source_bottom_fill is not None
-            and self._same_roms_source_as(physics)
-        ):
-            return physics._source_bottom_fill
-        fill = SourceBottomFill(
-            target_depth=self.ds_depth_coords["layer_depth_rho"],
-            source_depth=processed_fields["layer_depth_rho"],
-            source_bottom=processed_fields["bottom_depth_rho"],
-            lon=self.grid.ds["lon_rho"],
-            lat=self.grid.ds["lat_rho"],
-            mask=self.grid.ds["mask_rho"],
-        )
-        if self.type == "physics":
-            self._source_bottom_fill = fill
-        return fill
-
-    def _same_roms_source_as(self, other: "InitialConditionsSource") -> bool:
-        """Whether ``other`` reads the same restart on the same parent grid."""
-        mine, theirs = self.source, other.source
-        if mine is None or theirs is None:
-            return False
-        grid, other_grid = mine.get("grid"), theirs.get("grid")
-        return (
-            isinstance(grid, Grid)
-            and isinstance(other_grid, Grid)
-            and mine["path"] == theirs["path"]
-            and grid.ds.equals(other_grid.ds)
-            and self.adjust_depth_for_sea_surface_height
-            == other.adjust_depth_for_sea_surface_height
-        )
-
     def _regrid_vertically(
         self,
         data: ROMSDataset | LatLonDataset,
@@ -904,22 +857,15 @@ class InitialConditionsSource:
                 )
                 vertical_regrid = VerticalRegrid(ds_tmp, source_dim="s_rho")
 
-                # Regridding clamps below the source's deepest layer. Where the
-                # target is deeper than the source's local bottom, replace the
-                # clamped (shallow) value by the source's value at the same depth
-                # from the nearest deep-enough source column. Velocities are not
-                # filled.
-                fill_below_bottom = (
-                    self._get_source_bottom_fill(processed_fields)
-                    if location == "rho"
-                    else None
-                )
-
+                source_columns = {
+                    var_name: processed_fields[var_name]
+                    for var_name in filtered_vars
+                    if var_name in processed_fields
+                }
                 for var_name in filtered_vars:
                     if var_name in processed_fields:
-                        source_column = processed_fields[var_name]
-                        regridded = vertical_regrid.apply(
-                            source_column,
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
                             source_depth_coords=processed_fields[
                                 f"layer_depth_{location}"
                             ],
@@ -928,11 +874,22 @@ class InitialConditionsSource:
                             ],
                             mask_edges=False,
                         )
-                        if fill_below_bottom is not None:
-                            regridded = fill_below_bottom.apply(
-                                regridded, source_column
-                            )
-                        processed_fields[var_name] = regridded
+
+                if location == "rho":
+                    # Regridding clamps below the source's deepest layer: replace the
+                    # clamped values where the child is deeper than the parent.
+                    processed_fields.update(
+                        fill_below_source_bottom(
+                            {v: processed_fields[v] for v in source_columns},
+                            source_columns,
+                            target_depth=self.ds_depth_coords["layer_depth_rho"],
+                            source_depth=processed_fields["layer_depth_rho"],
+                            source_bottom=processed_fields["bottom_depth_rho"],
+                            lon=self.grid.ds["lon_rho"],
+                            lat=self.grid.ds["lat_rho"],
+                            mask=self.grid.ds["mask_rho"],
+                        )
+                    )
             else:
                 # LatLonDataset: create a regrid object for all variables
                 vertical_regrid = VerticalRegrid(
@@ -2101,8 +2058,6 @@ class InitialConditions:
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
-        # The donor map has served every object that can use it.
-        self.physics._source_bottom_fill = None
 
         if self.bgc:
             self.ds = InitialConditionsSource.merge(self.physics, self.bgc)

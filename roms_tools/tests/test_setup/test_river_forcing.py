@@ -2,6 +2,7 @@ import logging
 import textwrap
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -19,6 +20,7 @@ from roms_tools.datasets.lat_lon_datasets import (
 from roms_tools.setup.bgc_model import BGCMarbl
 from roms_tools.setup.river_forcing import (
     AIR_TEMP_COVERAGE_TOLERANCE_DAYS,
+    OVERLAP_RIVER_PREFIX,
     _climatological_river_temp,
     _sample_tair_at_river_mouths,
     _smooth_and_floor_air_temp,
@@ -938,23 +940,132 @@ class TestRiverForcingWithOverlappingIndices:
         assert ds_out["river_volume"].isel(nriver=synthetic_idx).item() > 0
         assert not np.isnan(ds_out["river_tracer"].isel(nriver=synthetic_idx).item())
 
-    def test_volume_sort_after_overlap(self, mock_river_dataset_with_simple_overlap):
-        ds, indices = mock_river_dataset_with_simple_overlap
-
+    def test_static_sort_keys(self, mock_river_dataset_with_complex_overlap):
+        ds, indices = mock_river_dataset_with_complex_overlap
         rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = indices
-        rf.grid = None
-        rf._river_name_prefix = ""  # mock fixtures use unprefixed names
+        rf.indices = {name: list(cells) for name, cells in indices.items()}
+        rf._river_name_prefix = ""
+        ds_out, _ = rf._handle_overlapping_rivers(ds)
+        names = [str(n) for n in ds_out.river_name.values]
+        size = {"RiverA": 3.0, "RiverB": 6.0, "RiverC": 9.0}
+
+        keys = dict(zip(names, rf._static_sort_keys(names, size)))
+
+        # Each member gives size / n_cells to every overlap cell it shares and
+        # keeps that amount per unshared cell.
+        assert keys["RiverA"] == pytest.approx(1.0)
+        assert keys["RiverB"] == pytest.approx(0.0)
+        assert keys["RiverC"] == pytest.approx(6.0)
+        overlap_keys = sorted(
+            v for n, v in keys.items() if n.startswith(OVERLAP_RIVER_PREFIX)
+        )
+        np.testing.assert_allclose(overlap_keys, [3.0, 3.0, 5.0])
+        assert sum(keys.values()) == pytest.approx(sum(size.values()))
+
+    def test_order_independent_of_time_window(self, iceland_test_grid):
+        def build(start, end):
+            return RiverForcing(
+                grid=iceland_test_grid,
+                start_time=start,
+                end_time=end,
+                convert_to_climatology="never",
+            ).ds
+
+        # 1998 has no Dai data for four of these rivers; 1980 has all of them.
+        sparse = build(datetime(1998, 1, 1), datetime(1998, 3, 1))
+        full = build(datetime(1980, 6, 1), datetime(1980, 9, 1))
+
+        # Descending Dai vol_stn after the (8, 6) merge; absorbed rivers by name.
+        expected = [
+            "overlap_Bruara",
+            "JkulsFjll",
+            "Lagarfljot",
+            "Svarta",
+            "Bruara",
+            "Hvita(Olfusa)",
+            "Thjorsa",
+        ]
+        assert list(sparse.river_name.values) == expected
+        assert list(full.river_name.values) == expected
+        np.testing.assert_array_equal(
+            sparse.river_index.values, full.river_index.values
+        )
+
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "mock_river_dataset_with_simple_overlap",
+            "mock_river_dataset_with_complex_overlap",
+        ],
+    )
+    @pytest.mark.parametrize("overlap_first", [True, False])
+    def test_overlap_cells_placed_and_volume_conserved(
+        self, request, fixture_name, overlap_first
+    ):
+        ds, indices = request.getfixturevalue(fixture_name)
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.indices = {name: list(cells) for name, cells in indices.items()}
+        rf._river_name_prefix = ""
+        rf.grid = SimpleNamespace(
+            ds=xr.Dataset({"h": (("eta_rho", "xi_rho"), np.zeros((20, 30)))})
+        )
+        total_in = float(ds["river_volume"].sum())
+
+        ds_out, _ = rf._handle_overlapping_rivers(ds)
+        names = [str(n) for n in ds_out.river_name.values]
+        order = sorted(
+            range(len(names)), key=lambda i: names[i].startswith(OVERLAP_RIVER_PREFIX)
+        )
+        if overlap_first:
+            order = order[::-1]
+        ds_out = rf._reindex_nriver(ds_out.isel(nriver=order))
+        ds_out = rf._write_indices_into_dataset(ds_out)
+
+        river_index = ds_out["river_index"].values
+        river_fraction = ds_out["river_fraction"].values
+        volume = ds_out["river_volume"].isel(time=0).values
+        names = [str(n) for n in ds_out.river_name.values]
+        assert len(set(names)) == len(names)
+        for name, cells in rf.indices.items():
+            if name.startswith(OVERLAP_RIVER_PREFIX):
+                assert river_index[cells[0]] == names.index(name) + 1
+        placed = sum(
+            volume[int(i) - 1] * f
+            for i, f in zip(river_index.ravel(), river_fraction.ravel())
+            if i > 0
+        )
+        np.testing.assert_allclose(placed, total_in, rtol=1e-6)
+
+    def test_overlap_names_unique_with_suffixed_river_names(self):
+        names = ["RiverA", "RiverA_2", "RiverB", "RiverC", "RiverD"]
+        ds = xr.Dataset(
+            {
+                "river_volume": (("time", "nriver"), [[1.0] * 5]),
+                "river_tracer": (("time", "ntracers", "nriver"), [[[10.0] * 5]]),
+            },
+            coords={
+                "time": [0],
+                "ntracers": [0],
+                "nriver": range(5),
+                "river_name": ("nriver", names),
+                "tracer_name": ("ntracers", ["temp"]),
+            },
+        )
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.indices = {
+            "RiverA": [(1, 1), (2, 2)],
+            "RiverB": [(1, 1)],
+            "RiverC": [(2, 2)],
+            "RiverA_2": [(3, 3)],
+            "RiverD": [(3, 3)],
+        }
+        rf._river_name_prefix = ""
 
         ds_out, _ = rf._handle_overlapping_rivers(ds)
 
-        # Apply the same re-sort logic __post_init__ uses after overlap handling
-        volume_means = ds_out["river_volume"].mean(dim="time")
-        sorted_nriver = np.argsort(volume_means.values)[::-1]
-        ds_sorted = ds_out.isel(nriver=sorted_nriver)
-
-        means = ds_sorted["river_volume"].mean(dim="time").values
-        assert all(means[i] >= means[i + 1] for i in range(len(means) - 1))
+        out_names = [str(n) for n in ds_out.river_name.values]
+        assert len(set(out_names)) == len(out_names)
+        assert sum(n.startswith(OVERLAP_RIVER_PREFIX) for n in out_names) == 3
 
     def test_overlap_strip_from_provided_indices(
         self, iceland_test_grid, single_cell_indices
@@ -1231,7 +1342,8 @@ class TestRiverForcingWithGloFAS:
 
     def test_min_discharge_m3s_override(self, iceland_test_grid, glofas_test_file):
         """``min_discharge_m3s`` overrides GloFAS's 1.0 m3/s default: a
-        100 m3/s station survives the default floor but not a 250 m3/s one.
+        100 m3/s station keeps its discharge under the default floor and is
+        zeroed, not dropped, under a 250 m3/s one.
         """
         rf_default = RiverForcing(
             grid=iceland_test_grid,
@@ -1248,16 +1360,17 @@ class TestRiverForcingWithGloFAS:
             source={"name": "GLOFAS", "path": Path(glofas_test_file)},
             min_discharge_m3s=250.0,
         )
-        assert "GloFAS_64.82N_22.78W" not in rf_override.indices
-        assert "GloFAS_65.47N_23.62W" in rf_override.indices
-        assert "GloFAS_63.72N_17.53W" in rf_override.indices
+        assert rf_override.indices.keys() == rf_default.indices.keys()
+        names = [str(n) for n in rf_override.ds.river_name.values]
+        volume = rf_override.ds.river_volume.mean("river_time").values
+        assert volume[names.index("GloFAS_64.82N_22.78W")] == 0.0
+        assert volume[names.index("GloFAS_65.47N_23.62W")] > 0.0
 
-    def test_below_floor_overlap_merge_is_dropped(
+    def test_below_floor_overlap_merge_is_zeroed(
         self, iceland_test_grid, tmp_path_factory
     ):
-        """A merged 'overlap_*' river must still be subject to the min-
-        discharge filter -- two co-located stations whose combined discharge
-        is still below the floor must not survive just because they merged.
+        """A merged 'overlap_*' river below the floor is kept with zero
+        discharge.
         """
         path = tmp_path_factory.mktemp("glofas_tiny_overlap") / "glofas_tiny.nc"
         times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
@@ -1275,7 +1388,11 @@ class TestRiverForcingWithGloFAS:
             source={"name": "GLOFAS", "path": path},
         )
         river_names = [str(n) for n in rf.ds.river_name.values]
-        assert not any(n.startswith("overlap_") for n in river_names)
+        merged = [
+            i for i, n in enumerate(river_names) if n.startswith(OVERLAP_RIVER_PREFIX)
+        ]
+        assert len(merged) == 1
+        assert np.all(rf.ds.river_volume.isel(nriver=merged[0]).values == 0.0)
 
 
 class TestRiverForcingGloFASClimatology:
@@ -2050,15 +2167,9 @@ class TestRiverForcingTotalDischargeMode:
                 bgc_source={"name": "RIVR2O"},
             )
 
-    def test_zero_discharge_station_is_dropped(
-        self, iceland_test_grid, tmp_path_factory
-    ):
-        """A standalone station (not part of an overlap merge) with zero
-        discharge on every day falls below GloFAS's MIN_DISCHARGE_M3S and
-        must be dropped entirely -- there's nothing physically meaningful to
-        force a ROMS river point with, so it's excluded rather than kept
-        around with a borrowed concentration value. A normally-flowing
-        station must be unaffected.
+    def test_zero_discharge_station_is_kept(self, iceland_test_grid, tmp_path_factory):
+        """A station below GloFAS's MIN_DISCHARGE_M3S is kept with zero
+        discharge; a normally-flowing station is unaffected.
         """
         path = tmp_path_factory.mktemp("glofas_rivr2o_zero") / "glofas_zero.nc"
         times = np.array(["1998-01-15", "1998-02-15"], dtype="datetime64[ns]")
@@ -2097,8 +2208,8 @@ class TestRiverForcingTotalDischargeMode:
         )
 
         river_names = [str(n) for n in rf.ds.river_name.values]
-        assert "GloFAS_65.12N_20.43W" not in river_names
-        assert "GloFAS_63.72N_17.53W" in river_names
+        zero_col = river_names.index("GloFAS_65.12N_20.43W")
+        assert np.all(rf.ds.river_volume.isel(nriver=zero_col).values == 0.0)
 
         dic_idx = rf.ds.tracer_name.values.tolist().index("DIC")
         dic_vals = rf.ds["river_tracer"].isel(ntracers=dic_idx).values

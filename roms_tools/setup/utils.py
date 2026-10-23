@@ -943,6 +943,21 @@ def get_variable_metadata():
             "long_name": "Tidal velocity in y-direction, complex part",
             "units": "m/s",
         },
+        "tide_Eamp": {"long_name": "Tidal elevation amplitude", "units": "m"},
+        "tide_Ephase": {"long_name": "Tidal elevation phase lag", "units": "degrees"},
+        "tide_Cmax": {
+            "long_name": "Tidal current ellipse semi-major axis",
+            "units": "m/s",
+        },
+        "tide_Cmin": {
+            "long_name": "Tidal current ellipse semi-minor axis",
+            "units": "m/s",
+        },
+        "tide_Cangle": {
+            "long_name": "Tidal current ellipse inclination from East",
+            "units": "degrees",
+        },
+        "tide_Cphase": {"long_name": "Tidal current phase lag", "units": "degrees"},
         "uwnd": {"long_name": "10 meter wind in x-direction", "units": "m/s"},
         "vwnd": {"long_name": "10 meter wind in y-direction", "units": "m/s"},
         "swrad": {

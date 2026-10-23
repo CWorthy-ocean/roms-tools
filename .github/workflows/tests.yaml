@@ -17,7 +17,7 @@ jobs:
       # surviving job is cancelled and its log shows a misleading exit code 143.
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 

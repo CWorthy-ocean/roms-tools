@@ -6,13 +6,20 @@
 
 ### New Features
 
+* roms-tools now supports Python 3.14. ([#708](https://github.com/CWorthy-ocean/roms-tools/pull/708))
+  * On Python 3.14, `pip install roms-tools` builds pyamg from source (it has no 3.14 wheel yet), which needs a C++ compiler; conda-forge installs are unaffected.
+
 ### Bug Fixes
 
 * Fixed `align_grids` blending the wrong child edge when a boundary is closed: with one boundary closed (by the user, or inferred because that edge is entirely land), the child's topography and mask on a different, open boundary were left unblended and could differ substantially from the parent's there. ([#705](https://github.com/CWorthy-ocean/roms-tools/pull/705))
 
 ### Improvements
 
+* roms-tools now accepts numpy 2.3 (previously capped below 2.3). ([#708](https://github.com/CWorthy-ocean/roms-tools/pull/708))
+
 ### Miscellaneous
+
+* CI runs the `use_dask=False` test job on Python 3.14 in addition to 3.12 and 3.13. ([#708](https://github.com/CWorthy-ocean/roms-tools/pull/708))
 
 ## 5.2.1
 

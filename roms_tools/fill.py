@@ -528,10 +528,12 @@ def fill_below_source_bottom(
         tree = build_kdtree_from_latlon(
             lat_flat[donors[:n_deep]], lon_flat[donors[:n_deep]]
         )
+        # Cells of one column share a donor within a bin: query each column once.
+        columns, inverse = np.unique(column[sel], return_inverse=True)
         nearest = tree.query(
-            latlon_to_xyz(lat_flat[column[sel]], lon_flat[column[sel]]), workers=-1
+            latlon_to_xyz(lat_flat[columns], lon_flat[columns]), workers=-1
         )[1]
-        donor[sel] = donors[nearest]
+        donor[sel] = donors[nearest][inverse]
         profile = profiles[:, donor[sel].astype(int)]
         k0 = np.clip((profile >= depth[sel]).sum(axis=0) - 1, 0, max(n_src - 2, 0))
         z0 = np.take_along_axis(profile, k0[None], 0)[0]

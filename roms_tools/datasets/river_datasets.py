@@ -572,13 +572,13 @@ class RiverDataset:
 
     def static_river_size(self) -> dict[str, float]:
         """Time-independent size of each river (the ``vol`` variable), keyed by
-        river name. Missing values count as 0; empty if ``vol`` is absent.
+        river name. NaN values count as 0, so those rivers are ordered last.
         """
-        var = (self.opt_var_names or {}).get("vol")
-        if var is None or var not in self.ds:
-            return {}
+        assert self.opt_var_names is not None
         names = self.ds[self.var_names["name"]].values
-        sizes = np.nan_to_num(self.ds[var].values.astype(np.float64))
+        sizes = np.nan_to_num(
+            self.ds[self.opt_var_names["vol"]].values.astype(np.float64)
+        )
         return {str(n): float(s) for n, s in zip(names, sizes)}
 
     def sort_by_river_volume(self, ds: xr.Dataset) -> xr.Dataset:

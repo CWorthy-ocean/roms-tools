@@ -652,13 +652,13 @@ class RiverForcing:
         """Build ``self.ds`` from ``source`` (and ``bgc_source``, if BGC is enabled).
 
         Resolves river locations (auto-discovered or user-provided), builds
-        volume/tracer forcing, resolves overlapping grid cells, re-sorts by
-        final river volume, and reassigns sequential 1-based ``nriver`` IDs in
-        that final order. The reassignment step guarantees that the
-        auto-discovery path (``indices=None``) and the YAML round-trip path
-        (``indices`` provided) produce the same ``river_index`` values for
-        the same physical rivers, even though they reach this point by
-        different routes.
+        volume/tracer forcing, resolves overlapping grid cells, orders rivers
+        largest first by ``vol_stn`` (see ``_static_sort_keys``), and reassigns
+        sequential 1-based ``nriver`` IDs in that order. The reassignment step
+        guarantees that the auto-discovery path (``indices=None``) and the YAML
+        round-trip path (``indices`` provided) produce the same ``river_index``
+        values for the same physical rivers, even though they reach this point
+        by different routes.
         """
         self._input_checks()
         data = self._get_data()
@@ -1668,6 +1668,21 @@ class RiverForcing:
 
         return ds_updated, exempt_names
 
+    def _overlap_cell_owners(self) -> dict[tuple[int, ...], str]:
+        """Map each shared grid cell to the ``overlap_*`` river that owns it.
+
+        The one ownership rule behind ``_reduce_river_volumes`` (originals keep
+        ``(n - k) / n`` of their volume), ``_write_indices_into_dataset`` (originals
+        skip owned cells) and ``_static_sort_keys``.
+        """
+        assert self.indices is not None
+        return {
+            tuple(cell): name
+            for name, cells in self.indices.items()
+            if name.startswith(OVERLAP_RIVER_PREFIX)
+            for cell in cells
+        }
+
     def _static_sort_keys(self, names: list[str], size: dict[str, float]) -> np.ndarray:
         """Time-independent size of each river in ``names`` after overlap merging.
 
@@ -1676,12 +1691,7 @@ class RiverForcing:
         missing from ``size`` count as 0.
         """
         assert self.indices is not None
-        overlap_cells = {
-            tuple(cell): name
-            for name, cells in self.indices.items()
-            if name.startswith(OVERLAP_RIVER_PREFIX)
-            for cell in cells
-        }
+        overlap_cells = self._overlap_cell_owners()
         keys = dict.fromkeys(names, 0.0)
         for name, cells in self.indices.items():
             if name.startswith(OVERLAP_RIVER_PREFIX) or name not in keys:
@@ -1905,7 +1915,8 @@ class RiverForcing:
             for name in rivers:
                 river_overlap_count[name] += 1
 
-        # Build scale factor vector array and apply in a single operation
+        # Each original keeps (n - k) / n of its volume for the cells it does not
+        # share; see _overlap_cell_owners for the matching placement and sort rule.
         names = ds["river_name"].values
         scale_factors = np.ones(len(names), dtype=np.float64)
         name_to_idx = {str(n): i for i, n in enumerate(names)}
@@ -1957,12 +1968,7 @@ class RiverForcing:
         river_names = ds["river_name"].values
         nriver_vals = ds["nriver"].values
 
-        overlap_cells = {
-            tuple(cell)
-            for name, cells in self.indices.items()
-            if name.startswith(OVERLAP_RIVER_PREFIX)
-            for cell in cells
-        }
+        overlap_cells = self._overlap_cell_owners()
 
         for river_name, nriver_val in zip(river_names, nriver_vals):
             river_name_str = str(river_name)

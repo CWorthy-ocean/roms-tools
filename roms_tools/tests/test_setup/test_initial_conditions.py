@@ -2,6 +2,7 @@ import copy
 import textwrap
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +17,9 @@ from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     UnifiedBGCDataset,
 )
+from roms_tools.setup import initial_conditions as ic_module
 from roms_tools.setup.initial_conditions import _set_required_vars
+from roms_tools.setup.utils import latlon_to_xyz
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -475,6 +478,148 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
             restart_values,
             equal_nan=True,
         ), f"{var_name} values changed during initialization"
+
+
+def _sloping_parent_grid() -> Grid:
+    """The parent grid of the ROMS fixtures, with a bottom that deepens southwards."""
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    lat = parent_grid.ds["lat_rho"]
+    parent_grid.ds["h"] = (4000.0 - 1300.0 * (lat - 33.0)).clip(min=300.0)
+    return parent_grid
+
+
+class _RecordingFill(ic_module.SourceBottomFill):
+    """A ``SourceBottomFill`` that remembers its instances and constructor inputs.
+
+    Defined at module level, and recording on the class, so that it is one and the
+    same object wherever the initial conditions construct their fills.
+    """
+
+    instances: ClassVar[list["_RecordingFill"]] = []
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.kwargs = kwargs
+        self.instances.append(self)
+
+
+@skip_xesmf
+def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(
+    use_dask, monkeypatch
+):
+    """A child that is deeper than its parent gets the parent's value at the same
+    depth from the nearest deep-enough column below the parent's bottom, instead of
+    the parent's deepest value repeated down the water column.
+    """
+    _RecordingFill.instances.clear()
+    monkeypatch.setattr(ic_module, "SourceBottomFill", _RecordingFill)
+    fills = _RecordingFill.instances
+
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    parent_grid = _sloping_parent_grid()
+    source = {"name": "ROMS", "grid": parent_grid, "path": restart_file}
+    grid_params = {
+        "nx": 5,
+        "ny": 5,
+        "center_lon": -120,
+        "center_lat": 34,
+        "size_x": 100,
+        "size_y": 100,
+    }
+
+    # The child is 600 m deeper than the parent in its northern half; there the
+    # parent has no data for the child's deepest levels.
+    child_grid = Grid(**grid_params, N=30)
+    lat = child_grid.ds["lat_rho"]
+    parent_h = 4000.0 - 1300.0 * (lat - 33.0)
+    child_grid.ds["h"] = parent_h.where(lat < 34.0, parent_h + 600.0)
+
+    ic = InitialConditions(
+        grid=child_grid,
+        ini_time=datetime(1998, 1, 6),
+        source=source,  # type: ignore
+        bgc_source=source,  # type: ignore
+        bgc_model=BGCMarbl,
+        model_reference_date=datetime(2000, 1, 1),
+        use_dask=use_dask,
+    )
+
+    # One fill per object: physics, then the BGC companion.
+    assert len(fills) == 2
+    fill = fills[0]
+    assert fill.n_filled > 0
+    assert fill.n_unfilled == 0
+    assert (fills[1].n_filled, fills[1].n_unfilled) == (fill.n_filled, 0)
+
+    # The reference: the parent's own columns at the child's points, which is what
+    # an object whose bottom is the regridded parent bottom (so that it has no cell
+    # below the bottom) reproduces on the parent's levels.
+    sbottom = fill.kwargs["source_bottom"].load()
+    ref_grid = Grid(**grid_params)
+    ref_grid.ds["h"] = sbottom
+    ic_ref = InitialConditions(
+        grid=ref_grid,
+        ini_time=datetime(1998, 1, 6),
+        source=source,  # type: ignore
+        bgc_source=source,  # type: ignore
+        bgc_model=BGCMarbl,
+        model_reference_date=datetime(2000, 1, 1),
+        use_dask=use_dask,
+    )
+    assert len(fills) == 4 and fills[2].n_filled == 0
+    ref_depth = (
+        ic_ref.physics.ds_depth_coords["layer_depth_rho"].squeeze().load().values
+    )
+    bottom = sbottom.values
+    depth = fill.kwargs["target_depth"].squeeze().load().values
+    wet = child_grid.ds["mask_rho"].values > 0.5
+    lon, lat_ = child_grid.ds["lon_rho"].values, child_grid.ds["lat_rho"].values
+
+    below = (depth > bottom[None]) & wet[None]
+    assert below.sum() == fill.n_filled
+    assert below.any(axis=0)[lat_ >= 34.0].any()
+    assert not below[:, lat_ < 34.0].any()
+
+    # Brute-force donor search: the nearest wet column deeper than the deepest cell
+    # of the cell's 50 m depth bin (any of the nearest, where the grid is symmetric
+    # enough for several to be equally near).
+    xyz = latlon_to_xyz(lat_.ravel(), lon.ravel()).reshape(*lon.shape, 3)
+    bins = np.floor(depth / 50.0)
+    cells = list(zip(*np.nonzero(below), strict=True))
+    for name in ["temp", "salt", "NO3"]:
+        out = ic.ds[name].squeeze().values
+        ref = ic_ref.ds[name].squeeze().values
+        assert np.isfinite(out).all()
+        for k, j, i in cells:
+            in_bin = below & (bins == bins[k, j, i])
+            eligible = wet & (bottom > depth[in_bin].max())
+            distance = np.where(
+                eligible, np.linalg.norm(xyz - xyz[j, i], axis=-1), np.inf
+            )
+            nearest = np.argwhere(distance <= distance.min() * (1 + 1e-6))
+            expected = [
+                np.interp(depth[k, j, i], ref_depth[::-1, dj, di], ref[::-1, dj, di])
+                for dj, di in nearest
+            ]
+            assert any(
+                out[k, j, i] == pytest.approx(e, rel=2e-3, abs=1e-3) for e in expected
+            ), (name, k, j, i)
+
+        # Without the fill, every cell below the parent's bottom would repeat the
+        # parent's deepest value (that of ``ref``'s deepest level; salinity hardly
+        # varies in this data, so it is left out of the check).
+        clamped = np.broadcast_to(ref[0], out.shape)[below]
+        if name != "salt":
+            assert np.abs(out[below] - clamped).max() > 1e-2, name
+        # Where the parent has no data the values are no longer one repeated number:
+        # they follow the donor's profile.
+        columns = [
+            (j, i) for j, i in zip(*np.nonzero(below.sum(axis=0) > 1), strict=True)
+        ]
+        assert columns
+        assert any(len(np.unique(out[below[:, j, i], j, i])) > 1 for j, i in columns)
 
 
 # Test initialization with missing 'name' in source

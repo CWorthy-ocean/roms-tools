@@ -41,6 +41,7 @@ from roms_tools.setup.utils import (
     _SELF_DOWNLOADING_BGC,
     BGC_INTERPOLATION_METHODS,
     RawDataSource,
+    SourceBottomFill,
     apply_scipy_fallback_fill,
     apply_source_prefill,
     bgc_source_extra_kwargs,
@@ -753,9 +754,13 @@ class InitialConditionsSource:
             for var_name in var_names:
                 processed_fields[var_name] = ds_rho[var_name]
 
-            # Regrid depth coordinates
+            # Regrid depth coordinates, and the source bottom depth, which tells
+            # `_regrid_vertically` where the source has no data.
             processed_fields["layer_depth_rho"] = lateral_regrid_from_roms.apply(
                 data.ds_depth_coords["layer_depth_rho"]
+            )
+            processed_fields["bottom_depth_rho"] = lateral_regrid_from_roms.apply(
+                data.grid.ds["h"]
             )
 
         else:
@@ -852,10 +857,29 @@ class InitialConditionsSource:
                 )
                 vertical_regrid = VerticalRegrid(ds_tmp, source_dim="s_rho")
 
+                # Regridding clamps below the source's deepest layer. Where the
+                # target is deeper than the source's local bottom, replace the
+                # clamped (shallow) value by the source's value at the same depth
+                # from the nearest deep-enough source column. Velocities are not
+                # filled.
+                fill_below_bottom = (
+                    SourceBottomFill(
+                        target_depth=self.ds_depth_coords["layer_depth_rho"],
+                        source_depth=processed_fields["layer_depth_rho"],
+                        source_bottom=processed_fields["bottom_depth_rho"],
+                        lon=self.grid.ds["lon_rho"],
+                        lat=self.grid.ds["lat_rho"],
+                        mask=self.grid.ds["mask_rho"],
+                    )
+                    if location == "rho"
+                    else None
+                )
+
                 for var_name in filtered_vars:
                     if var_name in processed_fields:
-                        processed_fields[var_name] = vertical_regrid.apply(
-                            processed_fields[var_name],
+                        source_column = processed_fields[var_name]
+                        regridded = vertical_regrid.apply(
+                            source_column,
                             source_depth_coords=processed_fields[
                                 f"layer_depth_{location}"
                             ],
@@ -864,6 +888,11 @@ class InitialConditionsSource:
                             ],
                             mask_edges=False,
                         )
+                        if fill_below_bottom is not None:
+                            regridded = fill_below_bottom.apply(
+                                regridded, source_column
+                            )
+                        processed_fields[var_name] = regridded
             else:
                 # LatLonDataset: create a regrid object for all variables
                 vertical_regrid = VerticalRegrid(

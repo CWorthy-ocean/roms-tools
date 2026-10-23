@@ -2083,6 +2083,272 @@ def compute_barotropic_velocity(
     return vel_bar
 
 
+# Depth-bin width (m) over which SourceBottomFill shares one donor search.
+_SOURCE_BOTTOM_FILL_BIN_M = 50.0
+
+# Name given to the source's vertical dimension inside SourceBottomFill, so that it
+# never clashes with the target's ``s_rho`` when the two differ in size.
+_SOURCE_VERTICAL_DIM = "s_rho_source"
+
+
+_CORE_DIMS = ("s_rho", "eta_rho", "xi_rho")
+
+
+def _core_depths(depth: xr.DataArray, name: str) -> np.ndarray:
+    """Return ``depth`` as a float array ordered ``(s_rho, eta_rho, xi_rho)``.
+
+    Singleton non-core dimensions (e.g. a single time record) are squeezed away.
+    """
+    singleton = [d for d in depth.dims if depth.sizes[d] == 1 and d not in _CORE_DIMS]
+    depth = depth.squeeze(singleton) if singleton else depth
+    if depth.ndim != 3:
+        raise ValueError(
+            f"`{name}` must hold a single time record, i.e. have dimensions "
+            f"(s_rho, eta_rho, xi_rho) after squeezing singleton dimensions; got "
+            f"{tuple(depth.dims)} with shape {tuple(depth.shape)}."
+        )
+    return np.asarray(depth.transpose("s_rho", "eta_rho", "xi_rho").values, float)
+
+
+class SourceBottomFill:
+    """Fill target levels that lie below the source's local bottom with deeper water.
+
+    A source on its own vertical grid (a parent ROMS simulation, say) has no data
+    below its local bottom. When the target grid is deeper than the source at some
+    points, vertical regridding clamps: every target level below the source's deepest
+    layer receives that layer's value, repeated down the column. On a slope that
+    value is shallow water and is badly wrong at depth.
+
+    This class replaces those values. For every wet target cell whose depth exceeds
+    the source bottom at that point, it takes the source's value *at the same depth*
+    from the nearest (great-circle) source column that is deep enough to hold that
+    depth, interpolating linearly in that donor column. Target cells between the
+    source's deepest layer and its bottom are not below the bottom and keep their
+    clamped value, as do cells deeper than every source column (no donor exists; one
+    warning reports how many).
+
+    The cell -> (donor column, level, weight) map is built once, in the constructor,
+    and then applied to any number of 3-D fields with :meth:`apply`. Each field needs
+    its source columns (the field on the source's own levels, before vertical
+    regridding) alongside its regridded counterpart. Donors are searched in depth bins
+    of 50 m with one KD-tree per bin (on 3-D unit vectors), where a donor must be
+    deeper than the deepest cell of the bin. Values are copied from the source, so the
+    result is NaN-free wherever the input was.
+
+    Attributes
+    ----------
+    n_filled : int
+        Number of target cells that are filled from a donor column.
+    n_unfilled : int
+        Number of target cells below the source bottom for which no source column
+        is deep enough; these keep their clamped value.
+
+    Notes
+    -----
+    The donor search is horizontally non-local, so the depth, bottom and coordinate
+    arrays (a single time record) are computed eagerly in the constructor, even if
+    they are dask-backed. :meth:`apply` handles one 3-D field at a time and stays
+    lazy for dask-backed fields; it needs a field's whole horizontal extent in one
+    chunk. Memory is one map (a few numbers per filled cell) plus the arrays of one
+    field at a time.
+    """
+
+    def __init__(
+        self,
+        target_depth: xr.DataArray,
+        source_depth: xr.DataArray,
+        source_bottom: xr.DataArray,
+        lon: xr.DataArray,
+        lat: xr.DataArray,
+        mask: xr.DataArray,
+    ) -> None:
+        """Build the map from below-bottom cells to donor columns.
+
+        Parameters
+        ----------
+        target_depth : xarray.DataArray
+            Layer depths (m, positive downward) of the target grid at its rho points,
+            with dimensions ``s_rho``, ``eta_rho``, ``xi_rho`` (a singleton time
+            dimension is allowed).
+        source_depth : xarray.DataArray
+            Layer depths (m, positive downward) of the *source's own* levels, already
+            regridded laterally to the target's rho points; the deepest level comes
+            first, as in ``target_depth``. May have a different number of levels.
+        source_bottom : xarray.DataArray
+            Source bottom depth (m, positive downward) regridded laterally to the
+            target's rho points, with dimensions ``eta_rho``, ``xi_rho``.
+        lon, lat : xarray.DataArray
+            Longitude and latitude (degrees) of the target's rho points.
+        mask : xarray.DataArray
+            Target land/sea mask at rho points (1 = ocean). Only ocean cells are
+            filled, and only ocean columns serve as donors.
+        """
+        tdepth = _core_depths(target_depth, "target_depth")
+        sdepth = _core_depths(source_depth, "source_depth")
+        n_src, ny, nx = sdepth.shape
+        if tdepth.shape[1:] != (ny, nx):
+            raise ValueError(
+                "`target_depth` and `source_depth` must share their horizontal "
+                f"shape; got {tdepth.shape[1:]} and {(ny, nx)}."
+            )
+
+        def horizontal(da: xr.DataArray) -> np.ndarray:
+            return da.transpose("eta_rho", "xi_rho").values.ravel()
+
+        sbottom = np.asarray(horizontal(source_bottom), float)
+        wet = np.asarray(horizontal(mask)) > 0.5
+        xyz = latlon_to_xyz(
+            np.asarray(horizontal(lat), float), np.asarray(horizontal(lon), float)
+        )
+        s_flat = sdepth.reshape(n_src, -1)
+
+        # Wet cells whose depth lies below the source bottom at the same point
+        # (a NaN anywhere in the comparison counts as "not below").
+        with np.errstate(invalid="ignore"):
+            below = (tdepth > sbottom.reshape(1, ny, nx)) & wet.reshape(1, ny, nx)
+        cells = np.flatnonzero(below)
+        del below
+        depth = tdepth.reshape(-1)[cells]
+
+        # Donor columns: wet, with a finite bottom and a finite source profile,
+        # sorted from deepest to shallowest so that the columns deep enough for any
+        # given depth form a prefix.
+        usable = wet & np.isfinite(sbottom) & np.isfinite(s_flat).all(axis=0)
+        donors = np.flatnonzero(usable)
+        donors = donors[np.argsort(-sbottom[donors], kind="stable")]
+        neg_bottom = -sbottom[donors]  # ascending
+
+        # Cells deeper than every donor column cannot be filled.
+        if donors.size:
+            fillable = depth < sbottom[donors[0]]
+        else:
+            fillable = np.zeros(depth.shape, bool)
+        self.n_unfilled = int((~fillable).sum())
+        cells, depth = cells[fillable], depth[fillable]
+        self.n_filled = int(cells.size)
+
+        # Group cells into depth bins and search donors once per bin.
+        order = np.argsort(depth, kind="stable")
+        cells, depth = cells[order], depth[order]
+        bin_id = np.floor(depth / _SOURCE_BOTTOM_FILL_BIN_M).astype(np.int64)
+        edges = np.flatnonzero(np.diff(bin_id)) + 1
+        starts = np.concatenate([[0], edges])
+        stops = np.concatenate([edges, [cells.size]])
+
+        donor_col = np.empty(cells.size, dtype=np.int64)
+        distance = np.empty(cells.size)
+        tree = None
+        n_tree = -1
+        for start, stop in zip(starts, stops, strict=True):
+            if start == stop:
+                continue
+            # Donors must be deeper than the deepest cell of the bin; depth is
+            # sorted, so that is its last cell.
+            n_deep = int(np.searchsorted(neg_bottom, -depth[stop - 1], side="left"))
+            if tree is None or n_deep != n_tree:  # nested sets: same size, same set
+                tree = cKDTree(xyz[donors[:n_deep]])
+                n_tree = n_deep
+            dist, nearest = tree.query(xyz[cells[start:stop] % (ny * nx)], workers=-1)
+            donor_col[start:stop] = donors[nearest]
+            distance[start:stop] = dist
+
+        # Level and weight of the target depth in each donor's source profile. The
+        # profile runs from deep (index 0) to shallow; the number of levels at least
+        # as deep as the target depth is found by bisection, so that no
+        # (n_levels, n_cells) array is ever formed.
+        level = np.empty(cells.size, dtype=np.int32)
+        weight = np.empty(cells.size)
+        step = 2_000_000
+        for start in range(0, cells.size, step):
+            col, dep = donor_col[start : start + step], depth[start : start + step]
+            lo = np.zeros(col.size, dtype=np.int64)
+            hi = np.full(col.size, n_src, dtype=np.int64)
+            for _ in range(n_src.bit_length()):
+                mid = (lo + hi) // 2
+                at_least_as_deep = s_flat[np.minimum(mid, n_src - 1), col] >= dep
+                active = lo < hi
+                lo = np.where(active & at_least_as_deep, mid + 1, lo)
+                hi = np.where(active & ~at_least_as_deep, mid, hi)
+            k0 = np.clip(lo - 1, 0, max(n_src - 2, 0))
+            k1 = np.minimum(k0 + 1, n_src - 1)
+            z0, z1 = s_flat[k0, col], s_flat[k1, col]
+            with np.errstate(invalid="ignore", divide="ignore"):
+                w = np.clip((z0 - dep) / (z0 - z1), 0.0, 1.0)
+            level[start : start + step] = k0
+            weight[start : start + step] = np.where(np.isfinite(w), w, 0.0)
+
+        self._cells = cells
+        self._donor_col = donor_col
+        self._level = level
+        self._weight = weight
+        self._n_src = n_src
+        self._shape = (tdepth.shape[0], ny, nx)
+
+        if self.n_unfilled:
+            logging.warning(
+                f"{self.n_unfilled} target cell(s) lie deeper than every source "
+                "column, so no same-depth value exists to fill them; they keep the "
+                "source's deepest value."
+            )
+        if self.n_filled:
+            km = 2 * R_EARTH / 1000 * np.arcsin(np.clip(distance / 2, 0, 1))
+            logging.info(
+                f"Filled {self.n_filled} target cell(s) below the source bottom from "
+                f"the nearest deep-enough source column (median distance "
+                f"{np.median(km):.1f} km, max {km.max():.1f} km)."
+            )
+
+    def apply(self, regridded: xr.DataArray, source: xr.DataArray) -> xr.DataArray:
+        """Fill the below-bottom cells of one vertically regridded field.
+
+        Parameters
+        ----------
+        regridded : xarray.DataArray
+            The field on the target's levels (``s_rho``, ``eta_rho``, ``xi_rho``,
+            plus e.g. ``time``), as produced by vertical regridding.
+        source : xarray.DataArray
+            The same field on the source's own levels at the target's rho points,
+            i.e. the input to that vertical regridding.
+
+        Returns
+        -------
+        xarray.DataArray
+            ``regridded`` with the below-bottom cells replaced; dimensions,
+            coordinates, attributes and dtype are unchanged. Lazy if ``regridded``
+            or ``source`` is dask-backed.
+        """
+        if self._cells.size == 0:
+            return regridded
+        target_core = ["s_rho", "eta_rho", "xi_rho"]
+        source_core = [_SOURCE_VERTICAL_DIM, "eta_rho", "xi_rho"]
+        source = source.rename({"s_rho": _SOURCE_VERTICAL_DIM})
+        filled = xr.apply_ufunc(
+            self._fill_block,
+            regridded.variable,
+            source.variable,
+            input_core_dims=[target_core, source_core],
+            output_core_dims=[target_core],
+            dask="parallelized",
+            output_dtypes=[regridded.dtype],
+            dask_gufunc_kwargs={"allow_rechunk": True},
+        )
+        return regridded.copy(data=filled.transpose(*regridded.dims).data)
+
+    def _fill_block(self, regridded: np.ndarray, source: np.ndarray) -> np.ndarray:
+        """Return a copy of ``regridded`` (``(..., s, eta, xi)``) with filled cells."""
+        lead = regridded.shape[:-3]
+        out = np.array(regridded, order="C", copy=True).reshape(-1, *self._shape)
+        src = np.asarray(source).reshape(
+            -1, self._n_src, self._shape[1] * self._shape[2]
+        )
+        flat = out.reshape(out.shape[0], -1)
+        low = src[:, self._level, self._donor_col]
+        high = src[:, np.minimum(self._level + 1, self._n_src - 1), self._donor_col]
+        value = low + self._weight * (high - low)
+        flat[:, self._cells] = np.where(np.isfinite(value), value, flat[:, self._cells])
+        return out.reshape(*lead, *self._shape)
+
+
 def get_vector_pairs(variable_info):
     """Extracts all unique vector pairs from the variable_info dictionary.
 

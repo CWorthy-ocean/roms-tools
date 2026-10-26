@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+### New Features
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
+* The end-to-end notebook now creates its BGC boundary forcing with `BoundaryForcing` and `bgc_model=BGCMarbl`, so the file it writes includes `Lig`, `DIC_ALT_CO2` and `ALK_ALT_CO2`. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
+* The end-to-end tutorial's "Download as .py script" file now runs with plain `python` instead of failing on IPython-only syntax. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
+* The end-to-end notebook's outputs before "Running ROMS" were re-run against current ROMS-Tools, and several small text errors are fixed. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
+
 ## 5.2.2
 
 ### New Features

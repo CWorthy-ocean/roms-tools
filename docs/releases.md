@@ -8,6 +8,10 @@
 
 ### Bug Fixes
 
+* `compute_cdr_metrics` (and `ROMSOutput.cdr_metrics`) counted the perturbation in a domain's outermost boundary rows and columns, which a nested child has already exported to its parent, so `UpscaledCDR` counted it twice and its `closure_residual` did not close. ([#713](https://github.com/CWorthy-ocean/roms-tools/pull/713))
+  * Both the flux-based and the DIC-difference uptake now sum over the interior rho points only, for release and transfer domains alike.
+  * `UpscaledCDR`'s `<parent>_DIC_difference_inside_<child>` diagnostic uses the child's interior as its footprint, to match.
+
 ### Improvements
 
 ### Miscellaneous
@@ -15,6 +19,7 @@
 * The end-to-end notebook now creates its BGC boundary forcing with `BoundaryForcing` and `bgc_model=BGCMarbl`, so the file it writes includes `Lig`, `DIC_ALT_CO2` and `ALK_ALT_CO2`. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
 * The end-to-end tutorial's "Download as .py script" file now runs with plain `python` instead of failing on IPython-only syntax. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
 * The end-to-end notebook's outputs before "Running ROMS" were re-run against current ROMS-Tools, and several small text errors are fixed. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
+* The CDR analysis docs say that both uptake integrals leave out the boundary rows and columns. ([#713](https://github.com/CWorthy-ocean/roms-tools/pull/713))
 
 ## 5.2.2
 

@@ -19,8 +19,8 @@ def minimal_grid_ds():
     """Minimal grid dataset with uniform spacing."""
     return xr.Dataset(
         {
-            "pm": (("eta_rho", "xi_rho"), np.ones((2, 2))),
-            "pn": (("eta_rho", "xi_rho"), np.ones((2, 2))),
+            "pm": (("eta_rho", "xi_rho"), np.ones((4, 4))),
+            "pn": (("eta_rho", "xi_rho"), np.ones((4, 4))),
         }
     )
 
@@ -30,8 +30,8 @@ def minimal_ds():
     """Minimal ROMS dataset with required variables and dimensions."""
     time = np.arange(3)
     s_rho = np.arange(1)
-    eta_rho = np.arange(2)
-    xi_rho = np.arange(2)
+    eta_rho = np.arange(4)
+    xi_rho = np.arange(4)
 
     return xr.Dataset(
         {
@@ -39,21 +39,21 @@ def minimal_ds():
             "avg_end_time": ("time", time + 1),
             "ALK_source": (
                 ("time", "s_rho", "eta_rho", "xi_rho"),
-                np.ones((3, 1, 2, 2)),
+                np.ones((3, 1, 4, 4)),
             ),
             "DIC_source": (
                 ("time", "s_rho", "eta_rho", "xi_rho"),
-                -np.ones((3, 1, 2, 2)),
+                -np.ones((3, 1, 4, 4)),
             ),
-            "FG_CO2": (("time", "eta_rho", "xi_rho"), np.full((3, 2, 2), 2.0)),
-            "FG_ALT_CO2": (("time", "eta_rho", "xi_rho"), np.full((3, 2, 2), 1.0)),
+            "FG_CO2": (("time", "eta_rho", "xi_rho"), np.full((3, 4, 4), 2.0)),
+            "FG_ALT_CO2": (("time", "eta_rho", "xi_rho"), np.full((3, 4, 4), 1.0)),
             "hDIC": (
                 ("time", "s_rho", "eta_rho", "xi_rho"),
-                np.full((3, 1, 2, 2), 10.0),
+                np.full((3, 1, 4, 4), 10.0),
             ),
             "hDIC_ALT_CO2": (
                 ("time", "s_rho", "eta_rho", "xi_rho"),
-                np.full((3, 1, 2, 2), 9.0),
+                np.full((3, 1, 4, 4), 9.0),
             ),
         },
         coords={"time": time, "s_rho": s_rho, "eta_rho": eta_rho, "xi_rho": xi_rho},
@@ -117,6 +117,33 @@ def test_compute_cdr_metrics_outputs(
     )
 
 
+def test_boundary_ring_is_not_counted(
+    minimal_ds: xr.Dataset, minimal_grid_ds: xr.Dataset
+) -> None:
+    """A perturbation in the outermost rho rows and columns is left out of both uptakes.
+
+    Those are boundary points: ucla-roms exports what reaches them to an upscaled
+    parent, which counts it, so counting it in this domain too would count it twice.
+    """
+    ds = minimal_ds.copy(deep=True)
+    for var in ["FG_CO2", "hDIC"]:
+        values = ds[var].values
+        values[..., [0, -1], :] = 100.0
+        values[..., :, [0, -1]] = 100.0
+    ds_cdr = compute_cdr_metrics(ds, minimal_grid_ds)
+
+    # 2 x 2 interior cells of area 1, with FG and hDIC differences of 1, windows of 1 s
+    native_flux = 4.0 * np.arange(1, 4)
+    native_dic = np.full(3, 4.0)
+    for var, native in [
+        ("cdr_carbon_uptake_from_flux", native_flux),
+        ("cdr_carbon_uptake_from_DIC_difference", native_dic),
+    ]:
+        np.testing.assert_allclose(
+            ds_cdr[var] / ds_cdr[var].attrs["tonnes_co2_per_native_unit"], native
+        )
+
+
 def test_native_dic_amount_to_mol_multiplier_warns_without_units(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -138,36 +165,29 @@ def test_carbon_uptake_tonnes_co2_analytic() -> None:
     """Uptake (tonnes CO2) equals native mmol C times the mmol→tonnes CO2 scale."""
     grid = xr.Dataset(
         {
-            "pm": (("eta_rho", "xi_rho"), np.ones((1, 1))),
-            "pn": (("eta_rho", "xi_rho"), np.ones((1, 1))),
+            "pm": (("eta_rho", "xi_rho"), np.ones((3, 3))),
+            "pn": (("eta_rho", "xi_rho"), np.ones((3, 3))),
         }
     )
-    # One cell, area 1 m^2; FG diff 3 mmol m^-2 s^-1 for 1 s -> 3 mmol C integrated
+    # 3 x 3 cells of area 1 m^2, whose only interior cell is the centre; FG diff
+    # 3 mmol m^-2 s^-1 for 1 s -> 3 mmol C integrated, hDIC diff 3 mmol m^-2 -> 3 mmol C
+    dims4 = ("time", "s_rho", "eta_rho", "xi_rho")
     ds = xr.Dataset(
         {
             "avg_begin_time": ("time", [0.0]),
             "avg_end_time": ("time", [1.0]),
-            "ALK_source": (
-                ("time", "s_rho", "eta_rho", "xi_rho"),
-                np.ones((1, 1, 1, 1)),
-            ),
-            "DIC_source": (
-                ("time", "s_rho", "eta_rho", "xi_rho"),
-                -np.ones((1, 1, 1, 1)),
-            ),
-            "FG_CO2": (("time", "eta_rho", "xi_rho"), np.array([[[5.0]]])),
-            "FG_ALT_CO2": (("time", "eta_rho", "xi_rho"), np.array([[[2.0]]])),
-            "hDIC": (("time", "s_rho", "eta_rho", "xi_rho"), np.array([[[[10.0]]]])),
-            "hDIC_ALT_CO2": (
-                ("time", "s_rho", "eta_rho", "xi_rho"),
-                np.array([[[[7.0]]]]),
-            ),
+            "ALK_source": (dims4, np.ones((1, 1, 3, 3))),
+            "DIC_source": (dims4, -np.ones((1, 1, 3, 3))),
+            "FG_CO2": (("time", "eta_rho", "xi_rho"), np.full((1, 3, 3), 5.0)),
+            "FG_ALT_CO2": (("time", "eta_rho", "xi_rho"), np.full((1, 3, 3), 2.0)),
+            "hDIC": (dims4, np.full((1, 1, 3, 3), 10.0)),
+            "hDIC_ALT_CO2": (dims4, np.full((1, 1, 3, 3), 7.0)),
         },
         coords={
             "time": [0],
             "s_rho": [0],
-            "eta_rho": [0],
-            "xi_rho": [0],
+            "eta_rho": np.arange(3),
+            "xi_rho": np.arange(3),
         },
     )
     ds["FG_CO2"].attrs["units"] = "mmol/m^2/s"
@@ -175,20 +195,8 @@ def test_carbon_uptake_tonnes_co2_analytic() -> None:
 
     ds_cdr = compute_cdr_metrics(ds, grid)
 
-    area = 1.0 / (grid["pm"] * grid["pn"])
-    dt = ds["avg_end_time"] - ds["avg_begin_time"]
-    native_mmol_flux = float(
-        (
-            ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * area * dt)
-            .sum(dim=("eta_rho", "xi_rho"))
-            .cumsum(dim="time")
-        ).item()
-    )
-    native_mmol_dic = float(
-        ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * area)
-        .sum(dim=("s_rho", "eta_rho", "xi_rho"))
-        .item()
-    )
+    native_mmol_flux = 3.0
+    native_mmol_dic = 3.0
 
     mmol_to_tonnes = _native_carbon_amount_to_tonnes_co2_scale("mmol/m^2/s")
     assert np.isclose(

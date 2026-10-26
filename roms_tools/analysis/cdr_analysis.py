@@ -14,6 +14,14 @@ _MOLAR_MASS_CO2_KG_PER_MOL = 44.0095e-3
 SourceRole = t.Literal["release", "transfer"]
 SOURCE_ROLES: t.Final[tuple[str, ...]] = t.get_args(SourceRole)
 
+# The outermost rho row and column on each side are boundary points whose values the
+# boundary condition sets. What reaches them has left the domain: ucla-roms exports
+# it to an upscaled parent across the faces inside them, so the parent counts it.
+_INTERIOR: t.Final[dict[str, slice]] = {
+    "eta_rho": slice(1, -1),
+    "xi_rho": slice(1, -1),
+}
+
 
 def compute_cdr_metrics(
     ds: xr.Dataset, grid_ds: xr.Dataset, source_role: SourceRole = "release"
@@ -25,6 +33,11 @@ def compute_cdr_metrics(
       1. Flux-based: from area-integrated CO2 flux differences (time-cumulative
          for uptake).
       2. DIC difference-based: from volume-integrated DIC differences
+
+    Both integrals cover the interior rho points only. The outermost row and
+    column on each side are boundary points set by the boundary condition; a
+    perturbation there has already left the domain (and, in a nested experiment,
+    has been exported to the parent, which counts it).
 
     Copies selected tracer and flux variables and computes grid cell areas
     and averaging window durations.
@@ -141,9 +154,9 @@ def compute_cdr_metrics(
     # Cumulative flux-based uptake (Method 1)
     flux = (
         (
-            ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * ds_cdr["area"]).sum(
-                dim=["eta_rho", "xi_rho"]
-            )
+            ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * ds_cdr["area"])
+            .isel(_INTERIOR)
+            .sum(dim=["eta_rho", "xi_rho"])
             * ds_cdr["window_length"]
         )
         .cumsum(dim="time")
@@ -153,6 +166,7 @@ def compute_cdr_metrics(
     # DIC difference-based uptake (Method 2)
     diff_DIC = (
         ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * ds_cdr["area"])
+        .isel(_INTERIOR)
         .sum(dim=["s_rho", "eta_rho", "xi_rho"])
         .compute()
     )

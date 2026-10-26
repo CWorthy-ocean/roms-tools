@@ -4,12 +4,14 @@ import logging
 import textwrap
 from pathlib import Path
 
+import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.testing as npt
 import pytest
 import xarray as xr
 from scipy.ndimage import label
+from shapely.geometry import box
 
 from conftest import calculate_file_hash
 from roms_tools import Grid
@@ -19,7 +21,7 @@ from roms_tools.constants import (
     UPPER_BOUND_THETA_S,
 )
 from roms_tools.datasets.download import download_test_data
-from roms_tools.setup.mask import _close_narrow_channels
+from roms_tools.setup.mask import _close_narrow_channels, add_mask
 from roms_tools.setup.topography import _compute_rfactor
 
 try:
@@ -940,6 +942,25 @@ def test_close_narrow_channel_integration():
 
     kwargs["mask_shapefile"] = shapefile
     _assert_closing_only(Grid(**kwargs), Grid(**kwargs, close_narrow_channels=True))
+
+
+def test_add_mask_shapefile_without_land_in_domain(tmp_path):
+    """A shapefile with no land inside the domain gives an all-ocean mask."""
+    # land polygon far away from the domain below
+    shapefile = tmp_path / "land.shp"
+    gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1)], crs="EPSG:4326").to_file(shapefile)
+
+    lon, lat = np.meshgrid(np.linspace(130, 134, 5), np.linspace(16, 20, 5))
+    ds = xr.Dataset(
+        coords={
+            "lon_rho": (("eta_rho", "xi_rho"), lon),
+            "lat_rho": (("eta_rho", "xi_rho"), lat),
+        }
+    )
+
+    ds = add_mask(ds, shapefile=shapefile)
+
+    assert (ds["mask_rho"] == 1).all()
 
 
 # Boundary tests

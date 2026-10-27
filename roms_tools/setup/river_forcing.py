@@ -69,7 +69,7 @@ OVERLAP_RIVER_PREFIX = "overlap_"
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 # river name -> grid cell -> source river name -> fraction of that source's volume
-TCellShares: TypeAlias = dict[str, dict[tuple[int, ...], dict[str, float]]]
+TSourceVolumeFraction: TypeAlias = dict[str, dict[tuple[int, ...], dict[str, float]]]
 
 
 class FillSource(BaseModel):
@@ -1592,9 +1592,9 @@ class RiverForcing:
 
         For each overlapping grid cell:
         - A new river is registered in `self.indices` and appended to the dataset.
-        - Its volume is each member's share of that cell (``_river_cell_shares``);
-          its tracers are the volume-weighted mix.
-        - Each member's own volume is reduced by the share it gave up.
+        - Its volume sums each member's volume times its fraction on that cell
+          (``_source_volume_fraction``); its tracers are the volume-weighted mix.
+        - Each member's own volume is reduced by the fraction it gave up.
 
         Parameters
         ----------
@@ -1618,7 +1618,7 @@ class RiverForcing:
         )
         assert self.indices is not None
 
-        # Name and register every overlap river first, so the shares see all owners.
+        # Name and register every overlap river first, so every owner is known.
         # Fixed group order so names match between auto-discovery and the
         # YAML-roundtrip path, whose dict-iteration orders differ.
         groups = sorted(
@@ -1639,11 +1639,15 @@ class RiverForcing:
             self.indices[name] = [idx_pair]
             new_rivers.append((name, tuple(idx_pair)))
 
-        shares = self._river_cell_shares()
+        src_fraction = self._source_volume_fraction()
         name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
         combined = [
             self._create_combined_river(
-                ds, name, ds.sizes["nriver"] + i + 1, shares[name][cell], name_to_idx
+                ds,
+                name,
+                ds.sizes["nriver"] + i + 1,
+                src_fraction[name][cell],
+                name_to_idx,
             )
             for i, (name, cell) in enumerate(new_rivers)
         ]
@@ -1659,7 +1663,7 @@ class RiverForcing:
         ds_updated.attrs = ds.attrs
         return ds_updated
 
-    def _river_cell_shares(self) -> TCellShares:
+    def _source_volume_fraction(self) -> TSourceVolumeFraction:
         """For each river in ``self.indices``: its grid cells and, per cell, the
         fraction of each source river's volume placed there.
 
@@ -1669,33 +1673,33 @@ class RiverForcing:
         derive from this.
         """
         assert self.indices is not None
-        owners = {
-            tuple(cell): name
-            for name, cells in self.indices.items()
-            if name.startswith(OVERLAP_RIVER_PREFIX)
-            for cell in cells
+        overlap_names = {
+            name for name in self.indices if name.startswith(OVERLAP_RIVER_PREFIX)
         }
-        shares: TCellShares = {name: {} for name in self.indices}
+        owners = {
+            tuple(cell): name for name in overlap_names for cell in self.indices[name]
+        }
+        src_fraction: TSourceVolumeFraction = {name: {} for name in self.indices}
         for src, cells in self.indices.items():
-            if src.startswith(OVERLAP_RIVER_PREFIX):
+            if src in overlap_names:
                 continue
             for cell in map(tuple, cells):
                 owner = owners.get(cell, src)
-                shares[owner].setdefault(cell, {})[src] = 1 / len(cells)
-        return shares
+                src_fraction[owner].setdefault(cell, {})[src] = 1 / len(cells)
+        return src_fraction
 
     def _static_sort_keys(self, names: list[str], size: dict[str, float]) -> np.ndarray:
         """Time-independent size of each river in ``names`` after overlap merging:
-        the sum of ``size`` over its source shares (``_river_cell_shares``).
+        the sum of ``size`` over its source fractions (``_source_volume_fraction``).
         Rivers missing from ``size`` count as 0.
         """
-        shares = self._river_cell_shares()
+        src_fraction = self._source_volume_fraction()
         return np.array(
             [
                 sum(
-                    share * size.get(src, 0.0)
-                    for members in shares.get(name, {}).values()
-                    for src, share in members.items()
+                    fraction * size.get(src, 0.0)
+                    for members in src_fraction.get(name, {}).values()
+                    for src, fraction in members.items()
                 )
                 for name in names
             ]
@@ -1807,7 +1811,7 @@ class RiverForcing:
             Index for the new river along the nriver dimension.
         members : dict[str, float]
             Contributing river names mapped to the fraction of their volume placed
-            on the shared cell (from ``_river_cell_shares``).
+            on the shared cell (from ``_source_volume_fraction``).
         name_to_idx : dict
             It's a dictionary built from the river_name coordinate of the dataset,
             mapping each river's name (string) to its integer position along the nriver dimension.
@@ -1823,8 +1827,8 @@ class RiverForcing:
         contributing_indices = [name_to_idx[rname] for rname in members]
         weighted_volumes = xr.concat(
             [
-                (ds["river_volume"].isel(nriver=idx) * share).astype("float64")
-                for idx, share in zip(contributing_indices, members.values())
+                (ds["river_volume"].isel(nriver=idx) * fraction).astype("float64")
+                for idx, fraction in zip(contributing_indices, members.values())
             ],
             dim="tmp",
         )
@@ -1868,8 +1872,8 @@ class RiverForcing:
     def _reduce_river_volumes(self, ds: xr.Dataset) -> xr.Dataset:
         """Reduce river volumes for rivers contributing to overlapping grid cells.
 
-        Each river in ``ds`` keeps the sum of its own shares on the cells it
-        still owns (``_river_cell_shares``).
+        Each river in ``ds`` keeps the sum of its own fractions on the cells it
+        still owns (``_source_volume_fraction``).
 
         Parameters
         ----------
@@ -1886,12 +1890,12 @@ class RiverForcing:
                 "`self.indices` must be set before calling _reduce_river_volumes"
             )
 
-        shares = self._river_cell_shares()
+        src_fraction = self._source_volume_fraction()
         names = [str(n) for n in ds["river_name"].values]
         scale_factors = np.ones(len(names), dtype=np.float64)
         for i, name in enumerate(names):
-            if name in shares:
-                scale_factors[i] = sum(m[name] for m in shares[name].values())
+            if name in src_fraction:
+                scale_factors[i] = sum(m[name] for m in src_fraction[name].values())
 
         # Apply all scale factors in a single operation
         attrs = ds["river_volume"].attrs
@@ -1911,7 +1915,7 @@ class RiverForcing:
         xr.DataArray at the end, avoiding repeated xarray indexing overhead in the assignment loop.
 
         Each river spreads its volume evenly over its cells in
-        ``_river_cell_shares``; a river with no cells there is not placed.
+        ``_source_volume_fraction``; a river with no cells there is not placed.
 
         Parameters
         ----------
@@ -1929,16 +1933,16 @@ class RiverForcing:
         river_names = ds["river_name"].values
         nriver_vals = ds["nriver"].values
 
-        shares = self._river_cell_shares()
+        src_fraction = self._source_volume_fraction()
 
         for river_name, nriver_val in zip(river_names, nriver_vals):
-            cells = shares[str(river_name)]
+            cells = src_fraction[str(river_name)]
             if not cells:
                 continue
-            fraction = 1.0 / len(cells)
+            cell_fraction = 1.0 / len(cells)
             for eta_index, xi_index in cells:
                 river_index_arr[eta_index, xi_index] = nriver_val
-                river_fraction_arr[eta_index, xi_index] = fraction
+                river_fraction_arr[eta_index, xi_index] = cell_fraction
 
         river_index = xr.DataArray(
             river_index_arr,

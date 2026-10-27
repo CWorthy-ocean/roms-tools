@@ -842,7 +842,7 @@ class TestRiverForcingWithOverlappingIndices:
         name = "overlap_" + sorted(river_list)[0].replace("GloFAS_", "")
         new_nriver = ds.sizes["nriver"] + 1  # first overlap group (i=0)
         rf.indices[name] = [idx_pair]
-        members = rf._river_cell_shares()[name][idx_pair]
+        members = rf._source_volume_fraction()[name][idx_pair]
         assert sorted(members) == sorted(river_list)
 
         combined_volume, combined_tracer = rf._create_combined_river(
@@ -967,25 +967,25 @@ class TestRiverForcingWithOverlappingIndices:
         np.testing.assert_allclose(overlap_keys, [3.0, 3.0, 5.0])
         assert sum(keys.values()) == pytest.approx(sum(size.values()))
 
-    def test_river_cell_shares(self, mock_river_dataset_with_complex_overlap):
+    def test_source_volume_fraction(self, mock_river_dataset_with_complex_overlap):
         ds, indices = mock_river_dataset_with_complex_overlap
         rf = _bare_forcing(indices)
         rf._handle_overlapping_rivers(ds)
 
-        shares = rf._river_cell_shares()
+        src_fraction = rf._source_volume_fraction()
 
         # Every source river's volume is fully placed
         totals: dict[str, float] = {}
-        for cells in shares.values():
+        for cells in src_fraction.values():
             for members in cells.values():
-                for src, share in members.items():
-                    totals[src] = totals.get(src, 0.0) + share
+                for src, fraction in members.items():
+                    totals[src] = totals.get(src, 0.0) + fraction
         assert totals == pytest.approx(dict.fromkeys(indices, 1.0))
         # Each overlap river owns exactly its one cell; RiverB is fully absorbed
-        for name, cells in shares.items():
+        for name, cells in src_fraction.items():
             if name.startswith(OVERLAP_RIVER_PREFIX):
                 assert list(cells) == [tuple(rf.indices[name][0])]
-        assert shares["RiverB"] == {}
+        assert src_fraction["RiverB"] == {}
 
     @pytest.mark.parametrize(
         "indices",

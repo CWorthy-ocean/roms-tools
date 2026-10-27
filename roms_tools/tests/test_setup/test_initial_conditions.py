@@ -480,11 +480,13 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
 
 @skip_xesmf
 def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(use_dask):
-    """A child deeper than its parent gets the parent's value at the same depth from
-    the nearest deep-enough column below the parent's bottom, not the parent's deepest
-    value repeated down the water column. Physics and BGC are checked against a
-    brute-force donor search on an object that has no cell below the parent's bottom.
+    """A child deeper than its parent gets, below the parent's bottom, the parent's
+    bottom value blended over FILL_BLEND_M into the value at the same depth in the
+    nearest deep-enough column, not the parent's deepest value repeated down the water
+    column. Physics and BGC are checked against a brute-force donor search on an object
+    that has no cell below the parent's bottom.
     """
+    from roms_tools.fill import FILL_BLEND_M
     from roms_tools.regrid import LateralRegridFromROMS
 
     restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
@@ -550,16 +552,25 @@ def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(use_
                 eligible, np.linalg.norm(xyz - xyz[j, i], axis=-1), np.inf
             )
             nearest = np.argwhere(distance <= distance.min() * (1 + 1e-6))
+            blend = min((depth[k, j, i] - bottom[j, i]) / FILL_BLEND_M, 1.0)
             expected = [
-                np.interp(depth[k, j, i], ref_depth[::-1, a, b], ref[::-1, a, b])
+                ref[0, j, i]
+                + blend
+                * (
+                    np.interp(depth[k, j, i], ref_depth[::-1, a, b], ref[::-1, a, b])
+                    - ref[0, j, i]
+                )
                 for a, b in nearest
             ]
             assert any(
                 out[k, j, i] == pytest.approx(e, rel=2e-3, abs=1e-3) for e in expected
             ), (name, k, j, i)
-        # Not the parent's deepest value repeated (that of ``ref``'s deepest level).
-        clamped = np.broadcast_to(ref[0], out.shape)[below]
-        assert np.abs(out[below] - clamped).max() > 1e-2, name
+        # Well below the bottom, not the parent's deepest value repeated (that of
+        # ``ref``'s deepest level).
+        deep = below & (depth - bottom >= FILL_BLEND_M)
+        assert deep.any()
+        clamped = np.broadcast_to(ref[0], out.shape)[deep]
+        assert np.abs(out[deep] - clamped).max() > 1e-2, name
 
 
 # Test initialization with missing 'name' in source

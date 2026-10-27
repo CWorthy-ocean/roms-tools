@@ -233,11 +233,16 @@ def test_apply_raises_if_var_has_nans_on_valid_mask():
         lf.apply(var)
 
 
-def _below_bottom_case(bottoms=(100.0, 1000.0, 2000.0), mask=None, nan_column=None):
+def _below_bottom_case(
+    bottoms=(100.0, 1000.0, 2000.0),
+    mask=None,
+    nan_column=None,
+    levels=(950.0, 400.0, 250.0, 150.0, 50.0),
+):
     """Three columns west to east with source bottoms ``bottoms`` (eta_rho is 2).
 
     The source has 4 levels at 90, 60, 30 and 5 % of the local bottom (deepest first);
-    the target has 4 levels at 950, 400, 250 and 50 m everywhere. Source temperature
+    the target has levels at ``levels`` m everywhere. Source temperature
     is ``offset - depth / 100`` in the deep columns (offsets 20 and 30) and constant
     10 in the shallow one. Returns the arguments of ``fill_below_source_bottom``.
     """
@@ -246,14 +251,12 @@ def _below_bottom_case(bottoms=(100.0, 1000.0, 2000.0), mask=None, nan_column=No
     sdepth = np.array([0.9, 0.6, 0.3, 0.05])[:, None, None] * bottom
     stemp = np.array([10.0, 20.0, 30.0]) - sdepth / 100.0
     stemp[:, :, 0] = 10.0
-    tdepth = np.broadcast_to(
-        np.array([950.0, 400.0, 250.0, 50.0])[:, None, None], (4, 2, 3)
-    )
+    tdepth = np.broadcast_to(np.array(levels)[:, None, None], (len(levels), 2, 3))
     if nan_column is not None:
         sdepth = sdepth.copy()
         sdepth[:, :, nan_column] = np.nan
     # What vertical regridding gives: the source's deepest value repeated downwards.
-    regridded = np.broadcast_to(stemp[0], (4, 2, 3)).copy()
+    regridded = np.broadcast_to(stemp[0], (len(levels), 2, 3)).copy()
     time = {"time": [0]}
     return {
         "regridded": {
@@ -285,16 +288,20 @@ def test_fill_below_source_bottom_takes_the_deeper_columns_value_at_that_depth()
     before = kwargs["regridded"]["temp"]
     out = fill_below_source_bottom(**kwargs)["temp"]
 
-    # In the 100 m column the 950, 400 and 250 m cells lie below the bottom; the
-    # nearest column deep enough is the 1000 m one, temp = 20 - depth / 100 (clamped
-    # to its deepest layer, 900 m, for the 950 m cell). The 50 m cell is above it.
+    # In the 100 m column (clamp 10) the 950, 400, 250 and 150 m cells lie below the
+    # bottom; the nearest column deep enough is the 1000 m one, temp = 20 - depth / 100
+    # (clamped to its deepest layer, 900 m, for the 950 m cell). The first three are
+    # at least 100 m below the bottom and take that value; the 150 m cell is 50 m
+    # below it and is halfway between the clamp and the donor's 18.5. The 50 m cell
+    # is above the bottom.
     np.testing.assert_allclose(
-        out.values[0, :3, :, 0], [[11.0] * 2, [16.0] * 2, [17.5] * 2]
+        out.values[0, :4, :, 0],
+        [[11.0] * 2, [16.0] * 2, [17.5] * 2, [10.0 + 0.5 * (18.5 - 10.0)] * 2],
     )
     # Everything else is unchanged, bitwise (including the 950 m cell of the 1000 m
     # column, which lies between its deepest layer and its bottom).
     unchanged = np.ones(out.shape, bool)
-    unchanged[0, :3, :, 0] = False
+    unchanged[0, :4, :, 0] = False
     np.testing.assert_array_equal(out.values[unchanged], before.values[unchanged])
     # Dims, coords, attrs and dtype are preserved, also for a field whose memory
     # layout is not C order and that is float32.
@@ -315,6 +322,17 @@ def test_fill_below_source_bottom_takes_the_deeper_columns_value_at_that_depth()
     odd_out = fill_below_source_bottom(**{**kwargs, **odd})["temp"]
     assert odd_out.dtype == np.float32
     np.testing.assert_allclose(odd_out.values, out.values, rtol=1e-6)
+
+
+def test_fill_below_source_bottom_stays_close_to_the_clamp_just_below_the_bottom():
+    # The 103 m cell lies 3 m below the 100 m column's bottom: its value is the clamp
+    # (10) plus 3 % of the way to the donor's (20 - 103 / 100 interpolated).
+    kwargs = _below_bottom_case(levels=(950.0, 400.0, 250.0, 103.0, 50.0))
+    clamp = kwargs["regridded"]["temp"].values[0, 3, :, 0]
+    out = fill_below_source_bottom(**kwargs)["temp"].values[0, 3, :, 0]
+    donor = 20.0 - 1.03
+    assert (np.abs(out - clamp) <= 0.03 * abs(donor - clamp) + 1e-12).all()
+    np.testing.assert_allclose(out, clamp + 0.03 * (donor - clamp))
 
 
 def test_fill_below_source_bottom_keeps_the_clamp_where_no_column_is_deep_enough(

@@ -5,10 +5,14 @@ import pyamg
 import xarray as xr
 from scipy import sparse
 
+from roms_tools.constants import R_EARTH
 from roms_tools.setup.utils import build_kdtree_from_latlon, latlon_to_xyz
 
 # Width (m) of the depth bins whose cells share one donor search.
 FILL_BIN_M = 50.0
+# Depth (m) below the source bottom over which the fill blends from the clamped
+# value to the deeper column's value.
+FILL_BLEND_M = 100.0
 
 
 class LateralFill:
@@ -485,9 +489,12 @@ def fill_below_source_bottom(
     to that layer's value. For each wet target cell deeper than the source bottom,
     this takes the source value at the same depth from the nearest (great-circle)
     wet source column whose bottom is deeper than every cell in the cell's 50 m
-    depth bin, interpolating linearly in that column. Cells between the deepest
-    layer and the bottom keep the clamped value, as do cells deeper than every
-    column (counted in one warning). Depths are positive downward, deepest level
+    depth bin, interpolating linearly in that column. The fill blends in from the
+    clamped value: a cell at the source bottom keeps it (the local bottom water is
+    the better estimate there) and takes more of the deeper column's water at the
+    same depth the further it lies below the bottom, all of it from 100 m on. Cells
+    between the deepest layer and the bottom keep the clamped value, as do cells
+    deeper than every column (counted in one warning). Depths are positive downward, deepest level
     first; target and source (``(..., s_rho, eta_rho, xi_rho)``, on the source's own
     levels) fields are given by name. The arrays are computed (one record).
     """
@@ -520,7 +527,7 @@ def fill_below_source_bottom(
         return dict(regridded)
 
     # One donor search per depth bin; then level and weight in each donor's profile.
-    donor, level, weight = (np.empty(cells.size) for _ in range(3))
+    donor, level, weight, distance = (np.empty(cells.size) for _ in range(4))
     profiles = sdepth.reshape(n_src, -1)
     bins = np.floor(depth / FILL_BIN_M)
     for sel in np.split(np.arange(cells.size), np.flatnonzero(np.diff(bins)) + 1):
@@ -530,10 +537,11 @@ def fill_below_source_bottom(
         )
         # Cells of one column share a donor within a bin: query each column once.
         columns, inverse = np.unique(column[sel], return_inverse=True)
-        nearest = tree.query(
+        chord, nearest = tree.query(
             latlon_to_xyz(lat_flat[columns], lon_flat[columns]), workers=-1
-        )[1]
+        )
         donor[sel] = donors[nearest][inverse]
+        distance[sel] = chord[inverse] * R_EARTH / 1000.0
         profile = profiles[:, donor[sel].astype(int)]
         k0 = np.clip((profile >= depth[sel]).sum(axis=0) - 1, 0, max(n_src - 2, 0))
         z0 = np.take_along_axis(profile, k0[None], 0)[0]
@@ -541,8 +549,14 @@ def fill_below_source_bottom(
         with np.errstate(invalid="ignore", divide="ignore"):
             w = np.clip((z0 - depth[sel]) / (z0 - z1), 0.0, 1.0)
         level[sel], weight[sel] = k0, np.where(np.isfinite(w), w, 0.0)
-    logging.info(f"Filled {cells.size} target cell(s) below the source bottom.")
+    logging.info(
+        f"Filled {cells.size} target cell(s) below the source bottom from source "
+        f"columns up to {distance.max():.0f} km away "
+        f"(median {np.median(distance):.0f} km)."
+    )
 
+    # Blend from the clamped value at the source bottom to the donor's value.
+    blend = np.clip((depth - bottom[column]) / FILL_BLEND_M, 0.0, 1.0)
     donor, level = donor.astype(int), level.astype(int)
     filled = {}
     for name, field in regridded.items():
@@ -553,6 +567,8 @@ def fill_below_source_bottom(
         low = src[:, level, donor]
         high = src[:, np.minimum(level + 1, n_src - 1), donor]
         value = low + weight * (high - low)
-        flat[:, cells] = np.where(np.isfinite(value), value, flat[:, cells])
+        clamped = flat[:, cells]
+        blended = clamped + blend * (value - clamped)
+        flat[:, cells] = np.where(np.isfinite(value), blended, clamped)
         filled[name] = values.copy(data=out).transpose(*field.dims)
     return filled

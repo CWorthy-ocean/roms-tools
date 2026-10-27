@@ -871,15 +871,15 @@ class TestRiverForcingWithOverlappingIndices:
     def test_reduce_river_volumes(self, request, fixture_name, expected_volumes):
         ds, indices = request.getfixturevalue(fixture_name)
 
-        # Manually create RiverForcing instance with mock indices
+        # Manually create RiverForcing instance with mock indices, plus one
+        # overlap river per shared cell
         rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = indices
-
-        # Compute overlapping rivers
-        overlapping = rf._get_overlapping_rivers()
+        rf.indices = dict(indices)
+        for i, cell in enumerate(rf._get_overlapping_rivers()):
+            rf.indices[f"{OVERLAP_RIVER_PREFIX}{i}"] = [cell]
 
         # Apply volume reduction
-        ds_out = rf._reduce_river_volumes(ds.copy(), overlapping)
+        ds_out = rf._reduce_river_volumes(ds.copy())
 
         # Validate reduced volumes
         actual = ds_out["river_volume"].sel(time=0).values
@@ -902,7 +902,7 @@ class TestRiverForcingWithOverlappingIndices:
         rf.grid = None  # Not needed for this test
         rf._river_name_prefix = ""  # mock fixtures use unprefixed names
 
-        ds_out, _ = rf._handle_overlapping_rivers(ds)
+        ds_out = rf._handle_overlapping_rivers(ds)
 
         # Assert number of synthetic rivers added
         expected_nriver = ds.sizes["nriver"] + expected_synthetic_count
@@ -945,7 +945,7 @@ class TestRiverForcingWithOverlappingIndices:
         rf = RiverForcing.__new__(RiverForcing)
         rf.indices = {name: list(cells) for name, cells in indices.items()}
         rf._river_name_prefix = ""
-        ds_out, _ = rf._handle_overlapping_rivers(ds)
+        ds_out = rf._handle_overlapping_rivers(ds)
         names = [str(n) for n in ds_out.river_name.values]
         size = {"RiverA": 3.0, "RiverB": 6.0, "RiverC": 9.0}
 
@@ -1011,7 +1011,7 @@ class TestRiverForcingWithOverlappingIndices:
         )
         total_in = float(ds["river_volume"].sum())
 
-        ds_out, _ = rf._handle_overlapping_rivers(ds)
+        ds_out = rf._handle_overlapping_rivers(ds)
         names = [str(n) for n in ds_out.river_name.values]
         order = sorted(
             range(len(names)), key=lambda i: names[i].startswith(OVERLAP_RIVER_PREFIX)
@@ -1061,7 +1061,7 @@ class TestRiverForcingWithOverlappingIndices:
         }
         rf._river_name_prefix = ""
 
-        ds_out, _ = rf._handle_overlapping_rivers(ds)
+        ds_out = rf._handle_overlapping_rivers(ds)
 
         out_names = [str(n) for n in ds_out.river_name.values]
         assert len(set(out_names)) == len(out_names)
@@ -1343,7 +1343,7 @@ class TestRiverForcingWithGloFAS:
     def test_min_discharge_m3s_override(self, iceland_test_grid, glofas_test_file):
         """``min_discharge_m3s`` overrides GloFAS's 1.0 m3/s default: a
         100 m3/s station keeps its discharge under the default floor and is
-        zeroed, not dropped, under a 250 m3/s one.
+        kept with zero discharge under a 250 m3/s one.
         """
         rf_default = RiverForcing(
             grid=iceland_test_grid,
@@ -1393,6 +1393,22 @@ class TestRiverForcingWithGloFAS:
         ]
         assert len(merged) == 1
         assert np.all(rf.ds.river_volume.isel(nriver=merged[0]).values == 0.0)
+
+    def test_partly_shared_river_below_floor_is_zeroed(self, iceland_test_grid):
+        """A two-cell river below the floor that shares one cell is zeroed like any
+        other river below the floor.
+        """
+        rf = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            convert_to_climatology="never",
+            indices={"Bruara": [(8, 6), (7, 6)], "Thjorsa": [(8, 6)]},
+            min_discharge_m3s=100.0,
+        )
+        names = [str(n) for n in rf.ds.river_name.values]
+        volume = rf.ds.river_volume.mean("river_time").values
+        assert volume[names.index("Bruara")] == 0.0
 
 
 class TestRiverForcingGloFASClimatology:

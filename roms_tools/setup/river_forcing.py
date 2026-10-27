@@ -706,7 +706,7 @@ class RiverForcing:
             data.extract_named_rivers(source_indices)
 
         ds = self._create_river_forcing(data)
-        ds, exempt_names = self._handle_overlapping_rivers(ds)
+        ds = self._handle_overlapping_rivers(ds)
         # Largest rivers first, by a time-independent size, so the order and
         # river IDs do not depend on the requested time window.
         volume_means = ds["river_volume"].mean(dim="river_time")
@@ -726,9 +726,7 @@ class RiverForcing:
         # Per-river means are unchanged by the nriver reorder -- reuse them
         # instead of recomputing the reduction over river_time.
         mean_discharge = volume_means.values[sorted_nriver]
-        ds = self._zero_rivers_below_min_discharge(
-            ds, data, exempt_names, mean_discharge
-        )
+        ds = self._zero_rivers_below_min_discharge(ds, data, mean_discharge)
 
         if self.include_bgc and self.bgc_source is not None:
             ds = self._apply_bgc_tracers(ds)
@@ -1579,7 +1577,7 @@ class RiverForcing:
             ntracer_idx = _tracer_index(tracer_names_arr, tracer_name)
             ds["river_tracer"].loc[{"ntracers": ntracer_idx}] = values
 
-    def _handle_overlapping_rivers(self, ds: xr.Dataset) -> tuple[xr.Dataset, set[str]]:
+    def _handle_overlapping_rivers(self, ds: xr.Dataset) -> xr.Dataset:
         """Detect and resolve overlapping river grid cell assignments.
 
         If multiple rivers are assigned to the same grid cell (i.e., overlapping index pairs),
@@ -1603,18 +1601,10 @@ class RiverForcing:
 
         Returns
         -------
-        tuple[xr.Dataset, set[str]]
-            A new dataset with overlapping rivers resolved and new entries
-            added, plus the set of original contributing river names exempt
-            from the downstream min-discharge floor (the synthetic
-            "overlap_*" rivers are not exempt) -- see
-            ``_zero_rivers_below_min_discharge``.
+        xr.Dataset
+            A new dataset with overlapping rivers resolved and new entries added.
         """
         overlapping_rivers = self._get_overlapping_rivers()
-
-        exempt_names: set[str] = {
-            name for names in overlapping_rivers.values() for name in names
-        }
 
         if len(overlapping_rivers) > 0:
             logging.info(
@@ -1664,16 +1654,17 @@ class RiverForcing:
             ds_updated = ds
 
         # Reduce volume fraction of original rivers by appropriate amount
-        ds_updated = self._reduce_river_volumes(ds_updated, overlapping_rivers)
+        ds_updated = self._reduce_river_volumes(ds_updated)
 
-        return ds_updated, exempt_names
+        return ds_updated
 
     def _overlap_cell_owners(self) -> dict[tuple[int, ...], str]:
         """Map each shared grid cell to the ``overlap_*`` river that owns it.
 
-        The one ownership rule behind ``_reduce_river_volumes`` (originals keep
-        ``(n - k) / n`` of their volume), ``_write_indices_into_dataset`` (originals
-        skip owned cells) and ``_static_sort_keys``.
+        A river with ``n`` cells puts ``1/n`` of its volume on each; a shared cell
+        belongs to its ``overlap_*`` river. Used by ``_reduce_river_volumes``,
+        ``_write_indices_into_dataset`` and ``_static_sort_keys``; the same per-cell
+        share sets the merged volume in ``_create_combined_river``.
         """
         assert self.indices is not None
         return {
@@ -1719,22 +1710,18 @@ class RiverForcing:
         self,
         ds: xr.Dataset,
         data: RiverDataset,
-        exempt_names: set[str],
         mean_discharge: np.ndarray,
     ) -> xr.Dataset:
         """Set ``river_volume`` to 0 for rivers whose ``mean_discharge`` is below
         the resolved min-discharge floor (see ``_resolve_min_discharge``).
 
-        Rivers are kept, so river IDs and indices do not change. Original
-        participants of an overlap merge (``exempt_names``) keep their volume;
-        their merged ``overlap_*`` river is subject to the floor.
+        Rivers keep their IDs and grid cells.
         """
         min_discharge = self._resolve_min_discharge(data)
         if min_discharge is None:
             return ds
 
-        is_exempt = np.array([str(n) in exempt_names for n in ds.river_name.values])
-        low = (mean_discharge < min_discharge) & ~is_exempt
+        low = (mean_discharge < min_discharge) & (mean_discharge > 0)
         if low.any():
             logging.info(
                 "Zeroing discharge of %d river(s) with mean discharge below %.2f m3/s.",
@@ -1840,7 +1827,7 @@ class RiverForcing:
         # Get the number of grid points each river originally contributed to
         num_cells_per_river = [len(self.indices[rname]) for rname in river_list]
 
-        # Weighted sum of river volume contributions at the overlapping location
+        # Each member contributes its 1/n per-cell share (see _overlap_cell_owners)
         weighted_volumes = xr.concat(
             [
                 (ds["river_volume"].isel(nriver=idx) / n_cells).astype("float64")
@@ -1885,18 +1872,16 @@ class RiverForcing:
 
         return combined_river_volume, combined_river_tracer
 
-    def _reduce_river_volumes(
-        self, ds: xr.Dataset, overlapping_rivers: TRiverIndex
-    ) -> xr.Dataset:
+    def _reduce_river_volumes(self, ds: xr.Dataset) -> xr.Dataset:
         """Reduce river volumes for rivers contributing to overlapping grid cells.
+
+        Each original river keeps ``(n - k) / n`` of its volume, where ``k`` of its
+        ``n`` cells are owned by ``overlap_*`` rivers (``_overlap_cell_owners``).
 
         Parameters
         ----------
         ds : xr.Dataset
             Dataset containing `river_name` and `river_volume` variables.
-        overlapping_rivers : dict
-            Mapping from (eta_rho, xi_rho) grid cell indices to lists of river names
-            contributing to that cell.
 
         Returns
         -------
@@ -1908,28 +1893,15 @@ class RiverForcing:
                 "`self.indices` must be set before calling _reduce_river_volumes"
             )
 
-        # Count number of overlaps for each river
-        river_overlap_count: dict[str, int] = defaultdict(int)
-
-        for rivers in overlapping_rivers.values():
-            for name in rivers:
-                river_overlap_count[name] += 1
-
-        # Each original keeps (n - k) / n of its volume for the cells it does not
-        # share; see _overlap_cell_owners for the matching placement and sort rule.
+        owners = self._overlap_cell_owners()
         names = ds["river_name"].values
         scale_factors = np.ones(len(names), dtype=np.float64)
-        name_to_idx = {str(n): i for i, n in enumerate(names)}
-
-        for rivers in overlapping_rivers.values():
-            for name in rivers:
-                if name in name_to_idx:
-                    n_cells = len(self.indices[name])
-                    n_overlaps = river_overlap_count.get(name, 0)
-                    if n_cells > 0:
-                        scale_factors[name_to_idx[name]] = (
-                            n_cells - n_overlaps
-                        ) / n_cells
+        for i, name in enumerate(names):
+            cells = self.indices.get(str(name), [])
+            if str(name).startswith(OVERLAP_RIVER_PREFIX) or not cells:
+                continue
+            n_owned = sum(tuple(cell) in owners for cell in cells)
+            scale_factors[i] = (len(cells) - n_owned) / len(cells)
 
         # Apply all scale factors in a single operation
         attrs = ds["river_volume"].attrs

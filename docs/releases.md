@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+* River order and `nriver` IDs in output files change: rivers are now ordered largest first by `vol_stn` (ties by name) instead of by mean discharge over the requested window. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* GloFAS river files now contain rivers below `min_discharge_m3s` (default 1 m³/s) with zero discharge instead of omitting them, so files have more rivers. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* At grid cells shared by several rivers, `river_index` now points to the merged `overlap_*` river, and repeated merged-river names get `_2`, `_3`, … suffixes. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+
 ### New Features
 
 ### Bug Fixes
@@ -11,8 +15,15 @@
 * `compute_cdr_metrics` (and `ROMSOutput.cdr_metrics`) counted the perturbation in a domain's outermost boundary rows and columns, which a nested child has already exported to its parent, so `UpscaledCDR` counted it twice and its `closure_residual` did not close. ([#713](https://github.com/CWorthy-ocean/roms-tools/pull/713))
   * Both the flux-based and the DIC-difference uptake now sum over the interior rho points only, for release and transfer domains alike.
   * `UpscaledCDR`'s `<parent>_DIC_difference_inside_<child>` diagnostic uses the child's interior as its footprint, to match.
+* Discharge from rivers sharing a grid cell now reaches the grid; previously the merged river was overwritten by a zero-volume original and its discharge was lost. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* Rivers split across several cells, some shared, no longer have the discharge on their remaining cells cut twice. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* Merged rivers for overlapping cells now always get unique names; a river in two overlaps no longer produces duplicate names that lose a cell. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* grids whose domain has no land from the mask_shapefile (e.g. open ocean) no longer crash in mask creation. you get an all-water mask. ([#711](https://github.com/CWorthy-ocean/roms-tools/pull/711))
 
 ### Improvements
+
+* River order and river IDs no longer depend on `start_time`/`end_time`, and YAML round trips produce the same order. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* Rivers below the minimum discharge keep their IDs and grid cells, so the river set is the same for every time window. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
 
 ### Miscellaneous
 
@@ -20,6 +31,8 @@
 * The end-to-end tutorial's "Download as .py script" file now runs with plain `python` instead of failing on IPython-only syntax. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
 * The end-to-end notebook's outputs before "Running ROMS" were re-run against current ROMS-Tools, and several small text errors are fixed. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
 * The CDR analysis docs say that both uptake integrals leave out the boundary rows and columns. ([#713](https://github.com/CWorthy-ocean/roms-tools/pull/713))
+* River forcing documentation updated for the new river ordering and overlap handling (executed notebook outputs not re-run). ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* `river_forcing_no_climatology` and `river_forcing_with_bgc` reference fixtures regenerated; per-river volumes and tracers are unchanged, only river order and the owner of the one shared cell differ. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
 
 ## 5.2.2
 

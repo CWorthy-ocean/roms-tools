@@ -2233,11 +2233,11 @@ class RiverForcing:
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
         serialized_indices["_convention"] = "eta_rho, xi_rho"
 
-        # Remove keys starting with "overlap_"
+        # Synthetic overlap rivers are recreated on load
         filtered_indices = {
             key: value
             for key, value in serialized_indices.items()
-            if not key.startswith("overlap_")
+            if not key.startswith(OVERLAP_RIVER_PREFIX)
         }
 
         forcing_dict["RiverForcing"]["indices"] = filtered_indices

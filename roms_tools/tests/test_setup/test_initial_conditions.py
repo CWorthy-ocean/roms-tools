@@ -17,6 +17,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCDataset,
 )
 from roms_tools.setup.initial_conditions import _set_required_vars
+from roms_tools.setup.utils import latlon_to_xyz
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -475,6 +476,101 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
             restart_values,
             equal_nan=True,
         ), f"{var_name} values changed during initialization"
+
+
+@skip_xesmf
+def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(use_dask):
+    """A child deeper than its parent gets, below the parent's bottom, the parent's
+    bottom value blended over FILL_BLEND_M into the value at the same depth in the
+    nearest deep-enough column, not the parent's deepest value repeated down the water
+    column. Physics and BGC are checked against a brute-force donor search on an object
+    that has no cell below the parent's bottom.
+    """
+    from roms_tools.fill import FILL_BLEND_M
+    from roms_tools.regrid import LateralRegridFromROMS
+
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    # A parent whose bottom deepens southwards, and a child that is 600 m deeper than
+    # it in its northern half.
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    parent_grid.ds["h"] = (4000.0 - 1300.0 * (parent_grid.ds["lat_rho"] - 33.0)).clip(
+        min=300.0
+    )
+    source = {"name": "ROMS", "grid": parent_grid, "path": restart_file}
+    params = {"nx": 5, "ny": 5, "center_lon": -120, "center_lat": 34}
+    params |= {"size_x": 100, "size_y": 100}
+    child_grid = Grid(**params, N=30)
+    lat = child_grid.ds["lat_rho"]
+    parent_h = 4000.0 - 1300.0 * (lat - 33.0)
+    child_grid.ds["h"] = parent_h.where(lat < 34.0, parent_h + 600.0)
+
+    def build(grid):
+        return InitialConditions(
+            grid=grid,
+            ini_time=datetime(1998, 1, 6),
+            source=source,  # type: ignore
+            bgc_source=source,  # type: ignore
+            bgc_model=BGCMarbl,
+            model_reference_date=datetime(2000, 1, 1),
+            use_dask=use_dask,
+        )
+
+    ic = build(child_grid)
+
+    # The reference object has the parent's own levels at the child's points: its
+    # bottom is the parent bottom regridded to the child's points.
+    ds_in = parent_grid.ds[["h"]].rename({"lat_rho": "lat", "lon_rho": "lon"})
+    target = {"lat": child_grid.ds["lat_rho"], "lon": child_grid.ds["lon_rho"]}
+    bottom = LateralRegridFromROMS(ds_in, target).apply(parent_grid.ds["h"]).values
+    ref_grid = Grid(**params)
+    ref_grid.ds["h"] = (("eta_rho", "xi_rho"), bottom)
+    ic_ref = build(ref_grid)
+
+    depth = ic.physics.ds_depth_coords["layer_depth_rho"].squeeze().load().values
+    ref_depth = (
+        ic_ref.physics.ds_depth_coords["layer_depth_rho"].squeeze().load().values
+    )
+    wet = child_grid.ds["mask_rho"].values > 0.5
+    below = (depth > bottom) & wet
+    assert below.sum() > 20
+    assert not below[:, lat.values < 34.0].any()
+
+    # Brute force: the nearest wet column deeper than the deepest cell of the cell's
+    # 50 m depth bin (any of the nearest where several are equally near).
+    xyz = latlon_to_xyz(lat.values.ravel(), child_grid.ds["lon_rho"].values.ravel())
+    xyz = xyz.reshape(*wet.shape, 3)
+    bins = np.floor(depth / 50.0)
+    for name in ["temp", "NO3"]:
+        out = ic.ds[name].squeeze().values
+        ref = ic_ref.ds[name].squeeze().values
+        assert np.isfinite(out).all()
+        for k, j, i in zip(*np.nonzero(below), strict=True):
+            eligible = wet & (bottom > depth[below & (bins == bins[k, j, i])].max())
+            distance = np.where(
+                eligible, np.linalg.norm(xyz - xyz[j, i], axis=-1), np.inf
+            )
+            nearest = np.argwhere(distance <= distance.min() * (1 + 1e-6))
+            blend = min((depth[k, j, i] - bottom[j, i]) / FILL_BLEND_M, 1.0)
+            expected = [
+                ref[0, j, i]
+                + blend
+                * (
+                    np.interp(depth[k, j, i], ref_depth[::-1, a, b], ref[::-1, a, b])
+                    - ref[0, j, i]
+                )
+                for a, b in nearest
+            ]
+            assert any(
+                out[k, j, i] == pytest.approx(e, rel=2e-3, abs=1e-3) for e in expected
+            ), (name, k, j, i)
+        # Well below the bottom, not the parent's deepest value repeated (that of
+        # ``ref``'s deepest level).
+        deep = below & (depth - bottom >= FILL_BLEND_M)
+        assert deep.any()
+        clamped = np.broadcast_to(ref[0], out.shape)[deep]
+        assert np.abs(out[deep] - clamped).max() > 1e-2, name
 
 
 # Test initialization with missing 'name' in source

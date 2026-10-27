@@ -19,6 +19,9 @@
 * Rivers split across several cells, some shared, no longer have the discharge on their remaining cells cut twice. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
 * Merged rivers for overlapping cells now always get unique names; a river in two overlaps no longer produces duplicate names that lose a cell. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
 * grids whose domain has no land from the mask_shapefile (e.g. open ocean) no longer crash in mask creation. you get an all-water mask. ([#711](https://github.com/CWorthy-ocean/roms-tools/pull/711))
+* Initial conditions from a ROMS restart no longer repeat the parent's deepest water at child levels below the parent's bottom; those tracers now come from the nearest deeper parent column at the same depth. ([#709](https://github.com/CWorthy-ocean/roms-tools/pull/709))
+  * This changes the initial state of any nested child that is deeper than its parent somewhere, for physics and BGC tracers alike; velocities are unchanged.
+  * If no parent column anywhere is deep enough, the old value is kept and a warning reports how many cells were affected.
 
 ### Improvements
 
@@ -33,6 +36,7 @@
 * The CDR analysis docs say that both uptake integrals leave out the boundary rows and columns. ([#713](https://github.com/CWorthy-ocean/roms-tools/pull/713))
 * River forcing documentation updated for the new river ordering and overlap handling (executed notebook outputs not re-run). ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
 * `river_forcing_no_climatology` and `river_forcing_with_bgc` reference fixtures regenerated; per-river volumes and tracers are unchanged, only river order and the owner of the one shared cell differ. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* The methods page and the initial-conditions and nesting notebooks explain how levels below the parent's bottom are filled. ([#709](https://github.com/CWorthy-ocean/roms-tools/pull/709))
 
 ## 5.2.2
 

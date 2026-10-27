@@ -1,14 +1,12 @@
 # Release notes
 
-## Unreleased
+## 5.3.0
 
 ### Breaking Changes
 
 * River order and `nriver` IDs in output files change: rivers are now ordered largest first by `vol_stn` (ties by name) instead of by mean discharge over the requested window. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
 * GloFAS river files now contain rivers below `min_discharge_m3s` (default 1 m³/s) with zero discharge instead of omitting them, so files have more rivers. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
 * At grid cells shared by several rivers, `river_index` now points to the merged `overlap_*` river, and repeated merged-river names get `_2`, `_3`, … suffixes. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
-
-### New Features
 
 ### Bug Fixes
 

@@ -12,7 +12,7 @@ import numpy as np
 import xarray as xr
 from matplotlib.path import Path as MplPath
 
-from roms_tools.analysis.cdr_analysis import SOURCE_ROLES
+from roms_tools.analysis.cdr_analysis import _INTERIOR, SOURCE_ROLES
 from roms_tools.plot import _add_boundary_to_ax, _add_gridlines, get_projection
 
 _FLUX_UPTAKE = "cdr_carbon_uptake_from_flux"
@@ -89,9 +89,10 @@ class UpscaledCDR:
       DIC-difference-based uptake (tonnes CO2).
     - ``{parent}_DIC_difference_inside_{child}``: the DIC perturbation (tonnes CO2)
       that a parent carries in the cells whose centre lies inside its child's
-      area (the child's rho points extended by half a cell, following the
-      child's orientation). The child already accounts for that region, so a
-      nonzero value indicates double counting.
+      interior (the child's rho points without the outermost boundary row and
+      column, extended by half a cell, following the child's orientation). The
+      child already accounts for that region, so a nonzero value indicates double
+      counting.
 
     Parameters
     ----------
@@ -341,8 +342,10 @@ class UpscaledCDR:
     @staticmethod
     def _footprint(ds: xr.Dataset, ref: float) -> MplPath:
         """
-        Perimeter of a domain's area as a lon/lat polygon.
+        Perimeter of a domain's interior as a lon/lat polygon.
 
+        The interior is the area `compute_cdr_metrics` accounts for: the rho
+        points without the outermost row and column, which are boundary points.
         Longitudes are unwrapped to within 180 degrees of `ref`. The rho points
         are cell centres, so each row and column is extrapolated by half a step to
         reach the cell edges before the outer ring is traced. This follows the
@@ -362,8 +365,9 @@ class UpscaledCDR:
                 axis=1,
             )
 
-        lon = extend(_unwrap_lon(ds["lon_rho"].values, ref))
-        lat = extend(ds["lat_rho"].values)
+        interior = ds[["lon_rho", "lat_rho"]].isel(_INTERIOR)
+        lon = extend(_unwrap_lon(interior["lon_rho"].values, ref))
+        lat = extend(interior["lat_rho"].values)
 
         def ring(a: np.ndarray) -> np.ndarray:
             return np.concatenate([a[0, :], a[1:, -1], a[-1, -2::-1], a[-2:0:-1, 0]])

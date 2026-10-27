@@ -68,6 +68,8 @@ AIR_TEMP_COVERAGE_TOLERANCE_DAYS = 1.0
 OVERLAP_RIVER_PREFIX = "overlap_"
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
+# river name -> grid cell -> source river name -> fraction of that source's volume
+TCellShares: TypeAlias = dict[str, dict[tuple[int, ...], dict[str, float]]]
 
 
 class FillSource(BaseModel):
@@ -865,6 +867,8 @@ class RiverForcing:
 
         if not isinstance(river_data, list):
             raise ValueError(f"Data for river `{river_name}` must be a list of tuples.")
+        if not river_data:
+            raise ValueError(f"River `{river_name}` must have at least one location.")
 
         seen_tuples = set()
         # Ensure each element in the list is a tuple of length 2
@@ -1587,9 +1591,10 @@ class RiverForcing:
         when that name repeats.
 
         For each overlapping grid cell:
-        - A new river is created using a volume-weighted sum of the original rivers' volume and tracer.
-        - The volume fraction of the original river is reduced proportionally to reflect the removal of the shared grid cell.
-        - The new river is appended to the dataset and indexed in `self.indices`.
+        - A new river is registered in `self.indices` and appended to the dataset.
+        - Its volume is each member's share of that cell (``_river_cell_shares``);
+          its tracers are the volume-weighted mix.
+        - Each member's own volume is reduced by the share it gave up.
 
         Parameters
         ----------
@@ -1605,94 +1610,96 @@ class RiverForcing:
             A new dataset with overlapping rivers resolved and new entries added.
         """
         overlapping_rivers = self._get_overlapping_rivers()
+        if not overlapping_rivers:
+            return self._reduce_river_volumes(ds.copy())
 
-        if len(overlapping_rivers) > 0:
-            logging.info(
-                f"Creating {len(overlapping_rivers)} synthetic river(s) to handle overlapping entries."
+        logging.info(
+            f"Creating {len(overlapping_rivers)} synthetic river(s) to handle overlapping entries."
+        )
+        assert self.indices is not None
+
+        # Name and register every overlap river first, so the shares see all owners.
+        # Fixed group order so names match between auto-discovery and the
+        # YAML-roundtrip path, whose dict-iteration orders differ.
+        groups = sorted(
+            overlapping_rivers.items(), key=lambda kv: (sorted(kv[1]), kv[0])
+        )
+        used_names = {str(n) for n in ds.river_name.values}
+        new_rivers = []
+        for idx_pair, river_list in groups:
+            base = OVERLAP_RIVER_PREFIX + sorted(river_list)[0].replace(
+                self._river_name_prefix, ""
             )
+            name, k = base, 1
+            while name in used_names:
+                k += 1
+                name = f"{base}_{k}"
+            used_names.add(name)
+            logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
+            self.indices[name] = [idx_pair]
+            new_rivers.append((name, tuple(idx_pair)))
 
-            # Add new unique river for each overlapping index
-            combined_river_volumes = []
-            combined_river_tracers = []
-
-            name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
-            # Fixed group order so names match between auto-discovery and the
-            # YAML-roundtrip path, whose dict-iteration orders differ.
-            groups = sorted(
-                overlapping_rivers.items(), key=lambda kv: (sorted(kv[1]), kv[0])
+        shares = self._river_cell_shares()
+        name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
+        combined = [
+            self._create_combined_river(
+                ds, name, ds.sizes["nriver"] + i + 1, shares[name][cell], name_to_idx
             )
-            used_names = {str(n) for n in ds.river_name.values}
-            for i, (idx_pair, river_list) in enumerate(groups):
-                base = OVERLAP_RIVER_PREFIX + sorted(river_list)[0].replace(
-                    self._river_name_prefix, ""
-                )
-                name, k = base, 1
-                while name in used_names:
-                    k += 1
-                    name = f"{base}_{k}"
-                used_names.add(name)
-                logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
-                new_nriver = ds.sizes["nriver"] + i + 1
-                (
-                    combined_river_volume,
-                    combined_river_tracer,
-                ) = self._create_combined_river(
-                    ds, name, new_nriver, idx_pair, river_list, name_to_idx
-                )
-                combined_river_volumes.append(combined_river_volume)
-                combined_river_tracers.append(combined_river_tracer)
+            for i, (name, cell) in enumerate(new_rivers)
+        ]
 
-            ds_updated = xr.Dataset()
-            ds_updated["river_volume"] = xr.concat(
-                [ds["river_volume"], *combined_river_volumes], dim="nriver"
-            )
-            ds_updated["river_tracer"] = xr.concat(
-                [ds["river_tracer"], *combined_river_tracers], dim="nriver"
-            )
-            ds_updated.attrs = ds.attrs
-        else:
-            ds_updated = ds
-
-        # Reduce volume fraction of original rivers by appropriate amount
-        ds_updated = self._reduce_river_volumes(ds_updated)
-
+        ds_reduced = self._reduce_river_volumes(ds.copy())
+        ds_updated = xr.Dataset()
+        ds_updated["river_volume"] = xr.concat(
+            [ds_reduced["river_volume"], *(vol for vol, _ in combined)], dim="nriver"
+        )
+        ds_updated["river_tracer"] = xr.concat(
+            [ds_reduced["river_tracer"], *(tr for _, tr in combined)], dim="nriver"
+        )
+        ds_updated.attrs = ds.attrs
         return ds_updated
 
-    def _overlap_cell_owners(self) -> dict[tuple[int, ...], str]:
-        """Map each shared grid cell to the ``overlap_*`` river that owns it.
+    def _river_cell_shares(self) -> TCellShares:
+        """For each river in ``self.indices``: its grid cells and, per cell, the
+        fraction of each source river's volume placed there.
 
-        A river with ``n`` cells puts ``1/n`` of its volume on each; a shared cell
-        belongs to its ``overlap_*`` river. Used by ``_reduce_river_volumes``,
-        ``_write_indices_into_dataset`` and ``_static_sort_keys``; the same per-cell
-        share sets the merged volume in ``_create_combined_river``.
+        A source river with ``n`` cells places ``1/n`` of its volume on each; a
+        cell shared by several sources belongs to their ``overlap_*`` river.
+        Volume scaling, merged volumes, placement fractions and sort keys all
+        derive from this.
         """
         assert self.indices is not None
-        return {
+        owners = {
             tuple(cell): name
             for name, cells in self.indices.items()
             if name.startswith(OVERLAP_RIVER_PREFIX)
             for cell in cells
         }
+        shares: TCellShares = {name: {} for name in self.indices}
+        for src, cells in self.indices.items():
+            if src.startswith(OVERLAP_RIVER_PREFIX):
+                continue
+            for cell in map(tuple, cells):
+                owner = owners.get(cell, src)
+                shares[owner].setdefault(cell, {})[src] = 1 / len(cells)
+        return shares
 
     def _static_sort_keys(self, names: list[str], size: dict[str, float]) -> np.ndarray:
-        """Time-independent size of each river in ``names`` after overlap merging.
-
-        An original river keeps the share of its ``size`` on cells it does not
-        share; an overlap river gets ``size / n_cells`` from each member. Rivers
-        missing from ``size`` count as 0.
+        """Time-independent size of each river in ``names`` after overlap merging:
+        the sum of ``size`` over its source shares (``_river_cell_shares``).
+        Rivers missing from ``size`` count as 0.
         """
-        assert self.indices is not None
-        overlap_cells = self._overlap_cell_owners()
-        keys = dict.fromkeys(names, 0.0)
-        for name, cells in self.indices.items():
-            if name.startswith(OVERLAP_RIVER_PREFIX) or name not in keys:
-                continue
-            per_cell = size.get(name, 0.0) / len(cells)
-            for cell in cells:
-                owner = overlap_cells.get(tuple(cell), name)
-                if owner in keys:
-                    keys[owner] += per_cell
-        return np.array([keys[n] for n in names])
+        shares = self._river_cell_shares()
+        return np.array(
+            [
+                sum(
+                    share * size.get(src, 0.0)
+                    for members in shares.get(name, {}).values()
+                    for src, share in members.items()
+                )
+                for name in names
+            ]
+        )
 
     def _resolve_min_discharge(self, data: RiverDataset) -> float | None:
         """Resolve the min-discharge floor (m3/s), or ``None`` if disabled.
@@ -1779,16 +1786,14 @@ class RiverForcing:
         ds: xr.Dataset,
         name: str,
         new_nriver: int,
-        idx_pair: tuple[int, int],
-        river_list: list[str],
+        members: dict[str, float],
         name_to_idx: dict[str, int],
     ) -> tuple[xr.DataArray, xr.DataArray]:
         """Create a combined river entry from multiple overlapping rivers.
 
         This method generates a synthetic river by merging contributions from several rivers
         that map to the same grid cell. It performs a weighted sum of river volumes and
-        computes volume-weighted averages of tracer concentrations. The new synthetic river is also
-        registered in `self.indices`.
+        computes volume-weighted averages of tracer concentrations.
 
         Parameters
         ----------
@@ -1800,10 +1805,9 @@ class RiverForcing:
             "overlap_12.5N_34.2E" for GloFAS coordinate-based names).
         new_nriver : int
             Index for the new river along the nriver dimension.
-        idx_pair : tuple[int, int]
-            Grid cell index (eta_rho, xi_rho) that the combined river will occupy.
-        river_list : list[str]
-            List of river names contributing to the overlapping grid cell.
+        members : dict[str, float]
+            Contributing river names mapped to the fraction of their volume placed
+            on the shared cell (from ``_river_cell_shares``).
         name_to_idx : dict
             It's a dictionary built from the river_name coordinate of the dataset,
             mapping each river's name (string) to its integer position along the nriver dimension.
@@ -1816,22 +1820,11 @@ class RiverForcing:
             The volume-weighted tracer concentration at the overlapping grid cell,
             as a new 1-entry DataArray with updated coordinates.
         """
-        if self.indices is None:
-            self.indices = {}
-
-        self.indices[name] = [idx_pair]
-
-        # Get index of all rivers contributing to this overlapping cell
-        contributing_indices = [name_to_idx[rname] for rname in river_list]
-
-        # Get the number of grid points each river originally contributed to
-        num_cells_per_river = [len(self.indices[rname]) for rname in river_list]
-
-        # Each member contributes its 1/n per-cell share (see _overlap_cell_owners)
+        contributing_indices = [name_to_idx[rname] for rname in members]
         weighted_volumes = xr.concat(
             [
-                (ds["river_volume"].isel(nriver=idx) / n_cells).astype("float64")
-                for idx, n_cells in zip(contributing_indices, num_cells_per_river)
+                (ds["river_volume"].isel(nriver=idx) * share).astype("float64")
+                for idx, share in zip(contributing_indices, members.values())
             ],
             dim="tmp",
         )
@@ -1875,8 +1868,8 @@ class RiverForcing:
     def _reduce_river_volumes(self, ds: xr.Dataset) -> xr.Dataset:
         """Reduce river volumes for rivers contributing to overlapping grid cells.
 
-        Each original river keeps ``(n - k) / n`` of its volume, where ``k`` of its
-        ``n`` cells are owned by ``overlap_*`` rivers (``_overlap_cell_owners``).
+        Each river in ``ds`` keeps the sum of its own shares on the cells it
+        still owns (``_river_cell_shares``).
 
         Parameters
         ----------
@@ -1893,15 +1886,12 @@ class RiverForcing:
                 "`self.indices` must be set before calling _reduce_river_volumes"
             )
 
-        owners = self._overlap_cell_owners()
-        names = ds["river_name"].values
+        shares = self._river_cell_shares()
+        names = [str(n) for n in ds["river_name"].values]
         scale_factors = np.ones(len(names), dtype=np.float64)
         for i, name in enumerate(names):
-            cells = self.indices.get(str(name), [])
-            if str(name).startswith(OVERLAP_RIVER_PREFIX) or not cells:
-                continue
-            n_owned = sum(tuple(cell) in owners for cell in cells)
-            scale_factors[i] = (len(cells) - n_owned) / len(cells)
+            if name in shares:
+                scale_factors[i] = sum(m[name] for m in shares[name].values())
 
         # Apply all scale factors in a single operation
         attrs = ds["river_volume"].attrs
@@ -1920,9 +1910,8 @@ class RiverForcing:
         from `self.indices` and assigns them to the dataset. Builds numpy arrays first and wraps in
         xr.DataArray at the end, avoiding repeated xarray indexing overhead in the assignment loop.
 
-        A cell shared by several rivers belongs to the synthetic overlap river that
-        merges them; each original river spreads its volume evenly over its
-        remaining cells, and a river with none left is not placed.
+        Each river spreads its volume evenly over its cells in
+        ``_river_cell_shares``; a river with no cells there is not placed.
 
         Parameters
         ----------
@@ -1940,17 +1929,14 @@ class RiverForcing:
         river_names = ds["river_name"].values
         nriver_vals = ds["nriver"].values
 
-        overlap_cells = self._overlap_cell_owners()
+        shares = self._river_cell_shares()
 
         for river_name, nriver_val in zip(river_names, nriver_vals):
-            river_name_str = str(river_name)
-            indices = self.indices[river_name_str]
-            if not river_name_str.startswith(OVERLAP_RIVER_PREFIX):
-                indices = [c for c in indices if tuple(c) not in overlap_cells]
-            if not indices:
+            cells = shares[str(river_name)]
+            if not cells:
                 continue
-            fraction = 1.0 / len(indices)
-            for eta_index, xi_index in indices:
+            fraction = 1.0 / len(cells)
+            for eta_index, xi_index in cells:
                 river_index_arr[eta_index, xi_index] = nriver_val
                 river_fraction_arr[eta_index, xi_index] = fraction
 

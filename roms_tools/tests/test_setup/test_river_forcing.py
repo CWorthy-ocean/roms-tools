@@ -640,6 +640,7 @@ class TestRiverForcingWithPrescribedIndices:
             ({}, "The provided 'indices' dictionary must contain at least one river."),
             ({123: [(8, 6)]}, "River name `123` must be a string."),
             ({"Hvita(Olfusa)": "8, 6"}, "must be a list of tuples."),
+            ({"Hvita(Olfusa)": []}, "must have at least one location"),
             ({"Hvita(Olfusa)": [(8, 6, 7)]}, "must be a tuple of length 2"),
             ({"Hvita(Olfusa)": [("a", 6)]}, "First element of tuple for river"),
             ({"Hvita(Olfusa)": [(8, "b")]}, "Second element of tuple for river"),
@@ -704,6 +705,17 @@ class TestCheckRiverLocationsAreAlongCoast:
                         check_river_locations_are_along_coast(mask, idx)
 
 
+def _bare_forcing(indices, grid_shape=None):
+    """``RiverForcing`` with only ``indices`` (copied) set, for overlap-method tests."""
+    rf = RiverForcing.__new__(RiverForcing)
+    rf.indices = {name: list(cells) for name, cells in indices.items()}
+    rf._river_name_prefix = ""
+    if grid_shape is not None:
+        h = xr.DataArray(np.zeros(grid_shape), dims=("eta_rho", "xi_rho"))
+        rf.grid = SimpleNamespace(ds=xr.Dataset({"h": h}))
+    return rf
+
+
 class TestRiverForcingWithOverlappingIndices:
     def test_get_overlapping_rivers(self):
         indices = {
@@ -713,9 +725,7 @@ class TestRiverForcingWithOverlappingIndices:
             "RiverD": [(3, 4)],
         }
 
-        # Create a dummy RiverForcing instance with these indices
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = indices
+        rf = _bare_forcing(indices)
 
         overlapping = rf._get_overlapping_rivers()
 
@@ -826,19 +836,20 @@ class TestRiverForcingWithOverlappingIndices:
     ):
         ds, indices = request.getfixturevalue(fixture_name)
 
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = indices
+        rf = _bare_forcing(indices)
 
         name_to_idx = {n: i for i, n in enumerate(ds.river_name.values)}
         name = "overlap_" + sorted(river_list)[0].replace("GloFAS_", "")
         new_nriver = ds.sizes["nriver"] + 1  # first overlap group (i=0)
+        rf.indices[name] = [idx_pair]
+        members = rf._river_cell_shares()[name][idx_pair]
+        assert sorted(members) == sorted(river_list)
 
         combined_volume, combined_tracer = rf._create_combined_river(
             ds=ds,
             name=name,
             new_nriver=new_nriver,
-            idx_pair=idx_pair,
-            river_list=river_list,
+            members=members,
             name_to_idx=name_to_idx,
         )
 
@@ -873,8 +884,7 @@ class TestRiverForcingWithOverlappingIndices:
 
         # Manually create RiverForcing instance with mock indices, plus one
         # overlap river per shared cell
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = dict(indices)
+        rf = _bare_forcing(indices)
         for i, cell in enumerate(rf._get_overlapping_rivers()):
             rf.indices[f"{OVERLAP_RIVER_PREFIX}{i}"] = [cell]
 
@@ -897,10 +907,7 @@ class TestRiverForcingWithOverlappingIndices:
     ):
         ds, indices = request.getfixturevalue(mock_river_dataset_fixture)
 
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = indices
-        rf.grid = None  # Not needed for this test
-        rf._river_name_prefix = ""  # mock fixtures use unprefixed names
+        rf = _bare_forcing(indices)
 
         ds_out = rf._handle_overlapping_rivers(ds)
 
@@ -942,9 +949,7 @@ class TestRiverForcingWithOverlappingIndices:
 
     def test_static_sort_keys(self, mock_river_dataset_with_complex_overlap):
         ds, indices = mock_river_dataset_with_complex_overlap
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = {name: list(cells) for name, cells in indices.items()}
-        rf._river_name_prefix = ""
+        rf = _bare_forcing(indices)
         ds_out = rf._handle_overlapping_rivers(ds)
         names = [str(n) for n in ds_out.river_name.values]
         size = {"RiverA": 3.0, "RiverB": 6.0, "RiverC": 9.0}
@@ -961,6 +966,49 @@ class TestRiverForcingWithOverlappingIndices:
         )
         np.testing.assert_allclose(overlap_keys, [3.0, 3.0, 5.0])
         assert sum(keys.values()) == pytest.approx(sum(size.values()))
+
+    def test_river_cell_shares(self, mock_river_dataset_with_complex_overlap):
+        ds, indices = mock_river_dataset_with_complex_overlap
+        rf = _bare_forcing(indices)
+        rf._handle_overlapping_rivers(ds)
+
+        shares = rf._river_cell_shares()
+
+        # Every source river's volume is fully placed
+        totals: dict[str, float] = {}
+        for cells in shares.values():
+            for members in cells.values():
+                for src, share in members.items():
+                    totals[src] = totals.get(src, 0.0) + share
+        assert totals == pytest.approx(dict.fromkeys(indices, 1.0))
+        # Each overlap river owns exactly its one cell; RiverB is fully absorbed
+        for name, cells in shares.items():
+            if name.startswith(OVERLAP_RIVER_PREFIX):
+                assert list(cells) == [tuple(rf.indices[name][0])]
+        assert shares["RiverB"] == {}
+
+    @pytest.mark.parametrize(
+        "indices",
+        [
+            {
+                "RiverA": [(10, 20), (10, 21)],
+                "RiverB": [(10, 20)],
+                "RiverC": [(15, 25)],
+            },
+            {"RiverA": [(1, 1), (1, 2)], "RiverB": [(2, 2)], "RiverC": [(3, 3)]},
+        ],
+        ids=["overlap", "no_overlap"],
+    )
+    def test_handle_overlapping_rivers_does_not_mutate_input(
+        self, mock_river_dataset_with_simple_overlap, indices
+    ):
+        ds, _ = mock_river_dataset_with_simple_overlap
+        rf = _bare_forcing(indices)
+        before = ds["river_volume"].values.copy()
+
+        rf._handle_overlapping_rivers(ds)
+
+        np.testing.assert_array_equal(ds["river_volume"].values, before)
 
     def test_order_independent_of_time_window(self, iceland_test_grid):
         def build(start, end):
@@ -1003,12 +1051,7 @@ class TestRiverForcingWithOverlappingIndices:
         self, request, fixture_name, overlap_first
     ):
         ds, indices = request.getfixturevalue(fixture_name)
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = {name: list(cells) for name, cells in indices.items()}
-        rf._river_name_prefix = ""
-        rf.grid = SimpleNamespace(
-            ds=xr.Dataset({"h": (("eta_rho", "xi_rho"), np.zeros((20, 30)))})
-        )
+        rf = _bare_forcing(indices, grid_shape=(20, 30))
         total_in = float(ds["river_volume"].sum())
 
         ds_out = rf._handle_overlapping_rivers(ds)
@@ -1051,15 +1094,15 @@ class TestRiverForcingWithOverlappingIndices:
                 "tracer_name": ("ntracers", ["temp"]),
             },
         )
-        rf = RiverForcing.__new__(RiverForcing)
-        rf.indices = {
-            "RiverA": [(1, 1), (2, 2)],
-            "RiverB": [(1, 1)],
-            "RiverC": [(2, 2)],
-            "RiverA_2": [(3, 3)],
-            "RiverD": [(3, 3)],
-        }
-        rf._river_name_prefix = ""
+        rf = _bare_forcing(
+            {
+                "RiverA": [(1, 1), (2, 2)],
+                "RiverB": [(1, 1)],
+                "RiverC": [(2, 2)],
+                "RiverA_2": [(3, 3)],
+                "RiverD": [(3, 3)],
+            }
+        )
 
         ds_out = rf._handle_overlapping_rivers(ds)
 

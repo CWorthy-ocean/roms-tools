@@ -21,6 +21,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     WOABGCDataset,
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
+from roms_tools.fill import fill_below_source_bottom
 from roms_tools.plot import plot
 from roms_tools.processing_methods import RegridConfig, _xesmf_available
 from roms_tools.regrid import (
@@ -753,9 +754,13 @@ class InitialConditionsSource:
             for var_name in var_names:
                 processed_fields[var_name] = ds_rho[var_name]
 
-            # Regrid depth coordinates
+            # Regrid depth coordinates, and the source bottom depth, which tells
+            # `_regrid_vertically` where the source has no data.
             processed_fields["layer_depth_rho"] = lateral_regrid_from_roms.apply(
                 data.ds_depth_coords["layer_depth_rho"]
+            )
+            processed_fields["bottom_depth_rho"] = lateral_regrid_from_roms.apply(
+                data.grid.ds["h"]
             )
 
         else:
@@ -852,6 +857,11 @@ class InitialConditionsSource:
                 )
                 vertical_regrid = VerticalRegrid(ds_tmp, source_dim="s_rho")
 
+                source_columns = {
+                    var_name: processed_fields[var_name]
+                    for var_name in filtered_vars
+                    if var_name in processed_fields
+                }
                 for var_name in filtered_vars:
                     if var_name in processed_fields:
                         processed_fields[var_name] = vertical_regrid.apply(
@@ -864,6 +874,22 @@ class InitialConditionsSource:
                             ],
                             mask_edges=False,
                         )
+
+                if location == "rho":
+                    # Regridding clamps below the source's deepest layer: replace the
+                    # clamped values where the child is deeper than the parent.
+                    processed_fields.update(
+                        fill_below_source_bottom(
+                            {v: processed_fields[v] for v in source_columns},
+                            source_columns,
+                            target_depth=self.ds_depth_coords["layer_depth_rho"],
+                            source_depth=processed_fields["layer_depth_rho"],
+                            source_bottom=processed_fields["bottom_depth_rho"],
+                            lon=self.grid.ds["lon_rho"],
+                            lat=self.grid.ds["lat_rho"],
+                            mask=self.grid.ds["mask_rho"],
+                        )
+                    )
             else:
                 # LatLonDataset: create a regrid object for all variables
                 vertical_regrid = VerticalRegrid(

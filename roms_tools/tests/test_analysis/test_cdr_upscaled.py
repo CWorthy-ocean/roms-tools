@@ -81,7 +81,14 @@ def _hdic_mid() -> np.ndarray:
 def domains() -> dict[str, xr.Dataset]:
     """Child (release), mid and outer (transfer) domains with nested footprints."""
     child = _make_domain(
-        (10, 11), (20, 21), 1.0, "release", 2.0, np.full((NT, 1, N, N), 3.0), 1.0, -1.0
+        (9.6, 11.4),
+        (19.6, 21.4),
+        1.0,
+        "release",
+        2.0,
+        np.full((NT, 1, N, N), 3.0),
+        1.0,
+        -1.0,
     )
     # pm * pn = 0.25 and 1/16 give cell areas of 4 and 16 (child: 1)
     mid = _make_domain((9, 12), (19, 22), 0.25, "transfer", 1.0, _hdic_mid(), -0.5, 0.5)
@@ -126,9 +133,9 @@ def test_combined_source_and_uptake(domains):
 def test_efficiency_matches_analytic_ratio(domains):
     ds = UpscaledCDR(domains).ds
 
-    # Flux: native uptake per step = diff * area * 16 cells * 1 s, cumulative.
+    # Flux: native uptake per step = diff * area * 4 interior cells * 1 s, cumulative.
     cum = np.arange(1, NT + 1)
-    flux_native = (2.0 * 1 + 1.0 * 4 + 0.5 * 16) * 16 * cum
+    flux_native = (2.0 * 1 + 1.0 * 4 + 0.5 * 16) * 4 * cum
     source = 2.0 * 16 * cum  # (ALK - DIC) = 2 in each of 16 cells of the release
     np.testing.assert_allclose(ds["cdr_efficiency_from_flux"], flux_native / source)
 
@@ -221,7 +228,7 @@ def test_non_nested_order_raises(domains):
 
 def test_parent_not_strictly_containing_raises(domains):
     # Parent bbox touches the child's bbox on one side.
-    mid = domains["mid"].assign_coords(lon_rho=domains["mid"]["lon_rho"].clip(min=10.0))
+    mid = domains["mid"].assign_coords(lon_rho=domains["mid"]["lon_rho"].clip(min=9.6))
     with pytest.raises(ValueError, match="strictly contain"):
         UpscaledCDR({"child": domains["child"], "mid": mid})
 
@@ -229,7 +236,7 @@ def test_parent_not_strictly_containing_raises(domains):
 @pytest.mark.parametrize("child_convention", ["0_360", "-180_180"])
 def test_domains_crossing_greenwich(domains, child_convention):
     # Shift every domain so the child is centred near 0E. Grid stores lon in
-    # [0, 360), so the child's longitudes wrap from ~359.8 to ~0.2.
+    # [0, 360), so the child's longitudes wrap from ~359.1 to ~0.9.
     def shift(ds: xr.Dataset, convention: str) -> xr.Dataset:
         lon = ds["lon_rho"] - 10.5
         lon = lon % 360 if convention == "0_360" else (lon + 180) % 360 - 180
@@ -330,14 +337,15 @@ def test_different_release_source_units_raise(domains):
 def test_footprint_diagnostic_hand_computed(domains):
     ds = UpscaledCDR(domains).ds
 
-    # Mid cells inside the child's bbox (lon 10..11, lat 20..21): eta/xi idx 1, 2.
+    # Mid cells inside the child's interior (lon 9.9..11.1, lat 19.9..21.1): eta/xi
+    # idx 1, 2.
     # Per-cell DIC difference (eta + 1) * (t + 1), mid area 4: rows eta=1,2 give
     # (2 + 3) per column over 2 columns.
     expected = (2 + 3) * 2 * 4 * np.arange(1, NT + 1) * SCALE
     np.testing.assert_allclose(ds["mid_DIC_difference_inside_child"], expected)
     assert ds["mid_DIC_difference_inside_child"].attrs["units"] == "tonnes CO2"
 
-    # No outer cell (lon 0/10/20/30, lat 0/13.3/26.7/40) lies in the mid bbox.
+    # No outer cell (lon 0/10/20/30, lat 0/13.3/26.7/40) lies in the mid interior.
     np.testing.assert_allclose(ds["outer_DIC_difference_inside_mid"], 0.0)
 
 

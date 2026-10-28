@@ -1,8 +1,14 @@
+import logging
+
 import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.fill import LateralFill, nearest_neighbor_fill
+from roms_tools.fill import (
+    LateralFill,
+    fill_below_source_bottom,
+    nearest_neighbor_fill,
+)
 from roms_tools.utils import unchunk_dask
 
 
@@ -225,3 +231,137 @@ def test_apply_raises_if_var_has_nans_on_valid_mask():
         ValueError, match="contains NaNs at grid points marked as valid"
     ):
         lf.apply(var)
+
+
+def _below_bottom_case(
+    bottoms=(100.0, 1000.0, 2000.0),
+    mask=None,
+    nan_column=None,
+    levels=(950.0, 400.0, 250.0, 150.0, 50.0),
+):
+    """Three columns west to east with source bottoms ``bottoms`` (eta_rho is 2).
+
+    The source has 4 levels at 90, 60, 30 and 5 % of the local bottom (deepest first);
+    the target has levels at ``levels`` m everywhere. Source temperature
+    is ``offset - depth / 100`` in the deep columns (offsets 20 and 30) and constant
+    10 in the shallow one. Returns the arguments of ``fill_below_source_bottom``.
+    """
+    dims, horizontal = ("s_rho", "eta_rho", "xi_rho"), ("eta_rho", "xi_rho")
+    bottom = np.broadcast_to(np.array(bottoms), (2, 3))
+    sdepth = np.array([0.9, 0.6, 0.3, 0.05])[:, None, None] * bottom
+    stemp = np.array([10.0, 20.0, 30.0]) - sdepth / 100.0
+    stemp[:, :, 0] = 10.0
+    tdepth = np.broadcast_to(np.array(levels)[:, None, None], (len(levels), 2, 3))
+    if nan_column is not None:
+        sdepth = sdepth.copy()
+        sdepth[:, :, nan_column] = np.nan
+    # What vertical regridding gives: the source's deepest value repeated downwards.
+    regridded = np.broadcast_to(stemp[0], (len(levels), 2, 3)).copy()
+    time = {"time": [0]}
+    return {
+        "regridded": {
+            "temp": xr.DataArray(
+                regridded[None],
+                dims=("time", *dims),
+                coords=time,
+                attrs={"units": "degC"},
+            )
+        },
+        "source": {"temp": xr.DataArray(stemp[None], dims=("time", *dims))},
+        "target_depth": xr.DataArray(tdepth[None], dims=("time", *dims)),
+        "source_depth": xr.DataArray(sdepth, dims=dims),
+        "source_bottom": xr.DataArray(bottom.copy(), dims=horizontal),
+        "lon": xr.DataArray(
+            np.broadcast_to([0.0, 1.0, 2.0], (2, 3)).copy(), dims=horizontal
+        ),
+        "lat": xr.DataArray(
+            np.broadcast_to([[0.0], [0.5]], (2, 3)).copy(), dims=horizontal
+        ),
+        "mask": xr.DataArray(
+            np.ones((2, 3)) if mask is None else mask, dims=horizontal
+        ),
+    }
+
+
+def test_fill_below_source_bottom_takes_the_deeper_columns_value_at_that_depth():
+    kwargs = _below_bottom_case()
+    before = kwargs["regridded"]["temp"]
+    out = fill_below_source_bottom(**kwargs)["temp"]
+
+    # In the 100 m column (clamp 10) the 950, 400, 250 and 150 m cells lie below the
+    # bottom; the nearest column deep enough is the 1000 m one, temp = 20 - depth / 100
+    # (clamped to its deepest layer, 900 m, for the 950 m cell). The first three are
+    # at least 100 m below the bottom and take that value; the 150 m cell is 50 m
+    # below it and is halfway between the clamp and the donor's 18.5. The 50 m cell
+    # is above the bottom.
+    np.testing.assert_allclose(
+        out.values[0, :4, :, 0],
+        [[11.0] * 2, [16.0] * 2, [17.5] * 2, [10.0 + 0.5 * (18.5 - 10.0)] * 2],
+    )
+    # Everything else is unchanged, bitwise (including the 950 m cell of the 1000 m
+    # column, which lies between its deepest layer and its bottom).
+    unchanged = np.ones(out.shape, bool)
+    unchanged[0, :4, :, 0] = False
+    np.testing.assert_array_equal(out.values[unchanged], before.values[unchanged])
+    # Dims, coords, attrs and dtype are preserved, also for a field whose memory
+    # layout is not C order and that is float32.
+    assert out.dims == before.dims and out.attrs == before.attrs
+    assert out.dtype == before.dtype
+    odd = {
+        "regridded": {
+            "temp": before.astype("float32").copy(
+                data=np.asfortranarray(before.values.astype("float32"))
+            )
+        },
+        "source": {
+            "temp": kwargs["source"]["temp"].copy(
+                data=np.asfortranarray(kwargs["source"]["temp"].values)
+            )
+        },
+    }
+    odd_out = fill_below_source_bottom(**{**kwargs, **odd})["temp"]
+    assert odd_out.dtype == np.float32
+    np.testing.assert_allclose(odd_out.values, out.values, rtol=1e-6)
+
+
+def test_fill_below_source_bottom_stays_close_to_the_clamp_just_below_the_bottom():
+    # The 103 m cell lies 3 m below the 100 m column's bottom: its value is the clamp
+    # (10) plus 3 % of the way to the donor's (20 - 103 / 100 interpolated).
+    kwargs = _below_bottom_case(levels=(950.0, 400.0, 250.0, 103.0, 50.0))
+    clamp = kwargs["regridded"]["temp"].values[0, 3, :, 0]
+    out = fill_below_source_bottom(**kwargs)["temp"].values[0, 3, :, 0]
+    donor = 20.0 - 1.03
+    assert (np.abs(out - clamp) <= 0.03 * abs(donor - clamp) + 1e-12).all()
+    np.testing.assert_allclose(out, clamp + 0.03 * (donor - clamp))
+
+
+def test_fill_below_source_bottom_keeps_the_clamp_where_no_column_is_deep_enough(
+    caplog,
+):
+    # No column is deeper than 950 m, so the 950 m cells below the bottoms of the 100 m
+    # and 800 m columns (and the 900 m one) have no donor.
+    kwargs = _below_bottom_case(bottoms=(100.0, 800.0, 900.0))
+    with caplog.at_level(logging.WARNING):
+        out = fill_below_source_bottom(**kwargs)["temp"]
+    assert (
+        sum("lie deeper than every source column" in r.message for r in caplog.records)
+        == 1
+    )
+    np.testing.assert_array_equal(
+        out.values[0, 0], kwargs["regridded"]["temp"].values[0, 0]
+    )
+    assert np.isfinite(out.values).all()
+
+
+def test_fill_below_source_bottom_never_donates_from_land_or_nan_columns():
+    land = np.ones((2, 3))
+    land[:, 1] = 0.0
+    for kwargs in (_below_bottom_case(mask=land), _below_bottom_case(nan_column=1)):
+        out = fill_below_source_bottom(**kwargs)["temp"]
+        assert np.isfinite(out.values).all()
+        # The 100 m column is filled from the 2000 m column: temp = 30 - depth / 100.
+        np.testing.assert_allclose(out.values[0, :3, 0, 0], [20.5, 26.0, 27.5])
+        # Column 1 (land, or with an unusable source profile) is left as it was.
+        np.testing.assert_array_equal(
+            out.values[0, :, :, 1], kwargs["regridded"]["temp"].values[0, :, :, 1]
+        )

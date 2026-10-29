@@ -372,6 +372,10 @@ companion physics object (``physics_forcing``; the ``InitialConditions`` /
 
 - ``method``: ``"nn"`` (default), ``"lir"`` or ``"mixed"``; ``equation``: 8 (salinity and
   temperature, default) or 16 (salinity only).
+- ``groom``: ``True`` (default) or ``False``. Grooming detects implausible values in the
+  ESPER-derived tracers and refills them from the surrounding water (see below). The
+  wrappers write the effective value into the stored source, so the YAML records it; a
+  YAML written before the key existed loads with grooming on.
 - ``salinity_conditioning``: ``{"woa_salinity_path": ..., "low": 31, "high": 34}``
   (needs fork tag ``v1.1.1+cworthy.1`` or later). ESPER's
   nets were fit to GLODAP bottle data with almost no coverage below ~31 PSU, so in river
@@ -396,6 +400,22 @@ oxygen lower, and lower values in the inputs change no rate, only the O2 invento
 WOA23 climatology sits at 3-10 there on the boundaries measured, 12 km Indo-Pacific and
 California Current). The output variables record what was applied in their
 ``esper_salinity_conditioning`` and ``esper_floor`` attributes.
+
+With ``groom`` on, :func:`roms_tools.setup.bgc_groom.bgc_groom` runs on each ESPER source
+before ``DIC_ALT_CO2``/``ALK_ALT_CO2`` are copied from DIC and alkalinity. It flags values
+outside plausible bounds, nutrients and oxygen sitting at their floor next to ordinary
+water, salinity-normalized alkalinity and DIC that spike against their neighbours, DIC
+inconsistent with alkalinity, and oxygen above 1.25 times saturation. Flagged cells are
+refilled from the surrounding good water (water fresher than 5 PSU only from fresh water),
+and oxygen is clipped to 1.25 times saturation. The groomed variables record the checks
+and fill parameters in a ``bgc_groom`` attribute. :func:`~roms_tools.setup.bgc_groom.bgc_check`
+reports what remains.
+
+Grooming judges each cell against its neighbours, so it cannot see an error that is
+coherent over a whole region, such as a stretch of boundary where every column carries
+the same wrong temperature and salinity: those cells agree with each other. Most of the
+alkalinity and DIC flags trace back to such errors in the physics the nets are fed, which
+are best fixed upstream, in the temperature and salinity themselves.
 
 :Required for: BGC Initial Conditions, BGC Boundary Forcing
 

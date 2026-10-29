@@ -492,7 +492,8 @@ def _stages(names: Sequence[str], checks: Mapping[str, BgcCheck]) -> list[list[s
 
 
 def _kernel(
-    combo: np.ndarray,
+    stack: np.ndarray,
+    aux: np.ndarray,
     *,
     names: tuple[str, ...],
     targets: tuple[str, ...],
@@ -505,23 +506,23 @@ def _kernel(
 ) -> np.ndarray:
     """Check (mode="check": uint8 flags) or groom ``stage`` (mode="groom": values).
 
-    ``combo`` is (tracers..., salt, temp, z, wet) stacked on axis 0, each (time, s, y, x).
-    ``names`` are all tracers in the stack; ``targets`` the ones checked (the rest are
-    inputs a check requires). The output has the same shape: groomed tracers followed by
-    the unchanged aux rows (mode="groom"), or flags (zero for non-targets) (mode="check").
+    ``stack`` is the tracers stacked on axis 0 and ``aux`` (salt, temp, z, wet), each
+    (time, s, y, x). ``names`` are all tracers in the stack; ``targets`` the ones checked
+    (the rest are inputs a check requires). The output has the shape of ``stack``: the
+    groomed tracers (mode="groom") or flags, zero for non-targets (mode="check"). ``aux``
+    is never returned, so no pass copies it.
     """
-    nv = len(names)
-    stack, (salt, temp, z, wetf) = combo[:nv], combo[nv:]
+    salt, temp, z, wetf = aux
     wet = wetf > 0.5
     values = {n: stack[i] for i, n in enumerate(names)}
     elig = _eligible(wet, z, dz_max)
     if mode == "check":
         block = Block(values, salt, temp, wet)
-        flags = np.zeros(combo.shape, dtype=np.uint8)
+        flags = np.zeros(stack.shape, dtype=np.uint8)
         for n in targets:
             flags[names.index(n)] = _detect(n, checks[n], block, elig)
         return flags
-    out = combo.copy()
+    out = stack.copy()
     for n in stage:
         block = Block(values, salt, temp, wet)
         holes = _detect(n, checks[n], block, elig) > 0
@@ -634,10 +635,13 @@ def _with_requires(
     return targets + tuple(extra)
 
 
-def _as_dask(da: xr.DataArray) -> dsa.Array:
+def _as_dask(da: xr.DataArray, chunks: Any = -1) -> dsa.Array:
+    """float64 dask view of ``da``; numpy data is chunked as ``chunks`` when wrapped, so
+    no task ever holds a whole-domain float64 copy.
+    """
     data = da.data
     if not isinstance(data, dsa.Array):
-        data = dsa.from_array(np.asarray(data), chunks=-1)
+        data = dsa.from_array(np.asarray(data), chunks=chunks)
     return data.astype(np.float64)
 
 
@@ -664,9 +668,13 @@ def _run(
     column_reach: int,
     relax_sweeps: int,
 ) -> dsa.Array:
-    """Chain lazy map_overlap passes; returns (tracer, time, s, y, x) values or flags."""
-    nv = len(names)
-    combo = dsa.concatenate([stack, aux], axis=0).rechunk({0: -1})
+    """Chain lazy map_overlap passes; returns (tracer, time, s, y, x) values or flags.
+
+    The aux rows (salt, temp, z, wet) are a separate, unchanged input to every pass,
+    so no pass copies them.
+    """
+    stack = stack.rechunk({0: -1})
+    aux = aux.rechunk((-1, *stack.chunks[1:]))
     kernel = partial(
         _kernel,
         names=names,
@@ -681,32 +689,35 @@ def _run(
         # Only axes split into several chunks need an overlap; a single chunk already
         # holds every neighbour, so the result is the same either way.
         return {
-            ax: (reach if ax >= 3 and len(combo.chunks[ax]) > 1 else 0)
+            ax: (reach if ax >= 3 and len(stack.chunks[ax]) > 1 else 0)
             for ax in range(5)
         }
 
     if mode == "check":
-        flags = dsa.map_overlap(
+        return dsa.map_overlap(
             partial(kernel, mode="check"),
-            combo,
+            stack,
+            aux,
             depth=depth_for(1),
             boundary="none",
+            align_arrays=False,
             dtype=np.uint8,
             meta=np.array((), dtype=np.uint8),
         )
-        return flags[:nv]
     depth = depth_for(_overlap_reach(column_reach, relax_sweeps))
     for _ in range(passes):
         for stage in _stages(targets, checks):
-            combo = dsa.map_overlap(
+            stack = dsa.map_overlap(
                 partial(kernel, mode="groom", stage=tuple(stage)),
-                combo,
+                stack,
+                aux,
                 depth=depth,
                 boundary="none",
+                align_arrays=False,
                 dtype=np.float64,
                 meta=np.array((), dtype=np.float64),
             )
-    return combo[:nv]
+    return stack
 
 
 def _params(
@@ -734,16 +745,16 @@ def _ic_arrays(ds, physics, grid_ds, names, tile):
     chunks = (1, -1, tile, tile)
 
     def arr(da):
-        return _as_dask(da.transpose(tdim, "s_rho", "eta_rho", "xi_rho")).rechunk(
-            chunks
-        )
+        return _as_dask(
+            da.transpose(tdim, "s_rho", "eta_rho", "xi_rho"), chunks
+        ).rechunk(chunks)
 
     stack = dsa.stack([arr(ds[n]) for n in names]).rechunk((-1, *chunks))
     # Chunk the grid first so the 3-D layer depths stay lazy, tile by tile.
     gch = grid_ds.chunk({"eta_rho": tile, "xi_rho": tile})
     z = compute_depth_coordinates(gch, zeta=0, depth_type="layer", location="rho")
     z = _as_dask(z.transpose("s_rho", "eta_rho", "xi_rho"))
-    wet = _as_dask(grid_ds["mask_rho"].transpose("eta_rho", "xi_rho"))
+    wet = _as_dask(grid_ds["mask_rho"].transpose("eta_rho", "xi_rho"), (tile, tile))
     aux = dsa.stack(
         [
             arr(phys["salt"]),
@@ -772,7 +783,9 @@ def _bry_arrays(ds, phys, grid_ds, names, side, time_chunk):
     chunks = (time_chunk, -1, 1, -1)
 
     def arr(da):
-        return _as_dask(da.transpose(*dims))[:, :, None, :].rechunk(chunks)
+        return _as_dask(da.transpose(*dims), (time_chunk, -1, -1))[
+            :, :, None, :
+        ].rechunk(chunks)
 
     stack = dsa.stack([arr(ds[f"{n}_{side}"]) for n in names]).rechunk((-1, *chunks))
     idx = {"eta": sl["eta_rho"]} if "eta_rho" in sl else {"xi": sl["xi_rho"]}

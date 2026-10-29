@@ -242,14 +242,97 @@ class LateralRegridToROMS:
         return da.interp(self.coords, method=method).drop_vars(list(self.coords.keys()))
 
 
+def per_variable_mask_name(var_name):
+    """Return the name of the per-variable source mask for ``var_name``.
+
+    Some sources (e.g. GLODAP) have variables whose wet cells differ, so a single
+    shared ``"mask"`` would mark cells as ocean where a variable has no data. Such
+    sources store a dedicated ``ds[per_variable_mask_name(var)]`` for each variable
+    whose pattern differs. This is the only place that name is derived.
+
+    Parameters
+    ----------
+    var_name : str
+        Name of the data variable in the source dataset.
+
+    Returns
+    -------
+    str
+        The name of that variable's dedicated mask.
+    """
+    return f"mask_{var_name}"
+
+
+def source_mask_name(ds, var_name, *, is_vector):
+    """Return the name of the source mask a variable uses, or ``None``.
+
+    In order: the variable's own mask (:func:`per_variable_mask_name`) when the
+    source carries one; ``"mask_vel"`` for velocity components when present;
+    ``"mask"`` when present; otherwise ``None``.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The source dataset.
+    var_name : str or None
+        Name of the data variable in ``ds``; ``None`` skips the per-variable lookup.
+    is_vector : bool
+        Whether the field is a velocity component.
+
+    Returns
+    -------
+    str or None
+        The mask variable name, or ``None`` when the source has no applicable mask.
+    """
+    if var_name is not None:
+        name = per_variable_mask_name(var_name)
+        if name in ds.data_vars:
+            return name
+    if is_vector and "mask_vel" in ds.data_vars:
+        return "mask_vel"
+    if "mask" in ds.data_vars:
+        return "mask"
+    return None
+
+
+def select_source_mask_name(ds, *, is_vector, use_xesmf, prefill, var_name=None):
+    """Return the name of the source mask for the xESMF masked-bilinear path, or ``None``.
+
+    A mask is only meaningful on the xESMF path with no source prefill (a prefilled
+    source is already NaN-free, so plain bilinear is used); this is the one place
+    that guard lives. Which mask applies is decided by :func:`source_mask_name`.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The source dataset.
+    is_vector : bool
+        Whether the field being regridded is a velocity component.
+    use_xesmf : bool
+        Whether the xESMF engine is in use (``RegridConfig.use_xesmf``).
+    prefill : str or None
+        The resolved source prefill (``RegridConfig.prefill``); ``None`` means no
+        whole-domain source fill was applied.
+    var_name : str, optional
+        Name of the data variable in ``ds``, for sources with per-variable masks.
+
+    Returns
+    -------
+    str or None
+        The mask variable name, or ``None`` when masking does not apply.
+    """
+    if not (use_xesmf and prefill is None):
+        return None
+    return source_mask_name(ds, var_name, is_vector=is_vector)
+
+
 def select_source_mask(ds, *, is_vector, use_xesmf, prefill):
-    """Pick the source mask for the xESMF masked-bilinear path, or ``None``.
+    """Pick the shared source mask for the xESMF masked-bilinear path, or ``None``.
 
     Reproduces the per-field mask selection used across the setup classes (e.g.
-    ``boundary_forcing.py``): a mask is only meaningful on the xESMF path with no
-    source prefill (a prefilled source is already NaN-free, so plain bilinear is
-    used). Velocity fields use ``"mask_vel"`` when the source provides it, falling
-    back to the scalar-field ``"mask"``.
+    ``boundary_forcing.py``): ``"mask_vel"`` for velocity fields, else the
+    scalar-field ``"mask"``, and ``None`` off the xESMF/no-prefill path (see
+    :func:`select_source_mask_name`, which also picks per-variable masks).
 
     Parameters
     ----------
@@ -268,12 +351,10 @@ def select_source_mask(ds, *, is_vector, use_xesmf, prefill):
     xarray.DataArray or None
         The source mask, or ``None`` when masking does not apply.
     """
-    if not (use_xesmf and prefill is None):
-        return None
-    scalar = ds["mask"] if "mask" in ds.data_vars else None
-    if is_vector:
-        return ds["mask_vel"] if "mask_vel" in ds.data_vars else scalar
-    return scalar
+    name = select_source_mask_name(
+        ds, is_vector=is_vector, use_xesmf=use_xesmf, prefill=prefill
+    )
+    return None if name is None else ds[name]
 
 
 def build_lateral_regridder(target_coords, data, regrid_config, source_mask):

@@ -32,6 +32,7 @@ from roms_tools.setup.utils import (
     apply_source_prefill,
     check_source_coverage,
     compute_missing_surface_bgc_variables,
+    fill_nans_over_land,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -380,10 +381,25 @@ class SurfaceForcing:
             ds = self._apply_rad_time(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+        ds = self._fill_nans_over_land(ds)
 
         self.ds = ds
+
+    def _fill_nans_over_land(self, ds):
+        """Fill NaN over land with 0, raising on NaN at a wet point.
+
+        All surface variables sit at rho-points, so they share ``target_coords["mask"]``
+        (the coarse mask in coarse-grid mode), as in ``_validate``. The check is skipped
+        (plain fill) under ``bypass_validation``.
+        """
+        for var_name in ds.data_vars:
+            if self.bypass_validation:
+                ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+            else:
+                ds[var_name] = fill_nans_over_land(
+                    ds[var_name], self.target_coords["mask"], var_name
+                )
+        return ds
 
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is

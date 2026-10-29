@@ -293,6 +293,79 @@ def nan_check_batch(items) -> None:
             raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
 
 
+def wet_mask(grid_ds: xr.Dataset, location: Literal["rho", "u", "v"]) -> xr.DataArray:
+    """Return the grid's wet/dry mask at ``location`` (``mask_rho``/``mask_u``/``mask_v``)."""
+    return grid_ds[f"mask_{location}"]
+
+
+def fill_nans_over_land(
+    field: xr.DataArray, mask: xr.DataArray, var_name: str, fill_value: float = 0.0
+) -> xr.DataArray:
+    """Replace NaN by ``fill_value`` over land, raising if any NaN sits at a wet point.
+
+    Unlike :func:`substitute_nans_by_fillvalue`, a NaN at an ocean point (``mask == 1``)
+    is an error rather than being silently turned into ``fill_value``.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The data to fill. Non-floating dtypes are returned unchanged.
+    mask : xr.DataArray
+        Wet (``1``) / dry (``0``) mask. Its dimensions must be a subset of those of
+        ``field``; it is broadcast against ``field`` by dimension name.
+    var_name : str
+        Name of the variable, used in the error message.
+    fill_value : float, optional
+        Value that replaces NaN over land. Default is 0.0.
+
+    Returns
+    -------
+    xr.DataArray
+        ``field`` with NaN replaced by ``fill_value``.
+
+    Raises
+    ------
+    ValueError
+        If ``field`` has NaN at any wet point. For numpy-backed data this is raised
+        immediately; for dask-backed data the check is part of the lazy graph, adds no
+        compute of its own, and is raised when the data are computed (e.g. at
+        ``.save()``), for the first offending chunk.
+        With dask data the error surfaces during ``save()``/``compute()``, so
+        ``save()`` can leave a partially written file.
+    """
+    if not np.issubdtype(field.dtype, np.floating):
+        return field
+
+    in_chunks = " in one chunk of the data" if field.chunks is not None else ""
+
+    def _fill(values, wet):
+        is_nan = np.isnan(values)
+        n_wet_nan = np.count_nonzero(is_nan & (wet == 1))
+        if n_wet_nan:
+            raise ValueError(
+                f"{var_name} has {n_wet_nan} NaN value(s){in_chunks} at ocean points "
+                "(mask == 1), so no value reached them. Likely causes: a source "
+                "variable has NaN where the source's own mask says ocean, or a wet "
+                "target point has no wet source data nearby (e.g. no `prefill` and no "
+                "extrapolation), in which case try a `prefill` method. With "
+                f"`bypass_validation=True` they are written as {fill_value}."
+            )
+        return np.where(is_nan, values.dtype.type(fill_value), values)
+
+    # Hand the mask over as bare data + dims so only dimension names (never
+    # coordinate labels) are used to line it up with the field.
+    bare_mask = xr.DataArray(mask.data, dims=mask.dims)
+    # Like ``fillna``: attrs and coords are kept, encoding is not.
+    return xr.apply_ufunc(
+        _fill,
+        field,
+        bare_mask,
+        dask="parallelized",
+        output_dtypes=[field.dtype],
+        keep_attrs=True,
+    ).rename(field.name)
+
+
 def materialize_before_check(ds, var_names, materialize: bool) -> None:
     """Realize each of ``var_names`` in ``ds`` via one combined ``dask.compute()`` call
     and write the results back into ``ds`` in place, *before* any NaN-check view is

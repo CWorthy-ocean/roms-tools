@@ -467,6 +467,58 @@ def test_tides_source_coverage_error(
         )
 
 
+def _tides_with_a_hole_in_the_second_constituent(tmp_path, use_dask, **kwargs):
+    """Tidal forcing from a TPXO source with a block of NaN in the ocean.
+
+    The block is in the elevation of the second constituent (m2 is the first). The
+    construction-time check only looks at the first constituent, so it does not see it.
+    """
+    files = _regional_tpxo10v2_files()
+    h = xr.open_dataset(files["h"]).load()
+    h["hRe"][1, 100:120, 80:100] = np.nan  # around the centre of the test grid
+    h.to_netcdf(tmp_path / "h.nc")
+    h.close()
+    return TidalForcing(
+        grid=_tides_grid(),
+        source={"name": "TPXO", "path": {**files, "h": tmp_path / "h.nc"}},
+        ntides=2,
+        use_dask=use_dask,
+        **kwargs,
+    )
+
+
+def test_nan_at_a_wet_point_in_tides_raises_instead_of_becoming_zero(
+    tmp_path, use_dask
+):
+    """A tidal field the source leaves NaN at ocean points is an error, not a 0.
+
+    Tidal forcing used to write such a NaN as 0 without a message. Without dask the
+    error is raised while the object is built; with dask, when the variable is computed.
+    """
+    match = r"ssh_Re has \d+ NaN value.* at ocean points"
+    if use_dask:
+        tidal_forcing = _tides_with_a_hole_in_the_second_constituent(tmp_path, use_dask)
+        with pytest.raises(ValueError, match=match):
+            tidal_forcing.ds["ssh_Re"].compute()
+    else:
+        with pytest.raises(ValueError, match=match):
+            _tides_with_a_hole_in_the_second_constituent(tmp_path, use_dask)
+
+
+def test_tides_bypass_validation_still_fills_a_wet_point_nan_with_zero(
+    tmp_path, use_dask
+):
+    """``bypass_validation=True`` keeps the plain fill, so the hole is written as 0."""
+    tidal_forcing = _tides_with_a_hole_in_the_second_constituent(
+        tmp_path, use_dask, bypass_validation=True
+    )
+
+    ssh_Re = tidal_forcing.ds["ssh_Re"].compute()
+    assert not ssh_Re.isnull().any()
+    assert (ssh_Re.isel(ntides=1) == 0).any()
+    assert (ssh_Re.isel(ntides=0) != 0).all()
+
+
 def test_tides_regrid_options_roundtrip_yaml(tmp_path, use_dask):
     """The prefill/regrid options survive the to_yaml/from_yaml round-trip."""
     tidal_forcing = TidalForcing(

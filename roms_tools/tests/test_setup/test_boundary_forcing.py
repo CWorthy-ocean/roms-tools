@@ -17,7 +17,10 @@ from conftest import calculate_data_hash
 from roms_tools import BGCMarbl, BoundaryForcing, BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import _xesmf_available
-from roms_tools.tests.test_setup.utils import download_regional_and_bigger
+from roms_tools.tests.test_setup.utils import (
+    download_regional_and_bigger,
+    write_synthetic_glodap,
+)
 
 try:
     import copernicusmarine  # type: ignore
@@ -1599,6 +1602,156 @@ def test_static_bgc_source_without_the_flag_still_brackets():
         bypass_validation=True,
     )
     assert bf.ds.sizes["bry_time"] == 2
+
+
+@pytest.mark.parametrize("direction", ["east", "west"])
+@pytest.mark.parametrize("name", ["temp", "u", "v"])
+def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
+    use_dask, name, direction
+):
+    """Each boundary variable is checked against its own mask, cut at its own boundary.
+
+    Rho cells are made dry, which dries the u and v points that touch them. At a point
+    of the east (west) boundary that is dry for the variable, a NaN is plain land and
+    becomes 0; for u and v there is such a point where the rho mask says wet. At a wet
+    point a NaN raises, naming the variable.
+    """
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    boundaries = {"south": False, "east": True, "north": False, "west": True}
+    bf = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={
+            "name": "GLORYS",
+            "path": [
+                Path(download_test_data("GLORYS_NA_20120101.nc")),
+                Path(download_test_data("GLORYS_NA_20121231.nc")),
+            ],
+        },
+        boundaries=boundaries,
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    rho = np.ones(grid.ds["mask_rho"].shape, dtype=int)
+    rho[2, 1] = rho[2, -2] = rho[3, -1] = rho[3, 0] = 0
+    grid.ds["mask_rho"].values[...] = rho
+    grid.ds["mask_u"].values[...] = rho[:, :-1] * rho[:, 1:]
+    grid.ds["mask_v"].values[...] = rho[:-1] * rho[1:]
+
+    # The mask along the boundary, written out here rather than taken from the code.
+    end = -1 if direction == "east" else 0
+    mask = {
+        "temp": rho[:, end],
+        "u": grid.ds["mask_u"].values[:, end],
+        "v": grid.ds["mask_v"].values[:, end],
+    }[name]
+    wet = int(np.argwhere(mask == 1)[0, 0])
+    dry = int(np.argwhere(mask == 0)[0, 0])
+    if name != "temp":
+        assert rho[dry, end] == 1  # dry for u (v), though wet for rho
+
+    var_name = f"{name}_{direction}"
+    boundary_dim = bf.ds[var_name].dims[-1]
+
+    def with_nan_at(index):
+        ds = bf.ds.copy()
+        hole = xr.DataArray(np.arange(mask.size) == index, dims=boundary_dim)
+        ds[var_name] = ds[var_name].where(~hole)
+        return ds
+
+    with pytest.raises(ValueError, match=rf"{var_name} has \d+ NaN value"):
+        bf._fill_nans_over_land(with_nan_at(wet))[var_name].compute()
+
+    filled = bf._fill_nans_over_land(with_nan_at(dry)).compute()
+    assert not filled[var_name].isnull().any()
+    assert (filled[var_name].isel({boundary_dim: dry}) == 0).all()
+
+
+def _glodap_boundary_missing_a_wet_column(tmp_path, use_dask, **kwargs):
+    """South boundary from a GLODAP source whose silicate and TCO2 miss a column.
+
+    Silicate lacks the source column at 53N/0E and TCO2 the one at 53N/1E, near the
+    south boundary, though NO3, which the shared source mask is taken from, has both.
+    That mask calls them ocean for every variable, so the NaN stays inside it and the
+    masked-bilinear regrid carries it onto the boundary.
+    """
+
+    def field_fn(name, values):
+        gap = {"silicate": (18, 30), "TCO2": (18, 31)}.get(name)  # lat 53, lon 0 / 1
+        if gap is not None:
+            values[:, gap[0], gap[1]] = np.nan
+        return values
+
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap", field_fn=field_fn)
+    grid = Grid(
+        nx=20,
+        ny=20,
+        size_x=400,
+        size_y=400,
+        center_lon=0,
+        center_lat=55,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    return BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 30),
+        end_time=datetime(2012, 2, 1),
+        boundaries={"south": True, "east": False, "north": False, "west": False},
+        source={"name": "GLODAP", "path": str(glodap_dir)},
+        type="bgc",
+        use_vars=["ALK", "DIC", "SiO3"],
+        use_dask=use_dask,
+        **kwargs,
+    )
+
+
+@requires_xesmf
+def test_nan_at_a_wet_boundary_point_raises_instead_of_becoming_zero(
+    tmp_path, use_dask
+):
+    """A boundary variable the source leaves NaN at ocean points is an error, not a 0.
+
+    The boundary forcing used to write such a NaN as 0 (silicate and DIC of 0 on the
+    boundary) without a message. Without dask the error is raised while the object is
+    built; with dask, when the variable is computed.
+    """
+    match = r"(SiO3|DIC)_south has \d+ NaN value.* at ocean points"
+    if use_dask:
+        bf = _glodap_boundary_missing_a_wet_column(tmp_path, use_dask)
+        with pytest.raises(ValueError, match=match):
+            bf.ds["SiO3_south"].compute()
+    else:
+        with pytest.raises(ValueError, match=match):
+            _glodap_boundary_missing_a_wet_column(tmp_path, use_dask)
+
+
+@requires_xesmf
+def test_bypass_validation_still_fills_a_wet_boundary_nan_with_zero(tmp_path, use_dask):
+    """``bypass_validation=True`` keeps the plain fill, so the hole is written as 0."""
+    bf = _glodap_boundary_missing_a_wet_column(
+        tmp_path, use_dask, bypass_validation=True
+    )
+
+    # The source is uniform (about 10 SiO3), so a 0 on the boundary is the leaked NaN.
+    assert float(bf.ds["SiO3_south"].min()) == 0.0
+    assert not bf.ds["SiO3_south"].isnull().any()
 
 
 def test_use_vars_on_physics_type_raises():

@@ -52,6 +52,7 @@ from roms_tools.setup.utils import (
     companions_derive_from_physics_ts,
     compute_barotropic_velocity,
     deserialize_forcing_data,
+    fill_nans_over_land,
     forwardable_fields,
     from_yaml,
     get_roms_tools_version_info,
@@ -64,6 +65,7 @@ from roms_tools.setup.utils import (
     preflight_esper_sources,
     substitute_nans_by_fillvalue,
     to_dict,
+    wet_mask,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -457,10 +459,31 @@ class InitialConditionsSource:
             self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+        ds = self._fill_nans_over_land(ds)
 
         self.ds = ds
+
+    @property
+    def _variable_info(self):
+        """Metadata of the variables this object produces (physics or bgc)."""
+        if self.type == "bgc":
+            return {**self.variable_info_physics, **self.variable_info_bgc}
+        return self.variable_info_physics
+
+    def _fill_nans_over_land(self, ds):
+        """Fill NaN over land with 0, raising on NaN at a wet point.
+
+        The check is skipped (plain fill) under ``bypass_validation``.
+        """
+        variable_info = self._variable_info
+        for var_name in ds.data_vars:
+            if self.bypass_validation or var_name not in variable_info:
+                # No grid-point location (e.g. Cs_r, Cs_w), so no mask to check against.
+                ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+            else:
+                mask = wet_mask(self.grid.ds, variable_info[var_name]["location"])
+                ds[var_name] = fill_nans_over_land(ds[var_name], mask, var_name)
+        return ds
 
     def _resolve_prefill_options(self) -> None:
         """Build the validated :class:`RegridConfig` from the public options.
@@ -1364,10 +1387,7 @@ class InitialConditionsSource:
         ESPER -- every variable is materialised first and cached, so the check does
         not force a second compute; see :func:`~roms_tools.setup.utils.materialize_before_check`.
         """
-        if self.type == "bgc":
-            variable_info = {**self.variable_info_physics, **self.variable_info_bgc}
-        else:
-            variable_info = self.variable_info_physics
+        variable_info = self._variable_info
 
         # Materialize every variable sharing this source's expensive computation (not
         # just the ones actually NaN-checked below -- bgc_variable_info() flags only
@@ -1385,12 +1405,7 @@ class InitialConditionsSource:
         checks = []
         for var_name in variable_info:
             if variable_info[var_name]["validate"]:
-                if variable_info[var_name]["location"] == "rho":
-                    mask = self.grid.ds.mask_rho
-                elif variable_info[var_name]["location"] == "u":
-                    mask = self.grid.ds.mask_u
-                elif variable_info[var_name]["location"] == "v":
-                    mask = self.grid.ds.mask_v
+                mask = wet_mask(self.grid.ds, variable_info[var_name]["location"])
                 checks.append((ds[var_name].squeeze(), mask, None))
 
         nan_check_batch(checks)

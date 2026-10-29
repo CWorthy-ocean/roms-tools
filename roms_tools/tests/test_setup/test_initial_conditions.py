@@ -18,7 +18,10 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.setup.initial_conditions import _set_required_vars
 from roms_tools.setup.utils import latlon_to_xyz
-from roms_tools.tests.test_setup.utils import download_regional_and_bigger
+from roms_tools.tests.test_setup.utils import (
+    download_regional_and_bigger,
+    write_synthetic_glodap,
+)
 
 try:
     import copernicusmarine  # type: ignore
@@ -445,11 +448,16 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
     restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     ds = xr.open_dataset(restart_file)
 
+    # bypass_validation: with the child's edge on the parent's edge, u/v have no
+    # parent velocity on the outermost ring (averaging u/v to rho-points needs a
+    # neighbour beyond the parent edge), which the wet-point NaN check would reject.
+    # Real nests keep the child inside the parent; u/v are not compared below.
     ic = InitialConditions(
         grid=grid,
         ini_time=datetime(1998, 1, 6),
         source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
         use_dask=use_dask,
+        bypass_validation=True,
     )
 
     mask = grid.ds.mask_rho
@@ -1462,52 +1470,6 @@ def test_ic_roms_source_ignores_regrid_options(use_dask, caplog):
 # ---------------------------------------------------------------------------
 
 
-def _write_synthetic_glodap(directory, include_ts: bool = True):
-    """A minimal GLODAP-shaped source: one file per variable, lat/lon/depth, NO time.
-
-    GLODAP's real layout is exactly this -- ``{dir}/GLODAPv2.2016b.{file_var}.nc``, each
-    holding one variable on a 1 degree grid with no time dimension -- so a synthetic one
-    exercises the static-source path without needing the multi-GB download.
-
-    ``include_ts`` writes temperature/salinity files alongside the six BGC tracers
-    (uniform T=2 degC, S=35 PSU), exercising the real in-situ-density unit
-    conversion; set it False to exercise the T/S-missing 1025 kg/m3 fallback path.
-    """
-    import numpy as np
-    import xarray as xr
-
-    directory.mkdir(parents=True, exist_ok=True)
-    # Comfortably covers the test grid (centred at 0E/55N) plus the regrid margin.
-    lat = np.arange(35.0, 76.0, 1.0)
-    lon = np.arange(-30.0, 31.0, 1.0)
-    depth = np.array([0.0, 50.0, 200.0, 1000.0])
-    variables = [
-        ("TAlk", 2300.0),
-        ("TCO2", 2100.0),
-        ("PO4", 1.0),
-        ("NO3", 15.0),
-        ("silicate", 10.0),
-        ("oxygen", 280.0),
-    ]
-    if include_ts:
-        variables += [("temperature", 2.0), ("salinity", 35.0)]
-    for file_var, value in variables:
-        # Mirrors the real files: `Depth` is a 1-D *data variable* on an unlabelled
-        # `depth_surface` dimension, which `GLODAPv2Dataset.clean_up` promotes to a
-        # dimension coordinate. Writing it as a plain coord would not exercise that.
-        xr.Dataset(
-            {
-                file_var: (
-                    ("depth_surface", "lat", "lon"),
-                    np.full((depth.size, lat.size, lon.size), value, dtype="f4"),
-                ),
-                "Depth": (("depth_surface",), depth),
-            },
-            coords={"lat": lat, "lon": lon},
-        ).to_netcdf(directory / f"GLODAPv2.2016b.{file_var}.nc")
-    return directory
-
-
 def test_static_bgc_source_takes_the_physics_time(tmp_path):
     """A BGC source with no time axis must be broadcast onto the physics time.
 
@@ -1525,7 +1487,7 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
     from roms_tools import BGCMarbl, Grid, InitialConditions
     from roms_tools.datasets.download import download_test_data
 
-    glodap_dir = _write_synthetic_glodap(tmp_path / "glodap")
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap")
     grid = Grid(
         nx=2,
         ny=2,
@@ -1590,6 +1552,150 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
     assert got_alk == pytest.approx(expected_alk, rel=1e-3)
 
 
+@pytest.mark.parametrize("name", ["u", "v"])
+def test_fill_nans_over_land_uses_the_mask_at_the_location_of_the_variable(
+    use_dask, name
+):
+    """U and v are checked against their own masks, not the rho mask.
+
+    A rho cell is made dry, which dries the u and v points that touch it. At a u (v)
+    point that is dry while the rho mask at the same index says wet, a NaN is plain
+    land: it becomes 0. At a wet point it raises, naming the variable.
+    """
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    mask_rho = np.ones(grid.ds["mask_rho"].shape, dtype=int)
+    mask_rho[1, 1] = 0
+    grid.ds["mask_rho"].values[...] = mask_rho
+    grid.ds["mask_u"].values[...] = mask_rho[:, :-1] * mask_rho[:, 1:]
+    grid.ds["mask_v"].values[...] = mask_rho[:-1] * mask_rho[1:]
+    mask = grid.ds[f"mask_{name}"].values
+    wet = np.argwhere(mask == 1)[0]
+    dry = np.argwhere(mask == 0)[0]
+    assert mask_rho[tuple(dry)] == 1  # dry for u (v), though wet for rho
+
+    def with_nan_at(index):
+        hole = np.zeros(mask.shape, dtype=bool)
+        hole[tuple(index)] = True
+        ds = ic.physics.ds.copy()
+        ds[name] = ds[name].where(
+            ~xr.DataArray(hole, dims=grid.ds[f"mask_{name}"].dims)
+        )
+        return ds
+
+    with pytest.raises(ValueError, match=rf"{name} has \d+ NaN value"):
+        ic.physics._fill_nans_over_land(with_nan_at(wet))[name].compute()
+
+    filled = ic.physics._fill_nans_over_land(with_nan_at(dry)).compute()
+    assert not filled[name].isnull().any()
+    assert (filled[name].isel(s_rho=0, ocean_time=0).values[tuple(dry)]) == 0
+
+
+def _ic_with_glodap_missing_a_wet_column(tmp_path, use_dask, **kwargs):
+    """Initial conditions from a GLODAP source whose silicate and TCO2 miss a column.
+
+    GLODAP variables do not all have data in the same columns. Silicate lacks the
+    column at 55N/0E and TCO2 the one at 55N/1E, though NO3, which the shared source
+    mask is taken from, has both. That mask calls them ocean for every variable, so the
+    NaN stays inside it and reaches the target points around them (through the lateral
+    fill when ``prefill`` is set, through the masked-bilinear regrid otherwise).
+    """
+
+    def field_fn(name, values):
+        gap = {"silicate": (20, 30), "TCO2": (20, 31)}.get(name)  # lat 55, lon 0 / 1
+        if gap is not None:
+            values[:, gap[0], gap[1]] = np.nan
+        return values
+
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap", field_fn=field_fn)
+    grid = Grid(
+        nx=8,
+        ny=8,
+        size_x=400,
+        size_y=400,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {
+                "source": {"name": "GLODAP", "path": str(glodap_dir)},
+                "use_vars": ["ALK", "DIC", "SiO3"],
+            }
+        ],
+        bgc_model=BGCMarbl,
+        use_dask=use_dask,
+        **kwargs,
+    )
+    return grid, ic
+
+
+@skip_xesmf
+def test_nan_at_a_wet_point_in_a_bgc_source_raises_instead_of_becoming_zero(
+    tmp_path, use_dask
+):
+    """A variable the source leaves NaN at ocean points is an error, not a 0.
+
+    Initial conditions used to write such a NaN as 0 (silicate and DIC of 0 at ocean
+    points in the output) without a message. Without dask the error is raised while the
+    object is built; with dask, when the variable is computed.
+    """
+    match = r"(SiO3|DIC) has \d+ NaN value.* at ocean points"
+    if use_dask:
+        _, ic = _ic_with_glodap_missing_a_wet_column(tmp_path, use_dask)
+        with pytest.raises(ValueError, match=match):
+            ic.ds["SiO3"].compute()
+    else:
+        with pytest.raises(ValueError, match=match):
+            _ic_with_glodap_missing_a_wet_column(tmp_path, use_dask)
+
+
+@skip_xesmf
+def test_bypass_validation_still_fills_a_wet_point_nan_with_zero(tmp_path, use_dask):
+    """``bypass_validation=True`` keeps the plain fill, so the hole is written as 0."""
+    grid, ic = _ic_with_glodap_missing_a_wet_column(
+        tmp_path, use_dask, bypass_validation=True
+    )
+
+    # The source is uniform (about 10 SiO3), so a 0 at a wet point is the leaked NaN.
+    wet = grid.ds["mask_rho"] == 1
+    assert (ic.ds["SiO3"].where(wet, np.inf) == 0).any()
+    assert not ic.ds["SiO3"].isnull().any()
+
+
 def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, caplog):
     """When T/S are absent, GLODAP falls back to a uniform 1025 kg/m3 density.
 
@@ -1600,7 +1706,7 @@ def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, c
 
     from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
 
-    glodap_dir = _write_synthetic_glodap(tmp_path / "glodap_no_ts", include_ts=False)
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap_no_ts", include_ts=False)
 
     with caplog.at_level(logging.WARNING):
         ds = GLODAPv2BGCDataset(filename=str(glodap_dir)).ds

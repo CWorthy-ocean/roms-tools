@@ -849,6 +849,28 @@ def _store(out, ds, var, data, dims, mode, checks, name, params):
 # --------------------------------------------------------------------------- public API
 
 
+def _dispatch(
+    source: Any, grid: Any, physics: Any, kw: dict[str, Any]
+) -> xr.Dataset | list[xr.Dataset]:
+    """One result per BGC source for a ``BoundaryForcing`` (its BGC data lives in
+    ``bf.bgc[i].ds``, its salt/temp in ``bf.physics.ds``); one Dataset otherwise,
+    including an ``InitialConditions``, whose merged ``.ds`` carries salt and temp.
+    """
+    from roms_tools.setup.boundary_forcing import BoundaryForcing
+
+    if isinstance(source, BoundaryForcing):
+        return [
+            _process(
+                b.ds,
+                source.grid if grid is None else grid,
+                source.physics.ds if physics is None else physics,
+                **kw,
+            )
+            for b in source.bgc
+        ]
+    return _process(source, grid, physics, **kw)
+
+
 def bgc_check(
     source: Any,
     grid: Grid | xr.Dataset | str | Path | None = None,
@@ -878,17 +900,7 @@ def bgc_check(
         tile=tile,
         time_chunk=time_chunk,
     )
-    if hasattr(source, "bgc") and hasattr(source, "physics"):  # BoundaryForcing wrapper
-        return [
-            _process(
-                b.ds,
-                source.grid if grid is None else grid,
-                source.physics.ds if physics is None else physics,
-                **kw,
-            )
-            for b in source.bgc
-        ]
-    return _process(source, grid, physics, **kw)
+    return _dispatch(source, grid, physics, kw)
 
 
 def bgc_groom(
@@ -912,7 +924,15 @@ def bgc_groom(
     define the result and are recorded in the attrs; ``tile`` and ``time_chunk`` only set
     task size and do not change it. Run :func:`bgc_check` on the result for what remains.
     For a ``BoundaryForcing`` object, returns one Dataset per BGC source (assign to
-    ``bf.bgc[i].ds`` to save); for initial conditions assign to ``ic.ds``.
+    ``bf.bgc[i].ds`` to save); for an ``InitialConditions`` object, one Dataset (assign
+    to ``ic.ds``).
+
+    ESPER sources are groomed automatically when the object is built (see the ESPER
+    source's ``groom`` key), before ``DIC_ALT_CO2``/``ALK_ALT_CO2`` are copied from DIC
+    and ALK. Grooming a finished object by hand does not touch those copies.
+
+    Peak memory grows with the domain, not only the tile: roughly 0.6 times the float64
+    stack of the groomed tracers per extra domain size on 10 threads.
     """
     for k, v in (
         ("passes", passes),
@@ -932,17 +952,7 @@ def bgc_groom(
         tile=tile,
         time_chunk=time_chunk,
     )
-    if hasattr(source, "bgc") and hasattr(source, "physics"):  # BoundaryForcing wrapper
-        return [
-            _process(
-                b.ds,
-                source.grid if grid is None else grid,
-                source.physics.ds if physics is None else physics,
-                **kw,
-            )
-            for b in source.bgc
-        ]
-    return _process(source, grid, physics, **kw)
+    return _dispatch(source, grid, physics, kw)
 
 
 def summarize_flags(flags: xr.Dataset) -> dict[str, dict[str, int]]:

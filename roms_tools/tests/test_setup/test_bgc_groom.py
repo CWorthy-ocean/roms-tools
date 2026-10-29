@@ -230,6 +230,21 @@ def test_region_wider_than_reach_stays_flagged_and_reported(grid, clean):
     assert counts["NO3"]["floor_jump"] > 0
 
 
+def test_supersaturated_o2_is_clipped_to_the_ceiling(grid, clean):
+    """Supersaturated water with no good donors anywhere cannot be filled; it is clipped
+    to 1.25 x saturation, so a check of the result comes back clean.
+    """
+    wet = clean["salt"] > 0
+    clean["O2"] = np.where(wet, 500.0, 0.0)
+    out = bgc_groom(_ic(clean), grid, variables=["O2"]).compute()
+    counts = summarize_flags(bgc_check(out, grid, variables=["O2"]))
+    assert counts["O2"]["total"] == 0, counts
+    o2 = out["O2"].values[wet]
+    # 1.25 x TEOS-10 saturation at S = 34.5, T = 10 C is about 350 mmol/m3.
+    np.testing.assert_allclose(o2, o2.mean(), rtol=1e-6)
+    assert 300.0 < o2.mean() < 400.0
+
+
 def _boundary(fields, side="west"):
     sl = {"west": {"xi_rho": 0}, "south": {"eta_rho": 0}}[side]
     along = "eta_rho" if side == "west" else "xi_rho"

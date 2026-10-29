@@ -21,6 +21,8 @@ Each tracer gets a :class:`BgcCheck`:
   region, which agrees with itself: bounds and ``physical_reality`` must catch that;
 - ``physical_reality``: an optional check returning where the value is plausible, e.g.
   ALK against the salinity mixing line, DIC against ALK.
+- ``ceiling``: an optional upper limit that grooming clips every wet cell to after
+  filling, e.g. O2 at 1.25 times saturation, which filling alone cannot always reach.
 
 Horizontal neighbours only count when their layer depths differ by less than ``dz_max``:
 over steep topography one s-level spans very different depths, and the vertical profile
@@ -54,6 +56,7 @@ import dask.array as dsa
 import numpy as np
 import xarray as xr
 
+from roms_tools.setup.esper import O2_FLOOR
 from roms_tools.setup.utils import get_boundary_coords
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
@@ -98,6 +101,10 @@ FLOOR_TOL = 1.0e-6
 #: Projected cells land this fraction of max_jump inside their envelope, so writing as
 #: float32 (rounding ~1e-4 mmol/m3 at these values) cannot push them back outside it.
 PROJECT_MARGIN = 1.0e-3
+
+#: Clipped cells land this fraction below their ceiling, so writing as float32 (relative
+#: rounding ~6e-8) cannot push them back above it.
+CEILING_MARGIN = 1.0e-6
 
 #: Default fill parameters. They define the result, so a run is reproducible from them.
 PASSES = 8
@@ -150,14 +157,17 @@ def dic_reality(block: Block) -> np.ndarray:
     return (alk > 0) & (r >= DIC_ALK_RATIO[0]) & (r <= DIC_ALK_RATIO[1])
 
 
-def o2_reality(block: Block) -> np.ndarray:
-    """O2 at most ``O2_SAT_MAX`` times saturation (TEOS-10 solubility)."""
+def o2_ceiling(block: Block) -> np.ndarray:
+    """``O2_SAT_MAX`` times O2 saturation (TEOS-10 solubility), in mmol/m3."""
     import gsw
 
     with np.errstate(invalid="ignore"):
-        sat = gsw.O2sol_SP_pt(block.salt, block.temp) * RHO0 / 1000.0
-    o2 = block.values["O2"]
-    return ~(o2 > O2_SAT_MAX * sat)  # NaN saturation (no physics) does not flag
+        return O2_SAT_MAX * gsw.O2sol_SP_pt(block.salt, block.temp) * RHO0 / 1000.0
+
+
+def o2_reality(block: Block) -> np.ndarray:
+    """O2 at most ``O2_SAT_MAX`` times saturation."""
+    return ~(block.values["O2"] > o2_ceiling(block))  # NaN (no physics) does not flag
 
 
 @dataclass(frozen=True)
@@ -170,6 +180,7 @@ class BgcCheck:
     max_jump: float | None = None
     normalize_by_salinity: bool = False
     physical_reality: Callable[[Block], np.ndarray] | None = None
+    ceiling: Callable[[Block], np.ndarray] | None = None
     requires: tuple[str, ...] = ()
 
     def describe(self) -> dict[str, Any]:
@@ -181,6 +192,7 @@ class BgcCheck:
             "max_jump": self.max_jump,
             "normalize_by_salinity": self.normalize_by_salinity,
             "physical_reality": getattr(self.physical_reality, "__name__", None),
+            "ceiling": getattr(self.ceiling, "__name__", None),
             "requires": list(self.requires),
         }
 
@@ -200,7 +212,11 @@ DEFAULT_CHECKS: dict[str, BgcCheck] = {
         requires=("ALK",),
     ),
     "O2": BgcCheck(
-        bounds=(0.0, 600.0), floor=5.0, floor_jump=20.0, physical_reality=o2_reality
+        bounds=(0.0, 600.0),
+        floor=O2_FLOOR,
+        floor_jump=20.0,
+        physical_reality=o2_reality,
+        ceiling=o2_ceiling,
     ),
     "NO3": BgcCheck(bounds=(0.0, 50.0), floor_jump=5.0),
     "PO4": BgcCheck(bounds=(0.0, 4.0), floor_jump=0.5),
@@ -529,6 +545,12 @@ def _kernel(
             )
             if (jmp := checks[n].max_jump) is not None:
                 values[n] = _project_into_envelope(values[n], holes, wet, elig, jmp)
+        if (ceiling := checks[n].ceiling) is not None:
+            # Cap every wet cell, not only holes: a value above the ceiling is not
+            # plausible anywhere. fmin keeps cells whose ceiling is NaN (no physics).
+            cap = ceiling(Block(values, salt, temp, wet)) * (1.0 - CEILING_MARGIN)
+            capped = np.fmin(values[n], cap)
+            values[n] = np.where(wet, capped, values[n])
         out[names.index(n)] = values[n]
     return out
 

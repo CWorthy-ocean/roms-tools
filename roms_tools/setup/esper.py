@@ -136,14 +136,17 @@ ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 #: (2010/2014), so the floor is at or above observations there; match it to
 #: ``parm_o2_min`` if a run changes that setting. ALK and DIC never approach zero and
 #: keep the generic floor. Any point that ESPER put below 5.0 now reads 5.0 -- an
-#: output change relative to the earlier floors (0, then 2.0).
+#: output change relative to the earlier floors (0, then 2.0). ``bgc_groom``'s O2 check
+#: uses the same ``O2_FLOOR``.
+O2_FLOOR = 5.0
+
 ESPER_FLOORS: dict[str, float] = {
     "ALK": 0.0,
     "DIC": 0.0,
     "NO3": 0.0,
     "PO4": 0.0,
     "SiO3": 0.0,
-    "O2": 5.0,
+    "O2": O2_FLOOR,
 }
 
 _VALID_METHODS = ("lir", "nn", "mixed")

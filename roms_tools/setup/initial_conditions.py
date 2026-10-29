@@ -878,11 +878,6 @@ class InitialConditionsSource:
                 )
                 vertical_regrid = VerticalRegrid(ds_tmp, source_dim="s_rho")
 
-                source_columns = {
-                    var_name: processed_fields[var_name]
-                    for var_name in filtered_vars
-                    if var_name in processed_fields
-                }
                 for var_name in filtered_vars:
                     if var_name in processed_fields:
                         processed_fields[var_name] = vertical_regrid.apply(
@@ -898,17 +893,26 @@ class InitialConditionsSource:
 
                 if location == "rho":
                     # Regridding clamps below the source's deepest layer: replace the
-                    # clamped values where the child is deeper than the parent.
+                    # clamped values where the child is deeper than the parent, from
+                    # the native parent columns.
+                    tracers = [v for v in filtered_vars if v in processed_fields]
                     processed_fields.update(
                         fill_below_source_bottom(
-                            {v: processed_fields[v] for v in source_columns},
-                            source_columns,
+                            regridded={v: processed_fields[v] for v in tracers},
                             target_depth=self.ds_depth_coords["layer_depth_rho"],
-                            source_depth=processed_fields["layer_depth_rho"],
                             source_bottom=processed_fields["bottom_depth_rho"],
                             lon=self.grid.ds["lon_rho"],
                             lat=self.grid.ds["lat_rho"],
                             mask=self.grid.ds["mask_rho"],
+                            parent_fields={
+                                v: data.ds[var_names[v]["name"]] for v in tracers
+                            },
+                            parent_depth=data.ds_depth_coords["layer_depth_rho"],
+                            parent_h=data.grid.ds["h"],
+                            parent_mask=data.grid.ds["mask_rho"],
+                            parent_lon=data.grid.ds["lon_rho"],
+                            parent_lat=data.grid.ds["lat_rho"],
+                            blend_m=self.bottom_fill_blend_m,
                         )
                     )
             else:

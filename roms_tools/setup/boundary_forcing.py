@@ -31,6 +31,7 @@ from roms_tools.regrid import (
     build_lateral_regridder,
     select_source_mask,
 )
+from roms_tools.setup.bgc_groom import resolve_groom_settings
 from roms_tools.setup.bgc_model import (
     BGCModel,
     bgc_model_from_name,
@@ -1924,6 +1925,17 @@ class BoundaryForcing:
     """Method-specific options for ``extrap_method``."""
     apply_2d_horizontal_fill: bool | None = None
     """Deprecated alias for ``prefill``; see :class:`BoundaryForcingSource`."""
+    groom: bool = True
+    """Groom the tracers supplied by ESPER BGC sources: implausible values (spikes, zeros
+    beside ordinary water, DIC inconsistent with ALK, supersaturated oxygen) are detected
+    and refilled from the surrounding water (:func:`roms_tools.bgc_groom`), before the
+    MARBL tracer set is completed. Recorded in the YAML, so regenerating reproduces the
+    file. Other BGC sources are never groomed."""
+    groom_settings: dict | None = None
+    """Optional overrides of the grooming thresholds and fill parameters; see
+    :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`. ``None`` uses this
+    roms-tools version's built-ins, which the groomed variables record in their
+    ``bgc_groom`` attribute."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the model."""
     use_dask: bool = False
@@ -1963,15 +1975,11 @@ class BoundaryForcing:
         # Validate `bgc_model` BEFORE building the physics source: a wrong value
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
-        from roms_tools.setup.esper import (
-            groom_esper_companion,
-            with_esper_groom_default,
-        )
-
-        bgc_sources = with_esper_groom_default(self.bgc_sources or [])
-        if self.bgc_sources is not None:
-            # Store the effective ESPER `groom` setting so the YAML records it.
-            self.bgc_sources = bgc_sources
+        bgc_sources = self.bgc_sources or []
+        if not isinstance(self.groom, bool):
+            raise TypeError(f"`groom` must be True or False, got {self.groom!r}.")
+        # Fail on bad settings before any regrid.
+        resolve_groom_settings(self.groom_settings)
         if bgc_sources:
             if self.bgc_model is None:
                 raise ValueError(
@@ -2020,14 +2028,26 @@ class BoundaryForcing:
                 shared_kwargs,
                 type_="bgc",
             )
-            # Groom before process_bgc_fields, which copies DIC/ALK to *_ALT_CO2.
-            for b in self.bgc:
-                b.ds = groom_esper_companion(
-                    b, self.grid, self.physics.ds, load=not self.use_dask
-                )
+            self._groom_bgc()
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
+
+    def _groom_bgc(self) -> None:
+        """Groom the ESPER companions' tracers in place when ``groom`` is set. Runs
+        before ``process_bgc_fields``, which copies DIC/ALK to ``*_ALT_CO2``.
+        """
+        if not self.groom:
+            return
+        from roms_tools.setup.esper import groom_esper_companions
+
+        groom_esper_companions(
+            self.bgc,
+            self.grid,
+            self.physics.ds,
+            self.groom_settings,
+            load=not self.use_dask,
+        )
 
     def save(
         self,

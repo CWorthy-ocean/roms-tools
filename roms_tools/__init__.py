@@ -36,11 +36,7 @@ from roms_tools.setup.utils import (  # noqa: F401
     compute_in_situ_density,
     compute_potential_density,
 )
-from roms_tools.setup.bgc_groom import (  # noqa: F401
-    bgc_check,
-    bgc_groom,
-    summarize_flags,
-)
+from roms_tools.setup.bgc_groom import bgc_check, bgc_groom  # noqa: F401
 
 
 # Configure logging when the package is imported

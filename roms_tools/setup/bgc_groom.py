@@ -36,17 +36,20 @@ data is chunked or tiled: the tile overlap is set to that reach, and tiled, unti
 eager runs agree bit for bit. Memory per dask task is bounded by the tile size, not the
 domain; the number of concurrent tasks (dask workers) is the other memory control.
 
-Inputs may be :class:`~roms_tools.InitialConditions`, :class:`~roms_tools.BoundaryForcing`
-(each BGC source is groomed; salinity comes from its physics), a
-``BoundaryForcingSource``, an ``xr.Dataset``, or NetCDF path(s). Everything stays lazy until
-the result is written or computed; :func:`summarize_flags` is the explicit eager step.
+:func:`bgc_groom` takes an ``xr.Dataset`` or NetCDF path(s); :func:`bgc_check` also takes
+:class:`~roms_tools.InitialConditions`, :class:`~roms_tools.BoundaryForcing` (each BGC
+source is checked; salinity comes from its physics) or a ``BoundaryForcingSource``. The
+inputs roms-tools builds are groomed through the ``groom``/``groom_settings`` arguments of
+``InitialConditions``/``BoundaryForcing``, so their YAML regenerates the file. Everything
+stays lazy until the result is written or computed; :func:`summarize_flags` is the explicit
+eager step.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -912,6 +915,121 @@ def _store(out, ds, var, data, dims, mode, checks, name, params):
 
 # --------------------------------------------------------------------------- public API
 
+#: ``groom_settings`` keys that set fill parameters (passed to :func:`bgc_groom`).
+GROOM_PARAMETERS = ("passes", "relax_sweeps", "column_reach", "dz_max")
+
+#: Per-check fields a ``groom_settings["checks"]`` entry may override. ``physical_reality``
+#: and ``ceiling`` are functions and can only be switched off (``None``).
+_CHECK_OVERRIDES = (
+    "bounds",
+    "floor",
+    "floor_jump",
+    "max_jump",
+    "normalize_by_salinity",
+    "physical_reality",
+    "ceiling",
+)
+
+
+def _number(value: Any, label: str, *, positive: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"groom_settings: {label} must be a number, got {value!r}.")
+    if positive and value <= 0:
+        raise ValueError(f"groom_settings: {label} must be positive, got {value!r}.")
+    return float(value)
+
+
+def resolve_groom_settings(
+    settings: Mapping[str, Any] | None,
+) -> tuple[dict[str, BgcCheck], dict[str, Any]]:
+    """Validate a ``groom_settings`` dict; return the checks and fill parameters it gives.
+
+    ``settings`` may hold ``passes``, ``relax_sweeps``, ``column_reach`` (non-negative
+    ints), ``dz_max`` (a positive number) and ``checks``: ``{tracer: {field: value}}``,
+    partial overrides of :data:`DEFAULT_CHECKS` for ``bounds`` (``[low, high]`` or
+    ``None``), ``floor``, ``floor_jump``, ``max_jump`` (a number or ``None``),
+    ``normalize_by_salinity`` (bool), and ``physical_reality``/``ceiling`` (``None`` only,
+    to switch them off). ``None`` returns the defaults. Anything else raises.
+    """
+    checks = dict(DEFAULT_CHECKS)
+    if settings is None:
+        return checks, {}
+    if not isinstance(settings, Mapping):
+        raise TypeError(
+            f"groom_settings must be a dict or None, got {type(settings).__name__}."
+        )
+    unknown = set(settings) - {*GROOM_PARAMETERS, "checks"}
+    if unknown:
+        raise ValueError(
+            f"groom_settings: unknown key(s) {sorted(unknown)}; valid keys are "
+            f"{[*GROOM_PARAMETERS, 'checks']}."
+        )
+    params: dict[str, Any] = {}
+    for k in ("passes", "relax_sweeps", "column_reach"):
+        if k in settings:
+            v = settings[k]
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                raise ValueError(
+                    f"groom_settings: {k} must be a non-negative int, got {v!r}."
+                )
+            params[k] = v
+    if "dz_max" in settings:
+        params["dz_max"] = _number(settings["dz_max"], "dz_max", positive=True)
+
+    overrides = settings.get("checks") or {}
+    if not isinstance(overrides, Mapping):
+        raise TypeError("groom_settings: 'checks' must be a dict of {tracer: {...}}.")
+    for var, fields in overrides.items():
+        if var not in checks:
+            raise ValueError(
+                f"groom_settings: no check for {var!r}; known: {sorted(checks)}."
+            )
+        if not isinstance(fields, Mapping):
+            raise TypeError(f"groom_settings: checks[{var!r}] must be a dict.")
+        bad = set(fields) - set(_CHECK_OVERRIDES)
+        if bad:
+            raise ValueError(
+                f"groom_settings: checks[{var!r}] has unknown field(s) {sorted(bad)}; "
+                f"valid fields are {list(_CHECK_OVERRIDES)}."
+            )
+        upd: dict[str, Any] = {}
+        label = f"checks[{var!r}]"
+        for f, v in fields.items():
+            if f == "bounds":
+                if v is None:
+                    upd[f] = None
+                    continue
+                if not isinstance(v, Sequence) or isinstance(v, str) or len(v) != 2:
+                    raise ValueError(
+                        f"groom_settings: {label}.bounds must be [low, high] or None."
+                    )
+                lo, hi = (_number(x, f"{label}.bounds") for x in v)
+                if not lo < hi:
+                    raise ValueError(
+                        f"groom_settings: {label}.bounds needs low < high, got {v!r}."
+                    )
+                upd[f] = (lo, hi)
+            elif f == "floor":
+                upd[f] = _number(v, f"{label}.floor")
+            elif f in ("floor_jump", "max_jump"):
+                upd[f] = (
+                    None if v is None else _number(v, f"{label}.{f}", positive=True)
+                )
+            elif f == "normalize_by_salinity":
+                if not isinstance(v, bool):
+                    raise ValueError(f"groom_settings: {label}.{f} must be a bool.")
+                upd[f] = v
+            else:  # physical_reality, ceiling
+                if v is not None:
+                    raise ValueError(
+                        f"groom_settings: {label}.{f} can only be switched off (null)."
+                    )
+                upd[f] = None
+                if f == "physical_reality":
+                    upd["requires"] = ()  # requires only feeds physical_reality
+        checks[var] = replace(checks[var], **upd)
+    return checks, params
+
 
 def _dispatch(
     source: Any, grid: Any, physics: Any, kw: dict[str, Any]
@@ -981,23 +1099,34 @@ def bgc_groom(
     tile: int = TILE,
     time_chunk: int = BRY_TIME_CHUNK,
 ) -> xr.Dataset | list[xr.Dataset]:
-    """Return a lazily groomed copy of the BGC data; the input is never modified.
+    """Return a lazily groomed copy of BGC data in a Dataset or NetCDF file(s); the
+    input is never modified.
+
+    A tool for analysis and one-off repair of existing files. To groom the inputs roms-tools
+    builds, use the ``groom`` and ``groom_settings`` arguments of
+    :class:`~roms_tools.InitialConditions` and :class:`~roms_tools.BoundaryForcing`: they
+    are recorded in the YAML, so the file can be regenerated from it. Those objects are
+    therefore refused here (:func:`bgc_check` accepts them). Grooming a file directly does
+    not touch derived tracers such as ``DIC_ALT_CO2``/``ALK_ALT_CO2``.
 
     Flagged cells are replaced by a fill from the surrounding good water, ``passes`` times
     (each pass re-checks). ``passes``, ``relax_sweeps``, ``column_reach`` and ``dz_max``
     define the result and are recorded in the attrs; ``tile`` and ``time_chunk`` only set
     task size and do not change it. Run :func:`bgc_check` on the result for what remains.
-    For a ``BoundaryForcing`` object, returns one Dataset per BGC source (assign to
-    ``bf.bgc[i].ds`` to save); for an ``InitialConditions`` object, one Dataset (assign
-    to ``ic.ds``).
+    Boundary data needs ``physics`` (the matching physics boundary data, for salt/temp).
 
-    ESPER sources are groomed automatically when the object is built (see the ESPER
-    source's ``groom`` key), before ``DIC_ALT_CO2``/``ALK_ALT_CO2`` are copied from DIC
-    and ALK. Grooming a finished object by hand does not touch those copies.
-
-    Peak memory grows with the domain, not only the tile: roughly 0.6 times the float64
-    stack of the groomed tracers per extra domain size on 10 threads.
+    Peak memory grows with the domain, not only the tile.
     """
+    from roms_tools.setup.boundary_forcing import BoundaryForcing
+    from roms_tools.setup.initial_conditions import InitialConditions
+
+    if isinstance(source, InitialConditions | BoundaryForcing):
+        raise TypeError(
+            f"bgc_groom does not take a {type(source).__name__} object: a groomed file "
+            "its YAML cannot regenerate would result. Pass groom=True (and optionally "
+            f"groom_settings) to {type(source).__name__} instead, or groom a Dataset or "
+            "NetCDF file."
+        )
     for k, v in (
         ("passes", passes),
         ("relax_sweeps", relax_sweeps),

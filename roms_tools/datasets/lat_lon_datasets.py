@@ -1409,6 +1409,55 @@ class GLORYSDefaultDataset(GLORYSDataset):
         return ds
 
 
+def _umol_kg_to_mmol_m3_factor(
+    ds: xr.Dataset,
+    temp_var: str | None,
+    salt_var: str | None,
+    depth_dim: str,
+    lat_dim: str,
+    lon_dim: str,
+    source_label: str,
+) -> xr.DataArray | float:
+    """Return the factor that converts a BGC tracer from umol/kg to mmol/m3.
+
+    Shared by the WOA and GLODAP BGC datasets, which must convert units by the same
+    rule. The factor is the in-situ density (kg/m3) divided by 1000, computed lazily
+    from the temperature and salinity in ``ds``. Where T or S is NaN but the tracer is
+    not, the density is replaced by its mean over the horizontal dimensions at that
+    depth level, so the tracer is not lost. If T/S are absent from ``ds``, a uniform
+    density of 1025 kg/m3 is used and a warning is logged.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset holding the temperature and salinity variables.
+    temp_var, salt_var : str or None
+        Names of the temperature and salinity variables in ``ds``.
+    depth_dim, lat_dim, lon_dim : str
+        Names of the depth, latitude and longitude dimensions (and coordinates).
+    source_label : str
+        Name of the source dataset, used in the warning (e.g. ``"WOA"``).
+
+    Returns
+    -------
+    xarray.DataArray or float
+        The density divided by 1000, to multiply each tracer by.
+    """
+    if temp_var in ds.data_vars and salt_var in ds.data_vars:
+        density = compute_in_situ_density(
+            ds[temp_var], ds[salt_var], ds[depth_dim], ds[lat_dim]
+        )
+        density = density.fillna(density.mean(dim=(lat_dim, lon_dim)))
+    else:
+        logging.warning(
+            "%s temperature/salinity unavailable; using a uniform 1025 kg m-3 "
+            "for the umol/kg -> mmol/m3 conversion.",
+            source_label,
+        )
+        density = 1025.0
+    return density / 1000.0
+
+
 @dataclass(kw_only=True)
 class WOADataset(LatLonDataset):
     """Represents World Ocean Atlas data on original grid.
@@ -1771,27 +1820,20 @@ class WOABGCDataset(WOADataset):
         WOA reports nutrients and oxygen in umol/kg, while ROMS expects mmol/m3.
         The conversion uses in-situ density (TEOS-10 gsw.rho with pressure from
         depth) from the loaded T/S, matching :meth:`GLODAPv2BGCDataset.post_process`.
-        T/S stay in ``self.ds`` so the pipeline can use them as the source density
-        coordinate; it drops them after vertical regridding via ``bgc_source_ts``.
+        Where T or S is NaN but a tracer is not, the mean density of that depth level
+        is used instead so the tracer is kept. T/S stay in ``self.ds`` so the
+        pipeline can use them as the source density coordinate; it drops them after
+        vertical regridding via ``bgc_source_ts``.
         """
-        temp_var = self.opt_var_names.get("temp_bgc")
-        salt_var = self.opt_var_names.get("salt_bgc")
-
-        if temp_var in self.ds.data_vars and salt_var in self.ds.data_vars:
-            density = compute_in_situ_density(
-                self.ds[temp_var],
-                self.ds[salt_var],
-                self.ds[self.dim_names["depth"]],
-                self.ds[self.dim_names["latitude"]],
-            )
-        else:
-            logging.warning(
-                "WOA temperature/salinity unavailable; using a uniform 1025 kg m-3 "
-                "for the umol/kg -> mmol/m3 conversion."
-            )
-            density = 1025.0
-
-        conversion_factor = density / 1000.0
+        conversion_factor = _umol_kg_to_mmol_m3_factor(
+            self.ds,
+            self.opt_var_names.get("temp_bgc"),
+            self.opt_var_names.get("salt_bgc"),
+            self.dim_names["depth"],
+            self.dim_names["latitude"],
+            self.dim_names["longitude"],
+            "WOA",
+        )
         for file_var in self.var_names.values():
             if file_var in self.ds.data_vars:
                 self.ds[file_var] = self.ds[file_var] * conversion_factor
@@ -2583,31 +2625,26 @@ class GLODAPv2BGCDataset(GLODAPv2Dataset):
         """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³.
 
         Uses in-situ density (TEOS-10 gsw.rho with pressure from depth) from
-        the loaded T/S to compute density (dask-lazy). T/S remain in
-        ``self.ds`` so the downstream pipeline can use them as the source
-        density coordinate for density-space vertical interpolation; the
-        pipeline drops them after regridding via ``bgc_source_ts``.
+        the loaded T/S to compute density (dask-lazy). Where T or S is NaN but a
+        tracer is not, the mean density of that depth level is used instead so the
+        tracer is kept. T/S remain in ``self.ds`` so the downstream pipeline can
+        use them as the source density coordinate for density-space vertical
+        interpolation; the pipeline drops them after regridding via
+        ``bgc_source_ts``.
 
         If T/S are absent (e.g. the file did not include them), falls back to a
         uniform 1025 kg m⁻³ density.
         """
-        from roms_tools.setup.utils import compute_in_situ_density
-
-        if "temperature" in self.ds.data_vars and "salinity" in self.ds.data_vars:
-            density = compute_in_situ_density(
-                self.ds["temperature"],
-                self.ds["salinity"],
-                self.ds[self.dim_names["depth"]],
-                self.ds[self.dim_names["latitude"]],
-            )
-        else:
-            logging.warning(
-                "GLODAP temperature/salinity unavailable; using a uniform 1025 "
-                "kg m-3 for the umol/kg -> mmol/m3 conversion."
-            )
-            density = 1025.0
-
-        conversion_factor = density / 1000.0  # µmol kg⁻¹ → mmol m⁻³
+        # µmol kg⁻¹ → mmol m⁻³
+        conversion_factor = _umol_kg_to_mmol_m3_factor(
+            self.ds,
+            self.opt_var_names.get("temp_bgc"),
+            self.opt_var_names.get("salt_bgc"),
+            self.dim_names["depth"],
+            self.dim_names["latitude"],
+            self.dim_names["longitude"],
+            "GLODAP",
+        )
 
         for file_var in self.var_names.values():
             if file_var in self.ds.data_vars:

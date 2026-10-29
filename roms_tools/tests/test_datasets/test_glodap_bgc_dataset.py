@@ -11,6 +11,7 @@ import xarray as xr
 
 from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
 from roms_tools.fill import BOTTOM_FILL_BLEND_M
+from roms_tools.setup.utils import compute_in_situ_density
 from roms_tools.tests.glodap_test_utils import write_synthetic_glodap
 
 DEPTH = np.array([0.0, 10.0, 20.0, 30.0, 50.0, 100.0, 200.0])
@@ -234,3 +235,72 @@ def test_infinite_blend_reproduces_the_forward_then_backward_fill(
     first = next(iter(expected.data_vars))
     expected_mask = xr.where(expected[first].isel(depth=0, drop=True).isnull(), 0, 1)
     np.testing.assert_array_equal(data.ds["mask"].values, expected_mask.values)
+
+
+# ---------------------------------------------------------------------------
+# umol/kg -> mmol/m3: a tracer must survive a missing temperature or salinity
+# ---------------------------------------------------------------------------
+
+#: (level, lat index, lon index) of the cells without a temperature / salinity.
+NO_TEMPERATURE = [(2, 1, 3), (1, 0, 4)]
+NO_SALINITY = [(2, 3, 0)]
+
+
+def _write_conversion_source(directory):
+    """A fully wet 4 x 5 grid whose T and S vary, with a few cells lacking one of them.
+
+    Every tracer is finite everywhere, so a NaN in the converted tracer can only come
+    from the NaN T/S.
+    """
+    lat = np.arange(10.0, 14.0)
+    lon = np.arange(20.0, 25.0)
+
+    def field_fn(name, values):
+        if name == "temperature":
+            values = values + np.arange(lon.size, dtype="f4")[None, None, :]
+            for k, i, j in NO_TEMPERATURE:
+                values[k, i, j] = np.nan
+        elif name == "salinity":
+            values = values + 0.2 * np.arange(lat.size, dtype="f4")[None, :, None]
+            for k, i, j in NO_SALINITY:
+                values[k, i, j] = np.nan
+        return values
+
+    return write_synthetic_glodap(directory, lat=lat, lon=lon, field_fn=field_fn)
+
+
+def test_a_tracer_with_nan_temperature_or_salinity_gets_the_mean_density_of_its_level(
+    tmp_path, use_dask
+):
+    """The converted tracer stays finite where T or S is NaN and equals the tracer times
+    the mean in-situ density of that depth level over the cells that have both, divided
+    by 1000; every other cell is converted with its own density, as before.
+    """
+    directory = _write_conversion_source(tmp_path / "conversion")
+    raw = _load(directory, use_dask, apply_post_processing=False).ds
+    converted = _load(directory, use_dask).ds
+
+    density = compute_in_situ_density(
+        raw["temperature"], raw["salinity"], raw["depth"], raw["latitude"]
+    ).transpose("depth", "latitude", "longitude")
+    rho = density.values
+    no_ts = [*NO_TEMPERATURE, *NO_SALINITY]
+    assert np.isnan(rho).sum() == len(no_ts)
+
+    for name in ("TAlk", "NO3", "oxygen"):
+        tracer = raw[name].transpose("depth", "latitude", "longitude").values
+        got = converted[name].transpose("depth", "latitude", "longitude").values
+        assert np.isfinite(got).all()
+
+        # Where T and S exist the plain formula is unchanged ...
+        have_ts = np.isfinite(rho)
+        plain = tracer * rho / 1000.0
+        np.testing.assert_allclose(got[have_ts], plain[have_ts], rtol=1e-6)
+        # ... and elsewhere the level's mean density over the cells that have both.
+        for k, i, j in no_ts:
+            expected = tracer[k, i, j] * np.nanmean(rho[k]) / 1000.0
+            assert got[k, i, j] == pytest.approx(expected, rel=1e-6), (name, k, i, j)
+
+    # T and S are not tracers and keep their NaNs.
+    for name in ("temperature", "salinity"):
+        np.testing.assert_array_equal(converted[name].values, raw[name].values)

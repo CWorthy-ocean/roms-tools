@@ -631,6 +631,42 @@ def test_mask_is_rebuilt_after_the_fill(woa_dir_columns, use_dask):
         assert np.isfinite(surface[:, expected == 1]).all(), name
 
 
+def test_a_tracer_with_nan_temperature_gets_the_mean_density_of_its_level(
+    woa_dir_columns, use_dask
+):
+    """The converted tracer stays finite where the temperature is NaN and equals the
+    tracer times the mean in-situ density of that depth level and month over the
+    cells that have T and S, divided by 1000; every other cell is converted with its
+    own density, as before.
+    """
+    raw = _load_columns(woa_dir_columns, use_dask).ds
+    converted = _load_columns(woa_dir_columns, use_dask, apply_post_processing=True).ds
+
+    rho = _in_order(
+        compute_in_situ_density(raw["t_an"], raw["s_an"], raw["depth"], raw["latitude"])
+    )
+    z = raw["depth"].values
+    level = int(np.flatnonzero(z == HOLE_DEPTH)[0])
+    assert np.isnan(rho[:, level, T_HOLE[0], T_HOLE[1]]).all()
+
+    for name in ("n_an", "o_an"):
+        tracer = _in_order(raw[name])
+        got = _in_order(converted[name])
+        # The only cell with a tracer but no density is the hole.
+        np.testing.assert_array_equal(np.isnan(got), np.isnan(tracer))
+        assert np.isfinite(got[:, level, T_HOLE[0], T_HOLE[1]]).all()
+
+        have_ts = np.isfinite(rho)
+        plain = tracer * rho / 1000.0
+        np.testing.assert_allclose(got[have_ts], plain[have_ts], rtol=1e-6)
+
+        level_mean = np.nanmean(rho[:, level], axis=(-2, -1))  # one per month
+        expected = tracer[:, level, T_HOLE[0], T_HOLE[1]] * level_mean / 1000.0
+        np.testing.assert_allclose(
+            got[:, level, T_HOLE[0], T_HOLE[1]], expected, rtol=1e-6
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pipeline integration: WOA as a registered BGC source
 # ---------------------------------------------------------------------------

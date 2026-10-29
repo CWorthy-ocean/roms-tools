@@ -56,7 +56,7 @@ import dask.array as dsa
 import numpy as np
 import xarray as xr
 
-from roms_tools.setup.esper import O2_FLOOR
+from roms_tools.setup.bgc_model import MARBL_PARM_O2_MIN
 from roms_tools.setup.utils import get_boundary_coords
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
@@ -79,6 +79,12 @@ S_MIN_NORMALIZE = 5.0
 #: allows for in-situ density: tracers are per m3 at in-situ density, about 4-5% above
 #: surface density at 4-5 km, so deep water near 2450 umol/kg reads about 2560 mmol/m3.
 NALK_RANGE = (2150.0, 2650.0)
+
+#: Upper bound (mmol/m3) for ALK and DIC: a gross-error net only, set well outside
+#: anything plausible. The plausibility checks are ``NALK_RANGE`` and ``DIC_ALK_RATIO``.
+#: At in-situ density, deep Eastern Mediterranean water (TA about 2610 umol/kg) reads
+#: above 2700 mmol/m3, so a tighter bound would clamp correct water.
+ALK_DIC_MAX = 3000.0
 
 #: Freshwater ALK and DIC endmember (mmol/m3) for salinity normalization: the value
 #: PyESPER's salinity conditioning dilutes TA and DIC toward. Normalizing against it
@@ -199,13 +205,13 @@ class BgcCheck:
 
 DEFAULT_CHECKS: dict[str, BgcCheck] = {
     "ALK": BgcCheck(
-        bounds=(400.0, 2700.0),
+        bounds=(400.0, ALK_DIC_MAX),
         max_jump=100.0,
         normalize_by_salinity=True,
         physical_reality=alk_reality,
     ),
     "DIC": BgcCheck(
-        bounds=(400.0, 2700.0),
+        bounds=(400.0, ALK_DIC_MAX),
         max_jump=100.0,
         normalize_by_salinity=True,
         physical_reality=dic_reality,
@@ -213,7 +219,7 @@ DEFAULT_CHECKS: dict[str, BgcCheck] = {
     ),
     "O2": BgcCheck(
         bounds=(0.0, 600.0),
-        floor=O2_FLOOR,
+        floor=MARBL_PARM_O2_MIN,
         floor_jump=20.0,
         physical_reality=o2_reality,
         ceiling=o2_ceiling,

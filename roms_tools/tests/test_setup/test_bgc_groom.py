@@ -152,6 +152,26 @@ def test_brackish_hole_beside_fresh_water_is_filled_on_the_mixing_line(grid, cle
     assert counts["ALK"]["total"] == 0, counts
 
 
+def test_deep_eastern_mediterranean_water_is_not_flagged(grid, clean):
+    """Correct deep E-Med water reads above 2700 mmol/m3 at in-situ density (TA about
+    2610 umol/kg); the raw bounds must not clamp it.
+    """
+    depth = (
+        compute_depth_coordinates(grid).transpose("s_rho", "eta_rho", "xi_rho").values
+    )[None]
+    wet = clean["salt"] > 0
+    alk = 2660.0 + 70.0 * depth / 1000.0
+    clean["salt"] = np.where(wet, 38.7, 0.0)
+    clean["ALK"] = np.where(wet, alk, 0.0)
+    clean["DIC"] = np.where(wet, 0.88 * alk, 0.0)
+    assert clean["ALK"].max() > 2700.0
+    ic = _ic(clean)
+    counts = summarize_flags(bgc_check(ic, grid, variables=["ALK", "DIC"]))
+    assert counts["ALK"]["total"] == 0 and counts["DIC"]["total"] == 0, counts
+    out = bgc_groom(ic, grid, variables=["ALK", "DIC"]).compute()
+    np.testing.assert_array_equal(out["ALK"].values, clean["ALK"].astype(np.float32))
+
+
 def test_check_flags_each_planted_defect(grid, clean):
     planted = _plant(clean)
     flags = bgc_check(_ic(clean), grid).compute()

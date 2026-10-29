@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import xarray as xr
 
+from roms_tools.setup.bgc_model import MARBL_PARM_O2_MIN
 from roms_tools.setup.utils import (
     apply_chunk_plan,
     compute_in_situ_density,
@@ -133,20 +134,17 @@ ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 #: that keeps feeding them holds water suboxic longer as it mixes (more mixing is needed
 #: to cross 5 and 10), widening the denitrifying volume. WOA23 sits at 3-10 µmol/kg at
 #: these points on the 12 km Indo-Pacific and California Current boundaries measured
-#: (2010/2014), so the floor is at or above observations there; match it to
-#: ``parm_o2_min`` if a run changes that setting. ALK and DIC never approach zero and
-#: keep the generic floor. Any point that ESPER put below 5.0 now reads 5.0 -- an
-#: output change relative to the earlier floors (0, then 2.0). ``bgc_groom``'s O2 check
-#: uses the same ``O2_FLOOR``.
-O2_FLOOR = 5.0
-
+#: (2010/2014), so the floor is at or above observations there. The value is
+#: ``MARBL_PARM_O2_MIN``. ALK and DIC never approach zero and keep the generic floor. Any
+#: point that ESPER put below 5.0 now reads 5.0 -- an output change relative to the
+#: earlier floors (0, then 2.0).
 ESPER_FLOORS: dict[str, float] = {
     "ALK": 0.0,
     "DIC": 0.0,
     "NO3": 0.0,
     "PO4": 0.0,
     "SiO3": 0.0,
-    "O2": O2_FLOOR,
+    "O2": MARBL_PARM_O2_MIN,
 }
 
 _VALID_METHODS = ("lir", "nn", "mixed")

@@ -431,6 +431,25 @@ def _fill(
     return np.where(holes & np.isnan(out), a, out)
 
 
+def _fill_within(
+    a: np.ndarray,
+    holes: np.ndarray,
+    region: np.ndarray,
+    z: np.ndarray,
+    elig: list[np.ndarray],
+    column_reach: int,
+    relax_sweeps: int,
+) -> np.ndarray:
+    """:func:`_fill` restricted to ``region``: its holes are filled from its own cells
+    only, and cells outside it are neither filled nor donors.
+    """
+    elig_in = [
+        e & region & _shift(region, axis, step, False)
+        for e, (axis, step) in zip(elig, _DIRS, strict=True)
+    ]
+    return _fill(a, holes & region, region, z, elig_in, column_reach, relax_sweeps)
+
+
 def _stages(names: Sequence[str], checks: Mapping[str, BgcCheck]) -> list[list[str]]:
     """Group tracers so each one is groomed after the tracers its check requires."""
     remaining = list(names)
@@ -490,16 +509,20 @@ def _kernel(
             )
         if checks[n].normalize_by_salinity:
             # Fill the salinity-normalized field, so the infill follows salinity and meets
-            # the same normalized jump test; only the hole cells are replaced.
+            # the same normalized jump test. Water fresher than S_MIN_NORMALIZE is not
+            # normalized, so it is filled apart, in raw values from fresh donors only: no
+            # fill mixes the two spaces. Only the hole cells are replaced.
             x, valid = _normalize(values[n], salt, wet)
-            x = _fill(x, holes, wet, z, elig, column_reach, relax_sweeps)
+            x = _fill_within(x, holes, valid, z, elig, column_reach, relax_sweeps)
             if (jmp := checks[n].max_jump) is not None:
                 x = _project_into_envelope(x, holes, valid, elig, jmp)
             e = FRESHWATER_ENDMEMBER
-            back = np.where(
-                valid, e + (x - e) * np.where(valid, salt, S_REF) / S_REF, x
+            back = e + (x - e) * np.where(valid, salt, S_REF) / S_REF
+            fresh = wet & ~valid
+            raw = _fill_within(
+                values[n], holes, fresh, z, elig, column_reach, relax_sweeps
             )
-            values[n] = np.where(holes, back, values[n])
+            values[n] = np.where(holes & valid, back, np.where(holes, raw, values[n]))
         else:
             values[n] = _fill(
                 values[n], holes, wet, z, elig, column_reach, relax_sweeps

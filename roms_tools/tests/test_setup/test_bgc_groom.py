@@ -110,6 +110,48 @@ def test_plume_front_and_hypersaline_water_on_the_mixing_line_pass(grid, clean):
     assert counts["ALK"]["total"] == 0 and counts["DIC"]["total"] == 0, counts
 
 
+def _plume(clean: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """Fresh plume (S = 2) at x < 6, a brackish column (S = 6) at x = 6, ocean beyond;
+    ALK and DIC on the 770 mixing line everywhere.
+    """
+    salt = clean["salt"].copy()
+    salt[..., :, :6] = 2.0
+    salt[..., :, 6] = 6.0
+    wet = clean["salt"] > 0
+    for v, n in (("ALK", 2300.0), ("DIC", 2050.0)):
+        clean[v] = np.where(wet, 770 + (n - 770) * salt / 35, 0.0)
+    clean["salt"] = np.where(wet, salt, 0.0)
+    return clean
+
+
+def test_fresh_hole_is_filled_from_fresh_water_in_raw_values(grid, clean):
+    """Below S_MIN_NORMALIZE values are not normalized; a fresh hole beside brackish
+    water must be filled from its fresh neighbours, not from normalized values.
+    """
+    clean = _plume(clean)
+    orig = clean["ALK"].copy()
+    clean["ALK"][0, 5, 10, 5] = 1.2
+    out = bgc_groom(_ic(clean), grid, variables=["ALK", "DIC"]).compute()
+    np.testing.assert_allclose(
+        out["ALK"].values[0, 5, 10, 5], orig[0, 5, 10, 5], rtol=1e-3
+    )
+    counts = summarize_flags(bgc_check(out, grid, variables=["ALK", "DIC"]))
+    assert counts["ALK"]["total"] == 0, counts
+
+
+def test_brackish_hole_beside_fresh_water_is_filled_on_the_mixing_line(grid, clean):
+    """A normalized (S >= 5) hole must not take raw fresh values as donors."""
+    clean = _plume(clean)
+    orig = clean["ALK"].copy()
+    clean["ALK"][0, 5, 10, 6] = 2600.0
+    out = bgc_groom(_ic(clean), grid, variables=["ALK", "DIC"]).compute()
+    np.testing.assert_allclose(
+        out["ALK"].values[0, 5, 10, 6], orig[0, 5, 10, 6], rtol=1e-3
+    )
+    counts = summarize_flags(bgc_check(out, grid, variables=["ALK", "DIC"]))
+    assert counts["ALK"]["total"] == 0, counts
+
+
 def test_check_flags_each_planted_defect(grid, clean):
     planted = _plant(clean)
     flags = bgc_check(_ic(clean), grid).compute()

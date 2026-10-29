@@ -1890,7 +1890,7 @@ def test_conditioned_source_survives_yaml_round_trips(
 
 
 # --------------------------------------------------------------------------------------
-# Grooming of ESPER-derived tracers (roms_tools.scripts.bgc_groom)
+# Grooming of ESPER-derived tracers (roms_tools.setup.bgc_groom)
 # --------------------------------------------------------------------------------------
 
 

@@ -4,7 +4,7 @@ import pytest
 import xarray as xr
 from dask.callbacks import Callback
 
-from roms_tools.scripts.bgc_groom import (
+from roms_tools.setup.bgc_groom import (
     FLAG_BOUNDS,
     FLAG_FLOOR_JUMP,
     FLAG_JUMP,

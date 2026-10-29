@@ -150,7 +150,7 @@ _VALID_METHODS = ("lir", "nn", "mixed")
 
 #: Whether ESPER-derived tracers are groomed by default: implausible values (spikes,
 #: zeros beside ordinary water, DIC inconsistent with ALK, ...) are detected and refilled
-#: from the surrounding water by ``roms_tools.scripts.bgc_groom``. An ESPER source turns
+#: from the surrounding water by ``roms_tools.setup.bgc_groom``. An ESPER source turns
 #: it off with ``"groom": False``. The wrappers write the effective value into the source
 #: they store, so a YAML records it.
 ESPER_GROOM_DEFAULT = True
@@ -377,7 +377,7 @@ def _groom_checks(variables: list[str], ds_vars: Iterable[str]) -> dict:
     """Default checks for ``variables``; DIC drops its ALK-based check when no ALK is
     available (e.g. an ESPER boundary file without ALK).
     """
-    from roms_tools.scripts.bgc_groom import DEFAULT_CHECKS
+    from roms_tools.setup.bgc_groom import DEFAULT_CHECKS
 
     checks = {v: DEFAULT_CHECKS[v] for v in variables}
     names = set(ds_vars)
@@ -396,7 +396,7 @@ def groom_esper_initial_conditions(
     variables = _groomed_esper_vars(bgc, ds.data_vars)
     if not variables:
         return ds
-    from roms_tools.scripts.bgc_groom import bgc_groom
+    from roms_tools.setup.bgc_groom import bgc_groom
 
     return bgc_groom(
         ds, grid, checks=_groom_checks(variables, ds.data_vars), variables=variables
@@ -410,7 +410,7 @@ def groom_esper_boundary(
     variables = _groomed_esper_vars([companion], companion.ds.data_vars)
     if not variables:
         return companion.ds
-    from roms_tools.scripts.bgc_groom import bgc_groom
+    from roms_tools.setup.bgc_groom import bgc_groom
 
     return bgc_groom(
         companion.ds,

@@ -110,3 +110,4 @@ Utilities
    roms_tools.setup.bgc_groom.bgc_check
    roms_tools.setup.bgc_groom.bgc_groom
    roms_tools.setup.bgc_groom.summarize_flags
+   roms_tools.setup.bgc_groom.resolve_groom_settings

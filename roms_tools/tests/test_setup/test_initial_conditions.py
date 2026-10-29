@@ -14,11 +14,13 @@ from roms_tools import BGCMarbl, Grid, InitialConditions, InitialConditionsSourc
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
+    GLODAPv2BGCDataset,
     UnifiedBGCDataset,
 )
 from roms_tools.fill import BOTTOM_FILL_BLEND_M
 from roms_tools.setup.initial_conditions import _set_required_vars
 from roms_tools.setup.utils import latlon_to_xyz
+from roms_tools.tests.glodap_test_utils import write_synthetic_glodap
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -1565,52 +1567,6 @@ def test_ic_roms_source_ignores_regrid_options(use_dask, caplog):
 # ---------------------------------------------------------------------------
 
 
-def _write_synthetic_glodap(directory, include_ts: bool = True):
-    """A minimal GLODAP-shaped source: one file per variable, lat/lon/depth, NO time.
-
-    GLODAP's real layout is exactly this -- ``{dir}/GLODAPv2.2016b.{file_var}.nc``, each
-    holding one variable on a 1 degree grid with no time dimension -- so a synthetic one
-    exercises the static-source path without needing the multi-GB download.
-
-    ``include_ts`` writes temperature/salinity files alongside the six BGC tracers
-    (uniform T=2 degC, S=35 PSU), exercising the real in-situ-density unit
-    conversion; set it False to exercise the T/S-missing 1025 kg/m3 fallback path.
-    """
-    import numpy as np
-    import xarray as xr
-
-    directory.mkdir(parents=True, exist_ok=True)
-    # Comfortably covers the test grid (centred at 0E/55N) plus the regrid margin.
-    lat = np.arange(35.0, 76.0, 1.0)
-    lon = np.arange(-30.0, 31.0, 1.0)
-    depth = np.array([0.0, 50.0, 200.0, 1000.0])
-    variables = [
-        ("TAlk", 2300.0),
-        ("TCO2", 2100.0),
-        ("PO4", 1.0),
-        ("NO3", 15.0),
-        ("silicate", 10.0),
-        ("oxygen", 280.0),
-    ]
-    if include_ts:
-        variables += [("temperature", 2.0), ("salinity", 35.0)]
-    for file_var, value in variables:
-        # Mirrors the real files: `Depth` is a 1-D *data variable* on an unlabelled
-        # `depth_surface` dimension, which `GLODAPv2Dataset.clean_up` promotes to a
-        # dimension coordinate. Writing it as a plain coord would not exercise that.
-        xr.Dataset(
-            {
-                file_var: (
-                    ("depth_surface", "lat", "lon"),
-                    np.full((depth.size, lat.size, lon.size), value, dtype="f4"),
-                ),
-                "Depth": (("depth_surface",), depth),
-            },
-            coords={"lat": lat, "lon": lon},
-        ).to_netcdf(directory / f"GLODAPv2.2016b.{file_var}.nc")
-    return directory
-
-
 def test_static_bgc_source_takes_the_physics_time(tmp_path):
     """A BGC source with no time axis must be broadcast onto the physics time.
 
@@ -1628,7 +1584,7 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
     from roms_tools import BGCMarbl, Grid, InitialConditions
     from roms_tools.datasets.download import download_test_data
 
-    glodap_dir = _write_synthetic_glodap(tmp_path / "glodap")
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap")
     grid = Grid(
         nx=2,
         ny=2,
@@ -1703,7 +1659,7 @@ def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, c
 
     from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
 
-    glodap_dir = _write_synthetic_glodap(tmp_path / "glodap_no_ts", include_ts=False)
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap_no_ts", include_ts=False)
 
     with caplog.at_level(logging.WARNING):
         ds = GLODAPv2BGCDataset(filename=str(glodap_dir)).ds
@@ -1712,3 +1668,64 @@ def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, c
 
     got_alk = float(ds["TAlk"].isel(depth=2, latitude=10, longitude=5))
     assert got_alk == pytest.approx(2300.0 * 1025.0 / 1000.0, rel=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("blend_m", "expected"),
+    [(None, BOTTOM_FILL_BLEND_M), (0.0, 0.0), (np.inf, np.inf)],
+    ids=["default", "zero", "inf"],
+)
+def test_bottom_fill_blend_m_reaches_the_glodap_bgc_fill(
+    tmp_path, monkeypatch, use_dask, blend_m, expected
+):
+    """``bottom_fill_blend_m`` is the blend length the GLODAP BGC source is filled with.
+
+    The option used to be accepted by this source and ignored. The GLODAP fill is
+    wrapped to record the ``blend_m`` it is called with: 25 m by default, and the
+    value given otherwise (0 and ``inf`` included, as neither may fall back to the
+    default).
+    """
+    calls = []
+    original = GLODAPv2BGCDataset.extrapolate_deepest_to_bottom
+
+    def record(self, blend_m=BOTTOM_FILL_BLEND_M):
+        calls.append(blend_m)
+        return original(self, blend_m=blend_m)
+
+    monkeypatch.setattr(GLODAPv2BGCDataset, "extrapolate_deepest_to_bottom", record)
+
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap")
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    kwargs = {} if blend_m is None else {"bottom_fill_blend_m": blend_m}
+    InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {
+                "source": {"name": "GLODAP", "path": str(glodap_dir)},
+                "use_vars": ["ALK", "DIC"],
+            }
+        ],
+        bgc_model=BGCMarbl,
+        use_dask=use_dask,
+        bypass_validation=True,
+        **kwargs,
+    )
+
+    assert calls == [expected]

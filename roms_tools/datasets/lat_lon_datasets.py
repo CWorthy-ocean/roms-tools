@@ -1563,7 +1563,9 @@ class WOABGCDataset(WOADataset):
     ts_decade: str = "decav"
     #: How to extend the shallow monthly fields to full depth: ``"annual_blend"``
     #: splices the full-depth annual climatology underneath with a linear taper
-    #: across the seam; ``"ffill"`` persists the deepest monthly value downward.
+    #: across the seam; ``"ffill"`` persists the deepest monthly value downward. In
+    #: both modes, cells below the seafloor are left to
+    #: :meth:`extrapolate_deepest_to_bottom`.
     deep_fill: str = "annual_blend"
     #: Half-width, in metres, of the ``"annual_blend"`` taper band, centred on each
     #: variable's own deepest monthly level. The default gives 700-900 m for the
@@ -1736,10 +1738,16 @@ class WOABGCDataset(WOADataset):
         seam = float(monthly["depth"].max())
         # The shallow axis is an exact leading slice of the annual axis, so a plain
         # reindex places the monthly values on the full grid without interpolating.
-        extended = monthly.reindex(depth=annual["depth"]).ffill("depth")
+        monthly_on_annual_axis = monthly.reindex(depth=annual["depth"])
+        extended = monthly_on_annual_axis.ffill("depth")
+        # Both modes copy a value into every cell below the seafloor of both fields.
+        # Those cells are masked back to NaN on return, so
+        # extrapolate_deepest_to_bottom() can fill them with the same-depth value of
+        # the nearest column that has water there, as it does for other sources.
+        has_data = annual.notnull() | monthly_on_annual_axis.notnull()
 
         if self.deep_fill == "ffill":
-            return extended
+            return extended.where(has_data)
 
         depth = annual["depth"]
         low = seam - self.deep_blend_halfwidth
@@ -1755,7 +1763,7 @@ class WOABGCDataset(WOADataset):
         # has data.
         extended = extended.fillna(annual)
         annual = annual.fillna(extended)
-        return extended * weight + annual * (1.0 - weight)
+        return (extended * weight + annual * (1.0 - weight)).where(has_data)
 
     def post_process(self) -> None:
         """Convert the tracers to mmol/m3 and build the land/ocean mask.
@@ -1803,22 +1811,32 @@ class WOABGCDataset(WOADataset):
     ) -> None:
         """Fill vertical NaN gaps downward and upward, then rebuild the mask.
 
-        A plain forward fill is not enough: WOA can be NaN at the surface where
-        deeper data exist, and coverage differs between variables, so the mask
-        built from the first tracer can mark a cell as ocean where another tracer
-        is NaN. This mirrors :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
+        Below a column's bottom and in interior gaps a cell takes the same-depth fill
+        of :meth:`LatLonDataset.extrapolate_deepest_to_bottom` (see
+        :class:`~roms_tools.fill.BelowBottomFill`). NaN above the data takes the
+        shallowest value below it. A plain forward fill is not enough: WOA can be NaN
+        at the surface where deeper data exist, and coverage differs between
+        variables, so the mask built from the first tracer can mark a cell as ocean
+        where another tracer is NaN. The mask is therefore rebuilt after the fill.
+        This mirrors :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
 
-        ``blend_m`` is accepted for compatibility but not used: the same-depth fill of
-        :meth:`LatLonDataset.extrapolate_deepest_to_bottom` is not applied to these
-        sparse climatologies (NaN above the data, untested), a follow-up.
+        Parameters
+        ----------
+        blend_m : float, optional
+            Depth (m) below a column's bottom over which a cell goes from the column's
+            own deepest value to the nearest same-depth column's value; ``0`` takes the
+            nearest column's value immediately and ``inf`` reproduces the plain
+            forward-then-backward fill along depth. Defaults to
+            ``BOTTOM_FILL_BLEND_M``.
         """
         if "depth" not in self.dim_names:
             return
         dim = self.dim_names["depth"]
+        super().extrapolate_deepest_to_bottom(blend_m=blend_m)
         for var_name in self.ds.data_vars:
             if var_name.startswith("mask") or dim not in self.ds[var_name].dims:
                 continue
-            self.ds[var_name] = self.ds[var_name].ffill(dim=dim).bfill(dim=dim)
+            self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
 
         data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
         if data_vars:
@@ -2460,29 +2478,37 @@ class GLODAPv2Dataset(LatLonDataset):
     def extrapolate_deepest_to_bottom(
         self, blend_m: float = BOTTOM_FILL_BLEND_M
     ) -> None:
-        """Forward- and backward-fill vertical NaN gaps for the sparse GLODAP grid.
+        """Fill the vertical NaN gaps of the sparse GLODAP grid, then rebuild the mask.
 
-        The standard forward (downward) fill is not enough for GLODAP: a variable
-        can be NaN at the surface even when data exists at a deeper level, or two
-        variables can have different surface coverage so the mask (built from the
-        first variable) marks a cell as ocean while a second variable has NaN there.
+        Below a column's bottom and in interior gaps a cell takes the same-depth fill
+        of :meth:`LatLonDataset.extrapolate_deepest_to_bottom` (see
+        :class:`~roms_tools.fill.BelowBottomFill`). That alone is not enough for
+        GLODAP: a variable can be NaN at the surface even when data exists at a
+        deeper level, or two variables can have different surface coverage so the
+        mask (built from the first variable) marks a cell as ocean while a second
+        variable has NaN there.
 
-        This override adds a backward (upward) fill after the forward fill so that
-        the shallowest valid value is propagated to the surface.  The mask is then
-        rebuilt from the first non-mask variable at depth=0 so that apply_lateral_fill()
-        never encounters NaN values at ocean grid points.
+        This override therefore adds a backward (upward) fill after the same-depth
+        fill, so that NaN above the data takes the shallowest value below it. The
+        mask is then rebuilt from the first non-mask variable at depth=0 so that
+        apply_lateral_fill() never encounters NaN values at ocean grid points.
 
-        ``blend_m`` is accepted for compatibility but not used: the same-depth fill of
-        :meth:`LatLonDataset.extrapolate_deepest_to_bottom` is not applied to these
-        sparse climatologies (NaN above the data, untested), a follow-up.
+        Parameters
+        ----------
+        blend_m : float, optional
+            Depth (m) below a column's bottom over which a cell goes from the column's
+            own deepest value to the nearest same-depth column's value; ``0`` takes the
+            nearest column's value immediately and ``inf`` reproduces the plain
+            forward-then-backward fill along depth. Defaults to
+            ``BOTTOM_FILL_BLEND_M``.
         """
         if "depth" not in self.dim_names:
             return
         dim = self.dim_names["depth"]
+        super().extrapolate_deepest_to_bottom(blend_m=blend_m)
         for var_name in self.ds.data_vars:
-            if dim not in self.ds[var_name].dims:
+            if var_name.startswith("mask") or dim not in self.ds[var_name].dims:
                 continue
-            self.ds[var_name] = self.ds[var_name].ffill(dim=dim)
             self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
 
         # Rebuild the mask now that all variables have surface values wherever

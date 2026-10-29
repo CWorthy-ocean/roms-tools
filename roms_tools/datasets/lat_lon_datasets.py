@@ -27,12 +27,17 @@ from roms_tools.datasets.download import (
 from roms_tools.datasets.utils import (
     check_dataset,
     convert_to_float64,
-    extrapolate_deepest_to_bottom,
     select_relevant_fields,
     select_relevant_times,
     validate_start_end_time,
 )
-from roms_tools.fill import LateralFill, nearest_neighbor_fill
+from roms_tools.fill import (
+    BOTTOM_FILL_BLEND_M,
+    BelowBottomFill,
+    LateralFill,
+    nearest_neighbor_fill,
+    one_dim_fill,
+)
 from roms_tools.processing_methods import METHOD_META, PrefillMethod
 from roms_tools.regrid import _xesmf_extrap_kwargs
 from roms_tools.setup.utils import (
@@ -910,15 +915,59 @@ class LatLonDataset:
 
         self._fill_masked_vars(fill_one)
 
-    def extrapolate_deepest_to_bottom(self):
-        """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth
-        dimension.
+    def extrapolate_deepest_to_bottom(self, blend_m: float = BOTTOM_FILL_BLEND_M):
+        """Fill the NaNs below each column's bottom along the depth dimension.
 
-        For each variable with a depth dimension, fills missing values at the bottom by
-        propagating the deepest available data downward.
+        Velocities (``var_names["u"]``/``["v"]``) propagate the column's deepest value
+        downward. Every other variable with a depth dimension takes, below a column's
+        bottom, the value of the nearest column that has water at that depth, blended
+        in from the column's own deepest value over ``blend_m`` metres (see
+        :class:`~roms_tools.fill.BelowBottomFill`). The wet mask of a variable is its
+        NaN pattern at the first time record, and variables with the same mask share
+        one fill.
+
+        Parameters
+        ----------
+        blend_m : float, optional
+            Depth (m) below a column's bottom over which a cell goes from the column's
+            own deepest value to the nearest same-depth column's value; ``0`` takes the
+            nearest column's value immediately and ``inf`` copies the deepest value
+            down for every variable (a plain forward fill, with no wet mask or donor
+            map). Defaults to ``BOTTOM_FILL_BLEND_M``.
         """
-        if "depth" in self.dim_names:
-            self.ds = extrapolate_deepest_to_bottom(self.ds, self.dim_names["depth"])
+        if "depth" not in self.dim_names:
+            return
+        depth_dim = self.dim_names["depth"]
+        horizontal = (self.dim_names["latitude"], self.dim_names["longitude"])
+        velocities = {self.var_names[v] for v in ("u", "v") if v in self.var_names}
+        fillers: list[tuple[np.ndarray, BelowBottomFill]] = []
+
+        for name in list(self.ds.data_vars):
+            da = self.ds[name]
+            if name.startswith("mask") or depth_dim not in da.dims:
+                continue
+            if name in velocities or np.isinf(blend_m):
+                self.ds[name] = one_dim_fill(da, depth_dim, direction="forward")
+                continue
+
+            # Only the first record of the 3D wet mask is computed.
+            first = {d: 0 for d in da.dims if d not in (depth_dim, *horizontal)}
+            wet = da.isel(first).transpose(depth_dim, *horizontal).notnull().values
+            filler = next((f for w, f in fillers if np.array_equal(w, wet)), None)
+            if filler is None:
+                filler = BelowBottomFill(
+                    wet,
+                    self.ds[depth_dim].values,
+                    self.ds[horizontal[0]].values,
+                    self.ds[horizontal[1]].values,
+                    dims=(depth_dim, *horizontal),
+                    blend_m=blend_m,
+                )
+                fillers.append((wet, filler))
+            if da.chunks is not None:
+                # The fill works on whole (depth, lat, lon) blocks.
+                da = da.chunk({d: -1 for d in (depth_dim, *horizontal)})
+            self.ds[name] = filler.apply(da)
 
     def rotate_velocities_to_east_and_north(self) -> None:
         """
@@ -1749,13 +1798,19 @@ class WOABGCDataset(WOADataset):
             )
             self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
 
-    def extrapolate_deepest_to_bottom(self) -> None:
+    def extrapolate_deepest_to_bottom(
+        self, blend_m: float = BOTTOM_FILL_BLEND_M
+    ) -> None:
         """Fill vertical NaN gaps downward and upward, then rebuild the mask.
 
         A plain forward fill is not enough: WOA can be NaN at the surface where
         deeper data exist, and coverage differs between variables, so the mask
         built from the first tracer can mark a cell as ocean where another tracer
         is NaN. This mirrors :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
+
+        ``blend_m`` is accepted for compatibility but not used: the same-depth fill of
+        :meth:`LatLonDataset.extrapolate_deepest_to_bottom` is not applied to these
+        sparse climatologies (NaN above the data, untested), a follow-up.
         """
         if "depth" not in self.dim_names:
             return
@@ -2402,7 +2457,9 @@ class GLODAPv2Dataset(LatLonDataset):
             ds["mask"] = xr.where(surface.isnull(), 0, 1)
         return ds
 
-    def extrapolate_deepest_to_bottom(self) -> None:
+    def extrapolate_deepest_to_bottom(
+        self, blend_m: float = BOTTOM_FILL_BLEND_M
+    ) -> None:
         """Forward- and backward-fill vertical NaN gaps for the sparse GLODAP grid.
 
         The standard forward (downward) fill is not enough for GLODAP: a variable
@@ -2414,6 +2471,10 @@ class GLODAPv2Dataset(LatLonDataset):
         the shallowest valid value is propagated to the surface.  The mask is then
         rebuilt from the first non-mask variable at depth=0 so that apply_lateral_fill()
         never encounters NaN values at ocean grid points.
+
+        ``blend_m`` is accepted for compatibility but not used: the same-depth fill of
+        :meth:`LatLonDataset.extrapolate_deepest_to_bottom` is not applied to these
+        sparse climatologies (NaN above the data, untested), a follow-up.
         """
         if "depth" not in self.dim_names:
             return

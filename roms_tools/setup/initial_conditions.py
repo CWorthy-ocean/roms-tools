@@ -21,7 +21,11 @@ from roms_tools.datasets.lat_lon_datasets import (
     WOABGCDataset,
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
-from roms_tools.fill import fill_below_source_bottom
+from roms_tools.fill import (
+    BOTTOM_FILL_BLEND_M,
+    check_bottom_fill_blend_m,
+    fill_below_source_bottom,
+)
 from roms_tools.plot import plot
 from roms_tools.processing_methods import RegridConfig, _xesmf_available
 from roms_tools.regrid import (
@@ -280,6 +284,15 @@ class InitialConditionsSource:
     extrap_kwargs : dict, optional
         Method-specific options for ``extrap_method``: ``num_src_pnts`` /
         ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
+    bottom_fill_blend_m : float, optional
+        Where the model column is deeper than the source column, the cells below the
+        source bottom hold no source data. A tracer (temperature, salinity, BGC) there
+        takes the value of the nearest source column that has water at that depth,
+        blended in from the column's own bottom value over ``bottom_fill_blend_m``
+        metres below the bottom: ``0`` takes the nearest column's value immediately,
+        ``inf`` copies each column's bottom value down instead. Velocities always copy
+        their bottom value down. Applies to lat/lon and ROMS restart sources. See the
+        methods documentation for choosing a value. Defaults to 25 m.
 
     Examples
     --------
@@ -368,6 +381,13 @@ class InitialConditionsSource:
     source."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``. Applies only to lat/lon sources."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom, over which a tracer in a cell deeper than
+    the source column goes from the column's own bottom value to the value of the nearest
+    source column with water at that depth. ``0`` takes the nearest column's value
+    immediately, ``inf`` copies the bottom value down instead. Velocities are
+    unaffected (they always copy the bottom value down). See the methods documentation
+    for choosing a value."""
     # `compare=False`: `xr.Dataset.__eq__` returns an elementwise Dataset (truthy in
     # a way that makes `==` comparisons on this dataclass vacuously true/broken)
     # rather than a bool, so equality between two objects of this class is defined
@@ -568,8 +588,8 @@ class InitialConditionsSource:
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
-        data.extrapolate_deepest_to_bottom()
         if isinstance(data, ROMSDataset):
+            data.extrapolate_deepest_to_bottom()
             # ROMS restart source: the bespoke ROMS-grid fill feeds only
             # ``LateralRegridFromROMS`` (unchanged). The prefill/regrid/extrap options
             # do not apply here; warn if the user explicitly set any of them.
@@ -580,6 +600,7 @@ class InitialConditionsSource:
                 self.model_reference_date = data.model_reference_date
             data.apply_lateral_fill()
         else:
+            data.extrapolate_deepest_to_bottom(blend_m=self.bottom_fill_blend_m)
             # `self.source` is always the source relevant to `type` now (contextual
             # on `self.type`), so no physics-vs-bgc branch is needed here anymore.
             source_name = self.source["name"]
@@ -1041,6 +1062,7 @@ class InitialConditionsSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
+        check_bottom_fill_blend_m(self.bottom_fill_blend_m)
 
     def _get_data(
         self, forcing_type=Literal["physics", "bgc"]
@@ -1426,6 +1448,7 @@ class InitialConditionsSource:
         ds.attrs["prefill"] = str(self.prefill)
         ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
         ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
+        ds.attrs["bottom_fill_blend_m"] = float(self.bottom_fill_blend_m)
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
@@ -1853,7 +1876,7 @@ class InitialConditions:
     ----------
     grid, ini_time, model_reference_date, allow_flex_time, use_dask, chunks,
     initial_slice_bounds, bypass_validation, prefill, prefill_kwargs,
-    regrid_method, extrap_method, extrap_kwargs
+    regrid_method, extrap_method, extrap_kwargs, bottom_fill_blend_m
         Forwarded to the internal physics :class:`InitialConditionsSource` (and, for
         the fields that apply to a lat/lon bgc source too, to each bgc companion).
         See :class:`InitialConditionsSource` for the full description of each.
@@ -1966,6 +1989,8 @@ class InitialConditions:
     """xESMF destination extrapolation used on the default no-prefill path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom; see :class:`InitialConditionsSource`."""
 
     # `compare=False` on all three: `physics`/`bgc` hold constituent
     # `InitialConditionsSource` objects and `ds` is the merged `xr.Dataset` itself

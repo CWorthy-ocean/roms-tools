@@ -1,4 +1,5 @@
 import logging
+import numbers
 
 import numpy as np
 import pyamg
@@ -8,11 +9,34 @@ from scipy import sparse
 from roms_tools.constants import R_EARTH
 from roms_tools.setup.utils import build_kdtree_from_latlon, latlon_to_xyz
 
+# Default blend length (m) below the source bottom: over this depth a tracer goes from
+# the column's own bottom value to the value of the nearest source column that has
+# water at that depth.
+BOTTOM_FILL_BLEND_M = 25.0
 # Width (m) of the depth bins whose cells share one donor search.
 FILL_BIN_M = 50.0
 # Depth (m) below the source bottom over which the fill blends from the clamped
 # value to the deeper column's value.
 FILL_BLEND_M = 100.0
+
+
+def check_bottom_fill_blend_m(value) -> None:
+    """Raise ``ValueError`` unless ``value`` is a real number >= 0 (``inf`` allowed).
+
+    Parameters
+    ----------
+    value : float
+        The ``bottom_fill_blend_m`` option to validate.
+    """
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, numbers.Real)
+        or np.isnan(value)
+        or value < 0
+    ):
+        raise ValueError(
+            f"`bottom_fill_blend_m` must be a number >= 0 (inf allowed), got {value!r}."
+        )
 
 
 class LateralFill:
@@ -471,6 +495,202 @@ def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArra
         elif direction == "backward":
             return da.bfill(dim=dim)
     return da
+
+
+class BelowBottomFill:
+    """Fill the cells below a source column's bottom from the nearest column with water.
+
+    A column of a lat/lon source ends at its local bottom, so a deeper model column
+    has levels with no source data. Copying the column's deepest value down gives
+    bottom water at any depth. Here a cell below the bottom takes instead the value of
+    the nearest (great-circle) column of the same source that has water at that
+    depth, blended from the column's own bottom value:
+    ``value = w * own + (1 - w) * donor`` with ``w = max(0, 1 - dz / blend_m)`` and
+    ``dz`` the depth below the column's bottom. With ``blend_m = 0`` the donor's value
+    is taken right below the bottom; with ``blend_m = inf`` the result is the plain
+    forward fill along depth.
+
+    The cells to fill are those a forward fill along depth would touch (finite at a
+    level above, NaN at the level), so land columns are never filled. A level where no
+    column has water keeps the filled level above. The donor of every cell is found
+    once, from a static 3-D wet mask (one KD-tree per level), and reused by
+    :meth:`apply` for any variable and time record.
+    """
+
+    def __init__(
+        self,
+        wet: np.ndarray,
+        depth: np.ndarray,
+        lat: np.ndarray,
+        lon: np.ndarray,
+        dims: tuple[str, str, str],
+        blend_m: float,
+    ):
+        """
+        Build the donor map of a fill.
+
+        Parameters
+        ----------
+        wet : numpy.ndarray
+            3D boolean array, ``True`` where the source has data, with dimensions
+            ``dims`` (depth, latitude, longitude).
+        depth : numpy.ndarray
+            1D source depths (m, positive downward, increasing with index).
+        lat, lon : numpy.ndarray
+            Latitude and longitude (degrees) of the source columns: 1D (along
+            ``dims[1]`` and ``dims[2]``) or 2D with shape ``(ny, nx)``.
+        dims : tuple of str
+            Names of the depth, latitude and longitude dimensions of the data passed
+            to :meth:`apply`.
+        blend_m : float
+            Depth (m) below a column's bottom over which a cell goes from the
+            column's own bottom value to its donor's value; ``0`` (donor right below
+            the bottom) to ``inf`` (plain forward fill).
+
+        Raises
+        ------
+        ValueError
+            If the shapes of the inputs are inconsistent or the depths do not
+            increase.
+        """
+        wet = np.asarray(wet, dtype=bool)
+        depth = np.asarray(depth, dtype=float)
+        if wet.ndim != 3 or depth.shape != (wet.shape[0],):
+            raise ValueError(
+                "BelowBottomFill error: 'wet' must be 3D with one depth per level, "
+                f"got wet.shape={wet.shape} and depth.shape={depth.shape}."
+            )
+        if not np.all(np.diff(depth) > 0):
+            raise ValueError("BelowBottomFill error: 'depth' must increase.")
+        lat, lon = np.asarray(lat, dtype=float), np.asarray(lon, dtype=float)
+        if lat.ndim == 1 and lon.ndim == 1:
+            lat, lon = np.meshgrid(lat, lon, indexing="ij")
+        if lat.shape != wet.shape[1:] or lon.shape != wet.shape[1:]:
+            raise ValueError(
+                "BelowBottomFill error: 'lat' and 'lon' must cover the horizontal "
+                f"shape {wet.shape[1:]} of 'wet', got {lat.shape} and {lon.shape}."
+            )
+
+        self.dims = dims
+        self.shape = wet.shape
+        self.blend_m = blend_m
+        # Per level with cells to fill: (level, flat cell indices, flat donor indices,
+        # weights of the cells' own value), the donors and weights ``None`` where the
+        # level has no water at all.
+        self._levels: list = []
+        # With an infinite blend length a cell keeps its own (forward-filled) value,
+        # so no donor is needed.
+        if not np.isinf(blend_m):
+            self._find_donors(
+                wet.reshape(wet.shape[0], -1), depth, lat.ravel(), lon.ravel()
+            )
+
+    def _find_donors(self, wet, depth, lat, lon):
+        """Find, level by level, the donor of every cell below its column's bottom."""
+        n_level = wet.shape[0]
+        # Level of each column's deepest wet cell (meaningless for land columns, which
+        # have no cell to fill).
+        bottom = n_level - 1 - np.argmax(wet[::-1], axis=0)
+        seen = np.zeros(wet.shape[1], dtype=bool)
+        distance = []
+        for k in range(n_level):
+            # int32 flat indices halve the map's size; a level never has 2**31 cells.
+            cells = np.flatnonzero(seen & ~wet[k]).astype(np.int32)
+            seen |= wet[k]
+            if not cells.size:
+                continue
+            wet_k = np.flatnonzero(wet[k]).astype(np.int32)
+            if not wet_k.size:
+                self._levels.append((k, cells, None, None))
+                continue
+            tree = build_kdtree_from_latlon(lat[wet_k], lon[wet_k])
+            chord, nearest = tree.query(
+                latlon_to_xyz(lat[cells], lon[cells]), workers=-1
+            )
+            distance.append((chord * R_EARTH / 1000.0).astype(np.float32))
+            # Cells above their column's deepest water (gaps inside a column) take
+            # the donor's value outright.
+            dz = depth[k] - depth[bottom[cells]]
+            if self.blend_m == 0:
+                weight = np.zeros(cells.size)
+            else:
+                weight = np.where(dz > 0, np.clip(1.0 - dz / self.blend_m, 0.0, 1.0), 0)
+            self._levels.append((k, cells, wet_k[nearest], weight))
+        if distance:
+            distance = np.concatenate(distance)
+            logging.info(
+                f"Filled {distance.size} source cell(s) below the source bottom from "
+                f"the nearest column with water at that depth, up to "
+                f"{distance.max():.0f} km away (median {np.median(distance):.0f} km)."
+            )
+
+    def apply(self, da: xr.DataArray) -> xr.DataArray:
+        """Fill the cells below each column's bottom.
+
+        Parameters
+        ----------
+        da : xarray.DataArray
+            Data to fill, with the dimensions ``dims`` (in any position, any other
+            dimension, e.g. time, is carried along) and NaN outside the wet mask the
+            fill was built from. Dask-backed input stays lazy; the dimensions
+            ``dims`` must each be a single chunk.
+
+        Returns
+        -------
+        xarray.DataArray
+            The data with the cells below each column's bottom filled; cells that
+            were not NaN, and cells in columns without any data, are unchanged.
+
+        Raises
+        ------
+        ValueError
+            If ``da`` lacks a dimension of ``dims`` or its size differs from that of
+            the wet mask.
+        """
+        for dim, size in zip(self.dims, self.shape, strict=True):
+            if dim not in da.dims or da.sizes[dim] != size:
+                raise ValueError(
+                    f"BelowBottomFill error: DataArray must have dimension {dim!r} "
+                    f"of size {size}, found dims {tuple(da.dims)} with sizes "
+                    f"{dict(da.sizes)}."
+                )
+        filled = xr.apply_ufunc(
+            _below_bottom_fill_np,
+            da,
+            input_core_dims=[list(self.dims)],
+            output_core_dims=[list(self.dims)],
+            output_dtypes=[da.dtype],
+            dask="parallelized",
+            keep_attrs=True,
+            kwargs={"levels": self._levels},
+        )
+        return filled.transpose(*da.dims)
+
+
+def _below_bottom_fill_np(arr: np.ndarray, levels: list) -> np.ndarray:
+    """Fill the cells below the columns' bottoms of ``arr`` (depth, lat, lon last).
+
+    The forward fill along depth gives every cell below a column's bottom the column's
+    own bottom value; the cells in ``levels`` (see :class:`BelowBottomFill`) are then
+    replaced by the blend of that value with the donor's. The levels come from the
+    first record's NaN pattern, so a cell that has data in this record keeps it.
+    """
+    shape = arr.shape
+    src = arr.reshape(-1, shape[-3], shape[-2] * shape[-1])
+    out = src.copy()
+    for k in range(1, out.shape[1]):
+        np.copyto(out[:, k], out[:, k - 1], where=np.isnan(out[:, k]))
+    for k, cells, donors, weight in levels:
+        raw = src[:, k, cells]
+        if donors is None:
+            # No water at this level: take the (filled) level above.
+            value = out[:, k - 1, cells]
+        else:
+            own = out[:, k, cells]
+            value = weight * own + (1.0 - weight) * src[:, k, donors]
+            value = np.where(np.isfinite(value), value, own)
+        out[:, k, cells] = np.where(np.isnan(raw), value, raw)
+    return out.reshape(shape)
 
 
 def fill_below_source_bottom(

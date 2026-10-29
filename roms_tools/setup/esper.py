@@ -393,10 +393,13 @@ def _groom_checks(variables: list[str], ds_vars: Iterable[str]) -> dict:
 
 
 def groom_esper_companion(
-    companion: Any, grid: Any, physics_ds: xr.Dataset
+    companion: Any, grid: Any, physics_ds: xr.Dataset, load: bool = False
 ) -> xr.Dataset:
-    """Lazily groomed copy of one ESPER companion's dataset (unchanged if off), for
-    initial conditions or boundary forcing; ``physics_ds`` supplies salt and temp.
+    """Groomed copy of one ESPER companion's dataset (unchanged if off), for initial
+    conditions or boundary forcing; ``physics_ds`` supplies salt and temp.
+
+    Lazy unless ``load``: an object built with ``use_dask=False`` passes True, so its
+    data is in memory and the groom is not recomputed on every access.
 
     Call it before ``process_bgc_fields``, so the tracers that model derives from DIC
     and ALK (``DIC_ALT_CO2``, ``ALK_ALT_CO2``) are copied from the groomed values.
@@ -406,13 +409,15 @@ def groom_esper_companion(
         return companion.ds
     from roms_tools.setup.bgc_groom import bgc_groom
 
-    return bgc_groom(
+    groomed = bgc_groom(
         companion.ds,
         grid,
         physics_ds,
         checks=_groom_checks(variables, companion.ds.data_vars),
         variables=variables,
     )
+    assert isinstance(groomed, xr.Dataset)
+    return groomed.load() if load else groomed
 
 
 def _salinity_conditioning(source: dict) -> SalinityConditioning | None:

@@ -2067,7 +2067,9 @@ class InitialConditions:
             )
             # Groom before process_bgc_fields, which copies DIC/ALK to *_ALT_CO2.
             for b in self.bgc:
-                b.ds = groom_esper_companion(b, self.grid, self.physics.ds)
+                b.ds = groom_esper_companion(
+                    b, self.grid, self.physics.ds, load=not self.use_dask
+                )
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []

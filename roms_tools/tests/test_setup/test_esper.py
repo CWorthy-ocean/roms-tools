@@ -1940,3 +1940,156 @@ def test_with_esper_groom_default_only_touches_esper_sources():
     assert out[1]["source"]["groom"] is False
     assert "groom" not in out[2]["source"]
     assert "groom" not in items[0]["source"]
+
+
+def _mock_esper_with_dic_spike(monkeypatch):
+    """Patch PyESPER with plausible fields (ALK/DIC on the 770 mixing line, DIC/ALK =
+    0.9) and one planted DIC spike (DIC/ALK = 1.2) in every estimate, at the last cell,
+    which is wet in ``_small_grid`` for the IC and the boundaries that have water.
+    """
+
+    def fake_estimate(
+        temp, salt, lon, lat, depth, *, source, roms_variables, est_dates=None
+    ):
+        s = np.asarray(salt, dtype=float)
+        alk = 770.0 + (2300.0 - 770.0) * s / 35.0
+        base = {
+            "ALK": alk,
+            "DIC": 0.9 * alk,
+            "NO3": np.full(s.shape, 10.0),
+            "PO4": np.full(s.shape, 1.0),
+            "SiO3": np.full(s.shape, 20.0),
+            "O2": np.full(s.shape, 200.0),
+        }
+        base["DIC"].flat[np.flatnonzero(np.isfinite(s))[-1]] *= 1.2 / 0.9
+        return {n: salt.copy(data=base[n]) for n in roms_variables}
+
+    monkeypatch.setattr(esper_module, "validate_esper_source", lambda source: None)
+    monkeypatch.setattr(esper_module, "estimate_bgc_fields", fake_estimate)
+
+
+def _max_dic_alk_ratio(ds: xr.Dataset, mask: np.ndarray, suffix: str = "") -> float:
+    """Largest DIC/ALK over wet cells (``mask`` broadcasts against the trailing dims)."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        r = ds[f"DIC{suffix}"].values / ds[f"ALK{suffix}"].values
+    return float(np.nanmax(np.where(np.broadcast_to(mask, r.shape), r, np.nan)))
+
+
+@pytest.mark.parametrize("groom", [True, False])
+def test_esper_groom_fixes_a_planted_spike_and_alt_co2_follows(monkeypatch, groom):
+    """Grooming changes the planted DIC spike (and leaves it with groom False); the
+    ALT_CO2 copies are made after grooming, so they equal the groomed DIC/ALK.
+    """
+    _mock_esper_with_dic_spike(monkeypatch)
+    ic = InitialConditions(
+        grid=_small_grid(),
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {"source": {"name": "ESPER", "groom": groom}, "use_vars": ["ALK", "DIC"]}
+        ],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+    )
+    ratio = _max_dic_alk_ratio(ic.ds, ic.grid.ds.mask_rho.values > 0)
+    if groom:
+        assert ratio <= 1.05
+    else:
+        assert ratio == pytest.approx(1.2, rel=1e-3)
+    np.testing.assert_array_equal(ic.ds["DIC_ALT_CO2"].values, ic.ds["DIC"].values)
+    np.testing.assert_array_equal(ic.ds["ALK_ALT_CO2"].values, ic.ds["ALK"].values)
+    # use_dask=False: the groomed data is in memory, not a lazy graph.
+    assert isinstance(ic.ds["DIC"].data, np.ndarray)
+
+
+@pytest.mark.parametrize("groom", [True, False])
+def test_esper_boundary_forcing_is_groomed_recorded_and_alt_co2_follows(
+    monkeypatch, groom
+):
+    from roms_tools.setup.utils import get_boundary_coords
+
+    _mock_esper_with_dic_spike(monkeypatch)
+    bf = BoundaryForcing(
+        grid=_small_grid(),
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {"source": {"name": "ESPER", "groom": groom}, "use_vars": ["ALK", "DIC"]}
+        ],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+    )
+    assert bf.bgc_sources[0]["source"]["groom"] is groom
+    ds = bf.bgc[0].ds
+    sides = [str(v)[len("DIC_") :] for v in ds.data_vars if str(v).startswith("DIC_")]
+    sides = [s for s in sides if not s.startswith("ALT")]
+    assert sides
+    mask = bf.grid.ds.mask_rho
+    ratios = {
+        side: _max_dic_alk_ratio(
+            ds, mask.isel(**get_boundary_coords()["rho"][side]).values > 0, f"_{side}"
+        )
+        for side in sides
+    }
+    if groom:
+        assert max(ratios.values()) <= 1.05, ratios
+    else:  # the spike sits on a wet boundary cell, so the groomed case is a real test
+        assert max(ratios.values()) == pytest.approx(1.2, rel=1e-3), ratios
+    for side in sides:
+        np.testing.assert_array_equal(
+            ds[f"DIC_ALT_CO2_{side}"].values, ds[f"DIC_{side}"].values
+        )
+        assert isinstance(ds[f"DIC_{side}"].data, np.ndarray)
+
+
+def test_bgc_groom_returns_one_dataset_for_initial_conditions(monkeypatch):
+    from roms_tools import bgc_groom
+
+    _mock_esper_with_dic_spike(monkeypatch)
+    ic = _esper_ic({"name": "ESPER", "path": "unused", "groom": False})
+    out = bgc_groom(ic, variables=["NO3", "PO4"])
+    assert isinstance(out, xr.Dataset)
+
+
+def test_esper_groom_survives_yaml_round_trip_and_legacy_yaml_grooms(
+    monkeypatch, tmp_path
+):
+    """``groom`` is written to the YAML and read back; a YAML from before the key
+    existed loads with grooming on and records it.
+    """
+    import yaml
+
+    _mock_esper_with_dic_spike(monkeypatch)
+    ic = _esper_ic({"name": "ESPER", "path": "unused", "groom": False})
+    path = tmp_path / "ic.yaml"
+    ic.to_yaml(path)
+    reloaded = InitialConditions.from_yaml(path, use_dask=False)
+    assert reloaded.bgc_sources[0]["source"]["groom"] is False
+
+    docs = list(yaml.safe_load_all(path.read_text()))
+    assert "groom: false" in path.read_text()
+
+    def drop_groom(node):
+        if isinstance(node, dict):
+            node.pop("groom", None)
+            for v in node.values():
+                drop_groom(v)
+        elif isinstance(node, list):
+            for v in node:
+                drop_groom(v)
+
+    drop_groom(docs)
+    legacy = tmp_path / "legacy.yaml"
+    legacy.write_text(yaml.safe_dump_all(docs, sort_keys=False))
+    assert "groom" not in legacy.read_text()
+    old = InitialConditions.from_yaml(legacy, use_dask=False)
+    assert old.bgc_sources[0]["source"]["groom"] is True

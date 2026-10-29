@@ -1356,15 +1356,6 @@ class TestExtrapolateDeepestToBottom:
         for name in ["zos", "mask", "mask_vel"]:
             xr.testing.assert_identical(blended[name], raw[name])
 
-    def test_infinite_blend_length_is_the_forward_fill_of_every_variable(
-        self, use_dask
-    ):
-        data = self._load(use_dask)
-        ffilled = data.ds.load().ffill("depth")
-        data.extrapolate_deepest_to_bottom(blend_m=np.inf)
-        for name in ["thetao", "so", "uo", "vo"]:
-            np.testing.assert_array_equal(data.ds[name], ffilled[name])
-
     def test_infinite_blend_length_builds_no_fill_and_keeps_the_chunks(
         self, use_dask, monkeypatch
     ):

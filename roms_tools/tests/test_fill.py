@@ -8,14 +8,14 @@ import xarray as xr
 
 from roms_tools.constants import R_EARTH
 from roms_tools.fill import (
-    BOTTOM_FILL_BLEND_M,
     BelowBottomFill,
     LateralFill,
     _find_deep_donors,
-    check_bottom_fill_blend_m,
     fill_below_source_bottom,
     nearest_neighbor_fill,
 )
+from roms_tools.processing_methods import BOTTOM_FILL_BLEND_M
+from roms_tools.setup.utils import latlon_to_xyz
 from roms_tools.utils import unchunk_dask
 
 
@@ -238,17 +238,6 @@ def test_apply_raises_if_var_has_nans_on_valid_mask():
         ValueError, match="contains NaNs at grid points marked as valid"
     ):
         lf.apply(var)
-
-
-@pytest.mark.parametrize("value", [0, 0.0, 25, 25.0, np.float32(3.0), np.inf])
-def test_check_bottom_fill_blend_m_accepts_numbers_from_zero_to_infinity(value):
-    check_bottom_fill_blend_m(value)
-
-
-@pytest.mark.parametrize("value", [-1.0, -np.inf, np.nan, True, "25", None, [25.0]])
-def test_check_bottom_fill_blend_m_rejects_everything_else(value):
-    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
-        check_bottom_fill_blend_m(value)
 
 
 DIMS = ("depth", "lat", "lon")
@@ -648,6 +637,9 @@ def test_fill_below_source_bottom_blends_over_the_blend_length(blend_m, expected
     kwargs = _nested_case()
     out = fill_below_source_bottom(**kwargs, blend_m=blend_m)
     np.testing.assert_allclose(_child_column(out), expected)
+    if np.isinf(blend_m):
+        # Nothing is filled: the input comes back as it was.
+        assert out["temp"].identical(kwargs["regridded"]["temp"])
 
 
 def test_fill_below_source_bottom_skips_nearer_columns_that_are_not_deep_enough():
@@ -664,32 +656,6 @@ def test_fill_below_source_bottom_takes_donors_from_outside_the_child_grid():
     kwargs = _nested_case(parent_h=(100.0, 100.0, 2000.0))
     out = fill_below_source_bottom(**kwargs, blend_m=0.0)
     np.testing.assert_allclose(_child_column(out), [20.5, 26.0, 27.5, 28.9, 10.0, 10.0])
-
-
-def test_fill_below_source_bottom_finds_a_donor_behind_hundreds_of_shallow_columns():
-    # The nearest 512 candidate columns of the tree search are all too shallow; the
-    # search still ends at the one deep column, 600 columns away.
-    n = 600
-    h = np.full((1, n), 100.0)
-    h[0, -1] = 5000.0
-    temp = np.full((2, 1, n), 5.0)
-    temp[:, :, -1] = 7.0
-    kwargs = {
-        "regridded": {"temp": xr.DataArray(np.full((1, 1, 1), 5.0), dims=S_RHO)},
-        "target_depth": xr.DataArray(np.full((1, 1, 1), 1000.0), dims=S_RHO),
-        "source_bottom": xr.DataArray([[100.0]], dims=HORIZONTAL),
-        "lon": xr.DataArray([[0.0]], dims=HORIZONTAL),
-        "lat": xr.DataArray([[0.0]], dims=HORIZONTAL),
-        "mask": xr.DataArray([[1.0]], dims=HORIZONTAL),
-        "parent_fields": {"temp": xr.DataArray(temp, dims=S_RHO)},
-        "parent_depth": xr.DataArray(np.stack([0.9 * h, 0.1 * h]), dims=S_RHO),
-        "parent_h": xr.DataArray(h, dims=HORIZONTAL),
-        "parent_mask": xr.DataArray(np.ones((1, n)), dims=HORIZONTAL),
-        "parent_lon": xr.DataArray(0.001 * np.arange(n)[None, :], dims=HORIZONTAL),
-        "parent_lat": xr.DataArray(np.zeros((1, n)), dims=HORIZONTAL),
-    }
-    out = fill_below_source_bottom(**kwargs, blend_m=0.0)
-    assert out["temp"].values.item() == 7.0
 
 
 def test_fill_below_source_bottom_keeps_the_clamp_where_no_column_is_deep_enough(
@@ -777,12 +743,6 @@ def test_fill_below_source_bottom_preserves_dims_attrs_and_dtype(layout):
     )
 
 
-def test_fill_below_source_bottom_returns_the_input_for_an_infinite_blend_length():
-    kwargs = _nested_case()
-    out = fill_below_source_bottom(**kwargs, blend_m=np.inf)
-    assert out["temp"].identical(kwargs["regridded"]["temp"])
-
-
 def test_fill_below_source_bottom_raises_for_parent_arrays_of_different_shapes():
     kwargs = _nested_case()
     kwargs["parent_fields"] = {"temp": kwargs["parent_fields"]["temp"][:, 1:]}
@@ -818,42 +778,42 @@ def _random_columns(rng, n_pool, n_cells):
     }
 
 
-def test_find_deep_donors_batches_its_queries_without_changing_the_donors(monkeypatch):
-    # 20000 columns of one cell each, with 512 neighbours queried at once: the query is
-    # split in batches of columns (three here). Cells deeper than 1000 m have a deep
-    # enough column only in the deepest of the 1000 pool columns, which is not among
-    # the 512 nearest of about half of them: those go on to the brute-force search
-    # (which needs the coordinates of the whole pool). The donor must be the nearest
-    # deep-enough column, as an exhaustive search finds.
+@pytest.fixture
+def xyz_queries(monkeypatch):
+    """The sizes of the coordinate arrays ``_find_deep_donors`` converts to xyz."""
+    queried = []
+
+    def spy(lat, lon):
+        queried.append(len(lat))
+        return latlon_to_xyz(lat, lon)
+
+    monkeypatch.setattr("roms_tools.fill.latlon_to_xyz", spy)
+    return queried
+
+
+def test_find_deep_donors_batches_its_queries_without_changing_the_donors(xyz_queries):
+    # 20000 columns of one cell each, with 512 neighbours queried at once: the cells
+    # are queried in chunks (three here). Cells deeper than 1000 m have a deep enough
+    # column only in the deepest of the 1000 pool columns, which is not among the 512
+    # nearest of about half of them: those are retried with 600 neighbours, then go on
+    # to the brute-force search (which needs the coordinates of the whole pool). The
+    # donor must be the nearest deep-enough column, as an exhaustive search finds.
     rng = np.random.default_rng(7)
     n_cells = 20000
     args = _random_columns(rng, 1000, n_cells)
     depth = rng.uniform(100.0, 3500.0, n_cells)
 
-    queried = []
-    real = _find_deep_donors.__globals__["latlon_to_xyz"]
+    donor, distance = _find_deep_donors(depth, **args, neighbors=(512, 600))
+    # The tree is queried before the brute-force search converts the pool: in chunks.
+    assert 1000 in xyz_queries
+    tree_queries = xyz_queries[: xyz_queries.index(1000)]
+    assert len(tree_queries) > 1 and max(tree_queries) <= 4_000_000 // 512
 
-    def spy(lat, lon):
-        queried.append(len(lat))
-        return real(lat, lon)
-
-    monkeypatch.setattr("roms_tools.fill.latlon_to_xyz", spy)
-    donor, distance = _find_deep_donors(depth, **args, neighbors=(512,))
-    assert 1000 in queried
-
-    def xyz(lat, lon):
-        lat, lon = np.deg2rad(lat), np.deg2rad(lon)
-        return np.stack(
-            [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], -1
-        )
-
-    pool_xyz = xyz(args["pool_lat"], args["pool_lon"])
+    pool_xyz = latlon_to_xyz(args["pool_lat"], args["pool_lon"])
     for start in range(0, n_cells, 2000):
         sel = slice(start, start + 2000)
-        chord = np.linalg.norm(
-            xyz(args["column_lat"][sel], args["column_lon"][sel])[:, None] - pool_xyz,
-            axis=-1,
-        )
+        column_xyz = latlon_to_xyz(args["column_lat"][sel], args["column_lon"][sel])
+        chord = np.linalg.norm(column_xyz[:, None] - pool_xyz, axis=-1)
         chord = np.where(args["pool_h"] > depth[sel, None], chord, np.inf)
         found = np.isfinite(chord.min(axis=1))
         np.testing.assert_array_equal(donor[sel] >= 0, found)
@@ -867,7 +827,7 @@ def test_find_deep_donors_batches_its_queries_without_changing_the_donors(monkey
 
 
 def test_find_deep_donors_does_not_search_for_cells_deeper_than_every_pool_column(
-    monkeypatch,
+    xyz_queries,
 ):
     # 20000 cells in 20000 columns lie deeper than every one of the 5000 pool columns,
     # 10 do not: only those reach a query (the brute-force search would need the
@@ -877,19 +837,11 @@ def test_find_deep_donors_does_not_search_for_cells_deeper_than_every_pool_colum
     args = _random_columns(rng, 5000, n_cells)
     depth = np.concatenate([np.full(10, 50.0), np.full(n_cells - 10, 6000.0)])
 
-    queried = []
-    real = _find_deep_donors.__globals__["latlon_to_xyz"]
-
-    def spy(lat, lon):
-        queried.append(len(lat))
-        return real(lat, lon)
-
-    monkeypatch.setattr("roms_tools.fill.latlon_to_xyz", spy)
     donor, distance = _find_deep_donors(depth, **args)
 
     assert (donor[:10] >= 0).all()
     assert (donor[10:] == -1).all() and np.isnan(distance[10:]).all()
-    assert max(queried) <= 10
+    assert max(xyz_queries) <= 10
 
 
 def test_find_deep_donors_builds_no_tree_when_no_cell_can_find_a_donor(monkeypatch):

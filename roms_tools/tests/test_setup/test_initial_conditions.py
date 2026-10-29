@@ -17,7 +17,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     GLODAPv2BGCDataset,
     UnifiedBGCDataset,
 )
-from roms_tools.fill import BOTTOM_FILL_BLEND_M
+from roms_tools.processing_methods import BOTTOM_FILL_BLEND_M
 from roms_tools.setup.initial_conditions import _set_required_vars
 from roms_tools.setup.utils import latlon_to_xyz
 from roms_tools.tests.glodap_test_utils import write_synthetic_glodap
@@ -1695,22 +1695,9 @@ def test_bottom_fill_blend_m_reaches_the_glodap_bgc_fill(
     monkeypatch.setattr(GLODAPv2BGCDataset, "extrapolate_deepest_to_bottom", record)
 
     glodap_dir = write_synthetic_glodap(tmp_path / "glodap")
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,
-        theta_s=5.0,
-        theta_b=2.0,
-        hc=250.0,
-    )
     kwargs = {} if blend_m is None else {"bottom_fill_blend_m": blend_m}
     InitialConditions(
-        grid=grid,
+        grid=_ic_grid(),
         ini_time=datetime(2021, 6, 29),
         source={
             "name": "GLORYS",

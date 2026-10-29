@@ -1,7 +1,9 @@
 """Unit tests for the shared prefill helpers (no I/O, no source data)."""
 
+import numpy as np
 import pytest
 
+from roms_tools.processing_methods import validate_bottom_fill_blend_m
 from roms_tools.regrid import _xesmf_extrap_kwargs
 from roms_tools.setup.utils import (
     PREFILL_ALLOWED_KWARGS,
@@ -143,3 +145,14 @@ class TestValidateExtrap:
     def test_nearest_s2d_rejects_kwargs(self):
         with pytest.raises(ValueError, match="not valid for extrap_method"):
             validate_extrap("nearest_s2d", {"num_src_pnts": 4})
+
+
+class TestValidateBottomFillBlendM:
+    @pytest.mark.parametrize("value", [0, 0.0, 25, 25.0, np.float32(3.0), np.inf])
+    def test_accepts_numbers_from_zero_to_infinity(self, value):
+        validate_bottom_fill_blend_m(value)
+
+    @pytest.mark.parametrize("value", [-1.0, -np.inf, np.nan, True, "25", None, [25.0]])
+    def test_rejects_everything_else(self, value):
+        with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+            validate_bottom_fill_blend_m(value)

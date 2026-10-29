@@ -18,14 +18,15 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCDataset,
     WOABGCDataset,
 )
-from roms_tools.fill import BOTTOM_FILL_BLEND_M, check_bottom_fill_blend_m
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.processing_methods import (
     BGC_INTERPOLATION_METHODS,
+    BOTTOM_FILL_BLEND_M,
     BgcInterpMethod,
     RegridConfig,
     _xesmf_available,
     resolve_bgc_interp_method,
+    validate_bottom_fill_blend_m,
 )
 from roms_tools.regrid import (
     VerticalRegrid,
@@ -1087,7 +1088,7 @@ class BoundaryForcingSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
-        check_bottom_fill_blend_m(self.bottom_fill_blend_m)
+        validate_bottom_fill_blend_m(self.bottom_fill_blend_m)
 
         # -------------------------------------------------------
         # Source configuration checks

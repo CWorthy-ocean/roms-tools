@@ -21,13 +21,14 @@ from roms_tools.datasets.lat_lon_datasets import (
     WOABGCDataset,
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
-from roms_tools.fill import (
-    BOTTOM_FILL_BLEND_M,
-    check_bottom_fill_blend_m,
-    fill_below_source_bottom,
-)
+from roms_tools.fill import fill_below_source_bottom
 from roms_tools.plot import plot
-from roms_tools.processing_methods import RegridConfig, _xesmf_available
+from roms_tools.processing_methods import (
+    BOTTOM_FILL_BLEND_M,
+    RegridConfig,
+    _xesmf_available,
+    validate_bottom_fill_blend_m,
+)
 from roms_tools.regrid import (
     LateralRegridFromROMS,
     VerticalRegrid,
@@ -1066,7 +1067,7 @@ class InitialConditionsSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
-        check_bottom_fill_blend_m(self.bottom_fill_blend_m)
+        validate_bottom_fill_blend_m(self.bottom_fill_blend_m)
 
     def _get_data(
         self, forcing_type=Literal["physics", "bgc"]

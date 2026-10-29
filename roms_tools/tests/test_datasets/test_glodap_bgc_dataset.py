@@ -10,7 +10,7 @@ import pytest
 import xarray as xr
 
 from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
-from roms_tools.fill import BOTTOM_FILL_BLEND_M
+from roms_tools.processing_methods import BOTTOM_FILL_BLEND_M
 from roms_tools.setup.utils import compute_in_situ_density
 from roms_tools.tests.glodap_test_utils import write_synthetic_glodap
 

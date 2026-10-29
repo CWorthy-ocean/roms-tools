@@ -13,6 +13,8 @@ representation, and the :class:`RegridConfig` model is built behind the construc
 """
 
 import logging
+import math
+import numbers
 import warnings
 from enum import StrEnum
 
@@ -166,6 +168,31 @@ def validate_extrap(extrap_method: str | None, extrap_kwargs: dict | None) -> No
         raise ValueError(
             f"extrap_kwargs {sorted(extra)} are not valid for "
             f"extrap_method={str(method)!r}. Allowed keys: {allowed_keys_str}."
+        )
+
+
+#: Default blend length (m) below the source bottom: over this depth a tracer goes from
+#: the column's own bottom value to the value of the nearest source column that has
+#: water at that depth.
+BOTTOM_FILL_BLEND_M = 25.0
+
+
+def validate_bottom_fill_blend_m(value) -> None:
+    """Raise ``ValueError`` unless ``value`` is a real number >= 0 (``inf`` allowed).
+
+    Parameters
+    ----------
+    value : float
+        The ``bottom_fill_blend_m`` option to validate.
+    """
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, numbers.Real)
+        or math.isnan(value)
+        or value < 0
+    ):
+        raise ValueError(
+            f"`bottom_fill_blend_m` must be a number >= 0 (inf allowed), got {value!r}."
         )
 
 

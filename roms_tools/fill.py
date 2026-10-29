@@ -1,5 +1,4 @@
 import logging
-import numbers
 
 import numpy as np
 import pyamg
@@ -8,30 +7,6 @@ from scipy import sparse
 
 from roms_tools.constants import R_EARTH
 from roms_tools.setup.utils import build_kdtree_from_latlon, latlon_to_xyz
-
-# Default blend length (m) below the source bottom: over this depth a tracer goes from
-# the column's own bottom value to the value of the nearest source column that has
-# water at that depth.
-BOTTOM_FILL_BLEND_M = 25.0
-
-
-def check_bottom_fill_blend_m(value) -> None:
-    """Raise ``ValueError`` unless ``value`` is a real number >= 0 (``inf`` allowed).
-
-    Parameters
-    ----------
-    value : float
-        The ``bottom_fill_blend_m`` option to validate.
-    """
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, numbers.Real)
-        or np.isnan(value)
-        or value < 0
-    ):
-        raise ValueError(
-            f"`bottom_fill_blend_m` must be a number >= 0 (inf allowed), got {value!r}."
-        )
 
 
 class LateralFill:
@@ -492,6 +467,18 @@ def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArra
     return da
 
 
+def _own_weight(dz: np.ndarray, blend_m: float) -> np.ndarray:
+    """Weight of a cell's own value, ``dz`` metres below its source's bottom.
+
+    ``w = clip(1 - dz / blend_m, 0, 1)``: 1 at the bottom, 0 from ``blend_m`` below it,
+    and 0 throughout for ``blend_m = 0``, where the donor's value is taken right below
+    the bottom. The donor's weight is ``1 - w``.
+    """
+    if blend_m == 0:
+        return np.zeros_like(dz, dtype=float)
+    return np.clip(1.0 - dz / blend_m, 0.0, 1.0)
+
+
 class BelowBottomFill:
     """Fill the cells below a source column's bottom from the nearest column with water.
 
@@ -606,10 +593,7 @@ class BelowBottomFill:
             # Cells above their column's deepest water (gaps inside a column) take
             # the donor's value outright.
             dz = depth[k] - depth[bottom[cells]]
-            if self.blend_m == 0:
-                weight = np.zeros(cells.size)
-            else:
-                weight = np.where(dz > 0, np.clip(1.0 - dz / self.blend_m, 0.0, 1.0), 0)
+            weight = np.where(dz > 0, _own_weight(dz, self.blend_m), 0.0)
             self._levels.append((k, cells, wet_k[nearest], weight))
         if distance:
             distance = np.concatenate(distance)
@@ -772,7 +756,6 @@ def fill_below_source_bottom(
     n_tgt, ny, nx = tdepth.shape
     pdepth = _single_record(parent_depth, dims)
     n_src = pdepth.shape[0]
-    pfields = {name: _single_record(f, dims) for name, f in parent_fields.items()}
     parent_2d = {
         name: da.transpose(*dims[1:]).values
         for name, da in (
@@ -782,7 +765,11 @@ def fill_below_source_bottom(
             ("lon", parent_lon),
         )
     }
-    mismatched = [n for n, f in pfields.items() if f.shape != pdepth.shape]
+    mismatched = [
+        n
+        for n, f in parent_fields.items()
+        if tuple(f.sizes.get(d) for d in dims) != pdepth.shape
+    ]
     mismatched += [n for n, a in parent_2d.items() if a.shape != pdepth.shape[1:]]
     if mismatched:
         raise ValueError(
@@ -791,7 +778,6 @@ def fill_below_source_bottom(
         )
     parent_2d = {name: a.ravel() for name, a in parent_2d.items()}
     profiles = pdepth.reshape(n_src, -1)
-    pfields = {name: f.reshape(n_src, -1) for name, f in pfields.items()}
 
     # Wet target cells below the parent bottom (NaN compares False).
     k, j, i = np.nonzero((tdepth > bottom) & wet)
@@ -849,21 +835,17 @@ def fill_below_source_bottom(
 
     # Blend from the clamped value at the parent bottom to the donor's value, one
     # tracer at a time.
-    weight = np.ones(cells.size) if blend_m == 0 else np.clip(dz / blend_m, 0.0, 1.0)
+    own = _own_weight(dz, blend_m)
     filled = {}
     for name, field in regridded.items():
-        value = np.empty(cells.size)
-        for start in range(0, cells.size, 50_000):
-            sel = slice(start, start + 50_000)
-            column_values = pfields[name][:, donor[sel]]
-            low = np.take_along_axis(column_values, deeper[sel][None], 0)[0]
-            high = np.take_along_axis(column_values, shallower[sel][None], 0)[0]
-            value[sel] = low + frac[sel] * (high - low)
+        pf = _single_record(parent_fields[name], dims).reshape(n_src, -1)
+        low, high = pf[deeper, donor], pf[shallower, donor]
+        value = low + frac * (high - low)
         target = field.transpose(..., *dims)
         out = np.array(target.values, order="C", copy=True)
         flat = out.reshape(-1, n_tgt * ny * nx)
         clamped = flat[:, cells]
-        blended = weight * value + (1.0 - weight) * clamped
+        blended = own * clamped + (1.0 - own) * value
         flat[:, cells] = np.where(np.isfinite(value), blended, clamped)
         filled[name] = target.copy(data=out).transpose(*field.dims)
     return filled
@@ -936,33 +918,27 @@ def _find_deep_donors(
     block = 4_000_000  # entries of an (columns or cells, k) array held at once
     for count in neighbors:
         k = min(count, pool_h.size)
-        # One query per column, shared by its cells, a batch of columns at a time.
-        columns, inverse = np.unique(column[todo], return_inverse=True)
-        by_column = np.argsort(inverse, kind="stable")
-        sorted_inverse = inverse[by_column]
+        # Sorted by column, a chunk of cells needs one query per distinct column.
+        todo = todo[np.argsort(column[todo], kind="stable")]
+        per_chunk = max(1, block // k)
         unresolved = []
-        per_batch = max(1, block // k)
-        for first in range(0, columns.size, per_batch):
-            batch = columns[first : first + per_batch]
+        for start in range(0, todo.size, per_chunk):
+            cells = todo[start : start + per_chunk]
+            columns, rows = np.unique(column[cells], return_inverse=True)
             chord, nearest = tree.query(
-                latlon_to_xyz(column_lat[batch], column_lon[batch]), k=k, workers=-1
+                latlon_to_xyz(column_lat[columns], column_lon[columns]), k=k, workers=-1
             )
             chord, nearest = chord.reshape(-1, k), nearest.reshape(-1, k)
-            lo, hi = np.searchsorted(sorted_inverse, [first, first + batch.size])
-            in_batch = by_column[lo:hi]
-            for start in range(0, in_batch.size, per_batch):
-                sel = in_batch[start : start + per_batch]
-                cells, rows = todo[sel], inverse[sel] - first
-                neighbor = nearest[rows]
-                deep = pool_h[neighbor] > depth[cells, None]
-                nearest_deep = deep.argmax(axis=1)
-                ok = deep.any(axis=1)
-                taken = np.arange(cells.size)
-                donor[cells[ok]] = neighbor[taken, nearest_deep][ok]
-                distance[cells[ok]] = (
-                    chord[rows][taken, nearest_deep][ok] * R_EARTH / 1000.0
-                )
-                unresolved.append(cells[~ok])
+            neighbor = nearest[rows]
+            deep = pool_h[neighbor] > depth[cells, None]
+            nearest_deep = deep.argmax(axis=1)
+            ok = deep.any(axis=1)
+            taken = np.arange(cells.size)
+            donor[cells[ok]] = neighbor[taken, nearest_deep][ok]
+            distance[cells[ok]] = (
+                chord[rows][taken, nearest_deep][ok] * R_EARTH / 1000.0
+            )
+            unresolved.append(cells[~ok])
         todo = np.concatenate(unresolved)
         # Every pool column was among the k nearest: the rest have no donor.
         if not todo.size or k >= pool_h.size:

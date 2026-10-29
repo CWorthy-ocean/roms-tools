@@ -32,13 +32,16 @@ from roms_tools.datasets.utils import (
     validate_start_end_time,
 )
 from roms_tools.fill import (
-    BOTTOM_FILL_BLEND_M,
     BelowBottomFill,
     LateralFill,
     nearest_neighbor_fill,
     one_dim_fill,
 )
-from roms_tools.processing_methods import METHOD_META, PrefillMethod
+from roms_tools.processing_methods import (
+    BOTTOM_FILL_BLEND_M,
+    METHOD_META,
+    PrefillMethod,
+)
 from roms_tools.regrid import _xesmf_extrap_kwargs
 from roms_tools.setup.utils import (
     Timed,
@@ -940,7 +943,10 @@ class LatLonDataset:
         depth_dim = self.dim_names["depth"]
         horizontal = (self.dim_names["latitude"], self.dim_names["longitude"])
         velocities = {self.var_names[v] for v in ("u", "v") if v in self.var_names}
-        fillers: list[tuple[np.ndarray, BelowBottomFill]] = []
+        fillers: dict[bytes, BelowBottomFill] = {}
+        if not np.isinf(blend_m):
+            # The fill works on whole (depth, lat, lon) blocks; a copy-down needs none.
+            self.ds = unchunk_dask(self.ds, self.dim_names, time_chunking=False)
 
         for name in list(self.ds.data_vars):
             da = self.ds[name]
@@ -953,9 +959,9 @@ class LatLonDataset:
             # Only the first record of the 3D wet mask is computed.
             first = {d: 0 for d in da.dims if d not in (depth_dim, *horizontal)}
             wet = da.isel(first).transpose(depth_dim, *horizontal).notnull().values
-            filler = next((f for w, f in fillers if np.array_equal(w, wet)), None)
-            if filler is None:
-                filler = BelowBottomFill(
+            key = wet.tobytes()
+            if key not in fillers:
+                fillers[key] = BelowBottomFill(
                     wet,
                     self.ds[depth_dim].values,
                     self.ds[horizontal[0]].values,
@@ -963,11 +969,7 @@ class LatLonDataset:
                     dims=(depth_dim, *horizontal),
                     blend_m=blend_m,
                 )
-                fillers.append((wet, filler))
-            if da.chunks is not None:
-                # The fill works on whole (depth, lat, lon) blocks.
-                da = da.chunk({d: -1 for d in (depth_dim, *horizontal)})
-            self.ds[name] = filler.apply(da)
+            self.ds[name] = fillers[key].apply(da)
 
     def rotate_velocities_to_east_and_north(self) -> None:
         """
@@ -1853,23 +1855,17 @@ class WOABGCDataset(WOADataset):
     ) -> None:
         """Fill vertical NaN gaps downward and upward, then rebuild the mask.
 
-        Below a column's bottom and in interior gaps a cell takes the same-depth fill
-        of :meth:`LatLonDataset.extrapolate_deepest_to_bottom` (see
-        :class:`~roms_tools.fill.BelowBottomFill`). NaN above the data takes the
-        shallowest value below it. A plain forward fill is not enough: WOA can be NaN
-        at the surface where deeper data exist, and coverage differs between
-        variables, so the mask built from the first tracer can mark a cell as ocean
-        where another tracer is NaN. The mask is therefore rebuilt after the fill.
-        This mirrors :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
+        Downward this is :meth:`LatLonDataset.extrapolate_deepest_to_bottom`; NaN above
+        the data then takes the shallowest value below it. WOA can be NaN at the
+        surface where deeper data exist, and coverage differs between variables, so
+        the mask built from the first tracer can mark a cell as ocean where another
+        tracer is NaN. The mask is therefore rebuilt after the fill. This mirrors
+        :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
 
         Parameters
         ----------
         blend_m : float, optional
-            Depth (m) below a column's bottom over which a cell goes from the column's
-            own deepest value to the nearest same-depth column's value; ``0`` takes the
-            nearest column's value immediately and ``inf`` reproduces the plain
-            forward-then-backward fill along depth. Defaults to
-            ``BOTTOM_FILL_BLEND_M``.
+            See :meth:`LatLonDataset.extrapolate_deepest_to_bottom`.
         """
         if "depth" not in self.dim_names:
             return
@@ -2522,27 +2518,19 @@ class GLODAPv2Dataset(LatLonDataset):
     ) -> None:
         """Fill the vertical NaN gaps of the sparse GLODAP grid, then rebuild the mask.
 
-        Below a column's bottom and in interior gaps a cell takes the same-depth fill
-        of :meth:`LatLonDataset.extrapolate_deepest_to_bottom` (see
-        :class:`~roms_tools.fill.BelowBottomFill`). That alone is not enough for
-        GLODAP: a variable can be NaN at the surface even when data exists at a
+        Downward this is :meth:`LatLonDataset.extrapolate_deepest_to_bottom`; a
+        backward (upward) fill then gives NaN above the data the shallowest value
+        below it. A variable can be NaN at the surface even when data exists at a
         deeper level, or two variables can have different surface coverage so the
         mask (built from the first variable) marks a cell as ocean while a second
-        variable has NaN there.
-
-        This override therefore adds a backward (upward) fill after the same-depth
-        fill, so that NaN above the data takes the shallowest value below it. The
-        mask is then rebuilt from the first non-mask variable at depth=0 so that
-        apply_lateral_fill() never encounters NaN values at ocean grid points.
+        variable has NaN there. The mask is therefore rebuilt from the first non-mask
+        variable at depth=0 so that apply_lateral_fill() never encounters NaN values
+        at ocean grid points.
 
         Parameters
         ----------
         blend_m : float, optional
-            Depth (m) below a column's bottom over which a cell goes from the column's
-            own deepest value to the nearest same-depth column's value; ``0`` takes the
-            nearest column's value immediately and ``inf`` reproduces the plain
-            forward-then-backward fill along depth. Defaults to
-            ``BOTTOM_FILL_BLEND_M``.
+            See :meth:`LatLonDataset.extrapolate_deepest_to_bottom`.
         """
         if "depth" not in self.dim_names:
             return

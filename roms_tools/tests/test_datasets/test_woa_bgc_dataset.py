@@ -14,7 +14,7 @@ import xarray as xr
 
 from roms_tools.datasets.download import WOA23_BGC_VARIABLES, woa23_filename
 from roms_tools.datasets.lat_lon_datasets import WOABGCDataset
-from roms_tools.fill import BOTTOM_FILL_BLEND_M
+from roms_tools.processing_methods import BOTTOM_FILL_BLEND_M
 from roms_tools.setup.utils import compute_in_situ_density
 
 # The WOA standard depth levels. The 43- and 57-level monthly axes are exact leading
@@ -26,9 +26,11 @@ STANDARD_DEPTHS = (
     + list(range(2100, 5600, 100))
 )
 
-#: Deepest monthly level per variable code: 800 m for the nutrients, 1500 m for
-#: oxygen and T/S. Only the annual field reaches 5500 m.
+#: Deepest monthly level per variable code, as a number of levels and as a depth (m):
+#: 800 m for the nutrients, 1500 m for oxygen and T/S. Only the annual field reaches
+#: 5500 m.
 MONTHLY_LEVELS = {"n": 43, "p": 43, "i": 43, "o": 57, "t": 57, "s": 57}
+MONTHLY_BOTTOM = {c: float(STANDARD_DEPTHS[n - 1]) for c, n in MONTHLY_LEVELS.items()}
 
 #: Rough umol/kg magnitudes, so the unit conversion is visible in the output.
 BASE_VALUE = {"n": 20.0, "p": 1.5, "i": 40.0, "o": 200.0, "t": 12.0, "s": 34.5}
@@ -249,13 +251,9 @@ def test_temperature_and_salinity_are_left_unconverted(woa_data):
     assert got == pytest.approx(expected_profile("t", 1, 1)[0], rel=1e-5)
 
 
-@pytest.mark.parametrize(
-    ("code", "seam"),
-    [("t_an", 1500.0), ("n_an", 800.0)],
-    ids=["ts_1500m", "nutrient_800m"],
-)
+@pytest.mark.parametrize("code", ["t_an", "n_an"], ids=["ts_1500m", "nutrient_800m"])
 def test_annual_blend_is_pure_monthly_above_and_pure_annual_below_the_band(
-    woa_dir, code, seam
+    woa_dir, code
 ):
     """The taper band is centred on each variable's own deepest monthly level.
 
@@ -274,6 +272,7 @@ def test_annual_blend_is_pure_monthly_above_and_pure_annual_below_the_band(
     z = data.ds.depth.values
     profile = data.ds[code].isel(time=0, **OCEAN_POINT).values
     letter = code[0]
+    seam = MONTHLY_BOTTOM[letter]
 
     nlev = MONTHLY_LEVELS[letter]
     monthly = expected_profile(letter, 1, nlev)
@@ -372,12 +371,12 @@ SHORT_MONTHLY = (0, 3)  # monthly data only down to 100 m, annual data at every 
 SHORT_ANNUAL = (2, 4)  # annual data only down to 300 m, monthly data to its own bottom
 SURFACE_GAP = (0, 5)  # no data above 10 m
 LAND = (2, 5)
+WET = np.ones((COLUMN_LAT.size, COLUMN_LON.size), dtype=bool)  # every column but LAND
+WET[LAND] = False
 T_HOLE = (1, 4)  # no temperature at 500 m, though every tracer has data there
 HOLE_DEPTH = 500.0
 #: The columns next to SHALLOW and SHORT_ANNUAL, which have water at every level.
 NEAR_SHALLOW, NEAR_SHORT_ANNUAL = (1, 1), (2, 3)
-#: Deepest monthly level of each tracer, which SHORT_ANNUAL's data ends at.
-MONTHLY_BOTTOM = {"n_an": 800.0, "o_an": 1500.0}
 
 
 def _shape_columns(code, period, values, z):
@@ -447,11 +446,9 @@ def _old_annual_blend(directory, code, halfwidth=100.0):
     return _in_order(old), _in_order(has_data)
 
 
-@pytest.mark.parametrize(
-    ("code", "monthly_bottom"), [("n", 800.0), ("t", 1500.0)], ids=["n", "t"]
-)
+@pytest.mark.parametrize("code", ["n", "t"])
 def test_annual_blend_leaves_nan_below_the_seafloor_of_both_fields(
-    woa_dir_columns, use_dask, code, monthly_bottom
+    woa_dir_columns, use_dask, code
 ):
     """Where the annual and the monthly field both lack data the spliced field is NaN
     (it used to hold a copy of the monthly deepest value); every cell where either has
@@ -471,11 +468,23 @@ def test_annual_blend_leaves_nan_below_the_seafloor_of_both_fields(
         return np.isfinite(got[:, :, column[0], column[1]]).all(axis=0)
 
     np.testing.assert_array_equal(present(SHALLOW), z <= 50.0)
-    np.testing.assert_array_equal(present(SHORT_ANNUAL), z <= monthly_bottom)
+    np.testing.assert_array_equal(present(SHORT_ANNUAL), z <= MONTHLY_BOTTOM[code])
     assert present(SHORT_MONTHLY).all()  # the annual field reaches the seafloor
     assert not np.isfinite(got[:, :, LAND[0], LAND[1]]).any()
     if code == "t":
         np.testing.assert_array_equal(present(T_HOLE), z != HOLE_DEPTH)
+
+
+def _expected_fill(before, z, bottom, column, donor, blend_m):
+    """The cells of ``column`` below level ``bottom`` once filled, and its own value
+    there: the own value blended into the same-depth value of ``donor`` over ``blend_m``
+    (``0`` takes the donor's value at once).
+    """
+    own = before[:, bottom, column[0], column[1]][:, None]
+    dz = z[bottom + 1 :] - z[bottom]
+    weight = np.zeros_like(dz) if blend_m == 0 else np.clip(1.0 - dz / blend_m, 0, 1)
+    donor_values = before[:, bottom + 1 :, donor[0], donor[1]]
+    return weight * own + (1.0 - weight) * donor_values, own
 
 
 @pytest.mark.parametrize("blend_m", [0.0, BOTTOM_FILL_BLEND_M])
@@ -499,20 +508,14 @@ def test_cells_below_the_seafloor_take_the_nearest_columns_value_at_that_depth(
     after = _in_order(data.ds[name])
 
     z = data.ds["depth"].values
-    bottom_depth = 50.0 if column == SHALLOW else MONTHLY_BOTTOM[name]
+    bottom_depth = 50.0 if column == SHALLOW else MONTHLY_BOTTOM[name[0]]
     bottom = int(np.flatnonzero(z <= bottom_depth)[-1])
-    below = slice(bottom + 1, None)
 
-    own = before[:, bottom, column[0], column[1]][:, None]
-    neighbour = before[:, below, donor[0], donor[1]]
-    dz = z[below] - z[bottom]
-    weight = np.zeros_like(dz) if blend_m == 0 else np.clip(1.0 - dz / blend_m, 0, 1)
-    expected = weight * own + (1.0 - weight) * neighbour
-    np.testing.assert_allclose(
-        after[:, below, column[0], column[1]], expected, rtol=1e-6
-    )
+    expected, own = _expected_fill(before, z, bottom, column, donor, blend_m)
+    filled = after[:, bottom + 1 :, column[0], column[1]]
+    np.testing.assert_allclose(filled, expected, rtol=1e-6)
     # Not the deepest value copied down, which is what the blend starts from.
-    assert not np.allclose(after[:, below, column[0], column[1]], own)
+    assert not np.allclose(filled, own)
     # The cells above the seafloor, and every other column, are untouched.
     unchanged = np.isfinite(before)
     np.testing.assert_array_equal(after[unchanged], before[unchanged])
@@ -526,14 +529,12 @@ def test_no_nan_is_left_in_a_column_with_water(woa_dir_columns, use_dask):
     data = _load_columns(woa_dir_columns, use_dask, apply_post_processing=True)
     data.extrapolate_deepest_to_bottom()
 
-    wet = np.ones((COLUMN_LAT.size, COLUMN_LON.size), dtype=bool)
-    wet[LAND] = False
     for name in data.ds.data_vars:
         if name.startswith("mask"):
             continue
         values = _in_order(data.ds[name])
-        assert np.isfinite(values[:, :, wet]).all(), name
-        assert np.isnan(values[:, :, ~wet]).all(), name
+        assert np.isfinite(values[:, :, WET]).all(), name
+        assert np.isnan(values[:, :, ~WET]).all(), name
 
 
 def test_infinite_blend_reproduces_the_forward_then_backward_fill(
@@ -569,7 +570,7 @@ def test_ffill_mode_masks_cells_below_the_seafloor_of_both_fields(
     """
     data = _load_columns(woa_dir_columns, use_dask, deep_fill="ffill")
     z = data.ds["depth"].values
-    for code, monthly_bottom in (("n", 800.0), ("t", 1500.0)):
+    for code in ("n", "t"):
         monthly, annual = _read_raw(woa_dir_columns, code)
         on_annual_axis = monthly.reindex(depth=annual["depth"])
         expected = _in_order(on_annual_axis.ffill("depth"))
@@ -586,7 +587,7 @@ def test_ffill_mode_masks_cells_below_the_seafloor_of_both_fields(
         )
         # A column with water to the bottom still holds the deepest monthly value
         # below the monthly depth limit.
-        limit = int(np.flatnonzero(z == monthly_bottom)[0])
+        limit = int(np.flatnonzero(z == MONTHLY_BOTTOM[code])[0])
         deep = got[:, :, NEAR_SHALLOW[0], NEAR_SHALLOW[1]]
         assert (deep[:, limit + 1 :] == deep[:, [limit]]).all()
 
@@ -595,20 +596,13 @@ def test_ffill_mode_masks_cells_below_the_seafloor_of_both_fields(
     after = _in_order(data.ds["n_an"])
 
     bottom = int(np.flatnonzero(z == 50.0)[0])
-    below = slice(bottom + 1, None)
-    column, donor = SHALLOW, NEAR_SHALLOW
-    own = before[:, bottom, column[0], column[1]][:, None]
-    neighbour = before[:, below, donor[0], donor[1]]
-    weight = np.clip(1.0 - (z[below] - z[bottom]) / BOTTOM_FILL_BLEND_M, 0.0, 1.0)
-    np.testing.assert_allclose(
-        after[:, below, column[0], column[1]],
-        weight * own + (1.0 - weight) * neighbour,
-        rtol=1e-6,
+    expected, own = _expected_fill(
+        before, z, bottom, SHALLOW, NEAR_SHALLOW, BOTTOM_FILL_BLEND_M
     )
-    assert not np.allclose(after[:, below, column[0], column[1]], own)
-    wet = np.ones((COLUMN_LAT.size, COLUMN_LON.size), dtype=bool)
-    wet[LAND] = False
-    assert np.isfinite(after[:, :, wet]).all()
+    filled = after[:, bottom + 1 :, SHALLOW[0], SHALLOW[1]]
+    np.testing.assert_allclose(filled, expected, rtol=1e-6)
+    assert not np.allclose(filled, own)
+    assert np.isfinite(after[:, :, WET]).all()
 
 
 def test_mask_is_rebuilt_after_the_fill(woa_dir_columns, use_dask):
@@ -623,12 +617,10 @@ def test_mask_is_rebuilt_after_the_fill(woa_dir_columns, use_dask):
     )
     data.extrapolate_deepest_to_bottom()
 
-    expected = np.ones((COLUMN_LAT.size, COLUMN_LON.size), dtype=int)
-    expected[LAND] = 0
-    np.testing.assert_array_equal(data.ds["mask"].values, expected)
+    np.testing.assert_array_equal(data.ds["mask"].values, WET)
     for name in data.var_names.values():
         surface = _in_order(data.ds[name])[:, 0]
-        assert np.isfinite(surface[:, expected == 1]).all(), name
+        assert np.isfinite(surface[:, WET]).all(), name
 
 
 def test_a_tracer_with_nan_temperature_gets_the_mean_density_of_its_level(

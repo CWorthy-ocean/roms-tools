@@ -389,24 +389,15 @@ def _groom_checks(variables: list[str], ds_vars: Iterable[str]) -> dict:
     return checks
 
 
-def groom_esper_initial_conditions(
-    ds: xr.Dataset, grid: Any, bgc: Iterable[Any]
-) -> xr.Dataset:
-    """Lazily groom the ESPER-derived tracers of a merged initial-conditions dataset."""
-    variables = _groomed_esper_vars(bgc, ds.data_vars)
-    if not variables:
-        return ds
-    from roms_tools.setup.bgc_groom import bgc_groom
-
-    return bgc_groom(
-        ds, grid, checks=_groom_checks(variables, ds.data_vars), variables=variables
-    )
-
-
-def groom_esper_boundary(
+def groom_esper_companion(
     companion: Any, grid: Any, physics_ds: xr.Dataset
 ) -> xr.Dataset:
-    """Lazily groomed copy of one ESPER boundary source's dataset (unchanged if off)."""
+    """Lazily groomed copy of one ESPER companion's dataset (unchanged if off), for
+    initial conditions or boundary forcing; ``physics_ds`` supplies salt and temp.
+
+    Call it before ``process_bgc_fields``, so the tracers that model derives from DIC
+    and ALK (``DIC_ALT_CO2``, ``ALK_ALT_CO2``) are copied from the groomed values.
+    """
     variables = _groomed_esper_vars([companion], companion.ds.data_vars)
     if not variables:
         return companion.ds

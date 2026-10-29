@@ -1913,7 +1913,6 @@ def test_esper_groom_is_on_by_default_and_recorded(monkeypatch):
     _mock_estimate_bgc_fields(monkeypatch)
     source = {"name": "ESPER", "path": "unused"}
     ic = _esper_ic(source)
-    assert "bgc_groom" in ic.ds.attrs
     assert "bgc_groom" in ic.ds["NO3"].attrs
     assert ic.bgc_sources[0]["source"]["groom"] is True  # recorded for the YAML
     assert "groom" not in source  # the caller's dict is not modified
@@ -1922,7 +1921,6 @@ def test_esper_groom_is_on_by_default_and_recorded(monkeypatch):
 def test_esper_groom_false_leaves_fields_untouched(monkeypatch):
     _mock_estimate_bgc_fields(monkeypatch)
     ic = _esper_ic({"name": "ESPER", "path": "unused", "groom": False})
-    assert "bgc_groom" not in ic.ds.attrs
     assert "bgc_groom" not in ic.ds["NO3"].attrs
 
 

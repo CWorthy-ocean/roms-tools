@@ -2006,7 +2006,7 @@ class InitialConditions:
         if self.bgc_source is not None:
             bgc_sources = [{"source": self.bgc_source, "use_vars": self.use_vars}]
         from roms_tools.setup.esper import (
-            groom_esper_initial_conditions,
+            groom_esper_companion,
             with_esper_groom_default,
         )
 
@@ -2065,13 +2065,15 @@ class InitialConditions:
                 shared_kwargs,
                 type_="bgc",
             )
+            # Groom before process_bgc_fields, which copies DIC/ALK to *_ALT_CO2.
+            for b in self.bgc:
+                b.ds = groom_esper_companion(b, self.grid, self.physics.ds)
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
 
         if self.bgc:
             self.ds = InitialConditionsSource.merge(self.physics, self.bgc)
-            self.ds = groom_esper_initial_conditions(self.ds, self.grid, self.bgc)
         else:
             self.ds = self.physics.ds
 

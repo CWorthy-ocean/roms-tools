@@ -1964,7 +1964,7 @@ class BoundaryForcing:
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
         from roms_tools.setup.esper import (
-            groom_esper_boundary,
+            groom_esper_companion,
             with_esper_groom_default,
         )
 
@@ -2020,9 +2020,10 @@ class BoundaryForcing:
                 shared_kwargs,
                 type_="bgc",
             )
-            self.bgc_model().process_bgc_fields(self.bgc)
+            # Groom before process_bgc_fields, which copies DIC/ALK to *_ALT_CO2.
             for b in self.bgc:
-                b.ds = groom_esper_boundary(b, self.grid, self.physics.ds)
+                b.ds = groom_esper_companion(b, self.grid, self.physics.ds)
+            self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
 

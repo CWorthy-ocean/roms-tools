@@ -1313,3 +1313,84 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
     # even though the data are effectively identical.
     # For grids that do not straddle the 180° meridian, strict equality still holds.
     xr.testing.assert_allclose(bigger_regional_data.ds, regional_data.ds)
+
+
+class TestExtrapolateDeepestToBottom:
+    """Filling the cells below each source column's bottom."""
+
+    @staticmethod
+    def _load(use_dask):
+        """The GLORYS test data on five of its levels (NaN below the bottoms)."""
+        data = GLORYSDataset(
+            filename=download_test_data("GLORYS_test_data.nc"),
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2013, 1, 1),
+            use_dask=use_dask,
+        )
+        object.__setattr__(data, "ds", data.ds.isel(depth=[0, 10, 20, 30, 40]))
+        return data
+
+    def test_tracers_take_neighbouring_water_and_velocities_copy_down(self, use_dask):
+        raw = self._load(use_dask).ds.load()
+        ffilled = raw.ffill("depth")
+        blended = self._load(use_dask)
+        blended.extrapolate_deepest_to_bottom()
+        blended = blended.ds.load()
+
+        # Velocities copy each column's deepest value down, like a forward fill.
+        for name in ["uo", "vo"]:
+            np.testing.assert_array_equal(blended[name], ffilled[name])
+        # Tracers fill exactly the cells a forward fill does (so land stays NaN), leave
+        # the cells with data alone and take other values below the bottoms.
+        for name in ["thetao", "so"]:
+            np.testing.assert_array_equal(
+                blended[name].isnull(), ffilled[name].isnull()
+            )
+            has_data = raw[name].notnull()
+            np.testing.assert_array_equal(
+                blended[name].where(has_data), raw[name].where(has_data)
+            )
+            filled = ~has_data & blended[name].notnull()
+            assert ((blended[name] != ffilled[name]) & filled).any()
+        # Variables without a depth dimension and the masks are untouched.
+        for name in ["zos", "mask", "mask_vel"]:
+            xr.testing.assert_identical(blended[name], raw[name])
+
+    def test_infinite_blend_length_is_the_forward_fill_of_every_variable(
+        self, use_dask
+    ):
+        data = self._load(use_dask)
+        ffilled = data.ds.load().ffill("depth")
+        data.extrapolate_deepest_to_bottom(blend_m=np.inf)
+        for name in ["thetao", "so", "uo", "vo"]:
+            np.testing.assert_array_equal(data.ds[name], ffilled[name])
+
+    def test_infinite_blend_length_builds_no_fill_and_keeps_the_chunks(
+        self, use_dask, monkeypatch
+    ):
+        # A copy-down needs no wet mask, donor map or rechunking: every variable takes
+        # the plain forward fill, which stays lazy on dask input.
+        from roms_tools.datasets import lat_lon_datasets
+
+        built = []
+        original = lat_lon_datasets.BelowBottomFill
+
+        def counting(*args, **kwargs):
+            built.append(args)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(lat_lon_datasets, "BelowBottomFill", counting)
+        data = self._load(use_dask)
+        before = {name: data.ds[name].chunks for name in ["thetao", "so", "uo", "vo"]}
+        ffilled = data.ds.load().ffill("depth")
+
+        data = self._load(use_dask)
+        data.extrapolate_deepest_to_bottom(blend_m=np.inf)
+        assert not built
+        for name, chunks in before.items():
+            assert data.ds[name].chunks == chunks
+            np.testing.assert_array_equal(data.ds[name], ffilled[name])
+
+        # The control: a finite blend length does build the fill.
+        self._load(use_dask).extrapolate_deepest_to_bottom(blend_m=25.0)
+        assert built

@@ -1,8 +1,8 @@
 {
   "attributes": {
     "title": "ROMS boundary forcing file created by ROMS-Tools",
-    "roms_tools_version": "5.0.0",
-    "roms_tools_git_commit": "cfabd0e3-dirty",
+    "roms_tools_version": "4.0.0a3.dev6+g18150aeee.d20260702",
+    "roms_tools_git_commit": "11fcf5cb-dirty",
     "start_time": "2012-01-01 00:00:00",
     "end_time": "2012-01-02 00:00:00",
     "source": "UNIFIED",
@@ -10,6 +10,7 @@
     "prefill": "2d_lateral_fill",
     "regrid_method": "scipy",
     "extrap_method": "inverse_dist",
+    "bottom_fill_blend_m": 25.0,
     "adjust_depth_for_sea_surface_height": "False",
     "theta_s": 5.0,
     "theta_b": 2.0,

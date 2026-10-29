@@ -16,6 +16,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     UnifiedBGCDataset,
 )
+from roms_tools.fill import BOTTOM_FILL_BLEND_M
 from roms_tools.setup.initial_conditions import _set_required_vars
 from roms_tools.setup.utils import latlon_to_xyz
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
@@ -243,6 +244,7 @@ def test_wrapper_shared_knobs_reach_physics_and_companions(example_grid, use_das
         source={"path": fname, "name": "GLORYS"},
         regrid_method="scipy",
         prefill="nearest_neighbor",
+        bottom_fill_blend_m=40.0,
         use_dask=use_dask,
         bgc_sources=[
             {"source": {"name": "constants", "constants": {"NO3": 24.0}}},
@@ -253,6 +255,7 @@ def test_wrapper_shared_knobs_reach_physics_and_companions(example_grid, use_das
     for obj in (ic.physics, *ic.bgc):
         assert obj.regrid_method == "scipy"
         assert obj.prefill == "nearest_neighbor"
+        assert obj.bottom_fill_blend_m == 40.0
         assert obj.bgc_interpolation_method == ic.bgc_interpolation_method
     assert ic.physics.use_vars is None
     assert all(b.use_vars is None for b in ic.bgc)
@@ -479,15 +482,19 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
 
 
 @skip_xesmf
-def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(use_dask):
-    """A child deeper than its parent gets, below the parent's bottom, the parent's
-    bottom value blended over FILL_BLEND_M into the value at the same depth in the
-    nearest deep-enough column, not the parent's deepest value repeated down the water
-    column. Physics and BGC are checked against a brute-force donor search on an object
-    that has no cell below the parent's bottom.
+@pytest.mark.parametrize("blend_m", [None, 0.0, 100.0])
+def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(
+    use_dask, blend_m
+):
+    """A child deeper than its parent gets, below the parent's bottom, the value at the
+    same depth of the nearest native parent column that is deeper than the cell,
+    blended in from the clamped value over ``bottom_fill_blend_m`` (25 m by default),
+    not the parent's deepest value repeated down the water column. Physics and BGC are
+    checked against a brute-force search over the parent grid; the clamped values are
+    those of the same object with an infinite blend length.
     """
-    from roms_tools.fill import FILL_BLEND_M
     from roms_tools.regrid import LateralRegridFromROMS
+    from roms_tools.vertical_coordinate import compute_depth_coordinates
 
     restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     # A parent whose bottom deepens southwards, and a child that is 600 m deeper than
@@ -499,78 +506,91 @@ def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(use_
         min=300.0
     )
     source = {"name": "ROMS", "grid": parent_grid, "path": restart_file}
-    params = {"nx": 5, "ny": 5, "center_lon": -120, "center_lat": 34}
-    params |= {"size_x": 100, "size_y": 100}
-    child_grid = Grid(**params, N=30)
+    child_grid = Grid(
+        nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=30
+    )
     lat = child_grid.ds["lat_rho"]
     parent_h = 4000.0 - 1300.0 * (lat - 33.0)
     child_grid.ds["h"] = parent_h.where(lat < 34.0, parent_h + 600.0)
 
-    def build(grid):
+    def build(**kwargs):
         return InitialConditions(
-            grid=grid,
+            grid=child_grid,
             ini_time=datetime(1998, 1, 6),
             source=source,  # type: ignore
             bgc_source=source,  # type: ignore
             bgc_model=BGCMarbl,
             model_reference_date=datetime(2000, 1, 1),
             use_dask=use_dask,
+            **kwargs,
         )
 
-    ic = build(child_grid)
+    ic = build() if blend_m is None else build(bottom_fill_blend_m=blend_m)
+    blend_m = BOTTOM_FILL_BLEND_M if blend_m is None else blend_m
+    assert ic.ds.attrs["bottom_fill_blend_m"] == blend_m
+    ic_clamped = build(bottom_fill_blend_m=np.inf)
 
-    # The reference object has the parent's own levels at the child's points: its
-    # bottom is the parent bottom regridded to the child's points.
+    # The bottom of the parent is its ``h`` regridded to the child's points; its layer
+    # depths follow from its own grid and the restart's sea surface height.
     ds_in = parent_grid.ds[["h"]].rename({"lat_rho": "lat", "lon_rho": "lon"})
     target = {"lat": child_grid.ds["lat_rho"], "lon": child_grid.ds["lon_rho"]}
     bottom = LateralRegridFromROMS(ds_in, target).apply(parent_grid.ds["h"]).values
-    ref_grid = Grid(**params)
-    ref_grid.ds["h"] = (("eta_rho", "xi_rho"), bottom)
-    ic_ref = build(ref_grid)
+    parent_ds = xr.open_dataset(restart_file).isel(time=1)
+    parent_depth = compute_depth_coordinates(
+        parent_grid.ds, parent_ds["zeta"], "layer", "rho"
+    ).values
+    parent_wet = parent_grid.ds["mask_rho"].values > 0.5
+    parent_h = parent_grid.ds["h"].values
+    parent_xyz = latlon_to_xyz(
+        parent_grid.ds["lat_rho"].values.ravel(),
+        parent_grid.ds["lon_rho"].values.ravel(),
+    ).reshape(*parent_wet.shape, 3)
 
     depth = ic.physics.ds_depth_coords["layer_depth_rho"].squeeze().load().values
-    ref_depth = (
-        ic_ref.physics.ds_depth_coords["layer_depth_rho"].squeeze().load().values
-    )
     wet = child_grid.ds["mask_rho"].values > 0.5
     below = (depth > bottom) & wet
     assert below.sum() > 20
     assert not below[:, lat.values < 34.0].any()
 
-    # Brute force: the nearest wet column deeper than the deepest cell of the cell's
-    # 50 m depth bin (any of the nearest where several are equally near).
     xyz = latlon_to_xyz(lat.values.ravel(), child_grid.ds["lon_rho"].values.ravel())
     xyz = xyz.reshape(*wet.shape, 3)
-    bins = np.floor(depth / 50.0)
     for name in ["temp", "NO3"]:
         out = ic.ds[name].squeeze().values
-        ref = ic_ref.ds[name].squeeze().values
+        clamped = ic_clamped.ds[name].squeeze().values
+        field = parent_ds[name].values
         assert np.isfinite(out).all()
+        # Everything that is not below the parent's bottom keeps the clamped value.
+        np.testing.assert_array_equal(out[~below], clamped[~below])
+
+        # Brute force: the nearest wet parent column deeper than the cell (any of the
+        # nearest where several are equally near), the parent's value at that depth in
+        # the column's layer depths, blended in over the blend length.
         for k, j, i in zip(*np.nonzero(below), strict=True):
-            eligible = wet & (bottom > depth[below & (bins == bins[k, j, i])].max())
+            eligible = parent_wet & (parent_h > depth[k, j, i])
             distance = np.where(
-                eligible, np.linalg.norm(xyz - xyz[j, i], axis=-1), np.inf
+                eligible, np.linalg.norm(parent_xyz - xyz[j, i], axis=-1), np.inf
             )
+            assert eligible.any()
             nearest = np.argwhere(distance <= distance.min() * (1 + 1e-6))
-            blend = min((depth[k, j, i] - bottom[j, i]) / FILL_BLEND_M, 1.0)
+            dz = depth[k, j, i] - bottom[j, i]
+            weight = 1.0 if blend_m == 0 else min(dz / blend_m, 1.0)
             expected = [
-                ref[0, j, i]
-                + blend
-                * (
-                    np.interp(depth[k, j, i], ref_depth[::-1, a, b], ref[::-1, a, b])
-                    - ref[0, j, i]
-                )
+                weight
+                * np.interp(depth[k, j, i], parent_depth[::-1, a, b], field[::-1, a, b])
+                + (1.0 - weight) * clamped[k, j, i]
                 for a, b in nearest
             ]
             assert any(
-                out[k, j, i] == pytest.approx(e, rel=2e-3, abs=1e-3) for e in expected
+                out[k, j, i] == pytest.approx(e, rel=1e-6, abs=1e-9) for e in expected
             ), (name, k, j, i)
-        # Well below the bottom, not the parent's deepest value repeated (that of
-        # ``ref``'s deepest level).
-        deep = below & (depth - bottom >= FILL_BLEND_M)
+        # Well below the bottom, not the parent's deepest value repeated.
+        deep = below & (depth - bottom >= blend_m)
         assert deep.any()
-        clamped = np.broadcast_to(ref[0], out.shape)[deep]
-        assert np.abs(out[deep] - clamped).max() > 1e-2, name
+        assert np.abs(out[deep] - clamped[deep]).max() > 1e-2, name
+
+    # Velocities are not filled.
+    for name in ["u", "v"]:
+        np.testing.assert_array_equal(ic.ds[name].values, ic_clamped.ds[name].values)
 
 
 # Test initialization with missing 'name' in source
@@ -927,6 +947,87 @@ def test_ic_prefill_options_roundtrip_yaml(tmp_path, use_dask):
     # Resolved values are also recorded in the saved-dataset metadata.
     assert ic.ds.attrs["prefill"] == "2d_lateral_fill"
     assert ic.ds.attrs["regrid_method"] == "scipy"
+
+
+@pytest.mark.parametrize("blend_m", [0.0, 40.0, np.inf])
+def test_ic_bottom_fill_blend_m_roundtrips_yaml_and_is_recorded(
+    tmp_path, use_dask, blend_m
+):
+    """``bottom_fill_blend_m`` (also 0 and inf) survives a to_yaml -> from_yaml
+    round-trip and is recorded, as a float, in the saved-dataset metadata.
+    """
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    ic = InitialConditions(
+        grid=_ic_grid(),
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bottom_fill_blend_m=blend_m,
+        use_dask=use_dask,
+    )
+
+    filepath = tmp_path / "ic_blend.yaml"
+    ic.to_yaml(filepath)
+    assert "bottom_fill_blend_m" in filepath.read_text()
+    ic_from_file = InitialConditions.from_yaml(filepath, use_dask=use_dask)
+
+    assert ic_from_file.bottom_fill_blend_m == ic.bottom_fill_blend_m == blend_m
+    for obj in (ic, ic_from_file):
+        assert obj.physics.bottom_fill_blend_m == blend_m
+        assert isinstance(obj.ds.attrs["bottom_fill_blend_m"], float)
+        assert obj.ds.attrs["bottom_fill_blend_m"] == blend_m
+
+
+@pytest.mark.parametrize("value", [-1.0, float("nan"), "25"])
+def test_ic_invalid_bottom_fill_blend_m_raises(value, use_dask):
+    """A negative, NaN or non-numeric blend length is rejected before any data loads,
+    by the source and by the wrapper alike.
+    """
+    kwargs = {
+        "grid": _ic_grid(),
+        "ini_time": datetime(2021, 6, 29),
+        "source": {"path": "unused.nc", "name": "GLORYS"},
+        "bottom_fill_blend_m": value,
+        "use_dask": use_dask,
+    }
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        InitialConditionsSource(**kwargs)
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        InitialConditions(**kwargs)
+
+
+def test_ic_bottom_fill_blend_m_changes_tracers_but_not_velocities(use_dask):
+    """Below a source column's bottom, tracers (physics and lat/lon BGC) take the nearest
+    column's water at that depth, which a blend length of ``inf`` (copy the bottom value
+    down) does not; velocities always copy the bottom value down.
+    """
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("CESM_regional_test_data_climatology.nc"))
+    ics = {
+        blend_m: InitialConditions(
+            grid=_ic_grid(),
+            ini_time=datetime(2021, 6, 29),
+            source={"path": fname, "name": "GLORYS"},
+            bgc_source={
+                "path": fname_bgc,
+                "name": "CESM_REGRIDDED",
+                "climatology": True,  # type: ignore[dict-item]
+            },
+            bgc_model=BGCMarbl,
+            prefill="2d_lateral_fill",
+            regrid_method="scipy",
+            bottom_fill_blend_m=blend_m,
+            use_dask=use_dask,
+        )
+        for blend_m in (0.0, np.inf)
+    }
+    for blend_m, ic in ics.items():
+        assert ic.physics.bottom_fill_blend_m == blend_m
+        assert [b.bottom_fill_blend_m for b in ic.bgc] == [blend_m]
+
+    for name in ["u", "v", "ubar", "vbar", "zeta"]:
+        np.testing.assert_array_equal(ics[0.0].ds[name], ics[np.inf].ds[name])
+    for name in ["temp", "salt", "NO3"]:
+        assert (ics[0.0].ds[name] != ics[np.inf].ds[name]).any(), name
 
 
 @pytest.mark.parametrize(
@@ -1330,6 +1431,8 @@ def test_ic_default_regrid_path(use_dask):
     assert ic.ds.attrs["prefill"] == "None"
     assert ic.ds.attrs["regrid_method"] == ("xesmf" if xesmf is not None else "scipy")
     assert ic.ds.attrs["extrap_method"] == "inverse_dist"
+    assert ic.bottom_fill_blend_m == 25.0
+    assert ic.ds.attrs["bottom_fill_blend_m"] == 25.0
 
 
 def test_ic_legacy_path(use_dask):

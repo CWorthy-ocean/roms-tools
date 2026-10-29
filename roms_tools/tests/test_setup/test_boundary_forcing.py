@@ -556,6 +556,75 @@ def test_invalid_extrap_kwargs_raises(use_dask):
         )
 
 
+@pytest.mark.parametrize("value", [-1.0, float("nan"), "25"])
+def test_invalid_bottom_fill_blend_m_raises(use_dask, value):
+    """A negative, NaN or non-numeric blend length is rejected before any data loads,
+    by the source and by the wrapper alike.
+    """
+    kwargs = {**_coarse_glorys_kwargs(use_dask), "bottom_fill_blend_m": value}
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        BoundaryForcingSource(**kwargs)
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        BoundaryForcing(**kwargs)
+
+
+@pytest.mark.parametrize("blend_m", [0.0, 40.0, np.inf])
+def test_bottom_fill_blend_m_yaml_round_trip_and_attrs(use_dask, tmp_path, blend_m):
+    """``bottom_fill_blend_m`` (also 0 and inf) survives a to_yaml -> from_yaml
+    round-trip and is recorded, as a float, in the saved-dataset metadata.
+    """
+    bf = BoundaryForcingSource(
+        **_coarse_glorys_kwargs(use_dask), bottom_fill_blend_m=blend_m
+    )
+    fp = tmp_path / "bf.yaml"
+    bf.to_yaml(fp)
+    assert "bottom_fill_blend_m" in fp.read_text()
+    bf2 = BoundaryForcingSource.from_yaml(fp, use_dask=use_dask)
+
+    assert bf2.bottom_fill_blend_m == bf.bottom_fill_blend_m == blend_m
+    for obj in (bf, bf2):
+        assert isinstance(obj.ds.attrs["bottom_fill_blend_m"], float)
+        assert obj.ds.attrs["bottom_fill_blend_m"] == blend_m
+
+
+def test_default_bottom_fill_blend_m_is_recorded(use_dask):
+    bf = BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask))
+    assert bf.bottom_fill_blend_m == 25.0
+    assert bf.ds.attrs["bottom_fill_blend_m"] == 25.0
+
+
+@pytest.mark.parametrize("prefill", [None, "2d_lateral_fill"])
+def test_bottom_fill_blend_m_changes_tracers_but_not_velocities(
+    small_grid, use_dask, prefill
+):
+    """Below a source column's bottom, tracers take the nearest column's water at that
+    depth, which a blend length of ``inf`` (copy the bottom value down) does not;
+    velocities always copy the bottom value down. Both fill code paths (with and
+    without a source prefill) pass the blend length on.
+    """
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    bfs = {
+        blend_m: BoundaryForcingSource(
+            grid=small_grid,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2012, 12, 31),
+            source={"name": "GLORYS", "path": [fname1, fname2]},
+            prefill=prefill,
+            regrid_method="scipy",
+            bottom_fill_blend_m=blend_m,
+            use_dask=use_dask,
+        )
+        for blend_m in (0.0, np.inf)
+    }
+    tracers = [v for v in bfs[0.0].ds.data_vars if v.startswith(("temp_", "salt_"))]
+    others = [v for v in bfs[0.0].ds.data_vars if v not in tracers]
+    assert tracers and others
+    for name in others:
+        np.testing.assert_array_equal(bfs[0.0].ds[name], bfs[np.inf].ds[name])
+    assert any((bfs[0.0].ds[v] != bfs[np.inf].ds[v]).any() for v in tracers)
+
+
 def test_regrid_method_xesmf_requires_xesmf(use_dask, monkeypatch):
     monkeypatch.setattr(
         "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
@@ -1816,10 +1885,13 @@ class TestBoundaryForcingWrapper:
         on each bgc companion (previously two hand-maintained kwargs lists that
         could -- and did -- diverge).
         """
-        bf = self._make(small_grid, use_dask, prefill="nearest_neighbor")
+        bf = self._make(
+            small_grid, use_dask, prefill="nearest_neighbor", bottom_fill_blend_m=40.0
+        )
         for obj in (bf.physics, *bf.bgc):
             assert obj.regrid_method == "scipy"
             assert obj.prefill == "nearest_neighbor"
+            assert obj.bottom_fill_blend_m == 40.0
             assert obj.model_reference_date == bf.model_reference_date
             assert obj.bypass_validation is bf.bypass_validation
         # Per-companion identity is preserved by build_bgc_companions.

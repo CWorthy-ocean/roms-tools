@@ -17,6 +17,7 @@ from conftest import calculate_data_hash
 from roms_tools import BGCMarbl, BoundaryForcing, BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import _xesmf_available
+from roms_tools.tests.glodap_test_utils import write_synthetic_glodap
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -1668,6 +1669,59 @@ def test_static_bgc_source_without_the_flag_still_brackets():
         bypass_validation=True,
     )
     assert bf.ds.sizes["bry_time"] == 2
+
+
+@pytest.mark.parametrize(
+    "prefill", [pytest.param(None, marks=requires_xesmf), "2d_lateral_fill"]
+)
+def test_glodap_variables_missing_a_wet_column_leave_no_hole_on_the_boundary(
+    tmp_path, use_dask, prefill
+):
+    """A GLODAP variable with no data in a column the others have regrids without a hole.
+
+    Silicate lacks the source column at 53N/0E and TCO2 the one at 53N/1E, near the
+    south boundary, though NO3 (which the shared mask was taken from) has both. With
+    that one mask the NaN stayed inside it: the regridded boundary held a NaN, which
+    the output writes as 0, and the lateral fill refused the source outright.
+    """
+
+    def field_fn(name, values):
+        gap = {"silicate": (18, 30), "TCO2": (18, 31)}.get(name)  # lat 53, lon 0 / 1
+        if gap is not None:
+            values[:, gap[0], gap[1]] = np.nan
+        return values
+
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap", field_fn=field_fn)
+    grid = Grid(
+        nx=20,
+        ny=20,
+        size_x=400,
+        size_y=400,
+        center_lon=0,
+        center_lat=55,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    bf = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 30),
+        end_time=datetime(2012, 2, 1),
+        boundaries={"south": True, "east": False, "north": False, "west": False},
+        source={"name": "GLODAP", "path": str(glodap_dir)},
+        type="bgc",
+        use_vars=["ALK", "DIC", "SiO3"],
+        prefill=prefill,
+        use_dask=use_dask,
+        bypass_validation=True,
+    )
+
+    # The source is uniform (about 2300 umol/kg ALK, 2100 DIC, 10 SiO3), so a NaN read
+    # as 0 would show as a minimum far below these bounds.
+    for name, lower in (("ALK", 1000.0), ("DIC", 1000.0), ("SiO3", 5.0)):
+        assert float(bf.ds[f"{name}_south"].min()) > lower, name
 
 
 def test_use_vars_on_physics_type_raises():

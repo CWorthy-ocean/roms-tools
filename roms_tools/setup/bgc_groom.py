@@ -9,9 +9,11 @@ the surrounding good water, then checks again.
 Each tracer gets a :class:`BgcCheck`:
 
 - ``bounds``: the plausible range;
-- ``floor_jump``: a value at its floor (``floor``) next to a neighbour at or above this,
-  i.e. the zero-next-to-normal artefact. Used for nutrients and O2, whose zeros can be
-  real, so a plain gradient limit would also flag natural nutriclines;
+- ``floor_jump``: a value at its floor (``floor``) next to a same-depth neighbour at or
+  above this, i.e. the zero-next-to-normal artefact. Used for nutrients and O2, whose
+  zeros can be real, so a plain gradient limit would also flag natural nutriclines.
+  Vertical neighbours do not count: on a coarse vertical grid a real nitracline or OMZ
+  edge steps from the floor to above ``floor_jump`` between adjacent levels;
 - ``max_jump``: a cell is flagged as a spike when it lies outside the range of its
   eligible horizontal neighbours (at least two) by more than this, or outside the range of
   its two vertical neighbours. Values are salinity-normalized (``E + (x - E) * 35 / S``,
@@ -279,8 +281,11 @@ def _detect(
         if chk.floor_jump is not None:
             at_floor = wet & (a <= chk.floor + FLOOR_TOL)
             high = np.zeros(a.shape, dtype=bool)
+            # Same-depth neighbours only: a floor value above or below ordinary water is
+            # a nitracline / OMZ edge on a coarse vertical grid, not an artefact.
             for e, (axis, step) in zip(elig, _DIRS, strict=True):
-                high |= e & (_shift(a, axis, step, -np.inf) >= chk.floor_jump)
+                if axis != -3:
+                    high |= e & (_shift(a, axis, step, -np.inf) >= chk.floor_jump)
             flags |= np.uint8(FLAG_FLOOR_JUMP) * (at_floor & high)
         if chk.max_jump is not None:
             if chk.normalize_by_salinity:

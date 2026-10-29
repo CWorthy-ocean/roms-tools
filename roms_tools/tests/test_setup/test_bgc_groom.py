@@ -172,6 +172,21 @@ def test_deep_eastern_mediterranean_water_is_not_flagged(grid, clean):
     np.testing.assert_array_equal(out["ALK"].values, clean["ALK"].astype(np.float32))
 
 
+def test_nitracline_step_between_levels_is_not_flagged(grid, clean):
+    """On a coarse vertical grid nitrate steps from zero to above floor_jump between
+    adjacent levels everywhere; that is a real nitracline, not an artefact.
+    """
+    wet = clean["salt"] > 0
+    no3 = np.where(wet, 20.0, 0.0)
+    no3[:, NS - 3 :] = 0.0  # top three levels depleted (s = 0 is the bottom)
+    clean["NO3"] = no3
+    ic = _ic(clean)
+    counts = summarize_flags(bgc_check(ic, grid, variables=["NO3"]))
+    assert counts["NO3"]["total"] == 0, counts
+    out = bgc_groom(ic, grid, variables=["NO3"]).compute()
+    np.testing.assert_array_equal(out["NO3"].values, no3.astype(np.float32))
+
+
 def test_check_flags_each_planted_defect(grid, clean):
     planted = _plant(clean)
     flags = bgc_check(_ic(clean), grid).compute()

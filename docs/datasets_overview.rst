@@ -404,7 +404,10 @@ alkalinity and DIC that spike against their neighbours, DIC inconsistent with al
 and oxygen above 1.25 times saturation; it refills flagged cells from the surrounding
 water and clips oxygen to 1.25 times saturation. ``groom_settings`` overrides the
 thresholds and fill parameters (see :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`).
-Both are recorded in the YAML, so regenerating from it reproduces the files.
+Both are recorded in the YAML, so regenerating from it reproduces the files. A YAML
+written by roms-tools 5.0-5.3 has no ``groom`` key and so loads with grooming on; add
+``groom: false`` to its ``InitialConditions``/``BoundaryForcing`` section for the earlier
+output (apart from the oxygen floor, which is now 5.0).
 :func:`~roms_tools.bgc_check` reports what is flagged, in these objects or any file.
 Grooming compares each cell with its neighbours, so errors shared by a whole region, such
 as wrong temperature and salinity along a stretch of boundary, are best fixed upstream in

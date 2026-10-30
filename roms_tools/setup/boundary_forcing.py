@@ -32,6 +32,7 @@ from roms_tools.regrid import (
     VerticalRegrid,
     build_lateral_regridder,
     select_source_mask,
+    select_source_mask_name,
 )
 from roms_tools.setup.bgc_groom import resolve_groom_settings
 from roms_tools.setup.bgc_model import (
@@ -499,7 +500,8 @@ class BoundaryForcingSource:
 
             # Precomputed static source masks for the xESMF masked-bilinear
             # path, matched to the field type: ``mask`` (scalar-field validity)
-            # for tracers and ``zeta``, ``mask_vel`` (velocity validity) for u/v.
+            # for ``zeta``, ``mask_vel`` (velocity validity) for u/v. Tracers
+            # pick their mask per variable in the tracer loop below.
             # Reusing these stored 2D fields avoids recomputing a mask from the
             # full (lazy) source series. ``None`` means the source is already
             # NaN-free (e.g. the pre-filled UNIFIED BGC dataset, which carries
@@ -558,12 +560,27 @@ class BoundaryForcingSource:
             if filtered_vars:
                 lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
                 lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
-                lateral_regrid = build_lateral_regridder(
-                    {"lat": lat, "lon": lon}, bdry_data, regrid, scalar_mask
-                )
+                # One regridder per distinct tracer mask (a source with
+                # per-variable masks needs several; otherwise just one), keyed by
+                # the mask's content so masks with the same wet pattern share one.
+                tracer_regridders = {}
                 for var_name in filtered_vars:
-                    processed_fields[var_name] = lateral_regrid.apply(
-                        bdry_data.ds[var_names[var_name]["name"]]
+                    src_name = var_names[var_name]["name"]
+                    mask_name = select_source_mask_name(
+                        bdry_data.ds,
+                        is_vector=False,
+                        use_xesmf=use_xesmf,
+                        prefill=prefill,
+                        var_name=src_name,
+                    )
+                    mask = None if mask_name is None else bdry_data.ds[mask_name]
+                    key = None if mask is None else mask.values.tobytes()
+                    if key not in tracer_regridders:
+                        tracer_regridders[key] = build_lateral_regridder(
+                            {"lat": lat, "lon": lon}, bdry_data, regrid, mask
+                        )
+                    processed_fields[var_name] = tracer_regridders[key].apply(
+                        bdry_data.ds[src_name]
                     )
 
             # rotation of velocities and interpolation to u/v points

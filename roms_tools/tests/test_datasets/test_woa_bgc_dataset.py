@@ -537,12 +537,18 @@ def test_no_nan_is_left_in_a_column_with_water(woa_dir_columns, use_dask):
         assert np.isnan(values[:, :, ~WET]).all(), name
 
 
-def test_infinite_blend_reproduces_the_forward_then_backward_fill(
+def test_infinite_blend_forward_then_backward_fills_the_spliced_data(
     woa_dir_columns, use_dask
 ):
-    """``blend_m=inf`` is exactly a forward then a backward fill along depth, the
-    fill before the same-depth fill, and the mask is built from the filled first
-    tracer.
+    """``blend_m=inf`` is exactly a forward then a backward fill along depth of the
+    spliced data, and the mask is built from every filled variable.
+
+    Below-seafloor cells differ from earlier versions. The splice now leaves the cells
+    below the seafloor of both the monthly and the annual field NaN (checked by
+    ``test_annual_blend_leaves_nan_below_the_seafloor_of_both_fields``), so with
+    ``deep_fill="annual_blend"`` those cells take the annual field's bottom value, not
+    the deepest monthly value that earlier versions copied down. This test compares
+    with the fill of the already-spliced input and so cannot detect that change.
     """
     data = _load_columns(woa_dir_columns, use_dask)
     before = data.ds.copy(deep=True)
@@ -553,10 +559,9 @@ def test_infinite_blend_reproduces_the_forward_then_backward_fill(
         np.testing.assert_array_equal(
             _in_order(data.ds[name]), _in_order(expected[name])
         )
-    first = next(iter(expected.data_vars))
-    surface = expected[first].isel(depth=0, time=0, drop=True)
+    surface = np.stack([_in_order(expected[name])[0, 0] for name in expected.data_vars])
     np.testing.assert_array_equal(
-        data.ds["mask"].values, xr.where(surface.isnull(), 0, 1).values
+        data.ds["mask"].values, np.isfinite(surface).all(axis=0).astype(int)
     )
 
 
@@ -621,6 +626,49 @@ def test_mask_is_rebuilt_after_the_fill(woa_dir_columns, use_dask):
     for name in data.var_names.values():
         surface = _in_order(data.ds[name])[:, 0]
         assert np.isfinite(surface[:, WET]).all(), name
+
+
+#: A column with water in every tracer but no temperature or salinity at any depth.
+NO_TS_COLUMN = (1, 2)
+
+
+def _shape_columns_without_ts(code, period, values, z):
+    _shape_columns(code, period, values, z)
+    if code in "ts":
+        values[:, :, NO_TS_COLUMN[0], NO_TS_COLUMN[1]] = np.nan
+
+
+def test_a_column_with_tracers_but_no_temperature_or_salinity_is_land(
+    tmp_path, use_dask
+):
+    """A column where the tracers have data but T and S have none at any depth is land
+    after the fill, and the lateral fill then leaves no variable, T and S included,
+    NaN where the mask is 1.
+
+    The mask used to follow the first tracer alone, so the column was ocean while T and
+    S stayed NaN there, and ``apply_lateral_fill`` raised.
+    """
+    directory = build_woa_directory(
+        tmp_path / "woa_no_ts",
+        lat=COLUMN_LAT,
+        lon=COLUMN_LON,
+        field_fn=_shape_columns_without_ts,
+    )
+    data = _load_columns(directory, use_dask, apply_post_processing=True)
+    column = {"latitude": NO_TS_COLUMN[0], "longitude": NO_TS_COLUMN[1]}
+    assert np.isfinite(data.ds["n_an"].isel(column)).all()
+    assert data.ds["t_an"].isel(column).isnull().all()
+    data.extrapolate_deepest_to_bottom()
+
+    expected = WET.astype(int)
+    expected[NO_TS_COLUMN] = 0
+    np.testing.assert_array_equal(data.ds["mask"].values, expected)
+
+    data.apply_lateral_fill()
+    wet = expected == 1
+    for name in data.ds.data_vars:
+        if not name.startswith("mask"):
+            assert np.isfinite(_in_order(data.ds[name])[:, :, wet]).all(), name
 
 
 def test_a_tracer_with_nan_temperature_gets_the_mean_density_of_its_level(

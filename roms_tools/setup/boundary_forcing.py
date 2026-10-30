@@ -214,9 +214,11 @@ class BoundaryForcingSource:
         takes the value of the nearest source column that has water at that depth,
         blended in from the column's own bottom value over ``bottom_fill_blend_m``
         metres below the bottom: ``0`` takes the nearest column's value immediately,
-        ``inf`` copies each column's bottom value down instead. Velocities always copy
-        their bottom value down. See the methods documentation for choosing a value.
-        Defaults to 25 m.
+        ``inf`` copies each column's bottom value down instead. The nearest column
+        can lie across a sill and hold lighter water than the column's own bottom
+        water; consider ``inf`` for semi-enclosed basins and overflow regions.
+        Velocities always copy their bottom value down. See the methods documentation
+        for choosing a value. Defaults to 25 m.
     apply_2d_horizontal_fill : bool, optional
         **Deprecated** -- use ``prefill`` instead. ``True`` maps to
         ``prefill="2d_lateral_fill"`` and ``False`` to ``prefill=None``; setting
@@ -1088,7 +1090,9 @@ class BoundaryForcingSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
-        validate_bottom_fill_blend_m(self.bottom_fill_blend_m)
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
 
         # -------------------------------------------------------
         # Source configuration checks
@@ -1996,6 +2000,11 @@ class BoundaryForcing:
                 )
             validate_bgc_model(self.bgc_model)
             preflight_esper_sources(bgc_sources)
+        # Normalized here too (the sources do the same) so this wrapper's own
+        # `to_yaml` writes a builtin float.
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
         # Every constructor argument this wrapper shares by name with
         # BoundaryForcingSource is forwarded to the physics object and to each bgc
         # companion -- derived from the two dataclasses (see forwardable_fields)

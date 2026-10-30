@@ -150,7 +150,14 @@ class TestValidateExtrap:
 class TestValidateBottomFillBlendM:
     @pytest.mark.parametrize("value", [0, 0.0, 25, 25.0, np.float32(3.0), np.inf])
     def test_accepts_numbers_from_zero_to_infinity(self, value):
-        validate_bottom_fill_blend_m(value)
+        assert validate_bottom_fill_blend_m(value) == value
+
+    @pytest.mark.parametrize(
+        "value", [25, np.float32(3.0), np.float64(40.0), np.inf], ids=repr
+    )
+    def test_returns_a_builtin_float(self, value):
+        """NumPy scalars and ints become ``float``, which YAML can represent."""
+        assert type(validate_bottom_fill_blend_m(value)) is float
 
     @pytest.mark.parametrize("value", [-1.0, -np.inf, np.nan, True, "25", None, [25.0]])
     def test_rejects_everything_else(self, value):

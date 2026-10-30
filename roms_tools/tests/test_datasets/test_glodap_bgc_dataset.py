@@ -7,7 +7,6 @@ is known exactly rather than approximately.
 
 import numpy as np
 import pytest
-import xarray as xr
 
 from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
 from roms_tools.processing_methods import BOTTOM_FILL_BLEND_M
@@ -204,6 +203,53 @@ def test_mask_is_rebuilt_after_the_fill(tmp_path, use_dask):
         assert np.isfinite(surface[mask == 1]).all(), name
 
 
+def test_a_column_with_tracers_but_no_temperature_or_salinity_is_land(
+    tmp_path, use_dask
+):
+    """A column with a finite tracer but T and S NaN at every depth is land to the fill.
+
+    The mask used to come from the first variable (a tracer) alone, so the column was
+    ocean while T and S stayed NaN there, and ``apply_lateral_fill`` raised. Now the
+    column is land, and after the lateral fill no variable, T and S included, is NaN
+    where the mask is 1.
+    """
+    lat, lon = np.arange(10.0, 14.0), np.arange(20.0, 25.0)
+    no_ts = (1, 2)
+
+    def field_fn(name, values):
+        if name in ("temperature", "salinity"):
+            values[:, no_ts[0], no_ts[1]] = np.nan
+        return values
+
+    directory = write_synthetic_glodap(
+        tmp_path / "no_ts", lat=lat, lon=lon, field_fn=field_fn
+    )
+    data = _load(directory, use_dask)
+    assert np.isfinite(data.ds["NO3"].isel(latitude=no_ts[0], longitude=no_ts[1])).all()
+    assert (
+        data.ds["temperature"]
+        .isel(latitude=no_ts[0], longitude=no_ts[1])
+        .isnull()
+        .all()
+    )
+    data.extrapolate_deepest_to_bottom()
+
+    expected = np.ones((lat.size, lon.size), dtype=int)
+    expected[no_ts] = 0
+    np.testing.assert_array_equal(data.ds["mask"].values, expected)
+
+    data.apply_lateral_fill()
+    wet = data.ds["mask"].values == 1
+    for name in data.ds.data_vars:
+        if name == "mask":
+            continue
+        values = data.ds[name].transpose("depth", "latitude", "longitude").values
+        assert np.isfinite(values[:, wet]).all(), name
+    # The column is filled for every variable, T and S included, from its neighbours.
+    column = data.ds["temperature"].isel(latitude=no_ts[0], longitude=no_ts[1])
+    np.testing.assert_allclose(column.values, 2.0, rtol=1e-3)
+
+
 @pytest.mark.parametrize(
     "holes",
     [
@@ -222,7 +268,7 @@ def test_infinite_blend_reproduces_the_forward_then_backward_fill(
 ):
     """``blend_m=inf`` is exactly ``ffill`` then ``bfill`` along depth, as before the
     same-depth fill, interior gaps and NaN above the data included, with the mask
-    rebuilt from the filled first variable.
+    rebuilt from every filled variable.
     """
     directory = _write_columns(tmp_path / "inf", holes=holes)
     data = _load(directory, use_dask, apply_post_processing=False)
@@ -232,9 +278,11 @@ def test_infinite_blend_reproduces_the_forward_then_backward_fill(
     expected = before.drop_vars("mask").ffill("depth").bfill("depth")
     for name in expected.data_vars:
         np.testing.assert_array_equal(data.ds[name].values, expected[name].values)
-    first = next(iter(expected.data_vars))
-    expected_mask = xr.where(expected[first].isel(depth=0, drop=True).isnull(), 0, 1)
-    np.testing.assert_array_equal(data.ds["mask"].values, expected_mask.values)
+    surface_finite = np.stack(
+        [expected[name].isel(depth=0).values for name in expected.data_vars]
+    )
+    expected_mask = np.isfinite(surface_finite).all(axis=0).astype(int)
+    np.testing.assert_array_equal(data.ds["mask"].values, expected_mask)
 
 
 # ---------------------------------------------------------------------------
@@ -304,3 +352,41 @@ def test_a_tracer_with_nan_temperature_or_salinity_gets_the_mean_density_of_its_
     # T and S are not tracers and keep their NaNs.
     for name in ("temperature", "salinity"):
         np.testing.assert_array_equal(converted[name].values, raw[name].values)
+
+
+def test_a_level_without_any_temperature_uses_a_density_of_1025(tmp_path, use_dask):
+    """At a level where T is NaN everywhere the level mean density is NaN too, and the
+    tracer is converted with 1025 kg m-3 rather than lost; other levels are unchanged.
+    """
+    level = 1
+    lat, lon = np.arange(10.0, 13.0), np.arange(20.0, 23.0)
+
+    def field_fn(name, values):
+        if name == "temperature":
+            values[level] = np.nan
+        return values
+
+    directory = write_synthetic_glodap(
+        tmp_path / "no_t_level", lat=lat, lon=lon, field_fn=field_fn
+    )
+    raw = _load(directory, use_dask, apply_post_processing=False).ds
+    converted = _load(directory, use_dask).ds
+
+    rho = compute_in_situ_density(
+        raw["temperature"], raw["salinity"], raw["depth"], raw["latitude"]
+    ).transpose("depth", "latitude", "longitude")
+    rho = rho.values
+    assert np.isnan(rho[level]).all()
+    others = [k for k in range(rho.shape[0]) if k != level]
+    assert np.isfinite(rho[others]).all()
+
+    for name in ("TAlk", "NO3", "oxygen"):
+        tracer = raw[name].transpose("depth", "latitude", "longitude").values
+        got = converted[name].transpose("depth", "latitude", "longitude").values
+        assert np.isfinite(got).all()
+        np.testing.assert_allclose(
+            got[level], tracer[level] * 1025.0 / 1000.0, rtol=1e-6
+        )
+        np.testing.assert_allclose(
+            got[others], tracer[others] * rho[others] / 1000.0, rtol=1e-6
+        )

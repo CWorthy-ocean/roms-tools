@@ -587,6 +587,23 @@ def test_bottom_fill_blend_m_yaml_round_trip_and_attrs(use_dask, tmp_path, blend
         assert obj.ds.attrs["bottom_fill_blend_m"] == blend_m
 
 
+def test_bottom_fill_blend_m_is_stored_as_a_builtin_float(use_dask, tmp_path):
+    """A NumPy scalar is stored as a ``float`` by the wrapper and its sources: YAML
+    cannot represent a NumPy scalar, and ``to_yaml`` raised after the whole build.
+    """
+    bf = BoundaryForcing(
+        **_coarse_glorys_kwargs(use_dask), bottom_fill_blend_m=np.float64(40.0)
+    )
+    assert type(bf.bottom_fill_blend_m) is float
+    assert type(bf.physics.bottom_fill_blend_m) is float
+
+    fp = tmp_path / "bf_type.yaml"
+    bf.to_yaml(fp)
+    bf2 = BoundaryForcing.from_yaml(fp, use_dask=use_dask)
+    assert type(bf2.bottom_fill_blend_m) is float
+    assert bf2.bottom_fill_blend_m == 40.0
+
+
 def test_default_bottom_fill_blend_m_is_recorded(use_dask):
     bf = BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask))
     assert bf.bottom_fill_blend_m == 25.0

@@ -291,9 +291,12 @@ class InitialConditionsSource:
         takes the value of the nearest source column that has water at that depth,
         blended in from the column's own bottom value over ``bottom_fill_blend_m``
         metres below the bottom: ``0`` takes the nearest column's value immediately,
-        ``inf`` copies each column's bottom value down instead. Velocities always copy
-        their bottom value down. Applies to lat/lon and ROMS restart sources. See the
-        methods documentation for choosing a value. Defaults to 25 m.
+        ``inf`` copies each column's bottom value down instead. The nearest column
+        can lie across a sill and hold lighter water than the column's own bottom
+        water; consider ``inf`` for semi-enclosed basins and overflow regions.
+        Velocities always copy their bottom value down. Applies to lat/lon and ROMS
+        restart sources. See the methods documentation for choosing a value. Defaults
+        to 25 m.
 
     Examples
     --------
@@ -1067,7 +1070,9 @@ class InitialConditionsSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
-        validate_bottom_fill_blend_m(self.bottom_fill_blend_m)
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
 
     def _get_data(
         self, forcing_type=Literal["physics", "bgc"]
@@ -2047,6 +2052,11 @@ class InitialConditions:
                 )
             validate_bgc_model(self.bgc_model)
             preflight_esper_sources(bgc_sources)
+        # Normalized here too (the sources do the same) so this wrapper's own
+        # `to_yaml` writes a builtin float.
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
 
         # Every constructor argument this wrapper shares by name with
         # InitialConditionsSource is forwarded to the physics object and to each

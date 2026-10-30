@@ -979,6 +979,36 @@ def test_ic_bottom_fill_blend_m_roundtrips_yaml_and_is_recorded(
         assert obj.ds.attrs["bottom_fill_blend_m"] == blend_m
 
 
+@pytest.mark.parametrize(
+    "blend_m",
+    [np.float64(40.0), np.float32(40.0), 40],
+    ids=["float64", "float32", "int"],
+)
+def test_ic_bottom_fill_blend_m_is_stored_as_a_builtin_float(
+    tmp_path, use_dask, blend_m
+):
+    """A NumPy scalar or an int is stored as a ``float``: YAML cannot represent a NumPy
+    scalar (``to_yaml`` raised after the whole build), and an int used to come back as
+    an int while the output attribute recorded a float.
+    """
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    ic = InitialConditions(
+        grid=_ic_grid(),
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bottom_fill_blend_m=blend_m,
+        use_dask=use_dask,
+    )
+    assert type(ic.bottom_fill_blend_m) is float
+    assert type(ic.physics.bottom_fill_blend_m) is float
+
+    filepath = tmp_path / "ic_blend_type.yaml"
+    ic.to_yaml(filepath)
+    ic_from_file = InitialConditions.from_yaml(filepath, use_dask=use_dask)
+    assert type(ic_from_file.bottom_fill_blend_m) is float
+    assert ic_from_file.bottom_fill_blend_m == 40.0
+
+
 @pytest.mark.parametrize("value", [-1.0, float("nan"), "25"])
 def test_ic_invalid_bottom_fill_blend_m_raises(value, use_dask):
     """A negative, NaN or non-numeric blend length is rejected before any data loads,
@@ -1668,6 +1698,53 @@ def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, c
 
     got_alk = float(ds["TAlk"].isel(depth=2, latitude=10, longitude=5))
     assert got_alk == pytest.approx(2300.0 * 1025.0 / 1000.0, rel=1e-6)
+
+
+def test_glodap_column_without_temperature_and_salinity_builds_with_density(
+    tmp_path, use_dask
+):
+    """A GLODAP column that has tracers but no temperature or salinity at any depth is
+    land to the fill, so the density interpolation still builds.
+
+    The column used to be ocean in the tracers' eyes while T/S stayed NaN there, and
+    the build raised ``NaN values found in regridded field``. Real GLODAPv2.2016b has
+    five such columns; here the nearest column of every ROMS grid point has no T/S.
+    """
+    grid = _ic_grid()
+    # The 1 degree synthetic GLODAP grid of ``write_synthetic_glodap``.
+    lat_axis, lon_axis = np.arange(35.0, 76.0), np.arange(-30.0, 31.0)
+    lon_rho = (grid.ds["lon_rho"].values + 180.0) % 360.0 - 180.0
+    no_ts = {
+        (np.abs(lat_axis - lat).argmin(), np.abs(lon_axis - lon).argmin())
+        for lat, lon in zip(grid.ds["lat_rho"].values.ravel(), lon_rho.ravel())
+    }
+
+    def field_fn(name, values):
+        if name in ("temperature", "salinity"):
+            for i, j in no_ts:
+                values[:, i, j] = np.nan
+        return values
+
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap_no_ts", field_fn=field_fn)
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {
+                "source": {"name": "GLODAP", "path": str(glodap_dir)},
+                "use_vars": ["ALK", "DIC"],
+            }
+        ],
+        bgc_model=BGCMarbl,
+        bgc_interpolation_method="density",
+        use_dask=use_dask,
+    )
+    for name in ("ALK", "DIC"):
+        assert np.isfinite(ic.ds[name].values).all(), name
 
 
 @pytest.mark.parametrize(

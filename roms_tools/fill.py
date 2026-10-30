@@ -8,6 +8,11 @@ from scipy import sparse
 from roms_tools.constants import R_EARTH
 from roms_tools.setup.utils import build_kdtree_from_latlon, latlon_to_xyz
 
+#: Number of KD-tree query points above which a query uses every core. Starting the
+#: thread pool costs ~90 ms on a 256-core node, against ~0.4 ms single-threaded for a
+#: few hundred points.
+_PARALLEL_QUERY_MIN = 50_000
+
 
 class LateralFill:
     """
@@ -587,7 +592,8 @@ class BelowBottomFill:
                 continue
             tree = build_kdtree_from_latlon(lat[wet_k], lon[wet_k])
             chord, nearest = tree.query(
-                latlon_to_xyz(lat[cells], lon[cells]), workers=-1
+                latlon_to_xyz(lat[cells], lon[cells]),
+                workers=-1 if cells.size > _PARALLEL_QUERY_MIN else 1,
             )
             distance.append((chord * R_EARTH / 1000.0).astype(np.float32))
             # Cells above their column's deepest water (gaps inside a column) take
@@ -883,7 +889,8 @@ def _find_deep_donors(
     KD-tree over the whole pool and the cell takes the first deep enough. Cells with
     none retry with the next count, then, if still unresolved, take the nearest
     deep-enough column by brute force (chord distance on the unit sphere, monotone in
-    great-circle distance).
+    great-circle distance), with the distances to the pool computed once per column
+    rather than per cell.
 
     Parameters
     ----------
@@ -926,7 +933,9 @@ def _find_deep_donors(
             cells = todo[start : start + per_chunk]
             columns, rows = np.unique(column[cells], return_inverse=True)
             chord, nearest = tree.query(
-                latlon_to_xyz(column_lat[columns], column_lon[columns]), k=k, workers=-1
+                latlon_to_xyz(column_lat[columns], column_lon[columns]),
+                k=k,
+                workers=-1 if columns.size > _PARALLEL_QUERY_MIN else 1,
             )
             chord, nearest = chord.reshape(-1, k), nearest.reshape(-1, k)
             neighbor = nearest[rows]
@@ -944,16 +953,36 @@ def _find_deep_donors(
         if not todo.size or k >= pool_h.size:
             return donor, distance
 
-    xyz = latlon_to_xyz(pool_lat, pool_lon)
-    step = max(1, 20_000_000 // pool_h.size)
-    for start in range(0, todo.size, step):
-        cells = todo[start : start + step]
-        xyz_cells = latlon_to_xyz(column_lat[column[cells]], column_lon[column[cells]])
-        d2 = 2.0 - 2.0 * (xyz_cells @ xyz.T)
-        d2 = np.where(pool_h[None, :] > depth[cells, None], d2, np.inf)
-        nearest_col = d2.argmin(axis=1)
-        best = d2[np.arange(cells.size), nearest_col]
-        ok = np.isfinite(best)
-        donor[cells[ok]] = nearest_col[ok]
+    # One row of distances per unresolved column, not per cell: a column with many
+    # unresolved levels would otherwise repeat the work for each. With the pool sorted
+    # by decreasing depth, the columns deeper than a cell are a leading run, so a
+    # running minimum along a row holds the nearest deep-enough column of every cell
+    # of that column.
+    order = np.argsort(-pool_h, kind="stable")
+    sorted_depth = -pool_h[order]
+    pool_xyz = latlon_to_xyz(pool_lat, pool_lon)[order]
+    todo = todo[np.argsort(column[todo], kind="stable")]
+    columns, rows = np.unique(column[todo], return_inverse=True)
+    step = max(1, 20_000_000 // pool_h.size)  # columns per chunk
+    for first in range(0, columns.size, step):
+        begin, end = np.searchsorted(rows, [first, first + step])
+        cells, row = todo[begin:end], rows[begin:end] - first
+        chunk = columns[first : first + step]
+        d2 = latlon_to_xyz(column_lat[chunk], column_lon[chunk]) @ pool_xyz.T
+        d2 *= -2.0
+        d2 += 2.0
+        np.minimum.accumulate(d2, axis=1, out=d2)
+        # Number of pool columns deeper than each cell, and the running minimum there.
+        count = np.searchsorted(sorted_depth, -depth[cells], side="left")
+        last = np.maximum(count - 1, 0)
+        best = d2[row, last]
+        # The running minimum falls until it reaches `best`: bisect for that position.
+        low, high = np.zeros_like(last), last.copy()
+        while (low < high).any():
+            mid = (low + high) // 2
+            above = d2[row, mid] > best
+            low, high = np.where(above, mid + 1, low), np.where(above, high, mid)
+        ok = count > 0
+        donor[cells[ok]] = order[low[ok]]
         distance[cells[ok]] = np.sqrt(np.clip(best[ok], 0.0, None)) * R_EARTH / 1000.0
     return donor, distance

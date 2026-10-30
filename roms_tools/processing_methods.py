@@ -177,13 +177,21 @@ def validate_extrap(extrap_method: str | None, extrap_kwargs: dict | None) -> No
 BOTTOM_FILL_BLEND_M = 25.0
 
 
-def validate_bottom_fill_blend_m(value) -> None:
-    """Raise ``ValueError`` unless ``value`` is a real number >= 0 (``inf`` allowed).
+def validate_bottom_fill_blend_m(value) -> float:
+    """Return ``value`` as a ``float``; raise ``ValueError`` unless it is >= 0.
+
+    ``value`` must be a real number (``inf`` allowed). The result is a builtin
+    ``float``, so a NumPy scalar or an int is stored (and written to YAML) as one.
 
     Parameters
     ----------
     value : float
         The ``bottom_fill_blend_m`` option to validate.
+
+    Returns
+    -------
+    float
+        ``value`` as a builtin ``float``.
     """
     if (
         isinstance(value, bool)
@@ -194,6 +202,7 @@ def validate_bottom_fill_blend_m(value) -> None:
         raise ValueError(
             f"`bottom_fill_blend_m` must be a number >= 0 (inf allowed), got {value!r}."
         )
+    return float(value)
 
 
 def resolve_regrid_engine(regrid_method: str | None, *, xesmf_available: bool) -> bool:

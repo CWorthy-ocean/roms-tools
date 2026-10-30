@@ -778,6 +778,31 @@ def _random_columns(rng, n_pool, n_cells):
     }
 
 
+def _assert_nearest_deep_donors(args, depth, donor, distance):
+    """``donor`` and ``distance`` are those of the nearest pool column deeper than each
+    cell, as an exhaustive search over the pool finds for every cell (equidistant
+    columns excepted); cells deeper than every pool column have none.
+    """
+    pool_xyz = latlon_to_xyz(args["pool_lat"], args["pool_lon"])
+    cell_xyz = latlon_to_xyz(
+        args["column_lat"][args["column"]], args["column_lon"][args["column"]]
+    )
+    step = max(1, 2_000_000 // pool_xyz.shape[0])
+    for start in range(0, depth.size, step):
+        sel = slice(start, start + step)
+        chord = np.linalg.norm(cell_xyz[sel, None] - pool_xyz, axis=-1)
+        chord = np.where(args["pool_h"] > depth[sel, None], chord, np.inf)
+        found = np.isfinite(chord.min(axis=1))
+        np.testing.assert_array_equal(donor[sel] >= 0, found)
+        np.testing.assert_allclose(
+            distance[sel][found], chord.min(axis=1)[found] * R_EARTH / 1000.0
+        )
+        np.testing.assert_array_equal(donor[sel][found], chord.argmin(axis=1)[found])
+    assert np.isnan(distance[donor < 0]).all()
+    assert (donor[depth >= args["pool_h"].max()] == -1).all()
+    assert (donor[depth < args["pool_h"].max()] >= 0).all()
+
+
 @pytest.fixture
 def xyz_queries(monkeypatch):
     """The sizes of the coordinate arrays ``_find_deep_donors`` converts to xyz."""
@@ -809,21 +834,7 @@ def test_find_deep_donors_batches_its_queries_without_changing_the_donors(xyz_qu
     tree_queries = xyz_queries[: xyz_queries.index(1000)]
     assert len(tree_queries) > 1 and max(tree_queries) <= 4_000_000 // 512
 
-    pool_xyz = latlon_to_xyz(args["pool_lat"], args["pool_lon"])
-    for start in range(0, n_cells, 2000):
-        sel = slice(start, start + 2000)
-        column_xyz = latlon_to_xyz(args["column_lat"][sel], args["column_lon"][sel])
-        chord = np.linalg.norm(column_xyz[:, None] - pool_xyz, axis=-1)
-        chord = np.where(args["pool_h"] > depth[sel, None], chord, np.inf)
-        found = np.isfinite(chord.min(axis=1))
-        np.testing.assert_array_equal(donor[sel] >= 0, found)
-        np.testing.assert_allclose(
-            distance[sel][found], chord.min(axis=1)[found] * R_EARTH / 1000.0
-        )
-        # The nearest deep-enough column (equidistant columns excepted).
-        np.testing.assert_array_equal(donor[sel][found], chord.argmin(axis=1)[found])
-    # Cells deeper than 3000 m have no donor.
-    assert (donor[depth >= 3000.0] == -1).all() and (donor[depth < 3000.0] >= 0).all()
+    _assert_nearest_deep_donors(args, depth, donor, distance)
 
 
 def test_find_deep_donors_does_not_search_for_cells_deeper_than_every_pool_column(
@@ -854,3 +865,92 @@ def test_find_deep_donors_builds_no_tree_when_no_cell_can_find_a_donor(monkeypat
     monkeypatch.setattr("roms_tools.fill.build_kdtree_from_latlon", forbidden)
     donor, distance = _find_deep_donors(np.full(20000, 5000.0), **args)
     assert (donor == -1).all() and np.isnan(distance).all()
+
+
+def test_find_deep_donors_computes_the_distances_once_for_a_column_with_many_levels(
+    xyz_queries,
+):
+    # 6 columns of 60 levels each, 360 cells, over a pool of 100 columns of which one
+    # is deep: with 2 neighbours searched, about 60 % of the cells (those deeper than
+    # the shallow columns) are left for the brute-force search. It computes the
+    # distances of the 6 columns to the pool, not those of every unresolved cell, and
+    # each cell still gets the nearest column deeper than itself.
+    rng = np.random.default_rng(11)
+    n_columns, n_levels = 6, 60
+    args = _random_columns(rng, 100, n_columns)
+    args["column"] = np.repeat(np.arange(n_columns), n_levels)
+    depth = np.tile(np.linspace(150.0, 3500.0, n_levels), n_columns)
+
+    donor, distance = _find_deep_donors(depth, **args, neighbors=(2,))
+
+    _assert_nearest_deep_donors(args, depth, donor, distance)
+    assert ((depth > 1000.0) & (depth < 3000.0)).sum() > 100  # unresolved cells
+    assert max(xyz_queries) <= 100  # coordinates converted: the pool, or 6 columns
+
+
+def test_find_deep_donors_brute_force_handles_more_columns_than_one_chunk():
+    # 4500 columns of 2 cells over a pool of 10000 columns: the brute-force search
+    # builds its distance matrix 2000 columns at a time, so three chunks, and a column
+    # never straddles two of them.
+    rng = np.random.default_rng(13)
+    n_columns = 4500
+    args = _random_columns(rng, 10_000, n_columns)
+    args["column"] = np.repeat(np.arange(n_columns), 2)
+    depth = rng.uniform(100.0, 3500.0, 2 * n_columns)
+
+    donor, distance = _find_deep_donors(depth, **args, neighbors=(4,))
+
+    _assert_nearest_deep_donors(args, depth, donor, distance)
+
+
+# Donor selection across the 0/360 and the +-180 seams of a global source: columns
+# 1 degree apart across the seam are neighbours, however far apart their longitudes
+# are numerically.
+SEAMS = pytest.mark.parametrize(
+    ("column", "near", "far"),
+    [(359.5, 0.5, 357.0), (179.5, -179.5, 177.0)],
+    ids=["0/360", "+-180"],
+)
+
+
+@SEAMS
+def test_below_bottom_fill_picks_the_nearest_column_across_the_dateline(
+    column, near, far
+):
+    """The column that ends at 100 m takes its deeper water from the column 1 degree
+    away across the seam, not from the one 2.5 degrees away on its own side.
+    """
+    depth = np.array([0.0, 100.0, 200.0, 300.0])
+    lat, lon = np.array([0.0]), np.array([column, near, far])
+    data = np.full((depth.size, 1, 3), np.nan)
+    data[:2, 0, 0] = [1.0, 2.0]
+    data[:, 0, 1] = [10.0, 20.0, 30.0, 40.0]
+    data[:, 0, 2] = [100.0, 200.0, 300.0, 400.0]
+    da = xr.DataArray(data, dims=DIMS, coords={"depth": depth, "lat": lat, "lon": lon})
+
+    filled = _fill_for(da, 0.0).apply(da)
+    np.testing.assert_array_equal(filled.isel(lat=0, lon=0), [1.0, 2.0, 30.0, 40.0])
+
+
+@SEAMS
+@pytest.mark.parametrize("neighbors", [(32, 128, 512), (1,)], ids=["tree", "brute"])
+def test_find_deep_donors_picks_the_nearest_column_across_the_dateline(
+    column, near, far, neighbors
+):
+    """The nearest deep-enough pool column is 1 degree away across the seam; the
+    nearest pool column of all (0.4 degrees away) is too shallow, which with a single
+    neighbour sends the cell to the brute-force search.
+    """
+    shallow = column + 0.4
+    donor, distance = _find_deep_donors(
+        np.array([500.0]),
+        np.array([0]),
+        np.array([0.0]),
+        np.array([column]),
+        np.zeros(3),
+        np.array([near, far, shallow]),
+        np.array([1000.0, 1000.0, 100.0]),
+        neighbors=neighbors,
+    )
+    assert donor.tolist() == [0]
+    assert distance[0] == pytest.approx(R_EARTH / 1000.0 * np.deg2rad(1.0), rel=1e-3)

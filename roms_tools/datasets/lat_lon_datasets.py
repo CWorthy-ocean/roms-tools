@@ -13,6 +13,7 @@ from typing import Any, ClassVar, Literal, cast
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
 
+import dask
 import fsspec
 import numpy as np
 import xarray as xr
@@ -948,17 +949,29 @@ class LatLonDataset:
             # The fill works on whole (depth, lat, lon) blocks; a copy-down needs none.
             self.ds = unchunk_dask(self.ds, self.dim_names, time_chunking=False)
 
-        for name in list(self.ds.data_vars):
-            da = self.ds[name]
-            if name.startswith("mask") or depth_dim not in da.dims:
-                continue
+        names = [
+            name
+            for name in self.ds.data_vars
+            if not name.startswith("mask") and depth_dim in self.ds[name].dims
+        ]
+        blended = []
+        for name in names:
             if name in velocities or np.isinf(blend_m):
-                self.ds[name] = one_dim_fill(da, depth_dim, direction="forward")
-                continue
+                self.ds[name] = one_dim_fill(
+                    self.ds[name], depth_dim, direction="forward"
+                )
+            else:
+                blended.append(name)
 
-            # Only the first record of the 3D wet mask is computed.
+        # Only the first record of each 3D wet mask is computed, all in one compute so
+        # that a source read lazily (e.g. streamed) is traversed once, not per variable.
+        wet_masks = []
+        for name in blended:
+            da = self.ds[name]
             first = {d: 0 for d in da.dims if d not in (depth_dim, *horizontal)}
-            wet = da.isel(first).transpose(depth_dim, *horizontal).notnull().values
+            wet_masks.append(da.isel(first).transpose(depth_dim, *horizontal).notnull())
+        for name, wet in zip(blended, dask.compute(*wet_masks), strict=True):
+            wet = wet.values
             key = wet.tobytes()
             if key not in fillers:
                 fillers[key] = BelowBottomFill(
@@ -969,7 +982,7 @@ class LatLonDataset:
                     dims=(depth_dim, *horizontal),
                     blend_m=blend_m,
                 )
-            self.ds[name] = fillers[key].apply(da)
+            self.ds[name] = fillers[key].apply(self.ds[name])
 
     def rotate_velocities_to_east_and_north(self) -> None:
         """
@@ -1426,7 +1439,9 @@ def _umol_kg_to_mmol_m3_factor(
     rule. The factor is the in-situ density (kg/m3) divided by 1000, computed lazily
     from the temperature and salinity in ``ds``. Where T or S is NaN but the tracer is
     not, the density is replaced by its mean over the horizontal dimensions at that
-    depth level, so the tracer is not lost. If T/S are absent from ``ds``, a uniform
+    depth level, so the tracer is not lost; the mean is taken over the whole loaded
+    source (before any subset to the model domain), and a level with no temperature or
+    salinity anywhere uses 1025 kg/m3. If T/S are absent from ``ds``, a uniform
     density of 1025 kg/m3 is used and a warning is logged.
 
     Parameters
@@ -1449,7 +1464,7 @@ def _umol_kg_to_mmol_m3_factor(
         density = compute_in_situ_density(
             ds[temp_var], ds[salt_var], ds[depth_dim], ds[lat_dim]
         )
-        density = density.fillna(density.mean(dim=(lat_dim, lon_dim)))
+        density = density.fillna(density.mean(dim=(lat_dim, lon_dim))).fillna(1025.0)
     else:
         logging.warning(
             "%s temperature/salinity unavailable; using a uniform 1025 kg m-3 "
@@ -1458,6 +1473,44 @@ def _umol_kg_to_mmol_m3_factor(
         )
         density = 1025.0
     return density / 1000.0
+
+
+def _surface_ocean_mask(
+    ds: xr.Dataset, depth_dim: str, time_dim: str | None = None
+) -> xr.DataArray | None:
+    """Return the land/ocean mask of the depth-filled WOA or GLODAP ``ds``.
+
+    A cell is ocean (1) only where every variable with a depth dimension, temperature
+    and salinity included, is finite at the first depth level (and first time record);
+    anywhere else it is land (0). A column where any variable has no data at all is
+    therefore land, and is filled laterally for every variable, so that no variable is
+    NaN where the mask is 1 (the lateral fill and the density regridding need that).
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset whose variables have already been filled along depth, so that a
+        variable with data at any depth is finite at the first level.
+    depth_dim : str
+        Name of the depth dimension.
+    time_dim : str, optional
+        Name of the time dimension, if any; only its first record is used.
+
+    Returns
+    -------
+    xarray.DataArray or None
+        The mask, 1 for ocean and 0 for land; ``None`` if no variable has a depth
+        dimension.
+    """
+    wet = None
+    for name, da in ds.data_vars.items():
+        if name.startswith("mask") or depth_dim not in da.dims:
+            continue
+        surface = da.isel({depth_dim: 0}, drop=True)
+        if time_dim in surface.dims:
+            surface = surface.isel({time_dim: 0}, drop=True)
+        wet = surface.notnull() if wet is None else wet & surface.notnull()
+    return None if wet is None else xr.where(wet, 1, 0)
 
 
 @dataclass(kw_only=True)
@@ -1859,7 +1912,10 @@ class WOABGCDataset(WOADataset):
         the data then takes the shallowest value below it. WOA can be NaN at the
         surface where deeper data exist, and coverage differs between variables, so
         the mask built from the first tracer can mark a cell as ocean where another
-        tracer is NaN. The mask is therefore rebuilt after the fill. This mirrors
+        variable is NaN. The mask is therefore rebuilt after the fill: a cell is ocean
+        only where every variable, temperature and salinity included, has data at some
+        depth, and a column where any variable has none is land, filled laterally for
+        every variable. This mirrors
         :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
 
         Parameters
@@ -1876,12 +1932,9 @@ class WOABGCDataset(WOADataset):
                 continue
             self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
 
-        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
-        if data_vars:
-            surface = self.ds[data_vars[0]].isel({dim: 0}, drop=True)
-            if self.dim_names.get("time") in surface.dims:
-                surface = surface.isel({self.dim_names["time"]: 0}, drop=True)
-            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+        mask = _surface_ocean_mask(self.ds, dim, self.dim_names.get("time"))
+        if mask is not None:
+            self.ds["mask"] = mask
 
 
 @dataclass(kw_only=True)
@@ -2523,9 +2576,12 @@ class GLODAPv2Dataset(LatLonDataset):
         below it. A variable can be NaN at the surface even when data exists at a
         deeper level, or two variables can have different surface coverage so the
         mask (built from the first variable) marks a cell as ocean while a second
-        variable has NaN there. The mask is therefore rebuilt from the first non-mask
-        variable at depth=0 so that apply_lateral_fill() never encounters NaN values
-        at ocean grid points.
+        variable has NaN there. The mask is therefore rebuilt after the fill: a cell
+        is ocean only where every variable, temperature and salinity included, is
+        finite at depth=0, so that apply_lateral_fill() never encounters NaN values
+        at ocean grid points. A column where any variable has no data at all (e.g. a
+        tracer without temperature or salinity) is land and is filled laterally for
+        every variable.
 
         Parameters
         ----------
@@ -2541,12 +2597,11 @@ class GLODAPv2Dataset(LatLonDataset):
                 continue
             self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
 
-        # Rebuild the mask now that all variables have surface values wherever
-        # data exists at any depth.
-        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
-        if data_vars:
-            surface = self.ds[data_vars[0]].isel(depth=0, drop=True)
-            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+        # Rebuild the mask now that all variables have surface values wherever data
+        # exists at any depth; ocean only where every variable has data.
+        mask = _surface_ocean_mask(self.ds, dim)
+        if mask is not None:
+            self.ds["mask"] = mask
 
 
 @dataclass(kw_only=True)

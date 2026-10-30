@@ -1,8 +1,8 @@
 {
   "attributes": {
     "title": "ROMS initial conditions file created by ROMS-Tools",
-    "roms_tools_version": "4.0.0",
-    "roms_tools_git_commit": "fac97199",
+    "roms_tools_version": "4.0.0a3.dev6+g18150aeee.d20260702",
+    "roms_tools_git_commit": "11fcf5cb-dirty",
     "ini_time": "2021-06-29 00:00:00",
     "model_reference_date": "2000-01-01 00:00:00",
     "adjust_depth_for_sea_surface_height": "False",
@@ -10,9 +10,11 @@
     "prefill": "2d_lateral_fill",
     "regrid_method": "scipy",
     "extrap_method": "inverse_dist",
+    "bottom_fill_blend_m": 25.0,
     "theta_s": 5.0,
     "theta_b": 2.0,
-    "hc": 250.0
+    "hc": 250.0,
+    "bgc_sources": "CESM_REGRIDDED"
   },
   "zarr_format": 3,
   "consolidated_metadata": {

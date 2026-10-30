@@ -47,6 +47,7 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
 import sys
 from collections.abc import Iterable
@@ -385,10 +386,12 @@ def groom_esper_companions(
     from roms_tools.setup.bgc_groom import bgc_groom, resolve_groom_settings
 
     checks, params = resolve_groom_settings(settings)
+    groomed_any = False
     for c in companions:
         variables = _groomed_esper_vars(c)
         if not variables:
             continue
+        groomed_any = True
         groomed = bgc_groom(
             c.ds,
             grid,
@@ -399,6 +402,10 @@ def groom_esper_companions(
         )
         assert isinstance(groomed, xr.Dataset)
         c.ds = groomed.load() if load else groomed
+    if settings is not None and not groomed_any:
+        logging.getLogger(__name__).info(
+            "groom_settings has no effect: no ESPER source supplies groomable tracers."
+        )
 
 
 def _salinity_conditioning(source: dict) -> SalinityConditioning | None:

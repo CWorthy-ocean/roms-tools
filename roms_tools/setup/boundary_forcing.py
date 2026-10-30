@@ -1978,8 +1978,13 @@ class BoundaryForcing:
         bgc_sources = self.bgc_sources or []
         if not isinstance(self.groom, bool):
             raise TypeError(f"`groom` must be True or False, got {self.groom!r}.")
-        # Fail on bad settings before any regrid.
+        # Fail on bad or contradictory settings before any regrid.
         resolve_groom_settings(self.groom_settings)
+        if self.groom_settings is not None and not self.groom:
+            raise ValueError(
+                "`groom_settings` only applies when `groom=True`; remove it or set "
+                "`groom=True`."
+            )
         if bgc_sources:
             if self.bgc_model is None:
                 raise ValueError(

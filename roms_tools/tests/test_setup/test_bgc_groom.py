@@ -11,6 +11,7 @@ from roms_tools.setup.bgc_groom import (
     FLAG_PHYSICAL,
     bgc_check,
     bgc_groom,
+    resolve_groom_settings,
     summarize_flags,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates
@@ -185,6 +186,78 @@ def test_nitracline_step_between_levels_is_not_flagged(grid, clean):
     assert counts["NO3"]["total"] == 0, counts
     out = bgc_groom(ic, grid, variables=["NO3"]).compute()
     np.testing.assert_array_equal(out["NO3"].values, no3.astype(np.float32))
+
+
+def test_floor_value_between_two_ordinary_levels_is_flagged(grid, clean):
+    """A floor value sandwiched between ordinary water above and below is never a
+    natural profile, even where no same-depth neighbour qualifies.
+    """
+    wet = clean["salt"] > 0
+    no3 = np.where(wet, 20.0, 0.0)
+    # A zero patch at one level around (10, 8): the centre's same-depth neighbours are
+    # zero too, so only the vertical rule (ordinary water above and below) catches it.
+    no3[0, 5, 9:12, 7:10] = 0.0
+    clean["NO3"] = no3
+    flags = bgc_check(_ic(clean), grid, variables=["NO3"]).compute()
+    assert flags["NO3"].values[0, 5, 10, 8] & FLAG_FLOOR_JUMP
+
+
+def test_nan_o2_is_not_turned_into_the_ceiling(grid, clean):
+    wet = clean["salt"] > 0
+    o2 = clean["O2"].copy()
+    o2[0, 4, 10, 10] = np.nan
+    clean["O2"] = o2
+    out = bgc_groom(_ic(clean), grid, variables=["O2"], passes=0).compute()
+    assert np.isnan(out["O2"].values[0, 4, 10, 10])
+    assert np.isfinite(out["O2"].values[wet & ~np.isnan(o2)]).all()
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"dz_max": float("nan")},
+        {"dz_max": np.float64(30.0)},
+        {"passes": True},
+        {"passes": np.int64(2)},
+        {"checks": []},
+        {"checks": {"DIC": 5}},
+        {"checks": {"O2": {"floor": float("nan")}}},
+        {"checks": {"ALK": {"bounds": (400.0, 3100.0)}}},
+        {"checks": {"ALK": {"bounds": [3100.0, 400.0]}}},
+        {"checks": {"O2": {"ceiling": "x"}}},
+        {"unknown": 1},
+        [("passes", 2)],
+    ],
+)
+def test_resolve_groom_settings_rejects_bad_values(settings):
+    """Only YAML-representable, finite values; everything else is a ValueError."""
+    with pytest.raises(ValueError, match="groom_settings"):
+        resolve_groom_settings(settings)
+
+
+def test_resolve_groom_settings_overrides():
+    checks, params = resolve_groom_settings(
+        {
+            "passes": 3,
+            "dz_max": 30,
+            "checks": {
+                "ALK": {"bounds": [400, 3100]},
+                "DIC": {"physical_reality": None},
+                "O2": {"ceiling": None},
+            },
+        }
+    )
+    assert params == {"passes": 3, "dz_max": 30.0}
+    assert checks["ALK"].bounds == (400.0, 3100.0)
+    assert checks["DIC"].physical_reality is None and checks["DIC"].requires == ()
+    assert checks["O2"].ceiling is None
+    assert resolve_groom_settings(None)[1] == {}
+    assert resolve_groom_settings({"checks": None})[1] == {}
+
+
+def test_bgc_groom_rejects_bool_counts(grid, clean):
+    with pytest.raises(ValueError, match="passes"):
+        bgc_groom(_ic(clean), grid, passes=True)
 
 
 def test_check_flags_each_planted_defect(grid, clean):

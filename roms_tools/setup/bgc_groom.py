@@ -10,10 +10,11 @@ Each tracer gets a :class:`BgcCheck`:
 
 - ``bounds``: the plausible range;
 - ``floor_jump``: a value at its floor (``floor``) next to a same-depth neighbour at or
-  above this, i.e. the zero-next-to-normal artefact. Used for nutrients and O2, whose
-  zeros can be real, so a plain gradient limit would also flag natural nutriclines.
-  Vertical neighbours do not count: on a coarse vertical grid a real nitracline or OMZ
-  edge steps from the floor to above ``floor_jump`` between adjacent levels;
+  above this, or between two vertical neighbours at or above it, i.e. the
+  zero-next-to-normal artefact. Used for nutrients and O2, whose zeros can be real, so a
+  plain gradient limit would also flag natural nutriclines. One high vertical neighbour
+  does not count: on a coarse vertical grid a real nitracline or OMZ edge steps from the
+  floor to above ``floor_jump`` between adjacent levels;
 - ``max_jump``: a cell is flagged as a spike when it lies outside the range of its
   eligible horizontal neighbours (at least two) by more than this, or outside the range of
   its two vertical neighbours. Values are salinity-normalized (``E + (x - E) * 35 / S``,
@@ -50,6 +51,7 @@ eager step.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
@@ -281,11 +283,17 @@ def _detect(
         if chk.floor_jump is not None:
             at_floor = wet & (a <= chk.floor + FLOOR_TOL)
             high = np.zeros(a.shape, dtype=bool)
-            # Same-depth neighbours only: a floor value above or below ordinary water is
-            # a nitracline / OMZ edge on a coarse vertical grid, not an artefact.
+            # Same-depth neighbours: a floor value above or below ordinary water is a
+            # nitracline / OMZ edge on a coarse vertical grid, not an artefact. A floor
+            # value between two ordinary levels is never a natural profile, so it counts.
+            v_high = []
             for e, (axis, step) in zip(elig, _DIRS, strict=True):
-                if axis != -3:
-                    high |= e & (_shift(a, axis, step, -np.inf) >= chk.floor_jump)
+                hi = e & (_shift(a, axis, step, -np.inf) >= chk.floor_jump)
+                if axis == -3:
+                    v_high.append(hi)
+                else:
+                    high |= hi
+            high |= v_high[0] & v_high[1]
             flags |= np.uint8(FLAG_FLOOR_JUMP) * (at_floor & high)
         if chk.max_jump is not None:
             if chk.normalize_by_salinity:
@@ -562,10 +570,12 @@ def _kernel(
                 values[n] = _project_into_envelope(values[n], holes, wet, elig, jmp)
         if (ceiling := checks[n].ceiling) is not None:
             # Cap every wet cell, not only holes: a value above the ceiling is not
-            # plausible anywhere. fmin keeps cells whose ceiling is NaN (no physics).
+            # plausible anywhere. A NaN value or ceiling (no physics) compares False,
+            # so it is left as is.
             cap = ceiling(Block(values, salt, temp, wet)) * (1.0 - CEILING_MARGIN)
-            capped = np.fmin(values[n], cap)
-            values[n] = np.where(wet, capped, values[n])
+            with np.errstate(invalid="ignore"):
+                over = wet & (values[n] > cap)
+            values[n] = np.where(over, cap, values[n])
         out[names.index(n)] = values[n]
     return out
 
@@ -937,11 +947,23 @@ _CHECK_OVERRIDES = (
 
 
 def _number(value: Any, label: str, *, positive: bool = False) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"groom_settings: {label} must be a number, got {value!r}.")
+    """A finite builtin int/float (not bool, not a numpy scalar, which a YAML cannot hold)."""
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError(
+            f"groom_settings: {label} must be a finite number, got {value!r}."
+        )
     if positive and value <= 0:
         raise ValueError(f"groom_settings: {label} must be positive, got {value!r}.")
     return float(value)
+
+
+def _check_count(name: str, value: Any, prefix: str = "") -> int:
+    """A non-negative builtin int (not bool): ``passes``, ``relax_sweeps``,
+    ``column_reach``.
+    """
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{prefix}{name} must be a non-negative int, got {value!r}.")
+    return value
 
 
 def resolve_groom_settings(
@@ -960,7 +982,7 @@ def resolve_groom_settings(
     if settings is None:
         return checks, {}
     if not isinstance(settings, Mapping):
-        raise TypeError(
+        raise ValueError(
             f"groom_settings must be a dict or None, got {type(settings).__name__}."
         )
     unknown = set(settings) - {*GROOM_PARAMETERS, "checks"}
@@ -972,25 +994,22 @@ def resolve_groom_settings(
     params: dict[str, Any] = {}
     for k in ("passes", "relax_sweeps", "column_reach"):
         if k in settings:
-            v = settings[k]
-            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
-                raise ValueError(
-                    f"groom_settings: {k} must be a non-negative int, got {v!r}."
-                )
-            params[k] = v
+            params[k] = _check_count(k, settings[k], "groom_settings: ")
     if "dz_max" in settings:
         params["dz_max"] = _number(settings["dz_max"], "dz_max", positive=True)
 
-    overrides = settings.get("checks") or {}
+    overrides = settings.get("checks")
+    if overrides is None:
+        overrides = {}
     if not isinstance(overrides, Mapping):
-        raise TypeError("groom_settings: 'checks' must be a dict of {tracer: {...}}.")
+        raise ValueError("groom_settings: 'checks' must be a dict of {tracer: {...}}.")
     for var, fields in overrides.items():
         if var not in checks:
             raise ValueError(
                 f"groom_settings: no check for {var!r}; known: {sorted(checks)}."
             )
         if not isinstance(fields, Mapping):
-            raise TypeError(f"groom_settings: checks[{var!r}] must be a dict.")
+            raise ValueError(f"groom_settings: checks[{var!r}] must be a dict.")
         bad = set(fields) - set(_CHECK_OVERRIDES)
         if bad:
             raise ValueError(
@@ -1004,7 +1023,7 @@ def resolve_groom_settings(
                 if v is None:
                     upd[f] = None
                     continue
-                if not isinstance(v, Sequence) or isinstance(v, str) or len(v) != 2:
+                if type(v) is not list or len(v) != 2:
                     raise ValueError(
                         f"groom_settings: {label}.bounds must be [low, high] or None."
                     )
@@ -1021,7 +1040,7 @@ def resolve_groom_settings(
                     None if v is None else _number(v, f"{label}.{f}", positive=True)
                 )
             elif f == "normalize_by_salinity":
-                if not isinstance(v, bool):
+                if type(v) is not bool:
                     raise ValueError(f"groom_settings: {label}.{f} must be a bool.")
                 upd[f] = v
             else:  # physical_reality, ceiling
@@ -1137,8 +1156,7 @@ def bgc_groom(
         ("relax_sweeps", relax_sweeps),
         ("column_reach", column_reach),
     ):
-        if not isinstance(v, int) or v < 0:
-            raise ValueError(f"{k} must be a non-negative int, got {v!r}")
+        _check_count(k, v)
     kw = dict(
         mode="groom",
         checks=checks,

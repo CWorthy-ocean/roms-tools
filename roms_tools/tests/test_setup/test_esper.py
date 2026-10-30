@@ -2060,6 +2060,17 @@ def test_bad_groom_settings_raise_before_any_regrid(settings):
         )
 
 
+def test_groom_settings_with_groom_false_raise():
+    with pytest.raises(ValueError, match="only applies when `groom=True`"):
+        InitialConditions(
+            grid=_small_grid(),
+            ini_time=datetime(2021, 6, 29),
+            source={"name": "GLORYS", "path": "never-opened.nc"},
+            groom=False,
+            groom_settings={"passes": 2},
+        )
+
+
 def test_groom_is_not_a_source_setting():
     """Only the wrappers groom: an ESPER source dict refuses a groom key, and the
     Source classes have no groom argument.

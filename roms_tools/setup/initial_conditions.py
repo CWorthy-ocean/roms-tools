@@ -33,7 +33,7 @@ from roms_tools.regrid import (
     LateralRegridFromROMS,
     VerticalRegrid,
     build_lateral_regridder,
-    select_source_mask,
+    select_source_mask_name,
 )
 from roms_tools.setup.bgc_groom import resolve_groom_settings
 from roms_tools.setup.bgc_model import (
@@ -790,35 +790,29 @@ class InitialConditionsSource:
             )
 
         else:
-            # Velocity fields (location "u"/"v") use the velocity mask; build a
-            # separate vector regridder only when a velocity var is present so
+            # Each variable regrids with the source mask `select_source_mask_name` picks
+            # for it (its own mask, `mask_vel` for velocity fields (location "u"/"v"), or
+            # `mask`); one regridder is built per distinct mask, lazily, so
             # mask_vel-less sources (e.g. BGC) don't pay for unused xESMF weights.
-            def _mask(is_vector):
-                return select_source_mask(
+            # Keyed by the mask's content, not its name: per-variable masks with the
+            # same wet pattern (most of GLODAP's) share one regridder.
+            regridders = {}
+            for var_name in var_names:
+                src_name = var_names[var_name]["name"]
+                mask_name = select_source_mask_name(
                     data.ds,
-                    is_vector=is_vector,
+                    is_vector=var_names[var_name]["location"] in ("u", "v"),
                     use_xesmf=self._regrid.use_xesmf,
                     prefill=self._regrid.prefill,
+                    var_name=src_name,
                 )
-
-            scalar_rg = build_lateral_regridder(
-                target_coords, data, self._regrid, _mask(False)
-            )
-            has_vel = any(var_names[v]["location"] in ("u", "v") for v in var_names)
-            vector_rg = (
-                build_lateral_regridder(target_coords, data, self._regrid, _mask(True))
-                if has_vel
-                else scalar_rg
-            )
-            for var_name in var_names:
-                rg = (
-                    vector_rg
-                    if var_names[var_name]["location"] in ("u", "v")
-                    else scalar_rg
-                )
-                processed_fields[var_name] = rg.apply(
-                    data.ds[var_names[var_name]["name"]]
-                )
+                mask = None if mask_name is None else data.ds[mask_name]
+                key = None if mask is None else mask.values.tobytes()
+                if key not in regridders:
+                    regridders[key] = build_lateral_regridder(
+                        target_coords, data, self._regrid, mask
+                    )
+                processed_fields[var_name] = regridders[key].apply(data.ds[src_name])
 
         return processed_fields
 

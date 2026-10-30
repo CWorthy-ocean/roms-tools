@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 
 from roms_tools.datasets.lat_lon_datasets import GLODAPv2BGCDataset
-from roms_tools.processing_methods import BOTTOM_FILL_BLEND_M
+from roms_tools.processing_methods import BOTTOM_FILL_BLEND_M, _xesmf_available
+from roms_tools.regrid import per_variable_mask_name
 from roms_tools.setup.utils import compute_in_situ_density
 from roms_tools.tests.glodap_test_utils import write_synthetic_glodap
 
@@ -203,15 +204,15 @@ def test_mask_is_rebuilt_after_the_fill(tmp_path, use_dask):
         assert np.isfinite(surface[mask == 1]).all(), name
 
 
-def test_a_column_with_tracers_but_no_temperature_or_salinity_is_land(
+def test_a_column_with_tracers_but_no_temperature_or_salinity_gets_its_own_ts_mask(
     tmp_path, use_dask
 ):
-    """A column with a finite tracer but T and S NaN at every depth is land to the fill.
+    """A column with a finite tracer but T and S NaN at every depth is land for T and S.
 
     The mask used to come from the first variable (a tracer) alone, so the column was
-    ocean while T and S stayed NaN there, and ``apply_lateral_fill`` raised. Now the
-    column is land, and after the lateral fill no variable, T and S included, is NaN
-    where the mask is 1.
+    ocean for T and S too while they stayed NaN there, and ``apply_lateral_fill``
+    raised. Now T and S carry their own masks, with the column as land, and after the
+    lateral fill no variable is NaN where its own mask is 1.
     """
     lat, lon = np.arange(10.0, 14.0), np.arange(20.0, 25.0)
     no_ts = (1, 2)
@@ -234,20 +235,186 @@ def test_a_column_with_tracers_but_no_temperature_or_salinity_is_land(
     )
     data.extrapolate_deepest_to_bottom()
 
+    np.testing.assert_array_equal(
+        data.ds["mask"].values, np.ones((lat.size, lon.size), dtype=int)
+    )
     expected = np.ones((lat.size, lon.size), dtype=int)
     expected[no_ts] = 0
-    np.testing.assert_array_equal(data.ds["mask"].values, expected)
+    for name in ("temperature", "salinity"):
+        np.testing.assert_array_equal(
+            data.ds[per_variable_mask_name(name)].values, expected
+        )
 
     data.apply_lateral_fill()
-    wet = data.ds["mask"].values == 1
     for name in data.ds.data_vars:
-        if name == "mask":
+        if name.startswith("mask"):
             continue
+        own = data.ds.get(per_variable_mask_name(name), data.ds["mask"]).values == 1
         values = data.ds[name].transpose("depth", "latitude", "longitude").values
-        assert np.isfinite(values[:, wet]).all(), name
-    # The column is filled for every variable, T and S included, from its neighbours.
+        assert np.isfinite(values[:, own]).all(), name
+    # T and S are filled in the column from their neighbours.
     column = data.ds["temperature"].isel(latitude=no_ts[0], longitude=no_ts[1])
     np.testing.assert_allclose(column.values, 2.0, rtol=1e-3)
+
+
+#: Columns of an all-wet 5 x 5 source for the per-variable mask tests, (lat, lon).
+GAP_LAT = np.arange(10.0, 15.0)
+GAP_LON = np.arange(20.0, 25.0)
+LAND, NO_SILICATE, NO_TCO2 = (0, 0), (2, 1), (2, 3)
+#: Every variable of that source is uniform, at this value.
+UNIFORM = 7.0
+
+
+def _write_gap_columns(directory):
+    """A uniform source where whole columns are missing, per variable.
+
+    ``NO_SILICATE`` has no silicate at any depth and ``NO_TCO2`` has no TCO2, though
+    every other variable (NO3, the one the shared mask comes from, included) has data
+    there; ``LAND`` has none of any variable.
+    """
+
+    def field_fn(name, values):
+        values = np.full_like(values, UNIFORM)
+        values[:, LAND[0], LAND[1]] = np.nan
+        for variable, column in (("silicate", NO_SILICATE), ("TCO2", NO_TCO2)):
+            if name == variable:
+                values[:, column[0], column[1]] = np.nan
+        return values
+
+    return write_synthetic_glodap(
+        directory,
+        include_ts=False,
+        lat=GAP_LAT,
+        lon=GAP_LON,
+        depth=DEPTH,
+        field_fn=field_fn,
+    )
+
+
+def _gap_dataset(tmp_path, use_dask):
+    data = _load(
+        _write_gap_columns(tmp_path / "gaps"), use_dask, apply_post_processing=False
+    )
+    data.extrapolate_deepest_to_bottom()
+    return data
+
+
+def test_a_variable_missing_a_column_the_shared_mask_calls_ocean_gets_its_own_mask(
+    tmp_path, use_dask
+):
+    """Only a variable whose wet cells differ from ``mask`` gets a per-variable mask."""
+    data = _gap_dataset(tmp_path, use_dask)
+
+    masks = {v for v in data.ds.data_vars if v.startswith("mask")}
+    assert masks == {"mask", "mask_silicate", "mask_TCO2"}
+
+    expected = np.ones((GAP_LAT.size, GAP_LON.size), dtype=int)
+    expected[LAND] = 0
+    np.testing.assert_array_equal(data.ds["mask"].values, expected)
+    expected[NO_SILICATE] = 0
+    np.testing.assert_array_equal(data.ds["mask_silicate"].values, expected)
+    expected[NO_SILICATE] = 1
+    expected[NO_TCO2] = 0
+    np.testing.assert_array_equal(data.ds["mask_TCO2"].values, expected)
+
+
+def test_extrapolating_twice_leaves_no_stale_per_variable_mask(tmp_path, use_dask):
+    """A second call rebuilds the masks: a variable that no longer differs loses its own."""
+    data = _gap_dataset(tmp_path, use_dask)
+    data.ds["silicate"] = (
+        data.ds["silicate"].fillna(UNIFORM).where(data.ds["mask"] == 1)
+    )
+    data.extrapolate_deepest_to_bottom()
+    assert "mask_silicate" not in data.ds
+    assert "mask_TCO2" in data.ds
+
+
+#: A column NO3 (the variable the shared mask comes from) lacks and every other
+#: variable has, and the distinct value those variables hold there.
+NO_NO3, OWN = (3, 2), UNIFORM + 1.0
+
+
+def test_a_variable_keeps_its_data_where_the_shared_masks_variable_has_none(
+    tmp_path, use_dask
+):
+    """A column that is land in ``mask`` but ocean in a variable's own mask keeps its data.
+
+    The shared mask comes from NO3, so a column NO3 lacks is land in it. With one mask
+    for all, the lateral fill overwrote the other variables there with their
+    neighbours' values; with their own masks it leaves them alone.
+    """
+
+    def field_fn(name, values):
+        values = np.full_like(values, UNIFORM)
+        values[:, LAND[0], LAND[1]] = np.nan
+        values[:, NO_NO3[0], NO_NO3[1]] = np.nan if name == "NO3" else OWN
+        return values
+
+    directory = write_synthetic_glodap(
+        tmp_path / "no_no3",
+        include_ts=False,
+        lat=GAP_LAT,
+        lon=GAP_LON,
+        depth=DEPTH,
+        field_fn=field_fn,
+    )
+    data = _load(directory, use_dask, apply_post_processing=False)
+    data.extrapolate_deepest_to_bottom()
+
+    others = [v for v in data.var_names.values() if v != "NO3"]
+    expected = np.ones((GAP_LAT.size, GAP_LON.size), dtype=int)
+    expected[LAND] = 0
+    expected[NO_NO3] = 0
+    np.testing.assert_array_equal(data.ds["mask"].values, expected)
+    expected[NO_NO3] = 1
+    for name in others:
+        np.testing.assert_array_equal(
+            data.ds[per_variable_mask_name(name)].values, expected
+        )
+
+    data.apply_lateral_fill()
+    column = dict(latitude=NO_NO3[0], longitude=NO_NO3[1])
+    for name in others:
+        np.testing.assert_allclose(data.ds[name].isel(**column), OWN, err_msg=name)
+    # NO3 itself is filled there from its neighbours.
+    np.testing.assert_allclose(data.ds["NO3"].isel(**column), UNIFORM)
+
+
+@pytest.mark.parametrize(
+    "fill",
+    [
+        "apply_lateral_fill",
+        "apply_nearest_neighbor_fill",
+        pytest.param(
+            "apply_xesmf_source_fill",
+            marks=pytest.mark.skipif(
+                not _xesmf_available(), reason="xesmf required for the xESMF fill"
+            ),
+        ),
+    ],
+)
+def test_each_variable_is_filled_against_its_own_mask(tmp_path, use_dask, fill):
+    """No NaN is left at the cells a variable lacks, and the cells it has keep their value.
+
+    With one shared mask, silicate's gap column is marked as known and stays NaN, and
+    LateralFill takes it as a value.
+    """
+    data = _gap_dataset(tmp_path, use_dask)
+    before = data.ds.copy(deep=True).compute()
+    getattr(data, fill)()
+
+    for name in data.var_names.values():
+        filled = data.ds[name].compute()
+        assert not filled.isnull().any(), name
+        own = before.get(per_variable_mask_name(name), before["mask"]) == 1
+        np.testing.assert_allclose(
+            filled.where(own).values, before[name].where(own).values
+        )
+    # Where silicate had nothing, it takes its neighbours' value (the field is uniform).
+    np.testing.assert_allclose(
+        data.ds["silicate"].isel(latitude=NO_SILICATE[0], longitude=NO_SILICATE[1]),
+        UNIFORM,
+    )
 
 
 @pytest.mark.parametrize(

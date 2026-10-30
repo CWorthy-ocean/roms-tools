@@ -30,6 +30,7 @@ from roms_tools.regrid import (
     build_lateral_regridder,
     select_source_mask,
 )
+from roms_tools.setup.bgc_groom import resolve_groom_settings
 from roms_tools.setup.bgc_model import (
     BGCModel,
     bgc_model_from_name,
@@ -1966,6 +1967,17 @@ class InitialConditions:
     """xESMF destination extrapolation used on the default no-prefill path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
+    groom: bool = True
+    """Groom the tracers supplied by ESPER BGC sources: implausible values (spikes, zeros
+    beside ordinary water, DIC inconsistent with ALK, supersaturated oxygen) are detected
+    and refilled from the surrounding water (:func:`roms_tools.bgc_groom`), before the
+    MARBL tracer set is completed. Recorded in the YAML, so regenerating reproduces the
+    file. Other BGC sources are never groomed."""
+    groom_settings: dict | None = None
+    """Optional overrides of the grooming thresholds and fill parameters; see
+    :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`. ``None`` uses this
+    roms-tools version's built-ins, which the groomed variables record in their
+    ``bgc_groom`` attribute."""
 
     # `compare=False` on all three: `physics`/`bgc` hold constituent
     # `InitialConditionsSource` objects and `ds` is the merged `xr.Dataset` itself
@@ -2006,6 +2018,15 @@ class InitialConditions:
         if self.bgc_source is not None:
             bgc_sources = [{"source": self.bgc_source, "use_vars": self.use_vars}]
         bgc_sources = bgc_sources or []
+        if not isinstance(self.groom, bool):
+            raise TypeError(f"`groom` must be True or False, got {self.groom!r}.")
+        # Fail on bad or contradictory settings before any regrid.
+        resolve_groom_settings(self.groom_settings)
+        if self.groom_settings is not None and not self.groom:
+            raise ValueError(
+                "`groom_settings` only applies when `groom=True`; remove it or set "
+                "`groom=True`."
+            )
         # Validate `bgc_model` BEFORE building the physics source: a wrong value
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
@@ -2055,6 +2076,7 @@ class InitialConditions:
                 shared_kwargs,
                 type_="bgc",
             )
+            self._groom_bgc()
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
@@ -2063,6 +2085,22 @@ class InitialConditions:
             self.ds = InitialConditionsSource.merge(self.physics, self.bgc)
         else:
             self.ds = self.physics.ds
+
+    def _groom_bgc(self) -> None:
+        """Groom the ESPER companions' tracers in place when ``groom`` is set. Runs
+        before ``process_bgc_fields``, which copies DIC/ALK to ``*_ALT_CO2``.
+        """
+        if not self.groom:
+            return
+        from roms_tools.setup.esper import groom_esper_companions
+
+        groom_esper_companions(
+            self.bgc,
+            self.grid,
+            self.physics.ds,
+            self.groom_settings,
+            load=not self.use_dask,
+        )
 
     def plot(
         self,

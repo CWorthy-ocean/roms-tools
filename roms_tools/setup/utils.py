@@ -298,8 +298,20 @@ def wet_mask(grid_ds: xr.Dataset, location: Literal["rho", "u", "v"]) -> xr.Data
     return grid_ds[f"mask_{location}"]
 
 
+#: Default advice in :func:`fill_nans_over_land`'s error, for regridded lat/lon sources.
+WET_NAN_HINT_REGRID = (
+    "Likely causes: a source variable has NaN where the source's own mask says ocean, "
+    "or a wet target point has no wet source data nearby (e.g. no `prefill` and no "
+    "extrapolation), in which case try a `prefill` method."
+)
+
+
 def fill_nans_over_land(
-    field: xr.DataArray, mask: xr.DataArray, var_name: str, fill_value: float = 0.0
+    field: xr.DataArray,
+    mask: xr.DataArray,
+    var_name: str,
+    fill_value: float = 0.0,
+    hint: str = WET_NAN_HINT_REGRID,
 ) -> xr.DataArray:
     """Replace NaN by ``fill_value`` over land, raising if any NaN sits at a wet point.
 
@@ -317,6 +329,9 @@ def fill_nans_over_land(
         Name of the variable, used in the error message.
     fill_value : float, optional
         Value that replaces NaN over land. Default is 0.0.
+    hint : str, optional
+        Likely cause and remedy, appended to the error message. Defaults to advice for
+        regridded lat/lon sources.
 
     Returns
     -------
@@ -330,24 +345,23 @@ def fill_nans_over_land(
         immediately; for dask-backed data the check is part of the lazy graph, adds no
         compute of its own, and is raised when the data are computed (e.g. at
         ``.save()``), for the first offending chunk.
-        With dask data the error surfaces during ``save()``/``compute()``, so
-        ``save()`` can leave a partially written file.
     """
     if not np.issubdtype(field.dtype, np.floating):
         return field
 
-    in_chunks = " in one chunk of the data" if field.chunks is not None else ""
+    in_chunks = (
+        " in one chunk of the data (other chunks or variables may also have some)"
+        if field.chunks is not None
+        else ""
+    )
 
     def _fill(values, wet):
         is_nan = np.isnan(values)
         n_wet_nan = np.count_nonzero(is_nan & (wet == 1))
         if n_wet_nan:
             raise ValueError(
-                f"{var_name} has {n_wet_nan} NaN value(s){in_chunks} at ocean points "
-                "(mask == 1), so no value reached them. Likely causes: a source "
-                "variable has NaN where the source's own mask says ocean, or a wet "
-                "target point has no wet source data nearby (e.g. no `prefill` and no "
-                "extrapolation), in which case try a `prefill` method. With "
+                f"{var_name} has {n_wet_nan} NaN value(s) at ocean points "
+                f"(mask == 1){in_chunks}, so no value reached them. {hint} With "
                 f"`bypass_validation=True` they are written as {fill_value}."
             )
         return np.where(is_nan, values.dtype.type(fill_value), values)

@@ -1702,6 +1702,13 @@ class BoundaryForcingSource:
         -------
         List[Path]
             A list of Path objects for the filenames that were saved.
+
+        Raises
+        ------
+        ValueError
+            With ``use_dask=True``, if a variable has NaN at an ocean point. The data
+            are first computed here, so this is where that check runs; the files this
+            call started writing are removed.
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)

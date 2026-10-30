@@ -1604,7 +1604,7 @@ def test_static_bgc_source_without_the_flag_still_brackets():
     assert bf.ds.sizes["bry_time"] == 2
 
 
-@pytest.mark.parametrize("direction", ["east", "west"])
+@pytest.mark.parametrize("direction", ["south", "east", "north", "west"])
 @pytest.mark.parametrize("name", ["temp", "u", "v"])
 def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
     use_dask, name, direction
@@ -1612,7 +1612,7 @@ def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
     """Each boundary variable is checked against its own mask, cut at its own boundary.
 
     Rho cells are made dry, which dries the u and v points that touch them. At a point
-    of the east (west) boundary that is dry for the variable, a NaN is plain land and
+    of a boundary that is dry for the variable, a NaN is plain land and
     becomes 0; for u and v there is such a point where the rho mask says wet. At a wet
     point a NaN raises, naming the variable.
     """
@@ -1629,7 +1629,7 @@ def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
         theta_b=2.0,
         hc=250.0,
     )
-    boundaries = {"south": False, "east": True, "north": False, "west": True}
+    boundaries = {"south": True, "east": True, "north": True, "west": True}
     bf = BoundaryForcingSource(
         grid=grid,
         start_time=datetime(2012, 1, 1),
@@ -1646,22 +1646,30 @@ def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
         use_dask=use_dask,
     )
     rho = np.ones(grid.ds["mask_rho"].shape, dtype=int)
-    rho[2, 1] = rho[2, -2] = rho[3, -1] = rho[3, 0] = 0
+    # Each edge gets a dry rho cell, plus a cell whose u (v) point on that edge is dry
+    # while the edge rho point is wet.
+    rho[2, 1] = rho[2, -2] = rho[3, -1] = rho[3, 0] = rho[0, 3] = rho[1, 1] = 0
+    rho[-1, 1] = 0
     grid.ds["mask_rho"].values[...] = rho
     grid.ds["mask_u"].values[...] = rho[:, :-1] * rho[:, 1:]
     grid.ds["mask_v"].values[...] = rho[:-1] * rho[1:]
 
     # The mask along the boundary, written out here rather than taken from the code.
-    end = -1 if direction == "east" else 0
+    edge = {
+        "south": (0, slice(None)),
+        "east": (slice(None), -1),
+        "north": (-1, slice(None)),
+        "west": (slice(None), 0),
+    }[direction]
     mask = {
-        "temp": rho[:, end],
-        "u": grid.ds["mask_u"].values[:, end],
-        "v": grid.ds["mask_v"].values[:, end],
-    }[name]
+        "temp": rho,
+        "u": grid.ds["mask_u"].values,
+        "v": grid.ds["mask_v"].values,
+    }[name][edge]
     wet = int(np.argwhere(mask == 1)[0, 0])
     dry = int(np.argwhere(mask == 0)[0, 0])
     if name != "temp":
-        assert rho[dry, end] == 1  # dry for u (v), though wet for rho
+        assert rho[edge][dry] == 1  # dry for u (v), though wet for rho
 
     var_name = f"{name}_{direction}"
     boundary_dim = bf.ds[var_name].dims[-1]

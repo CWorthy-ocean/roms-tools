@@ -486,6 +486,34 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
         ), f"{var_name} values changed during initialization"
 
 
+def test_roms_source_ic_reaching_the_parent_edge_raises_with_a_nesting_hint(use_dask):
+    """A child grid that reaches its parent's edge gets no velocity on the outer ring.
+
+    That used to be written as 0 without a message. It now raises, and the message says
+    what applies to a ROMS restart source (not the `prefill` advice for lat/lon sources,
+    which this path ignores).
+    """
+    grid_params = {
+        "nx": 8,
+        "ny": 13,
+        "center_lon": -120,
+        "center_lat": 30,
+        "size_x": 3000,
+        "size_y": 4000,
+        "rot": 32,
+    }
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    match = r"(u|v|ubar|vbar) has \d+ NaN value.*ROMS restart.*inside the parent"
+    with pytest.raises(ValueError, match=match):
+        ic = InitialConditions(
+            grid=Grid(**grid_params),
+            ini_time=datetime(1998, 1, 6),
+            source={"name": "ROMS", "grid": Grid(**grid_params), "path": restart_file},
+            use_dask=use_dask,
+        )
+        ic.ds.compute()
+
+
 @skip_xesmf
 def test_roms_source_fills_levels_below_the_parent_bottom_from_deeper_water(use_dask):
     """A child deeper than its parent gets, below the parent's bottom, the parent's

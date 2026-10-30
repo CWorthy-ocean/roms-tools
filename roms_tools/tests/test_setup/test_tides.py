@@ -467,42 +467,78 @@ def test_tides_source_coverage_error(
         )
 
 
-def _tides_with_a_hole_in_the_second_constituent(tmp_path, use_dask, **kwargs):
+def _tides_with_a_hole_in_the_second_constituent(
+    tmp_path, use_dask, file="h", source_var="hRe", **kwargs
+):
     """Tidal forcing from a TPXO source with a block of NaN in the ocean.
 
-    The block is in the elevation of the second constituent (m2 is the first). The
-    construction-time check only looks at the first constituent, so it does not see it.
+    The block is in ``source_var`` of the TPXO ``file`` ("h" or "u"), for the second
+    constituent (m2 is the first). The construction-time check only looks at the first
+    constituent, so it does not see it.
     """
     files = _regional_tpxo10v2_files()
-    h = xr.open_dataset(files["h"]).load()
-    h["hRe"][1, 100:120, 80:100] = np.nan  # around the centre of the test grid
-    h.to_netcdf(tmp_path / "h.nc")
-    h.close()
+    source = xr.open_dataset(files[file]).load()
+    source[source_var][1, 100:120, 80:100] = (
+        np.nan
+    )  # around the centre of the test grid
+    source.to_netcdf(tmp_path / f"{file}.nc")
+    source.close()
     return TidalForcing(
         grid=_tides_grid(),
-        source={"name": "TPXO", "path": {**files, "h": tmp_path / "h.nc"}},
+        source={"name": "TPXO", "path": {**files, file: tmp_path / f"{file}.nc"}},
         ntides=2,
         use_dask=use_dask,
         **kwargs,
     )
 
 
+# Velocities are rotated after regridding, so a hole in either TPXO component reaches
+# both u_Re and v_Re; the error names whichever is filled first.
+_TIDAL_HOLES = {
+    "ssh_Re": ("h", "hRe", "ssh_Re"),
+    "u_Re": ("u", "URe", "(u|v)_Re"),
+    "v_Re": ("u", "VRe", "(u|v)_Re"),
+}
+
+
+@pytest.mark.parametrize("var_name", list(_TIDAL_HOLES))
 def test_nan_at_a_wet_point_in_tides_raises_instead_of_becoming_zero(
-    tmp_path, use_dask
+    tmp_path, use_dask, var_name
 ):
     """A tidal field the source leaves NaN at ocean points is an error, not a 0.
 
     Tidal forcing used to write such a NaN as 0 without a message. Without dask the
     error is raised while the object is built; with dask, when the variable is computed.
+    Elevation is checked against the rho mask, velocities against the u and v masks.
     """
-    match = r"ssh_Re has \d+ NaN value.* at ocean points"
+    file, source_var, reported = _TIDAL_HOLES[var_name]
+    match = rf"{reported} has \d+ NaN value.* at ocean points"
     if use_dask:
-        tidal_forcing = _tides_with_a_hole_in_the_second_constituent(tmp_path, use_dask)
+        tidal_forcing = _tides_with_a_hole_in_the_second_constituent(
+            tmp_path, use_dask, file, source_var
+        )
         with pytest.raises(ValueError, match=match):
-            tidal_forcing.ds["ssh_Re"].compute()
+            tidal_forcing.ds[var_name].compute()
     else:
         with pytest.raises(ValueError, match=match):
-            _tides_with_a_hole_in_the_second_constituent(tmp_path, use_dask)
+            _tides_with_a_hole_in_the_second_constituent(
+                tmp_path, use_dask, file, source_var
+            )
+
+
+def test_tides_save_that_hits_a_wet_point_nan_leaves_no_file(tmp_path):
+    """With dask the error comes during ``save()``; the half-written file is removed.
+
+    Otherwise a later run that skips existing files (e.g. C-Star Forge) would take the
+    truncated file as finished.
+    """
+    tidal_forcing = _tides_with_a_hole_in_the_second_constituent(tmp_path, True)
+    filepath = tmp_path / "out" / "tides.nc"
+    filepath.parent.mkdir()
+    # The hole reaches both elevation components; either may be computed first.
+    with pytest.raises(ValueError, match=r"ssh_(Re|Im) has \d+ NaN value"):
+        tidal_forcing.save(filepath)
+    assert list(filepath.parent.iterdir()) == []
 
 
 def test_tides_bypass_validation_still_fills_a_wet_point_nan_with_zero(

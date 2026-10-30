@@ -17,10 +17,7 @@ from conftest import calculate_data_hash
 from roms_tools import BGCMarbl, BoundaryForcing, BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import _xesmf_available
-from roms_tools.tests.test_setup.utils import (
-    download_regional_and_bigger,
-    write_synthetic_glodap,
-)
+from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
     import copernicusmarine  # type: ignore
@@ -557,6 +554,92 @@ def test_invalid_extrap_kwargs_raises(use_dask):
             extrap_method="inverse_dist",
             extrap_kwargs={"bogus": 1},
         )
+
+
+@pytest.mark.parametrize("value", [-1.0, float("nan"), "25"])
+def test_invalid_bottom_fill_blend_m_raises(use_dask, value):
+    """A negative, NaN or non-numeric blend length is rejected before any data loads,
+    by the source and by the wrapper alike.
+    """
+    kwargs = {**_coarse_glorys_kwargs(use_dask), "bottom_fill_blend_m": value}
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        BoundaryForcingSource(**kwargs)
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        BoundaryForcing(**kwargs)
+
+
+@pytest.mark.parametrize("blend_m", [0.0, 40.0, np.inf])
+def test_bottom_fill_blend_m_yaml_round_trip_and_attrs(use_dask, tmp_path, blend_m):
+    """``bottom_fill_blend_m`` (also 0 and inf) survives a to_yaml -> from_yaml
+    round-trip and is recorded, as a float, in the saved-dataset metadata.
+    """
+    bf = BoundaryForcingSource(
+        **_coarse_glorys_kwargs(use_dask), bottom_fill_blend_m=blend_m
+    )
+    fp = tmp_path / "bf.yaml"
+    bf.to_yaml(fp)
+    assert "bottom_fill_blend_m" in fp.read_text()
+    bf2 = BoundaryForcingSource.from_yaml(fp, use_dask=use_dask)
+
+    assert bf2.bottom_fill_blend_m == bf.bottom_fill_blend_m == blend_m
+    for obj in (bf, bf2):
+        assert isinstance(obj.ds.attrs["bottom_fill_blend_m"], float)
+        assert obj.ds.attrs["bottom_fill_blend_m"] == blend_m
+
+
+def test_bottom_fill_blend_m_is_stored_as_a_builtin_float(use_dask, tmp_path):
+    """A NumPy scalar is stored as a ``float`` by the wrapper and its sources: YAML
+    cannot represent a NumPy scalar, and ``to_yaml`` raised after the whole build.
+    """
+    bf = BoundaryForcing(
+        **_coarse_glorys_kwargs(use_dask), bottom_fill_blend_m=np.float64(40.0)
+    )
+    assert type(bf.bottom_fill_blend_m) is float
+    assert type(bf.physics.bottom_fill_blend_m) is float
+
+    fp = tmp_path / "bf_type.yaml"
+    bf.to_yaml(fp)
+    bf2 = BoundaryForcing.from_yaml(fp, use_dask=use_dask)
+    assert type(bf2.bottom_fill_blend_m) is float
+    assert bf2.bottom_fill_blend_m == 40.0
+
+
+def test_default_bottom_fill_blend_m_is_recorded(use_dask):
+    bf = BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask))
+    assert bf.bottom_fill_blend_m == 25.0
+    assert bf.ds.attrs["bottom_fill_blend_m"] == 25.0
+
+
+@pytest.mark.parametrize("prefill", [None, "2d_lateral_fill"])
+def test_bottom_fill_blend_m_changes_tracers_but_not_velocities(
+    small_grid, use_dask, prefill
+):
+    """Below a source column's bottom, tracers take the nearest column's water at that
+    depth, which a blend length of ``inf`` (copy the bottom value down) does not;
+    velocities always copy the bottom value down. Both fill code paths (with and
+    without a source prefill) pass the blend length on.
+    """
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    bfs = {
+        blend_m: BoundaryForcingSource(
+            grid=small_grid,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2012, 12, 31),
+            source={"name": "GLORYS", "path": [fname1, fname2]},
+            prefill=prefill,
+            regrid_method="scipy",
+            bottom_fill_blend_m=blend_m,
+            use_dask=use_dask,
+        )
+        for blend_m in (0.0, np.inf)
+    }
+    tracers = [v for v in bfs[0.0].ds.data_vars if v.startswith(("temp_", "salt_"))]
+    others = [v for v in bfs[0.0].ds.data_vars if v not in tracers]
+    assert tracers and others
+    for name in others:
+        np.testing.assert_array_equal(bfs[0.0].ds[name], bfs[np.inf].ds[name])
+    assert any((bfs[0.0].ds[v] != bfs[np.inf].ds[v]).any() for v in tracers)
 
 
 def test_regrid_method_xesmf_requires_xesmf(use_dask, monkeypatch):
@@ -1688,29 +1771,30 @@ def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
     assert (filled[var_name].isel({boundary_dim: dry}) == 0).all()
 
 
-def _glodap_boundary_missing_a_wet_column(tmp_path, use_dask, **kwargs):
-    """South boundary from a GLODAP source whose silicate and TCO2 miss a column.
+def _boundary_with_a_salt_hole(tmp_path, use_dask, **kwargs):
+    """South boundary from a GLORYS source with salinity NaN in a block near it.
 
-    Silicate lacks the source column at 53N/0E and TCO2 the one at 53N/1E, near the
-    south boundary, though NO3, which the shared source mask is taken from, has both.
-    That mask calls them ocean for every variable, so the NaN stays inside it and the
-    masked-bilinear regrid carries it onto the boundary.
+    The GLORYS mask comes from sea-surface height, which has data there, so the source
+    calls the block ocean. The NaN starts at the surface, where no fill reaches it, and
+    the masked regrid carries it onto the boundary.
     """
-
-    def field_fn(name, values):
-        gap = {"silicate": (18, 30), "TCO2": (18, 31)}.get(name)  # lat 53, lon 0 / 1
-        if gap is not None:
-            values[:, gap[0], gap[1]] = np.nan
-        return values
-
-    glodap_dir = write_synthetic_glodap(tmp_path / "glodap", field_fn=field_fn)
+    paths = []
+    for name in ("GLORYS_NA_20120101.nc", "GLORYS_NA_20121231.nc"):
+        source = xr.open_dataset(download_test_data(name)).load()
+        block = (abs(source["latitude"] - 56.2) < 0.6) & (
+            abs(source["longitude"] + 8) < 1.0
+        )
+        source["so"] = source["so"].where(~block)
+        source.to_netcdf(tmp_path / name)
+        source.close()
+        paths.append(tmp_path / name)
     grid = Grid(
         nx=20,
         ny=20,
         size_x=400,
         size_y=400,
-        center_lon=0,
-        center_lat=55,
+        center_lon=-8,
+        center_lat=58,
         rot=0,
         N=3,
         theta_s=5.0,
@@ -1719,12 +1803,10 @@ def _glodap_boundary_missing_a_wet_column(tmp_path, use_dask, **kwargs):
     )
     return BoundaryForcingSource(
         grid=grid,
-        start_time=datetime(2012, 1, 30),
-        end_time=datetime(2012, 2, 1),
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
         boundaries={"south": True, "east": False, "north": False, "west": False},
-        source={"name": "GLODAP", "path": str(glodap_dir)},
-        type="bgc",
-        use_vars=["ALK", "DIC", "SiO3"],
+        source={"name": "GLORYS", "path": paths},
         use_dask=use_dask,
         **kwargs,
     )
@@ -1736,30 +1818,28 @@ def test_nan_at_a_wet_boundary_point_raises_instead_of_becoming_zero(
 ):
     """A boundary variable the source leaves NaN at ocean points is an error, not a 0.
 
-    The boundary forcing used to write such a NaN as 0 (silicate and DIC of 0 on the
-    boundary) without a message. Without dask the error is raised while the object is
-    built; with dask, when the variable is computed.
+    The boundary forcing used to write such a NaN as 0 without a message. Without dask
+    the error is raised while the object is built; with dask, when the variable is
+    computed.
     """
-    match = r"(SiO3|DIC)_south has \d+ NaN value.* at ocean points"
+    match = r"salt_south has \d+ NaN value.* at ocean points"
     if use_dask:
-        bf = _glodap_boundary_missing_a_wet_column(tmp_path, use_dask)
+        bf = _boundary_with_a_salt_hole(tmp_path, use_dask)
         with pytest.raises(ValueError, match=match):
-            bf.ds["SiO3_south"].compute()
+            bf.ds["salt_south"].compute()
     else:
         with pytest.raises(ValueError, match=match):
-            _glodap_boundary_missing_a_wet_column(tmp_path, use_dask)
+            _boundary_with_a_salt_hole(tmp_path, use_dask)
 
 
 @requires_xesmf
 def test_bypass_validation_still_fills_a_wet_boundary_nan_with_zero(tmp_path, use_dask):
     """``bypass_validation=True`` keeps the plain fill, so the hole is written as 0."""
-    bf = _glodap_boundary_missing_a_wet_column(
-        tmp_path, use_dask, bypass_validation=True
-    )
+    bf = _boundary_with_a_salt_hole(tmp_path, use_dask, bypass_validation=True)
 
-    # The source is uniform (about 10 SiO3), so a 0 on the boundary is the leaked NaN.
-    assert float(bf.ds["SiO3_south"].min()) == 0.0
-    assert not bf.ds["SiO3_south"].isnull().any()
+    # Salinity is never 0 in the ocean, so a 0 on the boundary is the filled NaN.
+    assert float(bf.ds["salt_south"].min()) == 0.0
+    assert not bf.ds["salt_south"].isnull().any()
 
 
 def test_use_vars_on_physics_type_raises():
@@ -1977,10 +2057,13 @@ class TestBoundaryForcingWrapper:
         on each bgc companion (previously two hand-maintained kwargs lists that
         could -- and did -- diverge).
         """
-        bf = self._make(small_grid, use_dask, prefill="nearest_neighbor")
+        bf = self._make(
+            small_grid, use_dask, prefill="nearest_neighbor", bottom_fill_blend_m=40.0
+        )
         for obj in (bf.physics, *bf.bgc):
             assert obj.regrid_method == "scipy"
             assert obj.prefill == "nearest_neighbor"
+            assert obj.bottom_fill_blend_m == 40.0
             assert obj.model_reference_date == bf.model_reference_date
             assert obj.bypass_validation is bf.bypass_validation
         # Per-companion identity is preserved by build_bgc_companions.

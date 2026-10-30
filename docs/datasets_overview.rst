@@ -389,11 +389,29 @@ companion physics object (``physics_forcing``; the ``InitialConditions`` /
 
 Estimates are converted to mmol m⁻³ like the gridded sources and clamped at a per-variable
 floor (``roms_tools.setup.esper.ESPER_FLOORS``), with or without salinity conditioning:
-0 for the nutrients, alkalinity and DIC, 2.0 mmol m⁻³ for oxygen, because the nets go
-negative inside the oxygen minimum zones where the WOA23 climatology stays at 3-10 on the
-boundaries measured (12 km Indo-Pacific and California Current; it does reach zero in a few
-OMZ cores elsewhere). The output variables record what was applied in their
+0 for the nutrients, alkalinity and DIC, 5.0 mmol m⁻³ for oxygen. The nets go negative
+inside the oxygen minimum zones, and 5.0 is MARBL's default ``parm_o2_min``: below it
+MARBL's O2 consumption is off and denitrification fully on, so its biology cannot take
+oxygen lower, and lower values in the inputs change no rate, only the O2 inventory (the
+WOA23 climatology sits at 3-10 there on the boundaries measured, 12 km Indo-Pacific and
+California Current). The output variables record what was applied in their
 ``esper_salinity_conditioning`` and ``esper_floor`` attributes.
+
+``InitialConditions`` and ``BoundaryForcing`` groom the ESPER-derived tracers by default
+(``groom=True``; pass ``groom=False`` for the raw estimates). Grooming flags values
+outside plausible bounds, nutrients and oxygen at their floor next to ordinary water,
+alkalinity and DIC that spike against their neighbours, DIC inconsistent with alkalinity,
+and oxygen above 1.25 times saturation; it refills flagged cells from the surrounding
+water and clips oxygen to 1.25 times saturation. ``groom_settings`` overrides the
+thresholds and fill parameters (see :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`).
+Both are recorded in the YAML, so regenerating from it reproduces the files. A YAML
+written by roms-tools 5.0-5.3 has no ``groom`` key and so loads with grooming on; add
+``groom: false`` to its ``InitialConditions``/``BoundaryForcing`` section for the earlier
+output (apart from the oxygen floor, which is now 5.0).
+:func:`~roms_tools.bgc_check` reports what is flagged, in these objects or any file.
+Grooming compares each cell with its neighbours, so errors shared by a whole region, such
+as wrong temperature and salinity along a stretch of boundary, are best fixed upstream in
+the physics.
 
 :Required for: BGC Initial Conditions, BGC Boundary Forcing
 

@@ -1450,6 +1450,7 @@ class TestForwardableFields:
             "regrid_method",
             "extrap_method",
             "extrap_kwargs",
+            "bottom_fill_blend_m",
         }
     )
 

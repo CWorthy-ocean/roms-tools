@@ -21,16 +21,19 @@ from roms_tools.datasets.lat_lon_datasets import (
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.processing_methods import (
     BGC_INTERPOLATION_METHODS,
+    BOTTOM_FILL_BLEND_M,
     BgcInterpMethod,
     RegridConfig,
     _xesmf_available,
     resolve_bgc_interp_method,
+    validate_bottom_fill_blend_m,
 )
 from roms_tools.regrid import (
     VerticalRegrid,
     build_lateral_regridder,
     select_source_mask,
 )
+from roms_tools.setup.bgc_groom import resolve_groom_settings
 from roms_tools.setup.bgc_model import (
     BGCModel,
     bgc_model_from_name,
@@ -208,6 +211,17 @@ class BoundaryForcingSource:
     extrap_kwargs : dict, optional
         Method-specific options for ``extrap_method``: ``num_src_pnts`` /
         ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
+    bottom_fill_blend_m : float, optional
+        Where the model column is deeper than the source column, the cells below the
+        source bottom hold no source data. A tracer (temperature, salinity, BGC) there
+        takes the value of the nearest source column that has water at that depth,
+        blended in from the column's own bottom value over ``bottom_fill_blend_m``
+        metres below the bottom: ``0`` takes the nearest column's value immediately,
+        ``inf`` copies each column's bottom value down instead. The nearest column
+        can lie across a sill and hold lighter water than the column's own bottom
+        water; consider ``inf`` for semi-enclosed basins and overflow regions.
+        Velocities always copy their bottom value down. See the methods documentation
+        for choosing a value. Defaults to 25 m.
     apply_2d_horizontal_fill : bool, optional
         **Deprecated** -- use ``prefill`` instead. ``True`` maps to
         ``prefill="2d_lateral_fill"`` and ``False`` to ``prefill=None``; setting
@@ -306,6 +320,13 @@ class BoundaryForcingSource:
     treated as ``"inverse_dist"``. Ignored when ``prefill`` is set."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method`` (e.g. ``num_src_pnts``/``dist_exponent``)."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom, over which a tracer in a cell deeper than
+    the source column goes from the column's own bottom value to the value of the nearest
+    source column with water at that depth. ``0`` takes the nearest column's value
+    immediately, ``inf`` copies the bottom value down instead. Velocities are
+    unaffected (they always copy the bottom value down). See the methods documentation
+    for choosing a value."""
     apply_2d_horizontal_fill: bool | None = None
     """Deprecated alias for ``prefill`` (sentinel ``None`` = unset). ``True`` ->
     ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``; emits a DeprecationWarning."""
@@ -403,7 +424,7 @@ class BoundaryForcingSource:
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
-            data.extrapolate_deepest_to_bottom()
+            data.extrapolate_deepest_to_bottom(blend_m=self.bottom_fill_blend_m)
             data.apply_prefill(
                 prefill,
                 prefill_kwargs=self.prefill_kwargs,
@@ -466,7 +487,9 @@ class BoundaryForcingSource:
                 # Default (no source prefill) path. Prep happens per boundary.
                 # Enforce double precision to ensure reproducibility
                 bdry_data.convert_to_float64()
-                bdry_data.extrapolate_deepest_to_bottom()
+                bdry_data.extrapolate_deepest_to_bottom(
+                    blend_m=self.bottom_fill_blend_m
+                )
                 if not use_xesmf:
                     # xESMF unavailable: nearest-neighbor pre-fill the source so the
                     # subsequent scipy interpolation cannot propagate NaNs.
@@ -1088,6 +1111,9 @@ class BoundaryForcingSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
 
         # -------------------------------------------------------
         # Source configuration checks
@@ -1441,6 +1467,7 @@ class BoundaryForcingSource:
         ds.attrs["prefill"] = str(self.prefill)
         ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
         ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
+        ds.attrs["bottom_fill_blend_m"] = float(self.bottom_fill_blend_m)
         ds.attrs["adjust_depth_for_sea_surface_height"] = str(
             self.adjust_depth_for_sea_surface_height
         )
@@ -1853,9 +1880,9 @@ class BoundaryForcing:
     Parameters
     ----------
     grid, start_time, end_time, boundaries, prefill, prefill_kwargs, regrid_method,
-    extrap_method, extrap_kwargs, apply_2d_horizontal_fill, model_reference_date,
-    use_dask, chunks, initial_slice_bounds, bypass_validation, start_time_pad,
-    end_time_pad
+    extrap_method, extrap_kwargs, bottom_fill_blend_m, apply_2d_horizontal_fill,
+    model_reference_date, use_dask, chunks, initial_slice_bounds, bypass_validation,
+    start_time_pad, end_time_pad
         Forwarded to the internal physics :class:`BoundaryForcingSource` (and, for
         the fields that apply to a lat/lon bgc source too, to each bgc companion).
         See :class:`BoundaryForcingSource` for the full description of each.
@@ -1938,8 +1965,21 @@ class BoundaryForcing:
     """xESMF destination extrapolation used on the default no-prefill path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom; see :class:`BoundaryForcingSource`."""
     apply_2d_horizontal_fill: bool | None = None
     """Deprecated alias for ``prefill``; see :class:`BoundaryForcingSource`."""
+    groom: bool = True
+    """Groom the tracers supplied by ESPER BGC sources: implausible values (spikes, zeros
+    beside ordinary water, DIC inconsistent with ALK, supersaturated oxygen) are detected
+    and refilled from the surrounding water (:func:`roms_tools.bgc_groom`), before the
+    MARBL tracer set is completed. Recorded in the YAML, so regenerating reproduces the
+    file. Other BGC sources are never groomed."""
+    groom_settings: dict | None = None
+    """Optional overrides of the grooming thresholds and fill parameters; see
+    :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`. ``None`` uses this
+    roms-tools version's built-ins, which the groomed variables record in their
+    ``bgc_groom`` attribute."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the model."""
     use_dask: bool = False
@@ -1980,6 +2020,15 @@ class BoundaryForcing:
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
         bgc_sources = self.bgc_sources or []
+        if not isinstance(self.groom, bool):
+            raise TypeError(f"`groom` must be True or False, got {self.groom!r}.")
+        # Fail on bad or contradictory settings before any regrid.
+        resolve_groom_settings(self.groom_settings)
+        if self.groom_settings is not None and not self.groom:
+            raise ValueError(
+                "`groom_settings` only applies when `groom=True`; remove it or set "
+                "`groom=True`."
+            )
         if bgc_sources:
             if self.bgc_model is None:
                 raise ValueError(
@@ -1988,6 +2037,11 @@ class BoundaryForcing:
                 )
             validate_bgc_model(self.bgc_model)
             preflight_esper_sources(bgc_sources)
+        # Normalized here too (the sources do the same) so this wrapper's own
+        # `to_yaml` writes a builtin float.
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
         # Every constructor argument this wrapper shares by name with
         # BoundaryForcingSource is forwarded to the physics object and to each bgc
         # companion -- derived from the two dataclasses (see forwardable_fields)
@@ -2028,9 +2082,26 @@ class BoundaryForcing:
                 shared_kwargs,
                 type_="bgc",
             )
+            self._groom_bgc()
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
+
+    def _groom_bgc(self) -> None:
+        """Groom the ESPER companions' tracers in place when ``groom`` is set. Runs
+        before ``process_bgc_fields``, which copies DIC/ALK to ``*_ALT_CO2``.
+        """
+        if not self.groom:
+            return
+        from roms_tools.setup.esper import groom_esper_companions
+
+        groom_esper_companions(
+            self.bgc,
+            self.grid,
+            self.physics.ds,
+            self.groom_settings,
+            load=not self.use_dask,
+        )
 
     def save(
         self,

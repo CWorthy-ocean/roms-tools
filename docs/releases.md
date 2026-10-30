@@ -7,6 +7,10 @@
 * ESPER-derived tracers are now groomed by default, so ESPER initial conditions and boundary forcing change wherever cells are flagged; pass `groom=False` to `InitialConditions`/`BoundaryForcing` for the raw estimates. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
   * A YAML written by roms-tools 5.0–5.3 has no `groom` key and loads with grooming on; add `groom: false` to its section to skip grooming.
 * ESPER oxygen below 5.0 mmol/m³ now reads 5.0 (previously 2.0), matching MARBL's default `parm_o2_min`; there is no setting to restore 2.0. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+* Initial conditions and boundary forcing change wherever the ROMS grid is deeper than its lat/lon source or ROMS parent: tracers below the source's bottom differ, velocities do not. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * YAML files saved by earlier versions load with the new 25 m default; setting `bottom_fill_blend_m=float("inf")` restores the old output for GLORYS and CESM sources.
+  * Nested initial conditions change too: #709's fixed 100 m blend and child-grid donors are replaced by the 25 m default and the parent's own columns; no setting reproduces 5.3.0's nested output, and `inf` gives the copy-down from before 5.3.0.
+  * BGC fields from the WOA and GLODAP climatologies change below the source's seafloor in the same way; no setting reproduces WOA's earlier `deep_fill="annual_blend"` values below the seafloor.
 
 ### New Features
 
@@ -15,14 +19,26 @@
 * New `bgc_check` and `bgc_groom` check or groom BGC tracers in a Dataset or NetCDF file, for analysis or one-off repair; `bgc_check` also accepts `InitialConditions`/`BoundaryForcing`. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
   * Checks cover plausible bounds, nutrients and oxygen at their floor beside ordinary water, salinity-normalized spikes, ALK/DIC consistency, and oxygen above 1.25 times saturation, which is clipped.
   * Results are identical for any chunking or tiling.
+* `InitialConditions` and `BoundaryForcing` take `bottom_fill_blend_m`, the depth (m) below the source bottom over which tracers go from the column's own bottom value to the nearest same-depth source column's value. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * `0` takes the neighbouring column's value right below the bottom, `inf` copies the bottom value down, and negative or NaN values raise.
+  * The value is forwarded to BGC sources, written to the output file's attributes and kept in YAML.
 
 ### Bug Fixes
+
+* Initial conditions and boundary forcing from lat/lon sources (GLORYS, CESM, WOA, GLODAP) no longer copy a shallow source column's deepest water down to the ROMS bottom; tracers there now come from the nearest source column with water at that depth. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * On the Pacific 12 km initial state this removes about 70 % of the temperature spikes found by the #715 spike test, and most columns with warm water at the bottom.
+  * WOA BGC no longer fills every cell below the seafloor with the monthly 800 m or 1500 m value.
+* Nested initial conditions no longer take below-bottom water from distant child columns because of #709's 50 m depth bins; each cell's donor is the nearest parent column deep enough for it. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+* GLODAP BGC tracers are no longer dropped where GLODAP has no temperature or salinity (1.7–3.4 % of each tracer's values, mostly in the Arctic); the unit conversion uses that depth's mean density there. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * GLODAP columns where one variable has no data at any depth are now treated as land and filled from neighbouring columns, instead of that variable being written as 0.
 
 ### Improvements
 
 ### Miscellaneous
 
 * The datasets overview documents ESPER grooming, `groom`/`groom_settings` and the oxygen floor; `bgc_check`, `bgc_groom`, `summarize_flags` and `resolve_groom_settings` are in the API reference. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+* The methods page describes the fill and has a new section on choosing `bottom_fill_blend_m` for different kinds of domain; the nesting, initial conditions and boundary forcing notebooks drop the old 100 m wording. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+* Six reference fixtures are regenerated; only tracers in cells below the source bottom change, and velocities and zeta do not. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
 
 ## 5.3.0
 

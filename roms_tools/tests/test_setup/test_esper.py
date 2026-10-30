@@ -1793,15 +1793,15 @@ def test_boundary_forcing_esper_with_salinity_conditioning(woa_salinity_file):
 
 def test_every_supported_variable_has_a_floor():
     assert set(ESPER_FLOORS) == set(ESPER_SUPPORTED_VARS)
-    assert ESPER_FLOORS["O2"] == 2.0
+    assert ESPER_FLOORS["O2"] == 5.0
     assert all(ESPER_FLOORS[v] == 0.0 for v in ESPER_SUPPORTED_VARS if v != "O2")
 
 
-def test_estimate_bgc_fields_floors_oxygen_at_two_and_nutrients_at_zero(monkeypatch):
+def test_estimate_bgc_fields_floors_oxygen_at_five_and_nutrients_at_zero(monkeypatch):
     """The nets overshoot below the physical range at the low end (OMZ oxygen,
-    oligotrophic nutrients). Nutrients clamp at 0; O2 at 2.0 mmol/m3, below WOA23's
-    own value everywhere ESPER needs the floor on the measured boundaries. The attr
-    records the floor on O2 only.
+    oligotrophic nutrients). Nutrients clamp at 0; O2 at 5.0 mmol/m3, MARBL's
+    ``parm_o2_min``, below which its biology cannot take O2. The attr records the
+    floor on O2 only.
     """
     calls = _spy_pyesper(monkeypatch)
 
@@ -1824,8 +1824,8 @@ def test_estimate_bgc_fields_floors_oxygen_at_two_and_nutrients_at_zero(monkeypa
     )
     assert float(out["NO3"].min()) == 0.0 and float(out["NO3"].max()) == 0.0
     assert float(out["ALK"].min()) == 0.0
-    assert float(out["O2"].min()) == 2.0 and float(out["O2"].max()) == 2.0
-    assert "2 mmol/m^3" in out["O2"].attrs["esper_floor"]
+    assert float(out["O2"].min()) == 5.0 and float(out["O2"].max()) == 5.0
+    assert "5 mmol/m^3" in out["O2"].attrs["esper_floor"]
     assert "esper_floor" not in out["NO3"].attrs
 
 
@@ -1887,3 +1887,208 @@ def test_conditioned_source_survives_yaml_round_trips(
         .ds[next(v for v in reloaded.bgc[0].ds.data_vars if str(v).startswith("ALK"))]
         .attrs
     )
+
+
+# --------------------------------------------------------------------------------------
+# Grooming of ESPER-derived tracers (InitialConditions/BoundaryForcing groom, groom_settings)
+# --------------------------------------------------------------------------------------
+
+
+def _mock_esper_with_dic_spike(monkeypatch):
+    """Patch PyESPER with plausible fields (ALK/DIC on the 770 mixing line, DIC/ALK =
+    0.9) and one planted DIC spike (DIC/ALK = 1.2) in every estimate, at the last cell,
+    which is wet in ``_small_grid`` for the IC and the boundaries that have water.
+    """
+
+    def fake_estimate(
+        temp, salt, lon, lat, depth, *, source, roms_variables, est_dates=None
+    ):
+        s = np.asarray(salt, dtype=float)
+        alk = 770.0 + (2300.0 - 770.0) * s / 35.0
+        base = {
+            "ALK": alk,
+            "DIC": 0.9 * alk,
+            "NO3": np.full(s.shape, 10.0),
+            "PO4": np.full(s.shape, 1.0),
+            "SiO3": np.full(s.shape, 20.0),
+            "O2": np.full(s.shape, 200.0),
+        }
+        base["DIC"].flat[np.flatnonzero(np.isfinite(s))[-1]] *= 1.2 / 0.9
+        return {n: salt.copy(data=base[n]) for n in roms_variables}
+
+    monkeypatch.setattr(esper_module, "validate_esper_source", lambda source: None)
+    monkeypatch.setattr(esper_module, "estimate_bgc_fields", fake_estimate)
+
+
+def _esper_wrapper(kind: str, **kwargs):
+    """An ESPER InitialConditions or BoundaryForcing on ``_small_grid`` (mocked ESPER)."""
+    common = dict(
+        grid=_small_grid(),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[{"source": {"name": "ESPER"}, "use_vars": ["ALK", "DIC"]}],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+        **kwargs,
+    )
+    if kind == "ic":
+        return InitialConditions(ini_time=datetime(2021, 6, 29), **common)
+    return BoundaryForcing(
+        start_time=datetime(2021, 6, 29), end_time=datetime(2021, 6, 30), **common
+    )
+
+
+def _bgc_ds(obj) -> xr.Dataset:
+    return obj.ds if isinstance(obj, InitialConditions) else obj.bgc[0].ds
+
+
+def _max_dic_alk_ratios(obj) -> dict[str, float]:
+    """Largest DIC/ALK over wet cells, per boundary side (BF) or for the IC."""
+    from roms_tools.setup.utils import get_boundary_coords
+
+    ds, mask = _bgc_ds(obj), obj.grid.ds.mask_rho
+    if isinstance(obj, InitialConditions):
+        parts = {"ic": ("", mask.values > 0)}
+    else:
+        parts = {
+            side: (f"_{side}", mask.isel(**sl).values > 0)
+            for side, sl in get_boundary_coords()["rho"].items()
+            if f"DIC_{side}" in ds
+        }
+    out = {}
+    for name, (suffix, wet) in parts.items():
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r = ds[f"DIC{suffix}"].values / ds[f"ALK{suffix}"].values
+        out[name] = float(np.nanmax(np.where(np.broadcast_to(wet, r.shape), r, np.nan)))
+    return out
+
+
+@pytest.mark.parametrize("kind", ["ic", "bf"])
+@pytest.mark.parametrize("groom", [True, False])
+def test_groom_fixes_a_planted_spike_and_alt_co2_follows(monkeypatch, kind, groom):
+    """groom=True changes the planted DIC spike, groom=False keeps it (so the spike sits
+    on a wet cell and the groomed case is a real test). The ALT_CO2 copies are made
+    after grooming, so they equal the groomed values; use_dask=False data is in memory.
+    """
+    _mock_esper_with_dic_spike(monkeypatch)
+    obj = _esper_wrapper(kind, groom=groom)
+    ratio = max(_max_dic_alk_ratios(obj).values())
+    if groom:
+        assert ratio <= 1.05
+    else:
+        assert ratio == pytest.approx(1.2, rel=1e-3)
+    ds = _bgc_ds(obj)
+    for v in [str(n) for n in ds.data_vars if str(n).startswith(("DIC", "ALK"))]:
+        if "ALT_CO2" in v:
+            continue
+        alt = v.replace("DIC", "DIC_ALT_CO2", 1).replace("ALK", "ALK_ALT_CO2", 1)
+        np.testing.assert_array_equal(ds[alt].values, ds[v].values)
+        assert isinstance(ds[v].data, np.ndarray)
+
+
+@pytest.mark.parametrize("kind", ["ic", "bf"])
+def test_groom_and_settings_round_trip_through_yaml_and_regenerate(
+    monkeypatch, tmp_path, kind
+):
+    """Groom and groom_settings are recorded in the YAML, and the YAML regenerates
+    identical data.
+    """
+    _mock_esper_with_dic_spike(monkeypatch)
+    settings = {"passes": 4, "checks": {"DIC": {"max_jump": 80.0}}}
+    obj = _esper_wrapper(kind, groom=True, groom_settings=settings)
+    path = tmp_path / f"{kind}.yaml"
+    obj.to_yaml(path)
+    cls = type(obj)
+    reloaded = cls.from_yaml(path, use_dask=False)
+    assert reloaded.groom is True
+    assert reloaded.groom_settings == settings
+    a, b = _bgc_ds(obj), _bgc_ds(reloaded)
+    for v in a.data_vars:
+        np.testing.assert_array_equal(a[v].values, b[v].values, err_msg=str(v))
+
+
+@pytest.mark.parametrize("kind", ["ic", "bf"])
+def test_yaml_without_groom_keys_grooms(monkeypatch, tmp_path, kind):
+    """A YAML written before groom existed loads with grooming on."""
+    import yaml
+
+    _mock_esper_with_dic_spike(monkeypatch)
+    obj = _esper_wrapper(kind, groom=False)
+    path = tmp_path / f"{kind}.yaml"
+    obj.to_yaml(path)
+    docs = list(yaml.safe_load_all(path.read_text()))
+    for doc in docs:
+        for block in doc.values() if isinstance(doc, dict) else ():
+            if isinstance(block, dict):
+                block.pop("groom", None)
+                block.pop("groom_settings", None)
+    legacy = tmp_path / "legacy.yaml"
+    legacy.write_text(yaml.safe_dump_all(docs, sort_keys=False))
+    assert "groom" not in legacy.read_text()
+    old = type(obj).from_yaml(legacy, use_dask=False)
+    assert old.groom is True
+    assert max(_max_dic_alk_ratios(old).values()) <= 1.05
+
+
+def test_groom_settings_change_the_result(monkeypatch):
+    """Switching off the DIC checks that catch the planted spike leaves it in place."""
+    _mock_esper_with_dic_spike(monkeypatch)
+    off = {"checks": {"DIC": {"physical_reality": None, "max_jump": None}}}
+    ic = _esper_wrapper("ic", groom=True, groom_settings=off)
+    assert max(_max_dic_alk_ratios(ic).values()) == pytest.approx(1.2, rel=1e-3)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"pases": 4},
+        {"checks": {"XX": {}}},
+        {"checks": {"ALK": {"bound": [0, 1]}}},
+        {"checks": {"O2": {"ceiling": "x"}}},
+    ],
+)
+def test_bad_groom_settings_raise_before_any_regrid(settings):
+    with pytest.raises(ValueError, match="groom_settings"):
+        InitialConditions(
+            grid=_small_grid(),
+            ini_time=datetime(2021, 6, 29),
+            source={"name": "GLORYS", "path": "never-opened.nc"},
+            groom_settings=settings,
+        )
+
+
+def test_groom_settings_with_groom_false_raise():
+    with pytest.raises(ValueError, match="only applies when `groom=True`"):
+        InitialConditions(
+            grid=_small_grid(),
+            ini_time=datetime(2021, 6, 29),
+            source={"name": "GLORYS", "path": "never-opened.nc"},
+            groom=False,
+            groom_settings={"passes": 2},
+        )
+
+
+def test_groom_is_not_a_source_setting():
+    """Only the wrappers groom: an ESPER source dict refuses a groom key, and the
+    Source classes have no groom argument.
+    """
+    with pytest.raises(ValueError, match="no longer a key of the ESPER source"):
+        esper_module.validate_esper_source({"name": "ESPER", "groom": True})
+    for cls in (InitialConditionsSource, BoundaryForcingSource):
+        assert "groom" not in cls.__dataclass_fields__
+        assert "groom_settings" not in cls.__dataclass_fields__
+
+
+def test_bgc_groom_refuses_objects_and_bgc_check_accepts_them(monkeypatch):
+    from roms_tools import bgc_check, bgc_groom
+
+    _mock_esper_with_dic_spike(monkeypatch)
+    ic = _esper_wrapper("ic", groom=False)
+    with pytest.raises(TypeError, match="groom_settings"):
+        bgc_groom(ic, variables=["ALK", "DIC"])
+    assert isinstance(bgc_check(ic, variables=["ALK", "DIC"]), xr.Dataset)
+    out = bgc_groom(ic.ds, ic.grid, variables=["ALK", "DIC"])
+    assert isinstance(out, xr.Dataset)

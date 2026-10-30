@@ -46,13 +46,17 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 
 from __future__ import annotations
 
+import dataclasses
+import logging
 import os
 import sys
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import xarray as xr
 
+from roms_tools.setup.bgc_model import MARBL_PARM_O2_MIN
 from roms_tools.setup.utils import (
     apply_chunk_plan,
     compute_in_situ_density,
@@ -121,26 +125,27 @@ ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 #: Lower bound (mmol/m³) applied to EVERY estimate after the unit conversion, with or
 #: without salinity conditioning. The nets are unconstrained regressions, so they
 #: overshoot below the physical range at the low end: nutrients and oxygen go negative.
-#: Zero is the obvious floor for the nutrients; oxygen gets 2.0 because ESPER's negative
-#: excursions sit in the oxygen minimum zones (Bay of Bengal, eastern tropical Pacific,
-#: ~300-700 m), where the WOA23 climatology is 3-10 µmol/kg and never below 2.75 at any
-#: of those points on the 12 km Indo-Pacific and California Current boundaries measured
-#: (2010/2014) -- WOA23 does reach zero in a few OMZ cores elsewhere. Clipping to zero
-#: there would hand MARBL exactly anoxic boundary water that no observation supports;
-#: 2.0 is below WOA's own value everywhere ESPER needs it on those boundaries, so it
-#: removes the artefact without inventing oxygen. For MARBL the choice is inert:
-#: ``parm_o2_min`` = 5 and ``parm_o2_min_delta`` = 5 (mmol/m³) make its denitrification
-#: weight and O2-consumption clamp identical at O2 = 0 and O2 = 2, so the floor changes
-#: the O2 inventory handed in, not MARBL's suboxic behaviour. ALK and DIC never approach
-#: zero and keep the generic floor. Any point that ESPER put in [0, 2) now reads 2.0 --
-#: an output change relative to the old clip at zero.
+#: Zero is the obvious floor for the nutrients. Oxygen gets 5.0, MARBL's default
+#: ``parm_o2_min``: ESPER's negative excursions sit in the oxygen minimum zones (Bay of
+#: Bengal, eastern tropical Pacific, ~300-700 m), and below ``parm_o2_min`` MARBL's
+#: biology is flat -- O2 consumption is fully off and denitrification fully on for any
+#: O2 in [0, 5] (``parm_o2_min_delta`` = 5 ramps both between 5 and 10) -- so no interior
+#: tendency can take O2 below 5. Values under it in ICs or boundary forcing are water
+#: the model cannot produce: they change no rate, only the inventory, and a boundary
+#: that keeps feeding them holds water suboxic longer as it mixes (more mixing is needed
+#: to cross 5 and 10), widening the denitrifying volume. WOA23 sits at 3-10 µmol/kg at
+#: these points on the 12 km Indo-Pacific and California Current boundaries measured
+#: (2010/2014), so the floor is at or above observations there. The value is
+#: ``MARBL_PARM_O2_MIN``. ALK and DIC never approach zero and keep the generic floor. Any
+#: point that ESPER put below 5.0 now reads 5.0 -- an output change relative to the
+#: earlier floors (0, then 2.0).
 ESPER_FLOORS: dict[str, float] = {
     "ALK": 0.0,
     "DIC": 0.0,
     "NO3": 0.0,
     "PO4": 0.0,
     "SiO3": 0.0,
-    "O2": 2.0,
+    "O2": MARBL_PARM_O2_MIN,
 }
 
 _VALID_METHODS = ("lir", "nn", "mixed")
@@ -324,8 +329,83 @@ def validate_esper_source(source: dict) -> None:
             "ESPER source 'equation' must be 8 (salinity+temperature) or 16 "
             f"(salinity only), got {equation!r}."
         )
+    if "groom" in source:
+        raise ValueError(
+            "Grooming is no longer a key of the ESPER source: pass groom=True/False "
+            "(and optionally groom_settings) to InitialConditions or BoundaryForcing."
+        )
     _ensure_pyesper(source.get("path"))
     _salinity_conditioning(source)
+
+
+def _groomed_esper_vars(companion: Any) -> list[str]:
+    """ESPER-derived tracers present in ``companion.ds`` (bare or ``_<side>`` names), or
+    none when the companion is not an ESPER source.
+    """
+    if companion.source.get("name") != "ESPER":
+        return []
+    want = set(companion.use_vars or ESPER_SUPPORTED_VARS)
+    present = set(companion.ds.data_vars)
+    return [
+        v
+        for v in ESPER_SUPPORTED_VARS
+        if v in want and (v in present or any(n.startswith(f"{v}_") for n in present))
+    ]
+
+
+def _groom_checks(variables: list[str], ds_vars: Iterable[str], checks: dict) -> dict:
+    """``checks`` for ``variables``; DIC drops its ALK-based check when no ALK is
+    available (e.g. an ESPER boundary file without ALK).
+    """
+    out = {v: checks[v] for v in variables}
+    names = set(ds_vars)
+    has_alk = "ALK" in names or any(n.startswith("ALK_") for n in names)
+    if "DIC" in out and not has_alk:
+        out["DIC"] = dataclasses.replace(out["DIC"], physical_reality=None, requires=())
+    return out
+
+
+def groom_esper_companions(
+    companions: Iterable[Any],
+    grid: Any,
+    physics_ds: xr.Dataset,
+    settings: dict | None = None,
+    load: bool = False,
+) -> None:
+    """Groom, in place, the tracers each ESPER companion supplies (initial conditions or
+    boundary forcing); other companions are left alone. ``physics_ds`` supplies salt and
+    temp; ``settings`` is a ``groom_settings`` dict (see
+    :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`).
+
+    Lazy unless ``load``: an object built with ``use_dask=False`` passes True, so its data
+    is in memory and the groom is not recomputed on every access.
+
+    Call it before ``process_bgc_fields``, so the tracers that model derives from DIC and
+    ALK (``DIC_ALT_CO2``, ``ALK_ALT_CO2``) are copied from the groomed values.
+    """
+    from roms_tools.setup.bgc_groom import bgc_groom, resolve_groom_settings
+
+    checks, params = resolve_groom_settings(settings)
+    groomed_any = False
+    for c in companions:
+        variables = _groomed_esper_vars(c)
+        if not variables:
+            continue
+        groomed_any = True
+        groomed = bgc_groom(
+            c.ds,
+            grid,
+            physics_ds,
+            checks=_groom_checks(variables, c.ds.data_vars, checks),
+            variables=variables,
+            **params,
+        )
+        assert isinstance(groomed, xr.Dataset)
+        c.ds = groomed.load() if load else groomed
+    if settings is not None and not groomed_any:
+        logging.getLogger(__name__).info(
+            "groom_settings has no effect: no ESPER source supplies groomable tracers."
+        )
 
 
 def _salinity_conditioning(source: dict) -> SalinityConditioning | None:
@@ -488,7 +568,7 @@ def estimate_bgc_fields(
 
     # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
     # depth), matching the GLODAP/WOA adapters' convention; then clamp each tracer
-    # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 2.0 for O2).
+    # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 5.0 for O2).
     density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()

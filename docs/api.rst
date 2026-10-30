@@ -107,3 +107,7 @@ Utilities
    roms_tools.setup.utils.compute_potential_density
    roms_tools.setup.utils.compute_in_situ_density
    roms_tools.setup.utils.compute_mld
+   roms_tools.setup.bgc_groom.bgc_check
+   roms_tools.setup.bgc_groom.bgc_groom
+   roms_tools.setup.bgc_groom.summarize_flags
+   roms_tools.setup.bgc_groom.resolve_groom_settings

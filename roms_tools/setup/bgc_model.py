@@ -64,6 +64,13 @@ def bgc_variable_info(var_names) -> dict[str, dict]:
     }
 
 
+#: MARBL's default ``parm_o2_min`` (mmol/m3): below it MARBL's O2 consumption is fully
+#: off and denitrification fully on, so its biology cannot take O2 lower. The ESPER O2
+#: floor and ``bgc_groom``'s O2 check use it; if a run changes ``parm_o2_min`` in its
+#: ``marbl_in``, this constant has to change with it.
+MARBL_PARM_O2_MIN = 5.0
+
+
 class BGCModel(ABC):
     """Abstract description of a ROMS biogeochemical model.
 

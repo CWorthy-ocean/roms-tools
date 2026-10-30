@@ -1266,6 +1266,37 @@ def save_datasets(
     _patch_1d_encodings(dataset_list)
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
+
+    def _file_state(path: str) -> tuple[int, int, int] | None:
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return None
+        return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+    def _save_mfdataset() -> None:
+        """Write ``dataset_list``, removing the files this write touched if it fails.
+
+        ``save_mfdataset`` creates every file before the one compute that fills them,
+        so an error raised by that compute (e.g. a NaN at an ocean point, see
+        :func:`~roms_tools.setup.utils.fill_nans_over_land`) would otherwise leave
+        partly written files that look finished. Files the write never touched are
+        left alone.
+        """
+        before = {f: _file_state(f) for f in output_filenames}
+        try:
+            xr.save_mfdataset(
+                dataset_list,
+                output_filenames,
+                format=format,
+                engine=NETCDF_WRITE_ENGINE,
+            )
+        except BaseException:
+            for f in output_filenames:
+                if _file_state(f) != before[f]:
+                    Path(f).unlink(missing_ok=True)
+            raise
+
     if verbose:
         logging.info(
             "Writing the following NetCDF files:\n%s", "\n".join(output_filenames)
@@ -1309,12 +1340,7 @@ def save_datasets(
                 logging.info("Writing NetCDF file(s)...")
             _start = time.perf_counter()
             with serialize_dask_and_boost_threads(serialize_dask):
-                xr.save_mfdataset(
-                    dataset_list,
-                    output_filenames,
-                    format=format,
-                    engine=NETCDF_WRITE_ENGINE,
-                )
+                _save_mfdataset()
             if verbose:
                 logging.info(
                     "Finished writing NetCDF file(s) in %s",
@@ -1324,23 +1350,11 @@ def save_datasets(
             from dask.diagnostics import ProgressBar
 
             with ProgressBar():
-                xr.save_mfdataset(
-                    dataset_list,
-                    output_filenames,
-                    format=format,
-                    engine=NETCDF_WRITE_ENGINE,
-                )
+                _save_mfdataset()
         else:
-            xr.save_mfdataset(
-                dataset_list,
-                output_filenames,
-                format=format,
-                engine=NETCDF_WRITE_ENGINE,
-            )
+            _save_mfdataset()
     else:
-        xr.save_mfdataset(
-            dataset_list, output_filenames, format=format, engine=NETCDF_WRITE_ENGINE
-        )
+        _save_mfdataset()
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

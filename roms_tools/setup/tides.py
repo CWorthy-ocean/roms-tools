@@ -18,6 +18,7 @@ from roms_tools.setup.utils import (
     apply_scipy_fallback_fill,
     apply_source_prefill,
     check_source_coverage,
+    fill_nans_over_land,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -25,6 +26,7 @@ from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
     to_dict,
+    wet_mask,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -272,10 +274,23 @@ class TidalForcing:
         ds["ntides"].attrs["long_name"] = "constituent label"
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+        ds = self._fill_nans_over_land(ds)
 
         self.ds = ds
+
+    def _fill_nans_over_land(self, ds):
+        """Fill NaN over land with 0, raising on NaN at a wet point.
+
+        The check is skipped (plain fill) under ``bypass_validation``.
+        """
+        for var_name in ds.data_vars:
+            if self.bypass_validation:
+                ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+            else:
+                location = self.variable_info[var_name]["location"]
+                mask = wet_mask(self.grid.ds, location)
+                ds[var_name] = fill_nans_over_land(ds[var_name], mask, var_name)
+        return ds
 
     def _resolve_prefill_options(self) -> None:
         """Build the validated :class:`RegridConfig` from the public options.
@@ -446,12 +461,7 @@ class TidalForcing:
         """
         for var_name in ds.data_vars:
             if self.variable_info[var_name]["validate"]:
-                if self.variable_info[var_name]["location"] == "rho":
-                    mask = self.grid.ds.mask_rho
-                elif self.variable_info[var_name]["location"] == "u":
-                    mask = self.grid.ds.mask_u
-                elif self.variable_info[var_name]["location"] == "v":
-                    mask = self.grid.ds.mask_v
+                mask = wet_mask(self.grid.ds, self.variable_info[var_name]["location"])
 
                 da = ds[var_name].isel(ntides=0)
                 nan_check(da, mask)
@@ -539,6 +549,13 @@ class TidalForcing:
         -------
         Path
             A `Path` object representing the location of the saved file.
+
+        Raises
+        ------
+        ValueError
+            With ``use_dask=True``, if a variable has NaN at an ocean point. The data
+            are first computed here, so this is where that check runs; the files this
+            call started writing are removed.
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)

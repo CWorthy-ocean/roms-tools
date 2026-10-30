@@ -21,6 +21,7 @@ from roms_tools.setup.utils import (
     compute_potential_density,
     cycle_to_times,
     expand_monthly_climatology_time_axis,
+    fill_nans_over_land,
     gc_dist,
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
@@ -32,6 +33,7 @@ from roms_tools.setup.utils import (
     query_kdtree_nearest,
     tile_monthly_climatology_on_calendar,
     validate_names,
+    wet_mask,
 )
 
 
@@ -919,6 +921,129 @@ def test_nan_check_batch():
                 (dirty.chunk(), mask, "boom"),
             ]
         )
+
+
+def test_wet_mask_picks_the_mask_at_the_location():
+    grid_ds = xr.Dataset(
+        {
+            "mask_rho": ("x", [1, 1]),
+            "mask_u": ("x", [1, 0]),
+            "mask_v": ("x", [0, 1]),
+        }
+    )
+    for location in ("rho", "u", "v"):
+        assert wet_mask(grid_ds, location).identical(grid_ds[f"mask_{location}"])
+
+
+def test_fill_nans_over_land_fills_land_and_keeps_the_rest():
+    """NaN at land becomes the fill value; metadata and everything else is kept."""
+    mask = xr.DataArray([1, 1, 0], dims="x")
+    field = xr.DataArray(
+        np.array([1.0, 2.0, np.nan], dtype="float32"),
+        dims="x",
+        coords={"x": [10, 20, 30]},
+        name="temp",
+        attrs={"units": "C"},
+    )
+
+    filled = fill_nans_over_land(field, mask, "temp")
+
+    expected = field.fillna(0.0)
+    xr.testing.assert_identical(filled, expected)
+    assert filled.dtype == np.float32
+    assert filled.attrs == {"units": "C"}
+    assert float(filled[2]) == 0.0
+
+
+@pytest.mark.parametrize("use_chunks", [False, True])
+def test_fill_nans_over_land_raises_for_nan_at_a_wet_point(use_chunks):
+    """A NaN at a wet point raises, naming the variable and how many there are.
+
+    Backed by numpy the error is immediate. Backed by dask it must not appear when
+    the call is made (the check adds no compute of its own), only when the data are
+    computed.
+    """
+    mask = xr.DataArray([1, 1, 0, 1], dims="x")
+    field = xr.DataArray([1.0, np.nan, np.nan, np.nan], dims="x", name="silicate")
+    if use_chunks:
+        field = field.chunk({"x": 2})
+
+    if use_chunks:
+        lazy = fill_nans_over_land(field, mask, "silicate")  # no raise yet
+        assert lazy.chunks is not None
+        with pytest.raises(ValueError, match="silicate has 1 NaN value.* in one chunk"):
+            lazy.compute()
+    else:
+        with pytest.raises(ValueError, match="silicate has 2 NaN value"):
+            fill_nans_over_land(field, mask, "silicate")
+
+
+def test_fill_nans_over_land_does_not_compute_dask_inputs():
+    """Building the fill must not realize a dask-backed field."""
+    import dask
+
+    calls = []
+
+    def source(block):
+        calls.append(1)
+        return block
+
+    field = xr.DataArray(np.ones((4, 4)), dims=("y", "x")).chunk({"y": 2})
+    field = field.copy(data=field.data.map_blocks(source, meta=np.empty((0, 0))))
+    mask = xr.DataArray(np.ones((4, 4)), dims=("y", "x"))
+
+    with dask.config.set(scheduler="synchronous"):
+        out = fill_nans_over_land(field, mask, "v")
+        assert calls == []
+        out.compute()
+    assert calls
+
+
+def test_fill_nans_over_land_passes_non_float_through():
+    """Integer data have no NaN: returned as they are, even where the mask is wet."""
+    field = xr.DataArray(np.arange(3), dims="x")
+    mask = xr.DataArray([1, 0, 1], dims="x")
+    assert fill_nans_over_land(field, mask, "i") is field
+
+
+@pytest.mark.parametrize("chunk_mask", [False, True])
+@pytest.mark.parametrize("use_chunks", [False, True])
+def test_fill_nans_over_land_broadcasts_the_mask_over_extra_dims(
+    use_chunks, chunk_mask
+):
+    """A 2-D mask applies to every time and s_rho level of a 4-D field.
+
+    The mask need not be chunked like the field; coordinates of the mask play no part.
+    """
+    field = xr.DataArray(
+        np.ones((2, 3, 4, 5)),
+        dims=("time", "s_rho", "eta_rho", "xi_rho"),
+        coords={"time": [0, 1]},
+        name="temp",
+    )
+    mask_values = np.ones((4, 5), dtype=int)
+    mask_values[0, :] = 0
+    mask = xr.DataArray(
+        mask_values, dims=("eta_rho", "xi_rho"), coords={"eta_rho": np.arange(4) + 7}
+    )
+    field[:, :, 0, 2] = np.nan  # land row: filled for every time and level
+    if use_chunks:
+        field = field.chunk({"time": 1, "s_rho": 2, "eta_rho": 2})
+    if chunk_mask:
+        mask = mask.chunk({"eta_rho": 3, "xi_rho": 2})
+
+    filled = fill_nans_over_land(field, mask, "temp").compute()
+
+    assert filled.dims == field.dims
+    assert not filled.isnull().any()
+    assert (filled[:, :, 0, 2] == 0).all()
+
+    field = field.compute()
+    field[1, 2, 3, 4] = np.nan  # a wet point, at the last time and level
+    if use_chunks:
+        field = field.chunk({"time": 1, "s_rho": 2, "eta_rho": 2})
+    with pytest.raises(ValueError, match="temp has 1 NaN value"):
+        fill_nans_over_land(field, mask, "temp").compute()
 
 
 def test_materialize_before_check_realizes_and_preserves_metadata():

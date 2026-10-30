@@ -1688,6 +1688,90 @@ def test_static_bgc_source_without_the_flag_still_brackets():
     assert bf.ds.sizes["bry_time"] == 2
 
 
+@pytest.mark.parametrize("direction", ["south", "east", "north", "west"])
+@pytest.mark.parametrize("name", ["temp", "u", "v"])
+def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
+    use_dask, name, direction
+):
+    """Each boundary variable is checked against its own mask, cut at its own boundary.
+
+    Rho cells are made dry, which dries the u and v points that touch them. At a point
+    of a boundary that is dry for the variable, a NaN is plain land and
+    becomes 0; for u and v there is such a point where the rho mask says wet. At a wet
+    point a NaN raises, naming the variable.
+    """
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    boundaries = {"south": True, "east": True, "north": True, "west": True}
+    bf = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={
+            "name": "GLORYS",
+            "path": [
+                Path(download_test_data("GLORYS_NA_20120101.nc")),
+                Path(download_test_data("GLORYS_NA_20121231.nc")),
+            ],
+        },
+        boundaries=boundaries,
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    rho = np.ones(grid.ds["mask_rho"].shape, dtype=int)
+    # Each edge gets a dry rho cell, plus a cell whose u (v) point on that edge is dry
+    # while the edge rho point is wet.
+    rho[2, 1] = rho[2, -2] = rho[3, -1] = rho[3, 0] = rho[0, 3] = rho[1, 1] = 0
+    rho[-1, 1] = 0
+    grid.ds["mask_rho"].values[...] = rho
+    grid.ds["mask_u"].values[...] = rho[:, :-1] * rho[:, 1:]
+    grid.ds["mask_v"].values[...] = rho[:-1] * rho[1:]
+
+    # The mask along the boundary, written out here rather than taken from the code.
+    edge = {
+        "south": (0, slice(None)),
+        "east": (slice(None), -1),
+        "north": (-1, slice(None)),
+        "west": (slice(None), 0),
+    }[direction]
+    mask = {
+        "temp": rho,
+        "u": grid.ds["mask_u"].values,
+        "v": grid.ds["mask_v"].values,
+    }[name][edge]
+    wet = int(np.argwhere(mask == 1)[0, 0])
+    dry = int(np.argwhere(mask == 0)[0, 0])
+    if name != "temp":
+        assert rho[edge][dry] == 1  # dry for u (v), though wet for rho
+
+    var_name = f"{name}_{direction}"
+    boundary_dim = bf.ds[var_name].dims[-1]
+
+    def with_nan_at(index):
+        ds = bf.ds.copy()
+        hole = xr.DataArray(np.arange(mask.size) == index, dims=boundary_dim)
+        ds[var_name] = ds[var_name].where(~hole)
+        return ds
+
+    with pytest.raises(ValueError, match=rf"{var_name} has \d+ NaN value"):
+        bf._fill_nans_over_land(with_nan_at(wet))[var_name].compute()
+
+    filled = bf._fill_nans_over_land(with_nan_at(dry)).compute()
+    assert not filled[var_name].isnull().any()
+    assert (filled[var_name].isel({boundary_dim: dry}) == 0).all()
+
+
 @pytest.mark.parametrize(
     "prefill", [pytest.param(None, marks=requires_xesmf), "2d_lateral_fill"]
 )

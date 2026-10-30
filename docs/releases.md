@@ -31,6 +31,8 @@
 * Nested initial conditions no longer take below-bottom water from distant child columns because of #709's 50 m depth bins; each cell's donor is the nearest parent column deep enough for it. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
 * GLODAP BGC tracers are no longer dropped where GLODAP has no temperature or salinity (1.7–3.4 % of each tracer's values, mostly in the Arctic); the unit conversion uses that depth's mean density there. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
   * GLODAP columns where one variable has no data at any depth are now treated as land and filled from neighbouring columns, instead of that variable being written as 0.
+* GLODAP BGC initial conditions and boundary forcing no longer get 0 (or a NaN error from the lateral fill) where a variable has no data in a column that the others have, such as silicate in the Black Sea and DIC in Hudson Bay. Each variable is filled from its own data. ([#718](https://github.com/CWorthy-ocean/roms-tools/pull/718))
+* GLODAP variables that have data in columns where NO3 has none (up to about 70 columns each for ALK, O2, T and S) keep those values instead of having them overwritten by the land fill. ([#718](https://github.com/CWorthy-ocean/roms-tools/pull/718))
 
 ### Improvements
 

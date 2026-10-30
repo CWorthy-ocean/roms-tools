@@ -1,5 +1,29 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+* ESPER-derived tracers are now groomed by default, so ESPER initial conditions and boundary forcing change wherever cells are flagged; pass `groom=False` to `InitialConditions`/`BoundaryForcing` for the raw estimates. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+  * A YAML written by roms-tools 5.0–5.3 has no `groom` key and loads with grooming on; add `groom: false` to its section to skip grooming.
+* ESPER oxygen below 5.0 mmol/m³ now reads 5.0 (previously 2.0), matching MARBL's default `parm_o2_min`; there is no setting to restore 2.0. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+
+### New Features
+
+* `InitialConditions` and `BoundaryForcing` take `groom` (default `True`) and `groom_settings`, optional overrides of the grooming thresholds and fill parameters; both are recorded in the YAML. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+  * `groom_settings` is validated before any regridding; unknown keys or invalid values raise.
+* New `bgc_check` and `bgc_groom` check or groom BGC tracers in a Dataset or NetCDF file, for analysis or one-off repair; `bgc_check` also accepts `InitialConditions`/`BoundaryForcing`. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+  * Checks cover plausible bounds, nutrients and oxygen at their floor beside ordinary water, salinity-normalized spikes, ALK/DIC consistency, and oxygen above 1.25 times saturation, which is clipped.
+  * Results are identical for any chunking or tiling.
+
+### Bug Fixes
+
+### Improvements
+
+### Miscellaneous
+
+* The datasets overview documents ESPER grooming, `groom`/`groom_settings` and the oxygen floor; `bgc_check`, `bgc_groom`, `summarize_flags` and `resolve_groom_settings` are in the API reference. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+
 ## 5.3.0
 
 ### Breaking Changes

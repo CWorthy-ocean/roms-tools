@@ -1919,8 +1919,8 @@ class WOABGCDataset(WOADataset):
         variable is NaN. The mask is therefore rebuilt after the fill: a cell is ocean
         only where every variable, temperature and salinity included, has data at some
         depth, and a column where any variable has none is land, filled laterally for
-        every variable. This mirrors
-        :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
+        every variable. (GLODAP, whose variables differ in coverage, instead gives each
+        variable its own mask; see :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.)
 
         Parameters
         ----------
@@ -2616,10 +2616,19 @@ class GLODAPv2Dataset(LatLonDataset):
             ]
         )
         if data_vars:
-            wet = {
-                v: xr.where(self.ds[v].isel(depth=0, drop=True).isnull(), 0, 1)
-                for v in data_vars
-            }
+            # One compute for every variable's surface slab under dask, rather than
+            # one per `.equals` below (as the wet masks of the depth fill are batched).
+            wet = dict(
+                zip(
+                    data_vars,
+                    dask.compute(
+                        *(
+                            xr.where(self.ds[v].isel(depth=0, drop=True).isnull(), 0, 1)
+                            for v in data_vars
+                        )
+                    ),
+                )
+            )
             mask = wet[data_vars[0]]
             self.ds["mask"] = mask
             for v in data_vars[1:]:

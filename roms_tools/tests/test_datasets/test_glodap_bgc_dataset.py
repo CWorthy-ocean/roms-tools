@@ -329,6 +329,57 @@ def test_extrapolating_twice_leaves_no_stale_per_variable_mask(tmp_path, use_das
     assert "mask_TCO2" in data.ds
 
 
+#: A column NO3 (the variable the shared mask comes from) lacks and every other
+#: variable has, and the distinct value those variables hold there.
+NO_NO3, OWN = (3, 2), UNIFORM + 1.0
+
+
+def test_a_variable_keeps_its_data_where_the_shared_masks_variable_has_none(
+    tmp_path, use_dask
+):
+    """A column that is land in ``mask`` but ocean in a variable's own mask keeps its data.
+
+    The shared mask comes from NO3, so a column NO3 lacks is land in it. With one mask
+    for all, the lateral fill overwrote the other variables there with their
+    neighbours' values; with their own masks it leaves them alone.
+    """
+
+    def field_fn(name, values):
+        values = np.full_like(values, UNIFORM)
+        values[:, LAND[0], LAND[1]] = np.nan
+        values[:, NO_NO3[0], NO_NO3[1]] = np.nan if name == "NO3" else OWN
+        return values
+
+    directory = write_synthetic_glodap(
+        tmp_path / "no_no3",
+        include_ts=False,
+        lat=GAP_LAT,
+        lon=GAP_LON,
+        depth=DEPTH,
+        field_fn=field_fn,
+    )
+    data = _load(directory, use_dask, apply_post_processing=False)
+    data.extrapolate_deepest_to_bottom()
+
+    others = [v for v in data.var_names.values() if v != "NO3"]
+    expected = np.ones((GAP_LAT.size, GAP_LON.size), dtype=int)
+    expected[LAND] = 0
+    expected[NO_NO3] = 0
+    np.testing.assert_array_equal(data.ds["mask"].values, expected)
+    expected[NO_NO3] = 1
+    for name in others:
+        np.testing.assert_array_equal(
+            data.ds[per_variable_mask_name(name)].values, expected
+        )
+
+    data.apply_lateral_fill()
+    column = dict(latitude=NO_NO3[0], longitude=NO_NO3[1])
+    for name in others:
+        np.testing.assert_allclose(data.ds[name].isel(**column), OWN, err_msg=name)
+    # NO3 itself is filled there from its neighbours.
+    np.testing.assert_allclose(data.ds["NO3"].isel(**column), UNIFORM)
+
+
 @pytest.mark.parametrize(
     "fill",
     [

@@ -794,6 +794,8 @@ class InitialConditionsSource:
             # for it (its own mask, `mask_vel` for velocity fields (location "u"/"v"), or
             # `mask`); one regridder is built per distinct mask, lazily, so
             # mask_vel-less sources (e.g. BGC) don't pay for unused xESMF weights.
+            # Keyed by the mask's content, not its name: per-variable masks with the
+            # same wet pattern (most of GLODAP's) share one regridder.
             regridders = {}
             for var_name in var_names:
                 src_name = var_names[var_name]["name"]
@@ -804,16 +806,13 @@ class InitialConditionsSource:
                     prefill=self._regrid.prefill,
                     var_name=src_name,
                 )
-                if mask_name not in regridders:
-                    regridders[mask_name] = build_lateral_regridder(
-                        target_coords,
-                        data,
-                        self._regrid,
-                        None if mask_name is None else data.ds[mask_name],
+                mask = None if mask_name is None else data.ds[mask_name]
+                key = None if mask is None else mask.values.tobytes()
+                if key not in regridders:
+                    regridders[key] = build_lateral_regridder(
+                        target_coords, data, self._regrid, mask
                     )
-                processed_fields[var_name] = regridders[mask_name].apply(
-                    data.ds[src_name]
-                )
+                processed_fields[var_name] = regridders[key].apply(data.ds[src_name])
 
         return processed_fields
 

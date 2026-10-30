@@ -559,7 +559,8 @@ class BoundaryForcingSource:
                 lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
                 lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
                 # One regridder per distinct tracer mask (a source with
-                # per-variable masks needs several; otherwise just one).
+                # per-variable masks needs several; otherwise just one), keyed by
+                # the mask's content so masks with the same wet pattern share one.
                 tracer_regridders = {}
                 for var_name in filtered_vars:
                     src_name = var_names[var_name]["name"]
@@ -570,14 +571,13 @@ class BoundaryForcingSource:
                         prefill=prefill,
                         var_name=src_name,
                     )
-                    if mask_name not in tracer_regridders:
-                        tracer_regridders[mask_name] = build_lateral_regridder(
-                            {"lat": lat, "lon": lon},
-                            bdry_data,
-                            regrid,
-                            None if mask_name is None else bdry_data.ds[mask_name],
+                    mask = None if mask_name is None else bdry_data.ds[mask_name]
+                    key = None if mask is None else mask.values.tobytes()
+                    if key not in tracer_regridders:
+                        tracer_regridders[key] = build_lateral_regridder(
+                            {"lat": lat, "lon": lon}, bdry_data, regrid, mask
                         )
-                    processed_fields[var_name] = tracer_regridders[mask_name].apply(
+                    processed_fields[var_name] = tracer_regridders[key].apply(
                         bdry_data.ds[src_name]
                     )
 

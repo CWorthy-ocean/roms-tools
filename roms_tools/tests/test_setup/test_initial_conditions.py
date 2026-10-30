@@ -1683,7 +1683,7 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
     "prefill", [pytest.param(None, marks=skip_xesmf), "2d_lateral_fill"]
 )
 def test_glodap_variables_missing_a_wet_column_leave_no_hole_at_wet_points(
-    tmp_path, prefill
+    tmp_path, use_dask, prefill
 ):
     """A variable with no data in a column other variables have regrids without a hole.
 
@@ -1729,7 +1729,7 @@ def test_glodap_variables_missing_a_wet_column_leave_no_hole_at_wet_points(
         ],
         bgc_model=BGCMarbl,
         prefill=prefill,
-        use_dask=False,
+        use_dask=use_dask,
         bypass_validation=True,
     )
 

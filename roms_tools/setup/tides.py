@@ -555,7 +555,8 @@ class TidalForcing:
         ValueError
             With ``use_dask=True``, if a variable has NaN at an ocean point. The data
             are first computed here, so this is where that check runs; the files this
-            call started writing are removed.
+            call started writing are removed, including a file that was already at an
+            output path (it is truncated when the write opens it).
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)

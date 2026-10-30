@@ -41,6 +41,7 @@ from roms_tools.setup.utils import (
     _CLIMATOLOGY_ONLY_BGC,
     _SELF_DOWNLOADING_BGC,
     BGC_INTERPOLATION_METHODS,
+    WET_NAN_HINT_REGRID,
     RawDataSource,
     apply_scipy_fallback_fill,
     apply_source_prefill,
@@ -485,14 +486,18 @@ class InitialConditionsSource:
         The check is skipped (plain fill) under ``bypass_validation``.
         """
         variable_info = self._variable_info
-        hint = {"hint": _WET_NAN_HINT_ROMS} if self.source["name"] == "ROMS" else {}
+        hint = (
+            _WET_NAN_HINT_ROMS if self.source["name"] == "ROMS" else WET_NAN_HINT_REGRID
+        )
         for var_name in ds.data_vars:
             if self.bypass_validation or var_name not in variable_info:
                 # No grid-point location (e.g. Cs_r, Cs_w), so no mask to check against.
                 ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
             else:
                 mask = wet_mask(self.grid.ds, variable_info[var_name]["location"])
-                ds[var_name] = fill_nans_over_land(ds[var_name], mask, var_name, **hint)
+                ds[var_name] = fill_nans_over_land(
+                    ds[var_name], mask, var_name, hint=hint
+                )
         return ds
 
     def _resolve_prefill_options(self) -> None:
@@ -1606,7 +1611,8 @@ class InitialConditionsSource:
         ValueError
             With ``use_dask=True``, if a variable has NaN at an ocean point. The data
             are first computed here, so this is where that check runs; the files this
-            call started writing are removed.
+            call started writing are removed, including a file that was already at an
+            output path (it is truncated when the write opens it).
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)

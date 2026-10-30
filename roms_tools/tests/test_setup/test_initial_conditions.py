@@ -486,6 +486,7 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
         ), f"{var_name} values changed during initialization"
 
 
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
 def test_roms_source_ic_reaching_the_parent_edge_raises_with_a_nesting_hint(use_dask):
     """A child grid that reaches its parent's edge gets no velocity on the outer ring.
 

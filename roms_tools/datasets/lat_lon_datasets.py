@@ -43,7 +43,11 @@ from roms_tools.processing_methods import (
     METHOD_META,
     PrefillMethod,
 )
-from roms_tools.regrid import _xesmf_extrap_kwargs
+from roms_tools.regrid import (
+    _xesmf_extrap_kwargs,
+    per_variable_mask_name,
+    source_mask_name,
+)
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
@@ -766,31 +770,31 @@ class LatLonDataset:
     def _iter_fillable_vars(self):
         """Yield ``(var_name, mask_name)`` for each non-mask data variable.
 
-        Centralizes the mask-selection rule shared by every fill method: a
-        velocity component uses ``"mask_vel"`` when that mask is present and both
-        ``u`` and ``v`` are known source variables; everything else uses
-        ``"mask"``. Iterating over ``self.ds.data_vars`` (not ``self.var_names``)
-        ensures each dataset variable is filled exactly once even when several
-        ``var_names`` entries alias the same variable.
+        Centralizes the mask-selection rule shared by every fill method, which is
+        :func:`roms_tools.regrid.source_mask_name`: a variable's own mask when the
+        source carries one (see :func:`roms_tools.regrid.per_variable_mask_name`),
+        else ``"mask_vel"`` for a velocity component when both ``u`` and ``v`` are
+        known source variables, else ``"mask"``. Iterating over ``self.ds.data_vars``
+        (not ``self.var_names``) ensures each dataset variable is filled exactly
+        once even when several ``var_names`` entries alias the same variable.
         """
-        use_vel_mask = (
-            "mask_vel" in self.ds.data_vars
-            and "u" in self.var_names
-            and "v" in self.var_names
-        )
-        vel_vars = {self.var_names["u"], self.var_names["v"]} if use_vel_mask else set()
+        has_vel = "u" in self.var_names and "v" in self.var_names
+        vel_vars = {self.var_names["u"], self.var_names["v"]} if has_vel else set()
         for var_name in self.ds.data_vars:
             if var_name.startswith("mask"):
                 continue
-            yield var_name, "mask_vel" if var_name in vel_vars else "mask"
+            yield (
+                var_name,
+                source_mask_name(self.ds, var_name, is_vector=var_name in vel_vars),
+            )
 
     def _fill_masked_vars(self, fill_one):
         """Apply ``fill_one(da, mask_name)`` to every fillable variable.
 
         ``fill_one`` receives the variable's DataArray and the name of the mask to
-        fill against (``"mask"`` or ``"mask_vel"``, chosen by
-        :meth:`_iter_fillable_vars`) and returns the filled DataArray. No-op when
-        the source is already NaN-free (``needs_lateral_fill`` is False).
+        fill against (chosen by :meth:`_iter_fillable_vars`) and returns the filled
+        DataArray. No-op when the source is already NaN-free (``needs_lateral_fill``
+        is False).
         """
         if not self.needs_lateral_fill:
             return
@@ -800,9 +804,9 @@ class LatLonDataset:
     def apply_lateral_fill(self):
         """Fill masked values in `self.ds` with the iterative `LateralFill` (AMG).
 
-        A separate mask (`mask_vel`) is used for velocity variables when present;
-        see :meth:`_iter_fillable_vars`. Assumes a ('latitude', 'longitude')
-        dimension ordering.
+        A separate mask (`mask_vel` for velocity variables, or a per-variable mask)
+        is used when present; see :meth:`_iter_fillable_vars`. Assumes a
+        ('latitude', 'longitude') dimension ordering.
         """
         dims = (self.dim_names["latitude"], self.dim_names["longitude"])
         fillers: dict[str, LateralFill] = {}
@@ -838,8 +842,8 @@ class LatLonDataset:
 
         Unlike destination-side extrapolation during the boundary regrid, this
         fills the 2D *source* field itself, where the valid ocean cells act as
-        seeds spread across the whole grid. Velocity variables use ``mask_vel``
-        when present, mirroring the other fills. The ``apply_xesmf_`` prefix
+        seeds spread across the whole grid. Each variable uses the same mask as in
+        the other fills (see :meth:`_iter_fillable_vars`). The ``apply_xesmf_`` prefix
         distinguishes this from the non-xESMF :meth:`apply_lateral_fill` (AMG) and
         :meth:`apply_nearest_neighbor_fill` (scipy) fills.
 
@@ -2559,7 +2563,9 @@ class GLODAPv2Dataset(LatLonDataset):
         # surface depth of the first available data variable.  apply_lateral_fill()
         # expects self.ds["mask"] to exist.  For GLODAP the mask is rebuilt after
         # the depth-fill pass in extrapolate_deepest_to_bottom() so that variables
-        # whose shallowest data is below depth[0] are also correctly treated as ocean.
+        # whose shallowest data is below depth[0] are also correctly treated as
+        # ocean, and variables whose wet cells differ from the first one's get a
+        # per-variable mask of their own there.
         data_vars = [v for v in ds.data_vars if not v.startswith("mask")]
         if data_vars:
             surface = ds[data_vars[0]].isel(depth=0, drop=True)
@@ -2569,19 +2575,20 @@ class GLODAPv2Dataset(LatLonDataset):
     def extrapolate_deepest_to_bottom(
         self, blend_m: float = BOTTOM_FILL_BLEND_M
     ) -> None:
-        """Fill the vertical NaN gaps of the sparse GLODAP grid, then rebuild the mask.
+        """Fill the vertical NaN gaps of the sparse GLODAP grid, then rebuild the masks.
 
         Downward this is :meth:`LatLonDataset.extrapolate_deepest_to_bottom`; a
         backward (upward) fill then gives NaN above the data the shallowest value
         below it. A variable can be NaN at the surface even when data exists at a
         deeper level, or two variables can have different surface coverage so the
         mask (built from the first variable) marks a cell as ocean while a second
-        variable has NaN there. The mask is therefore rebuilt after the fill: a cell
-        is ocean only where every variable, temperature and salinity included, is
-        finite at depth=0, so that apply_lateral_fill() never encounters NaN values
-        at ocean grid points. A column where any variable has no data at all (e.g. a
-        tracer without temperature or salinity) is land and is filled laterally for
-        every variable.
+        variable has NaN there. The masks are therefore rebuilt so that the lateral
+        fills and regridders never encounter NaN values at ocean grid points:
+        ``mask`` comes from the first non-mask variable at depth=0, and every other
+        variable whose surface wet pattern differs from it also gets its own mask,
+        ``ds[per_variable_mask_name(var)]`` (a variable can have no data in a whole
+        column that the first variable calls ocean). Variables that match ``mask``
+        get none, so sources whose variables share one pattern carry only ``mask``.
 
         Parameters
         ----------
@@ -2597,11 +2604,27 @@ class GLODAPv2Dataset(LatLonDataset):
                 continue
             self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
 
-        # Rebuild the mask now that all variables have surface values wherever data
-        # exists at any depth; ocean only where every variable has data.
-        mask = _surface_ocean_mask(self.ds, dim)
-        if mask is not None:
+        # Rebuild the masks now that all variables have surface values wherever
+        # data exists at any depth. Drop per-variable masks from an earlier call so
+        # none go stale.
+        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
+        self.ds = self.ds.drop_vars(
+            [
+                per_variable_mask_name(v)
+                for v in data_vars
+                if per_variable_mask_name(v) in self.ds.data_vars
+            ]
+        )
+        if data_vars:
+            wet = {
+                v: xr.where(self.ds[v].isel(depth=0, drop=True).isnull(), 0, 1)
+                for v in data_vars
+            }
+            mask = wet[data_vars[0]]
             self.ds["mask"] = mask
+            for v in data_vars[1:]:
+                if not wet[v].equals(mask):
+                    self.ds[per_variable_mask_name(v)] = wet[v]
 
 
 @dataclass(kw_only=True)

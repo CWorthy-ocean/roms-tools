@@ -1679,6 +1679,69 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
     assert got_alk == pytest.approx(expected_alk, rel=1e-3)
 
 
+@pytest.mark.parametrize(
+    "prefill", [pytest.param(None, marks=skip_xesmf), "2d_lateral_fill"]
+)
+def test_glodap_variables_missing_a_wet_column_leave_no_hole_at_wet_points(
+    tmp_path, prefill
+):
+    """A variable with no data in a column other variables have regrids without a hole.
+
+    GLODAP variables do not all have data in the same columns. Silicate lacks the
+    column at 55N/0E and TCO2 the one at 55N/1E, though NO3, which the shared mask
+    was taken from, has both. That mask called them ocean for every variable, so the
+    NaN stayed inside it and spread to the target points around it, both through the
+    masked-bilinear regrid (no prefill) and through the lateral fill (``prefill``).
+    """
+
+    def field_fn(name, values):
+        gap = {"silicate": (20, 30), "TCO2": (20, 31)}.get(name)  # lat 55, lon 0 / 1
+        if gap is not None:
+            values[:, gap[0], gap[1]] = np.nan
+        return values
+
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap", field_fn=field_fn)
+    grid = Grid(
+        nx=8,
+        ny=8,
+        size_x=400,
+        size_y=400,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[
+            {
+                "source": {"name": "GLODAP", "path": str(glodap_dir)},
+                "use_vars": ["ALK", "DIC", "SiO3"],
+            }
+        ],
+        bgc_model=BGCMarbl,
+        prefill=prefill,
+        use_dask=False,
+        bypass_validation=True,
+    )
+
+    # The initial conditions replace a NaN by 0, so a leaked NaN reads as 0 here. The
+    # source is uniform (about 2300 umol/kg ALK, 2100 DIC, 10 SiO3), so every wet
+    # point must be far from 0.
+    wet = grid.ds["mask_rho"] == 1
+    assert wet.any()
+    for name, lower in (("ALK", 1000.0), ("DIC", 1000.0), ("SiO3", 5.0)):
+        assert (ic.ds[name].where(wet, np.inf) > lower).all(), name
+
+
 def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, caplog):
     """When T/S are absent, GLODAP falls back to a uniform 1025 kg/m3 density.
 

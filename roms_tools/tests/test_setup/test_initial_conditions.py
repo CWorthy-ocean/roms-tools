@@ -450,11 +450,16 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
     restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     ds = xr.open_dataset(restart_file)
 
+    # bypass_validation: with the child's edge on the parent's edge, u/v have no
+    # parent velocity on the outermost ring (averaging u/v to rho-points needs a
+    # neighbour beyond the parent edge), which the wet-point NaN check would reject.
+    # Real nests keep the child inside the parent; u/v are not compared below.
     ic = InitialConditions(
         grid=grid,
         ini_time=datetime(1998, 1, 6),
         source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
         use_dask=use_dask,
+        bypass_validation=True,
     )
 
     mask = grid.ds.mask_rho
@@ -481,6 +486,35 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask
             restart_values,
             equal_nan=True,
         ), f"{var_name} values changed during initialization"
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_roms_source_ic_reaching_the_parent_edge_raises_with_a_nesting_hint(use_dask):
+    """A child grid that reaches its parent's edge gets no velocity on the outer ring.
+
+    That used to be written as 0 without a message. It now raises, and the message says
+    what applies to a ROMS restart source (not the `prefill` advice for lat/lon sources,
+    which this path ignores).
+    """
+    grid_params = {
+        "nx": 8,
+        "ny": 13,
+        "center_lon": -120,
+        "center_lat": 30,
+        "size_x": 3000,
+        "size_y": 4000,
+        "rot": 32,
+    }
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    match = r"(u|v|ubar|vbar) has \d+ NaN value.*ROMS restart.*inside the parent"
+    with pytest.raises(ValueError, match=match):
+        ic = InitialConditions(
+            grid=Grid(**grid_params),
+            ini_time=datetime(1998, 1, 6),
+            source={"name": "ROMS", "grid": Grid(**grid_params), "path": restart_file},
+            use_dask=use_dask,
+        )
+        ic.ds.compute()
 
 
 @skip_xesmf
@@ -1679,6 +1713,67 @@ def test_static_bgc_source_takes_the_physics_time(tmp_path):
     assert got_alk == pytest.approx(expected_alk, rel=1e-3)
 
 
+@pytest.mark.parametrize("name", ["u", "v"])
+def test_fill_nans_over_land_uses_the_mask_at_the_location_of_the_variable(
+    use_dask, name
+):
+    """U and v are checked against their own masks, not the rho mask.
+
+    A rho cell is made dry, which dries the u and v points that touch it. At a u (v)
+    point that is dry while the rho mask at the same index says wet, a NaN is plain
+    land: it becomes 0. At a wet point it raises, naming the variable.
+    """
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        prefill="2d_lateral_fill",
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    mask_rho = np.ones(grid.ds["mask_rho"].shape, dtype=int)
+    mask_rho[1, 1] = 0
+    grid.ds["mask_rho"].values[...] = mask_rho
+    grid.ds["mask_u"].values[...] = mask_rho[:, :-1] * mask_rho[:, 1:]
+    grid.ds["mask_v"].values[...] = mask_rho[:-1] * mask_rho[1:]
+    mask = grid.ds[f"mask_{name}"].values
+    wet = np.argwhere(mask == 1)[0]
+    dry = np.argwhere(mask == 0)[0]
+    assert mask_rho[tuple(dry)] == 1  # dry for u (v), though wet for rho
+
+    def with_nan_at(index):
+        hole = np.zeros(mask.shape, dtype=bool)
+        hole[tuple(index)] = True
+        ds = ic.physics.ds.copy()
+        ds[name] = ds[name].where(
+            ~xr.DataArray(hole, dims=grid.ds[f"mask_{name}"].dims)
+        )
+        return ds
+
+    with pytest.raises(ValueError, match=rf"{name} has \d+ NaN value"):
+        ic.physics._fill_nans_over_land(with_nan_at(wet))[name].compute()
+
+    filled = ic.physics._fill_nans_over_land(with_nan_at(dry)).compute()
+    assert not filled[name].isnull().any()
+    assert (filled[name].isel(s_rho=0, ocean_time=0).values[tuple(dry)]) == 0
+
+
 @pytest.mark.parametrize(
     "prefill", [pytest.param(None, marks=skip_xesmf), "2d_lateral_fill"]
 )
@@ -1740,6 +1835,72 @@ def test_glodap_variables_missing_a_wet_column_leave_no_hole_at_wet_points(
     assert wet.any()
     for name, lower in (("ALK", 1000.0), ("DIC", 1000.0), ("SiO3", 5.0)):
         assert (ic.ds[name].where(wet, np.inf) > lower).all(), name
+
+
+def _ic_with_a_salt_hole(tmp_path, use_dask, **kwargs):
+    """Initial conditions from a GLORYS source with salinity NaN in a block of ocean.
+
+    The GLORYS mask comes from sea-surface height, which has data there, so the source
+    calls the block ocean. The NaN starts at the surface, where no fill reaches it, and
+    the masked regrid carries it onto the target points around the block.
+    """
+    source = xr.open_dataset(download_test_data("GLORYS_coarse_test_data.nc")).load()
+    block = (abs(source["latitude"] - 55) < 1.5) & (abs(source["longitude"]) < 1.5)
+    source["so"] = source["so"].where(~block)
+    source.to_netcdf(tmp_path / "glorys.nc")
+    source.close()
+    grid = Grid(
+        nx=8,
+        ny=8,
+        size_x=400,
+        size_y=400,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"name": "GLORYS", "path": tmp_path / "glorys.nc"},
+        use_dask=use_dask,
+        **kwargs,
+    )
+    return grid, ic
+
+
+@skip_xesmf
+def test_nan_at_a_wet_point_in_the_source_raises_instead_of_becoming_zero(
+    tmp_path, use_dask
+):
+    """A variable the source leaves NaN at ocean points is an error, not a 0.
+
+    Initial conditions used to write such a NaN as 0 (e.g. silicate and DIC of 0 at
+    ocean points from a GLODAP leak) without a message. Without dask the error is
+    raised while the object is built; with dask, when the variable is computed.
+    """
+    match = r"salt has \d+ NaN value.* at ocean points"
+    if use_dask:
+        _, ic = _ic_with_a_salt_hole(tmp_path, use_dask)
+        with pytest.raises(ValueError, match=match):
+            ic.ds["salt"].compute()
+    else:
+        with pytest.raises(ValueError, match=match):
+            _ic_with_a_salt_hole(tmp_path, use_dask)
+
+
+@skip_xesmf
+def test_bypass_validation_still_fills_a_wet_point_nan_with_zero(tmp_path, use_dask):
+    """``bypass_validation=True`` keeps the plain fill, so the hole is written as 0."""
+    grid, ic = _ic_with_a_salt_hole(tmp_path, use_dask, bypass_validation=True)
+
+    # Salinity is never 0 in the ocean, so a 0 at a wet point is the filled NaN.
+    wet = grid.ds["mask_rho"] == 1
+    assert (ic.ds["salt"].where(wet, np.inf) == 0).any()
+    assert not ic.ds["salt"].isnull().any()
 
 
 def test_static_bgc_source_glodap_missing_ts_warns_and_uses_fallback(tmp_path, caplog):

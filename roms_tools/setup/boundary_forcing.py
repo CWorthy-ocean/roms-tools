@@ -57,6 +57,7 @@ from roms_tools.setup.utils import (
     compute_barotropic_velocity,
     cycle_to_times,
     deserialize_forcing_data,
+    fill_nans_over_land,
     forwardable_fields,
     from_yaml,
     get_boundary_coords,
@@ -73,6 +74,7 @@ from roms_tools.setup.utils import (
     preflight_esper_sources,
     substitute_nans_by_fillvalue,
     to_dict,
+    wet_mask,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -765,10 +767,34 @@ class BoundaryForcingSource:
             self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+        ds = self._fill_nans_over_land(ds)
 
         self.ds = ds
+
+    def _fill_nans_over_land(self, ds):
+        """Fill NaN over land with 0, raising on NaN at a wet point.
+
+        The mask of each boundary variable is the grid's mask at the variable's
+        location, cut to the boundary the same way ``_validate`` does. The check is
+        skipped (plain fill) under ``bypass_validation``.
+        """
+        locations = {
+            f"{name}_{direction}": (info["location"], direction)
+            for name, info in self.variable_info.items()
+            for direction, is_enabled in self.boundaries.items()
+            if is_enabled
+        }
+        for var_name in ds.data_vars:
+            if self.bypass_validation or var_name not in locations:
+                # No grid-point location, so no mask to check against.
+                ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+            else:
+                location, direction = locations[var_name]
+                mask = wet_mask(self.grid.ds, location).isel(
+                    **self.bdry_coords[location][direction]
+                )
+                ds[var_name] = fill_nans_over_land(ds[var_name], mask, var_name)
+        return ds
 
     def _resolve_prefill_options(self) -> None:
         """Build the validated :class:`RegridConfig` from the public options.
@@ -916,10 +942,7 @@ class BoundaryForcingSource:
         if not self.bypass_validation:
             self._validate(ds)
 
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
-
-        return ds
+        return self._fill_nans_over_land(ds)
 
     def _reject_climatology_on_static_source(self) -> None:
         """Reject ``climatology=True`` on a BGC source that carries no time axis.
@@ -1040,10 +1063,7 @@ class BoundaryForcingSource:
         if not self.bypass_validation:
             self._validate(ds)
 
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
-
-        return ds
+        return self._fill_nans_over_land(ds)
 
     def _apply_use_vars(self, fields: dict) -> dict:
         """Down-select ``fields`` (bare BGC var name -> DataArray) to ``self.use_vars``.
@@ -1541,13 +1561,7 @@ class BoundaryForcingSource:
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
 
-                # Select the appropriate mask based on variable location
-                if location == "rho":
-                    mask = self.grid.ds.mask_rho
-                elif location == "u":
-                    mask = self.grid.ds.mask_u
-                elif location == "v":
-                    mask = self.grid.ds.mask_v
+                mask = wet_mask(self.grid.ds, location)
 
                 for direction, is_enabled in self.boundaries.items():
                     if is_enabled:
@@ -1614,15 +1628,9 @@ class BoundaryForcingSource:
         var_name_wo_direction, direction = var_name.split("_")
         location = self.variable_info[var_name_wo_direction]["location"]
 
-        # Find correct mask
-        if location == "rho":
-            mask = self.grid.ds.mask_rho
-        elif location == "u":
-            mask = self.grid.ds.mask_u
-        elif location == "v":
-            mask = self.grid.ds.mask_v
-
-        mask = mask.isel(**self.bdry_coords[location][direction])
+        mask = wet_mask(self.grid.ds, location).isel(
+            **self.bdry_coords[location][direction]
+        )
 
         # Load the data
         if self.use_dask:
@@ -1738,6 +1746,14 @@ class BoundaryForcingSource:
         -------
         List[Path]
             A list of Path objects for the filenames that were saved.
+
+        Raises
+        ------
+        ValueError
+            With ``use_dask=True``, if a variable has NaN at an ocean point. The data
+            are first computed here, so this is where that check runs; the files this
+            call started writing are removed, including a file that was already at an
+            output path (it is truncated when the write opens it).
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)

@@ -11,6 +11,11 @@
   * YAML files saved by earlier versions load with the new 25 m default; setting `bottom_fill_blend_m=float("inf")` restores the old output for GLORYS and CESM sources.
   * Nested initial conditions change too: #709's fixed 100 m blend and child-grid donors are replaced by the 25 m default and the parent's own columns; no setting reproduces 5.3.0's nested output, and `inf` gives the copy-down from before 5.3.0.
   * BGC fields from the WOA and GLODAP climatologies change below the source's seafloor in the same way; no setting reproduces WOA's earlier `deep_fill="annual_blend"` values below the seafloor.
+* `InitialConditions`, `BoundaryForcing`, `TidalForcing` and `SurfaceForcing` now raise a `ValueError` where regridding left NaN at ocean points, instead of silently writing 0 there; setups that built before may now fail. ([#719](https://github.com/CWorthy-ocean/roms-tools/pull/719))
+  * The error names the variable and the number of such points, and suggests a likely cause.
+  * Without dask it is raised at construction; with dask it is raised at `.save()`, possibly after a long compute, and the files that save started are removed, including any earlier file at an output path, which the save has already truncated.
+  * `bypass_validation=True` restores the old behavior and writes 0 there.
+  * A ROMS-restart (nesting) initial condition whose child grid reaches the parent's edge now raises: velocities there have no parent value.
 
 ### New Features
 
@@ -33,6 +38,7 @@
   * GLODAP columns where one variable has no data at any depth are now treated as land and filled from neighbouring columns, instead of that variable being written as 0.
 * GLODAP BGC initial conditions and boundary forcing no longer get 0 (or a NaN error from the lateral fill) where a variable has no data in a column that the others have, such as silicate in the Black Sea and DIC in Hudson Bay. Each variable is filled from its own data. ([#718](https://github.com/CWorthy-ocean/roms-tools/pull/718))
 * GLODAP variables that have data in columns where NO3 has none (up to about 70 columns each for ALK, O2, T and S) keep those values instead of having them overwritten by the land fill. ([#718](https://github.com/CWorthy-ocean/roms-tools/pull/718))
+* A dask `.save()` that fails during its compute no longer leaves partly written NetCDF files behind. ([#719](https://github.com/CWorthy-ocean/roms-tools/pull/719))
 
 ### Improvements
 

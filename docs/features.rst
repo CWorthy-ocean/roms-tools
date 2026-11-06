@@ -57,8 +57,10 @@ Rutgers ROMS
 
 ``ROMS-Tools`` writes input files for UCLA-ROMS by default. Grids made by Rutgers ROMS tools can be loaded with ``Grid(filename=...)``, including the Rutgers ROMS vertical coordinate options (``vtransform``, ``vstretching``). Set ``convention="rutgers"`` to write these inputs as read by Rutgers ROMS:
 
+* ``Grid.save(..., convention="rutgers")`` writes the classic ROMS grid variables (``xl``, ``el``, ``dndx``, ``dmde``, ``mask_psi`` and the psi-point coordinates) that Rutgers ROMS requires.
+
 * ``InitialConditions`` and ``BoundaryForcing`` (physics only).
-* ``SurfaceForcing`` (``type="physics"`` and ``"sss"`` restoring): ``Uwind``, ``Vwind``, ``Qair`` as relative humidity, ``rain`` in kg m\ :sup:`-2` s\ :sup:`-1`, and ``lwrad_down``, which requires ``LONGWAVE_OUT``. Air pressure ``Pair`` is not written, so use ``ANA_PAIR`` or provide it separately.
+* ``SurfaceForcing`` (``type="physics"`` and ``"sss"`` restoring): ``Uwind``, ``Vwind``, ``Qair`` as relative humidity, ``rain`` in kg m\ :sup:`-2` s\ :sup:`-1`, and ``lwrad_down``, which requires ``LONGWAVE_OUT``. Air pressure ``Pair`` is written from ERA5 sea level pressure (``msl``), in millibar.
 * ``TidalForcing``: tidal elevation and current ellipses, following ``frc_tides.cdl``.
 * ``RiverForcing``: point sources on the faces between river and ocean cells, for ``LuvSrc``, following ``frc_rivers.cdl``, with a uniform vertical profile.
 

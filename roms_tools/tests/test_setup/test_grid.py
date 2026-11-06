@@ -1117,6 +1117,64 @@ def test_from_file_partial_parameters_raises_error(grid, tmp_path):
         Grid(filename=path, theta_s=5.0)
 
 
+def test_save_rutgers_convention(grid, tmp_path, caplog):
+    path = tmp_path / "rutgers_grid.nc"
+    grid.save(path, convention="rutgers")
+    ds = xr.open_dataset(path)
+
+    n_eta, n_xi = ds.mask_rho.shape
+    for name in ["xl", "el"]:
+        assert ds[name].dims == ()
+    for name in ["dndx", "dmde"]:
+        assert ds[name].dims == ("eta_rho", "xi_rho")
+    for name in ["mask_psi", "lon_psi", "lat_psi"]:
+        assert ds[name].dims == ("eta_psi", "xi_psi")
+        assert ds[name].shape == (n_eta - 1, n_xi - 1)
+
+    pm, pn = ds.pm.values, ds.pn.values
+    npt.assert_allclose(ds.xl, np.sum(1 / pm[n_eta // 2, 1:-1]))
+    npt.assert_allclose(ds.el, np.sum(1 / pn[1:-1, n_xi // 2]))
+    npt.assert_allclose(ds.dndx.values[1, 1:-1], 0.5 * (1 / pn[1, 2:] - 1 / pn[1, :-2]))
+    npt.assert_allclose(ds.dmde.values[1:-1, 1], 0.5 * (1 / pm[2:, 1] - 1 / pm[:-2, 1]))
+    assert (ds.dndx.values[:, [0, -1]] == 0).all()
+    assert (ds.dmde.values[[0, -1], :] == 0).all()
+
+    m = ds.mask_rho.values
+    npt.assert_array_equal(
+        ds.mask_psi.values, m[:-1, :-1] * m[1:, :-1] * m[:-1, 1:] * m[1:, 1:]
+    )
+
+    lat = ds.lat_rho.values
+    npt.assert_allclose(
+        ds.lat_psi, 0.25 * (lat[:-1, :-1] + lat[1:, :-1] + lat[:-1, 1:] + lat[1:, 1:])
+    )
+
+    assert "xl" not in grid.ds
+    assert "mask_psi" not in grid.ds
+    with pytest.raises(ValueError, match="must be 'ucla' or 'rutgers'"):
+        grid.save(tmp_path / "invalid", convention="Rutgers")
+
+    with caplog.at_level(logging.WARNING):
+        reloaded = Grid(filename=path)
+    assert "classic ROMS grid layout" not in caplog.text
+    xr.testing.assert_equal(reloaded.ds["h"], grid.ds["h"])
+
+
+def test_save_rutgers_convention_straddling_grid(tmp_path):
+    """lon_psi is averaged across the Greenwich meridian without a 360-to-0 jump."""
+    grid = Grid(nx=4, ny=4, size_x=300, size_y=300, center_lon=0, center_lat=50, N=3)
+    assert grid.ds.attrs["straddle"] == "True"
+    path = tmp_path / "straddling_grid.nc"
+    grid.save(path, convention="rutgers")
+    lon_psi = xr.open_dataset(path).lon_psi.values
+    assert ((0 <= lon_psi) & (lon_psi <= 360)).all()  # a -0 average wraps to 360
+    assert (lon_psi > 180).any() and (lon_psi < 180).any()
+    assert (
+        np.abs(np.diff(np.where(lon_psi > 180, lon_psi - 360, lon_psi), axis=1)).max()
+        < 5
+    )
+
+
 def test_rutgers_grid(grid, tmp_path, caplog):
     # UCLA-ROMS Vtransform and Vstretching are not written to YAML
     assert "vtransform" not in grid.grid_to_dict()

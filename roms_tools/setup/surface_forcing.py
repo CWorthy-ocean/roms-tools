@@ -33,6 +33,7 @@ from roms_tools.setup.utils import (
     apply_source_prefill,
     check_source_coverage,
     compute_missing_surface_bgc_variables,
+    drop_roms_tools_time_coords,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -141,9 +142,11 @@ class SurfaceForcing:
         units and time attributes read by Rutgers ROMS: ``Uwind``, ``Vwind``, ``Qair``
         (relative humidity as a fraction), ``rain`` (kg m-2 s-1), ``lwrad_down``
         (downward longwave radiation, which needs ``LONGWAVE_OUT``) and, for restoring,
-        ``SSS``. Air pressure ``Pair`` is not written, so Rutgers ROMS needs ``ANA_PAIR``
-        or a separate ``Pair`` file. Only ``"physics"`` and ``"sss"`` restoring are
-        supported, without the coarse grid. Defaults to ``"ucla"``.
+        ``SSS``. Air pressure ``Pair`` is written from ERA5 sea level pressure in
+        millibar, so the ERA5 source must contain it (``msl``, or
+        ``mean_sea_level_pressure`` in the ARCO archive). Only ``"physics"`` and
+        ``"sss"`` restoring are supported, without the coarse grid. Defaults to
+        ``"ucla"``.
 
 
     Examples
@@ -593,7 +596,19 @@ class SurfaceForcing:
                     raise ValueError(
                         "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
                     )
-                data = dataset_cls(**data_dict)
+                if self.convention == "rutgers":
+                    pair_name = dataset_cls.pair_var_name
+                    data_dict["opt_var_names"] = {"pair": pair_name}
+                    data = dataset_cls(**data_dict)
+                    if pair_name not in data.ds:
+                        raise ValueError(
+                            f"convention='rutgers' needs sea level pressure (`{pair_name}`) "
+                            "in the ERA5 source to write `Pair`; add it to the source, or "
+                            "define ANA_PAIR in Rutgers ROMS and use convention='ucla' for "
+                            "the other fields."
+                        )
+                else:
+                    data = dataset_cls(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -687,6 +702,8 @@ class SurfaceForcing:
                     "validate": True,
                 },
             }
+            if self.convention == "rutgers":
+                variable_info["pair"] = {**default_info, "validate": True}
         elif self.type == "bgc":
             if self.source["name"] == "MBL_co2":
                 variable_info = {}
@@ -995,17 +1012,19 @@ class SurfaceForcing:
                     "vwnd": "Vwind",
                     "qair": "Qair",
                     "lwrad": "lwrad_down",
+                    "pair": "Pair",
                 }
             )
             if "rad_time" in ds:
+                rad_vars = ["swrad", "lwrad_down"]
                 ds = set_rutgers_time(
                     ds,
                     "time",
                     self.model_reference_date,
-                    ["Uwind", "Vwind", "Tair", "Qair", "rain"],
+                    [name for name in ds.data_vars if name not in rad_vars],
                 )
                 ds = set_rutgers_time(
-                    ds, "rad_time", self.model_reference_date, ["swrad", "lwrad_down"]
+                    ds, "rad_time", self.model_reference_date, rad_vars
                 )
             else:
                 ds = set_rutgers_time(ds, "time", self.model_reference_date)
@@ -1156,6 +1175,9 @@ class SurfaceForcing:
         else:
             dataset_list = [self.ds]
             output_filenames = [str(filepath)]
+
+        if self.convention == "rutgers":
+            dataset_list = [drop_roms_tools_time_coords(ds) for ds in dataset_list]
 
         saved_filenames = save_datasets(
             dataset_list,

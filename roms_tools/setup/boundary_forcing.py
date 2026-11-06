@@ -53,6 +53,7 @@ from roms_tools.setup.utils import (
     compute_barotropic_velocity,
     cycle_to_times,
     deserialize_forcing_data,
+    drop_roms_tools_time_coords,
     forwardable_fields,
     from_yaml,
     get_boundary_coords,
@@ -1717,6 +1718,9 @@ class BoundaryForcingSource:
         else:
             dataset_list = [self.ds]
             output_filenames = [str(filepath)]
+
+        if self.convention == "rutgers":
+            dataset_list = [drop_roms_tools_time_coords(ds) for ds in dataset_list]
 
         if serialize_dask is None:
             serialize_dask = False

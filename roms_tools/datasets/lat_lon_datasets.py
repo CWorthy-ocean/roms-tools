@@ -2827,6 +2827,9 @@ class ERA5Dataset(LatLonDataset):
     """Represents ERA5 data on original grid."""
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+    #: Sea level pressure, loaded only when requested through ``opt_var_names``
+    #: (Rutgers ROMS ``Pair``).
+    pair_var_name: ClassVar[str] = "msl"
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {
@@ -2857,6 +2860,7 @@ class ERA5Dataset(LatLonDataset):
         - Convert radiation values from J/m^2 to W/m^2.
         - Convert rainfall from meters to cm/day.
         - Convert temperature from Kelvin to Celsius.
+        - Convert sea level pressure, if requested, from Pa to millibar.
         - Compute relative humidity if not present, convert to absolute humidity.
         - Use SST to create mask.
 
@@ -2879,6 +2883,11 @@ class ERA5Dataset(LatLonDataset):
         updates[vn["Tair"]] = ds[vn["Tair"]] - 273.15
         updates[vn["d2m"]] = ds[vn["d2m"]] - 273.15
 
+        # Convert sea level pressure from Pa to millibar
+        pair_name = self.opt_var_names.get("pair")
+        if pair_name is not None and pair_name in ds:
+            updates[pair_name] = ds[pair_name] / 100
+
         # Apply all scalar transforms in one lazy assign
         ds = ds.assign(updates)
 
@@ -2887,6 +2896,8 @@ class ERA5Dataset(LatLonDataset):
         ds[vn["lwrad"]].attrs["units"] = "W/m^2"
         ds[vn["Tair"]].attrs["units"] = "degrees C"
         ds[vn["d2m"]].attrs["units"] = "degrees C"
+        if pair_name is not None and pair_name in ds:
+            ds[pair_name].attrs["units"] = "millibar"
 
         # --- Humidity (lazy - all xarray/numpy ops on dask arrays stay lazy) ---
         if "qair" not in ds.data_vars:
@@ -2937,6 +2948,8 @@ class ERA5Dataset(LatLonDataset):
 @dataclass(kw_only=True)
 class ERA5ARCODataset(ERA5Dataset):
     # The GCP ARCO version of the dataset has different variable names
+
+    pair_var_name: ClassVar[str] = "mean_sea_level_pressure"
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {

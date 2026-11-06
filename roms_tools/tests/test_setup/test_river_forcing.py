@@ -2155,6 +2155,14 @@ def test_rutgers_convention(iceland_test_grid, multi_cell_indices, tmp_path):
     assert ds_rutgers["river_time"].attrs["cycle_length"] == 365.25
     assert ds_rutgers["river_transport"].attrs["time"] == "river_time"
 
+    # abs_time and month are dropped from the file, which Rutgers ROMS would read as
+    # the time (and so miss river_time's cycle_length)
+    rivers_path = river_forcing.save(tmp_path / "rivers.nc")[0]
+    with xr.open_dataset(rivers_path, decode_times=False) as saved:
+        assert "abs_time" not in saved and "month" not in saved
+        assert saved["river_time"].attrs["cycle_length"] == 365.25
+    assert "abs_time" in ds_rutgers.coords and "month" in ds_rutgers.coords
+
     with pytest.raises(NotImplementedError):
         river_forcing.plot()
 

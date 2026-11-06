@@ -1939,6 +1939,12 @@ def test_rutgers_convention(use_dask, tmp_path):
     for var_name in ds.data_vars:
         assert ds[var_name].attrs["time"] == "bry_time"
 
+    # abs_time is dropped from the file, which Rutgers ROMS would read as the time
+    bry_path = bf_rutgers.save(tmp_path / "bry.nc", group=False)[0][0]
+    with xr.open_dataset(bry_path, decode_times=False) as saved:
+        assert "abs_time" not in saved and "month" not in saved
+    assert "abs_time" in ds.coords
+
     filepath = tmp_path / "bf.yaml"
     bf_rutgers.to_yaml(filepath)
     assert BoundaryForcing.from_yaml(filepath, use_dask=use_dask) == bf_rutgers

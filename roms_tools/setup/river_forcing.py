@@ -45,6 +45,7 @@ from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
+    drop_roms_tools_time_coords,
     expand_monthly_climatology_time_axis,
     find_coastal_cells,
     from_yaml,
@@ -2319,6 +2320,9 @@ class RiverForcing:
 
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
+
+        if self.convention == "rutgers":
+            dataset_list = [drop_roms_tools_time_coords(ds) for ds in dataset_list]
 
         saved_filenames = save_datasets(dataset_list, output_filenames, format=format)
 

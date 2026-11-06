@@ -970,6 +970,7 @@ def get_variable_metadata():
         },
         "Tair": {"long_name": "air temperature at 2m", "units": "degrees Celsius"},
         "qair": {"long_name": "absolute humidity at 2m", "units": "kg/kg"},
+        "pair": {"long_name": "surface air pressure", "units": "millibar"},
         "rain": {"long_name": "total precipitation", "units": "cm/day"},
         "temp": {
             "long_name": "potential temperature",
@@ -2581,6 +2582,26 @@ def set_rutgers_time(
         ds[name].attrs["time"] = time_name
 
     return ds
+
+
+def drop_roms_tools_time_coords(ds: xr.Dataset) -> xr.Dataset:
+    """Drop the time coordinates roms-tools adds for readability.
+
+    Rutgers ROMS takes the first 1-D variable whose name contains "time" as the time
+    record of a file, so ``abs_time`` would hide the ``cycle_length`` of a
+    climatology. Drop ``abs_time`` and ``month`` from files written for Rutgers ROMS.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset to save.
+
+    Returns
+    -------
+    xarray.Dataset
+        The dataset without ``abs_time`` and ``month``, whichever are present.
+    """
+    return ds.drop_vars(["abs_time", "month"], errors="ignore")
 
 
 class NoAliasDumper(yaml.SafeDumper):

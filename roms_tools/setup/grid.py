@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 import xarray as xr
@@ -709,6 +709,7 @@ class Grid:
         self,
         filepath: str | Path,
         format: NetCDFFormat = DEFAULT_NETCDF_FORMAT,
+        convention: Literal["ucla", "rutgers"] = "ucla",
     ) -> None:
         """Save the grid information to a NetCDF file.
 
@@ -718,12 +719,17 @@ class Grid:
             The base path or filename where the dataset should be saved.
         format : {"NETCDF4", "NETCDF3_CLASSIC", "NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"}, optional
             NetCDF file format. Defaults to ``"NETCDF4"``.
+        convention : {"ucla", "rutgers"}, optional
+            ROMS convention to write the file for. ``"rutgers"`` also writes the classic ROMS grid variables ``xl``, ``el``, ``dndx``, ``dmde``, ``mask_psi``, ``lon_psi`` and ``lat_psi`` that Rutgers ROMS requires. Defaults to ``"ucla"``.
 
         Returns
         -------
         List[Path]
             A list of Path objects for the filenames that were saved.
         """
+        if convention not in ["ucla", "rutgers"]:
+            raise ValueError("`convention` must be 'ucla' or 'rutgers'.")
+
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -731,7 +737,10 @@ class Grid:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        dataset_list = [self.ds.load()]
+        ds = self.ds.load()
+        if convention == "rutgers":
+            ds = add_classic_grid_variables(ds)
+        dataset_list = [ds]
         output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(dataset_list, output_filenames, format=format)
@@ -1832,3 +1841,103 @@ def _add_lat_lon_at_velocity_points(ds, straddle):
     )
 
     return ds
+
+
+def add_classic_grid_variables(ds: xr.Dataset) -> xr.Dataset:
+    """Return a copy of the grid dataset with the classic ROMS grid variables.
+
+    These variables of the classic ROMS grid layout (``xl``, ``el``, ``dndx``,
+    ``dmde``, ``mask_psi``, ``lon_psi``, ``lat_psi``) are read by Rutgers ROMS;
+    ROMS-Tools itself never reads them. They are always recomputed from ``pm``,
+    ``pn``, ``mask_rho``, ``lon_rho`` and ``lat_rho``, overwriting existing ones.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The grid dataset. It is not modified.
+
+    Returns
+    -------
+    xarray.Dataset
+        A new dataset with the additional variables.
+    """
+    pm, pn = ds["pm"].values, ds["pn"].values
+    dx, dy = 1.0 / pm, 1.0 / pn
+
+    dndx = np.zeros_like(pn)
+    dmde = np.zeros_like(pm)
+    dndx[:, 1:-1] = 0.5 * (dy[:, 2:] - dy[:, :-2])
+    dmde[1:-1, :] = 0.5 * (dx[2:, :] - dx[:-2, :])
+
+    def at_psi(field: np.ndarray) -> np.ndarray:
+        return 0.25 * (
+            field[:-1, :-1] + field[1:, :-1] + field[:-1, 1:] + field[1:, 1:]
+        )
+
+    mask = ds["mask_rho"].values
+    straddle = ds.attrs.get("straddle") == "True"
+    lon = ds["lon_rho"]
+    if straddle:
+        # avoid jump from 360 to 0 in the average
+        lon = xr.where(lon > 180, lon - 360, lon)
+    lon_psi = at_psi(lon.values)
+    if straddle:
+        lon_psi = np.where(lon_psi < 0, lon_psi + 360, lon_psi)
+
+    psi_dims = ("eta_psi", "xi_psi")
+    rho_dims = ("eta_rho", "xi_rho")
+    return ds.assign(
+        xl=xr.Variable(
+            (),
+            dx[dx.shape[0] // 2, 1:-1].sum(),
+            {"long_name": "domain length in the XI-direction", "units": "meter"},
+        ),
+        el=xr.Variable(
+            (),
+            dy[1:-1, dy.shape[1] // 2].sum(),
+            {"long_name": "domain length in the ETA-direction", "units": "meter"},
+        ),
+        dndx=xr.Variable(
+            rho_dims,
+            dndx,
+            {
+                "long_name": "xi-derivative of inverse metric factor pn",
+                "units": "meter",
+            },
+        ),
+        dmde=xr.Variable(
+            rho_dims,
+            dmde,
+            {
+                "long_name": "eta-derivative of inverse metric factor pm",
+                "units": "meter",
+            },
+        ),
+        mask_psi=xr.Variable(
+            psi_dims,
+            (mask[:-1, :-1] * mask[1:, :-1] * mask[:-1, 1:] * mask[1:, 1:]).astype(
+                mask.dtype
+            ),
+            {
+                "long_name": "mask on psi-points",
+                "flag_values": "0, 1",
+                "flag_meanings": "land water",
+            },
+        ),
+        lon_psi=xr.Variable(
+            psi_dims,
+            lon_psi,
+            {
+                "long_name": "longitude of psi-points",
+                "units": ds["lon_rho"].attrs.get("units", ""),
+            },
+        ),
+        lat_psi=xr.Variable(
+            psi_dims,
+            at_psi(ds["lat_rho"].values),
+            {
+                "long_name": "latitude of psi-points",
+                "units": ds["lat_rho"].attrs.get("units", ""),
+            },
+        ),
+    )

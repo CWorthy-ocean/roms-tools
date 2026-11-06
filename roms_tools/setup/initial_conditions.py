@@ -51,6 +51,7 @@ from roms_tools.setup.utils import (
     companions_derive_from_physics_ts,
     compute_barotropic_velocity,
     deserialize_forcing_data,
+    drop_roms_tools_time_coords,
     forwardable_fields,
     from_yaml,
     get_roms_tools_version_info,
@@ -1573,6 +1574,9 @@ class InitialConditionsSource:
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
+        if self.convention == "rutgers":
+            dataset_list = [drop_roms_tools_time_coords(ds) for ds in dataset_list]
+
         if serialize_dask is None:
             serialize_dask = False
 
@@ -1670,6 +1674,8 @@ class InitialConditionsSource:
             raise ValueError(
                 "`bgc` must contain at least one InitialConditionsSource object."
             )
+        if physics.convention == "rutgers":
+            raise ValueError("convention='rutgers' does not support BGC sources.")
         for i, b in enumerate(bgc_list):
             if b.physics_forcing is not physics:
                 raise ValueError(
@@ -2144,8 +2150,11 @@ class InitialConditions:
             filepath = filepath.with_suffix("")
         if serialize_dask is None:
             serialize_dask = False
+        ds = self.ds
+        if self.convention == "rutgers":
+            ds = drop_roms_tools_time_coords(ds)
         return save_datasets(
-            [self.ds],
+            [ds],
             [str(filepath)],
             use_dask=self.use_dask,
             format=format,

@@ -1369,15 +1369,43 @@ def test_rutgers_convention(surface_forcing, rutgers_surface_forcing, tmp_path):
     # and air temperature separately would not
     assert 0 <= ds_rutgers["Qair"].min() and ds_rutgers["Qair"].max() <= 1.001
 
+    # sea level pressure in millibar, written only for Rutgers ROMS
+    assert "Pair" in ds_rutgers and "pair" not in ds_rutgers
+    assert "pair" not in ds and "Pair" not in ds
+    assert 900 < ds_rutgers["Pair"].min() and ds_rutgers["Pair"].max() < 1100
+    assert ds_rutgers["Pair"].attrs["units"] == "millibar"
+
     # time units with the reference date, and the time variable of each field
     filepath = rutgers_surface_forcing.save(tmp_path / "rutgers_frc.nc", group=False)[0]
     with xr.open_dataset(filepath, decode_times=False) as saved:
         for time_name in ["time", "rad_time"]:
             assert saved[time_name].attrs["units"] == "days since 2000-01-01 00:00:00"
-        for var_name in ["Uwind", "Vwind", "Tair", "Qair", "rain"]:
+        # abs_time is dropped from the file, which Rutgers ROMS would read as the time
+        assert "abs_time" not in saved and "abs_time" in ds_rutgers.coords
+        for var_name in ["Uwind", "Vwind", "Tair", "Qair", "rain", "Pair"]:
             assert saved[var_name].attrs["time"] == "time"
         for var_name in ["swrad", "lwrad_down"]:
             assert saved[var_name].attrs["time"] == "rad_time"
+
+
+def test_rutgers_convention_missing_pair(surface_forcing, use_dask, tmp_path):
+    path = tmp_path / "era5_no_msl.nc"
+    with xr.open_dataset(surface_forcing.source["path"]) as era5:
+        era5.drop_vars("msl").to_netcdf(path)
+
+    with pytest.raises(ValueError, match="sea level pressure"):
+        SurfaceForcing(
+            grid=surface_forcing.grid,
+            start_time=surface_forcing.start_time,
+            end_time=surface_forcing.end_time,
+            source={"name": "ERA5", "path": path},
+            correct_radiation=False,
+            coarse_grid_mode="never",
+            prefill="2d_lateral_fill",
+            regrid_method="scipy",
+            convention="rutgers",
+            use_dask=use_dask,
+        )
 
 
 def test_rutgers_convention_restoring(use_dask):

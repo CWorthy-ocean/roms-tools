@@ -1535,6 +1535,12 @@ def test_rutgers_convention(initial_conditions, use_dask, tmp_path):
     assert ds["Vstretching"] == 4 and ds["Vstretching"].dtype.kind == "i"
     assert ds["hc"] == 250.0
 
+    # abs_time is dropped from the file, which Rutgers ROMS would read as the time
+    ini_path = ic_rutgers.save(tmp_path / "ini.nc")[0]
+    with xr.open_dataset(ini_path, decode_times=False) as saved:
+        assert "abs_time" not in saved and "month" not in saved
+    assert "abs_time" in ds.coords
+
     filepath = tmp_path / "ic.yaml"
     ic_rutgers.to_yaml(filepath)
     assert InitialConditions.from_yaml(filepath, use_dask=use_dask) == ic_rutgers

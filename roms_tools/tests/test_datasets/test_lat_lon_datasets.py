@@ -639,6 +639,22 @@ def test_resolve_era5_source_accepts_path_object(tmp_path):
     assert dataset_cls is ERA5Dataset
 
 
+def test_era5_pair_loaded_only_on_request(use_dask):
+    """Sea level pressure is skipped by default and converted to millibar when asked."""
+    kwargs = {
+        "filename": download_test_data("ERA5_regional_test_data.nc"),
+        "start_time": datetime(2020, 2, 1),
+        "end_time": datetime(2020, 2, 2),
+        "use_dask": use_dask,
+    }
+    assert ERA5Dataset.pair_var_name not in ERA5Dataset(**kwargs).ds
+
+    pair_name = ERA5Dataset.pair_var_name
+    pair = ERA5Dataset(**kwargs, opt_var_names={"pair": pair_name}).ds[pair_name]
+    assert pair.attrs["units"] == "millibar"
+    assert 900 < float(pair.min()) and float(pair.max()) < 1100
+
+
 @pytest.mark.use_gcsfs
 def test_default_era5_dataset_loading_without_dask() -> None:
     """Verify that loading the default ERA5 dataset fails if use_dask is not True."""

@@ -116,11 +116,33 @@ def test_no_nans_on_water_points(eta_beta_iceland):
     water = eta_beta_iceland.grid.ds.mask_rho == 1
     ntimes = eta_beta_iceland.ds.sizes["time"]
 
-    for var in ["eta", "beta"]:
+    for var in ["ddic_dco2", "ddic_dalk"]:
         assert (
             eta_beta_iceland.ds[var].where(water).notnull().sum()
             == water.sum() * ntimes
         )
+
+
+def test_saved_file_matches_roms_forcing_names(his_ds, bgc_ds, grid, tmp_path):
+    """Saved files carry the variables ROMS reads (surf_flux.F90).
+
+    ROMS looks up ``ddic_dco2`` and ``ddic_dalk`` with their own time variables
+    ``ddic_dco2_time`` and ``ddic_dalk_time``, in days since the model
+    reference date.
+    """
+    his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    eta_beta = calculate_eta_beta(
+        his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
+    )
+
+    (fname,) = eta_beta.save(tmp_path / "out" / "carbonate_sensitivity")
+    with xr.open_dataset(fname, decode_times=False) as ds:
+        for var in ("ddic_dco2", "ddic_dalk"):
+            assert ds[var].dims == ("time", "eta_rho", "xi_rho")
+            assert ds[f"{var}_time"].dims == ("time",)
+            assert ds[f"{var}_time"].attrs["units"] == "days"
+            np.testing.assert_allclose(ds[f"{var}_time"].values, [0.0, 1.0])
 
 
 # this test will not be run by default
@@ -142,6 +164,7 @@ def test_save_results(request):
 
 def test_check_results(eta_beta_iceland, get_test_data_path):
     fname = get_test_data_path("eta_beta_iceland")
-    expected_ds = xr.open_zarr(fname)
+    # ddic_*_time carry units "days", which xarray would decode to timedelta64
+    expected_ds = xr.open_zarr(fname, decode_timedelta=False)
 
     xr.testing.assert_allclose(eta_beta_iceland.ds, expected_ds, rtol=1.0e-12)

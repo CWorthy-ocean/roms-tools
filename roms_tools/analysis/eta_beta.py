@@ -26,8 +26,8 @@ class calculate_eta_beta:
 
     where
 
-    - ``beta = dDIC / dCO2``
-    - ``eta  = dDIC / dALK``
+    - ``beta = dDIC / dCO2``, stored as ``ddic_dco2``
+    - ``eta  = dDIC / dALK``, stored as ``ddic_dalk``
 
     Call `save` to write ``ds`` to monthly files.
 
@@ -71,7 +71,7 @@ class calculate_eta_beta:
     ds_surface_control: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing the control-run surface fields."""
     ds: xr.Dataset = field(init=False, repr=False)
-    """An xarray Dataset containing the eta and beta fields."""
+    """An xarray Dataset containing ``ddic_dco2`` (beta), ``ddic_dalk`` (eta) and their record times."""
 
     def __post_init__(self):
         self.ds_surface_control = self._get_surface_vals_control()
@@ -152,7 +152,7 @@ class calculate_eta_beta:
         Returns
         -------
         xr.Dataset
-            Dataset with ``eta`` and ``beta`` on the same dimensions as the inputs,
+            Dataset with ``ddic_dco2`` (beta) and ``ddic_dalk`` (eta) on the same dimensions as the inputs,
             with ``ocean_time`` as a coordinate.
 
         Raises
@@ -210,16 +210,23 @@ class calculate_eta_beta:
         beta = (csys["dic"] - (csys["HCO3"] + 2.0 * csys["CO3"]) / iso_q) / csys["CO2"]
         eta = 1.0 / iso_q
 
-        # Assign dimensions
+        # Variable names and attributes match what ROMS reads (surf_flux.F90)
+        # and writes (cdr_gas_exch_output.F90).
         ds = xr.Dataset(
             {
-                "eta": (ALK.dims, np.asarray(eta)),
-                "beta": (ALK.dims, np.asarray(beta)),
+                "ddic_dco2": (ALK.dims, np.asarray(beta)),
+                "ddic_dalk": (ALK.dims, np.asarray(eta)),
             },
             coords=ALK.coords,
         )
-        ds["eta"].attrs = {"long_name": "dDIC / dALK", "units": "1"}
-        ds["beta"].attrs = {"long_name": "dDIC / dCO2", "units": "1"}
+        ds["ddic_dco2"].attrs = {
+            "long_name": "surface carbonate sensitivity beta = dDIC/dCO2 (ALT_CO2)",
+            "units": "nondimensional",
+        }
+        ds["ddic_dalk"].attrs = {
+            "long_name": "surface carbonate sensitivity eta = dDIC/dALK (ALT_CO2)",
+            "units": "nondimensional",
+        }
 
         if time is not None:
             ds = ds.assign_coords({"ocean_time": time.load()})
@@ -304,7 +311,7 @@ class calculate_eta_beta:
 
         abs_time = np.array(
             [
-                model_reference_date + timedelta(seconds=float(seconds))  # CHANGED
+                model_reference_date + timedelta(seconds=float(seconds))
                 for seconds in ds["ocean_time"].values
             ],
             dtype="datetime64[ns]",
@@ -314,8 +321,22 @@ class calculate_eta_beta:
             dims=[self.dim_names["time"]],
             attrs={"long_name": "absolute time"},
         )
+        ds = ds.assign_coords(abs_time=abs_time)
 
-        return ds.assign_coords(abs_time=abs_time)
+        # ROMS finds each forcing record by these variables, in days since the
+        # model reference date (surf_flux.F90, roms_read_write.F90).
+        days = ds["ocean_time"].values / 86400.0
+        for var in ("ddic_dco2", "ddic_dalk"):
+            ds[f"{var}_time"] = xr.DataArray(
+                days,
+                dims=[self.dim_names["time"]],
+                attrs={
+                    "long_name": f"time of {var} record, days since reference date",
+                    "units": "days",
+                },
+            )
+
+        return ds
 
     def _load_surface(
         self, path: str | Path | list[str | Path], source: str

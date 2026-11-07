@@ -1,17 +1,13 @@
 {
   "shape": [
-    1,
-    193,
-    321
+    1
   ],
   "data_type": "float64",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        1,
-        97,
-        321
+        1
       ]
     }
   },
@@ -38,15 +34,13 @@
     }
   ],
   "attributes": {
-    "long_name": "dDIC / dCO2",
-    "units": "1",
-    "coordinates": "abs_time lat_rho lon_rho ocean_time",
+    "long_name": "time of ddic_dalk record, days since reference date",
+    "units": "days",
+    "coordinates": "abs_time ocean_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
-    "time",
-    "eta_rho",
-    "xi_rho"
+    "time"
   ],
   "zarr_format": 3,
   "node_type": "array",

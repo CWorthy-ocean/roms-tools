@@ -52,7 +52,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "beta": {
+      "ddic_dalk": {
         "shape": [
           1,
           193,
@@ -92,8 +92,8 @@
           }
         ],
         "attributes": {
-          "long_name": "dDIC / dCO2",
-          "units": "1",
+          "long_name": "surface carbonate sensitivity eta = dDIC/dALK (ALT_CO2)",
+          "units": "nondimensional",
           "coordinates": "abs_time lat_rho lon_rho ocean_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -106,7 +106,55 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "eta": {
+      "ddic_dalk_time": {
+        "shape": [
+          1
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "time of ddic_dalk record, days since reference date",
+          "units": "days",
+          "coordinates": "abs_time ocean_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "time"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "ddic_dco2": {
         "shape": [
           1,
           193,
@@ -146,8 +194,8 @@
           }
         ],
         "attributes": {
-          "long_name": "dDIC / dALK",
-          "units": "1",
+          "long_name": "surface carbonate sensitivity beta = dDIC/dCO2 (ALT_CO2)",
+          "units": "nondimensional",
           "coordinates": "abs_time lat_rho lon_rho ocean_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -155,6 +203,54 @@
           "time",
           "eta_rho",
           "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "ddic_dco2_time": {
+        "shape": [
+          1
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "time of ddic_dco2 record, days since reference date",
+          "units": "days",
+          "coordinates": "abs_time ocean_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "time"
         ],
         "zarr_format": 3,
         "node_type": "array",

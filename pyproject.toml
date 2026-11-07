@@ -46,6 +46,7 @@ dependencies = [
     "dask[diagnostics]",
     "h5netcdf",
     "threadpoolctl",
+    "PyCO2SYS",
 ]
 dynamic = ["version"]
 

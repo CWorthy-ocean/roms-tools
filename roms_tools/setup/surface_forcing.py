@@ -177,8 +177,10 @@ class SurfaceForcing:
       the grid at that time, e.g. a gap in the record); it is raised when the
       data are computed, at ``save()`` with ``use_dask=True``. ROMS cannot run on
       NaN forcing, so either use a grid that lies entirely inside the footprint or
-      fill the NaN points from a global product before running. It requires
-      xESMF; the scipy engine cannot interpolate a 2D source grid.
+      fill the NaN points from a global product with
+      :func:`~roms_tools.scripts.blend_surface_forcing.blend_surface_forcing`
+      (see **Combining sources** below). It requires xESMF; the scipy engine
+      cannot interpolate a 2D source grid.
     - ``correct_radiation`` must be ``False``: the ERA5 correction climatology is
       matched by exact lat/lon coordinate value, which a curvilinear grid cannot
       satisfy.
@@ -187,6 +189,15 @@ class SurfaceForcing:
       grows with time and flux: about 1 W/m^2 in the 1980s, and by 2020 about
       4.6-9.1 W/m^2 for ``swrad`` and 9.1 W/m^2 for ``lwrad`` (see
       :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`).
+
+    **Combining sources.** A regional source such as CONUS404 leaves ``NaN`` in the
+    output wherever the target grid lies outside its footprint (see above). To fill
+    those points from a global source, optionally with a smooth transition, build a
+    second ``SurfaceForcing`` (e.g. ERA5) on the same grid, for the same times and
+    with the same explicit ``coarse_grid_mode``, and combine the two with
+    :func:`~roms_tools.scripts.blend_surface_forcing.blend_surface_forcing`; write
+    the result with
+    :func:`~roms_tools.scripts.blend_surface_forcing.save_blended_surface_forcing`.
 
     Examples
     --------

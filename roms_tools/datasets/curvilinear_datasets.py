@@ -587,7 +587,7 @@ class CONUS404Dataset(CurvilinearDataset):
     ----------
     qair_method : {"psfc", "fixed_pressure"}, optional
         How to derive specific humidity, both via
-        :func:`~roms_tools.datasets.utils.specific_humidity_from_dewpoint` from
+        ``specific_humidity_from_dewpoint`` from
         ``T2``/``TD2``:
 
         - ``"psfc"`` (default) uses CONUS404's own ``PSFC`` field, and is what you
@@ -635,7 +635,7 @@ class CONUS404Dataset(CurvilinearDataset):
     Differencing a since-model-start accumulation with ``label="upper"`` yields
     the mean flux over ``(t-1h, t]``, labelled at ``t`` -- the same
     backward-hourly-mean convention as ERA5's hourly ``ssr``/``strd``. So the
-    same 30-minute ``rad_time`` shift applies; see :attr:`rad_time_offset`.
+    same 30-minute ``rad_time`` shift applies; see ``rad_time_offset``.
 
     ``rain`` is also a backward hourly mean, yet ROMS reads it on ``time`` rather
     than ``rad_time``. That is inherited from the existing ERA5 handling and kept

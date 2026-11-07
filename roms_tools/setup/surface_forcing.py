@@ -102,6 +102,7 @@ class SurfaceForcing:
             - A single string (supports wildcards),
             - A single Path object,
             - A list of strings or Path objects.
+
             If omitted or set to the ARCO URL, ERA5 is streamed from the cloud. For
             "CONUS404", omitting it streams from the USGS/OSN zarr store
             (``s3://hytest/conus404/conus404_hourly.zarr``).

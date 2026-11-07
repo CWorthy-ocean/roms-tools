@@ -53,7 +53,7 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - `Climate Data Store <https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels>`_
    * - CONUS404
      - Surface Forcing (North America, high-resolution)
-     - No (streamed)
+     - Optional (streaming supported)
      - `USGS/OSN <https://hytest-org.github.io/hytest/dataset_access/CONUS404_ACCESS.html>`_
    * - Dai & Trenberth
      - River Forcing (discharge)
@@ -560,13 +560,13 @@ Global 1/4° atmospheric reanalysis from ECMWF providing meteorological surface 
       * - ``sst``
         - Sea surface temperature (K) — used for land masking
       * - ``sp`` *(recommended)*
-        - Surface pressure (Pa) — used to convert vapour pressure into specific humidity. ``msl`` (mean sea level pressure) is accepted instead; the two are equal at sea level, so either is accurate over the ocean. If a download carries neither, ROMS-Tools warns and falls back to a fixed 1010 hPa, which shifts ``qair`` by a few percent in either direction depending on the local pressure anomaly — and roughly three times that in the ``q_sat(SST) - qair`` deficit that drives evaporation. Include one of them.
+        - Surface pressure (Pa) — used to convert vapour pressure into specific humidity. ``msl`` (mean sea level pressure) is accepted instead; the two are equal at sea level, so either is accurate over the ocean. If a download carries neither, ROMS-Tools warns and falls back to a fixed 1010 hPa, which biases ``qair`` by ~1% over the open ocean (usually high; low under low pressure) and by more over land — and roughly three times that in the ``q_sat(SST) - qair`` deficit that drives evaporation. Include one of them.
 
 
 CONUS404
 ~~~~~~~~
 
-4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. For a domain that extends past its footprint the output is ``NaN`` outside the footprint, and those points must be filled from a global product such as ERA5 before running ROMS. Streamed from the zarr store on the USGS Open Storage Network pod; no download is needed, but ``use_dask=True`` and the ``s3fs`` package are (``pip install "roms-tools[stream]"``). Select it with ``source={"name": "CONUS404"}``; the store path defaults to ``s3://hytest/conus404/conus404_hourly.zarr``.
+4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. For a domain that extends past its footprint the output is ``NaN`` outside the footprint, and those points must be filled from a global product such as ERA5 before running ROMS (ROMS-Tools does not currently do this for you). Streamed by default from the zarr store on the USGS Open Storage Network pod, so no download is needed; streaming needs ``use_dask=True`` and the ``s3fs`` package (``pip install "roms-tools[stream]"``), and CONUS404 also needs xESMF, which is only available through conda (see below). A local copy of the zarr store can be given as ``path``. Select it with ``source={"name": "CONUS404"}``; the store path defaults to ``s3://hytest/conus404/conus404_hourly.zarr``.
 
 :Version: CONUS404 hourly, 1979-10-01 to 2024-10-01
 :Required for: Surface Forcing (optional alternative to ERA5)
@@ -580,7 +580,7 @@ CONUS404
    * Any part of the ROMS grid outside the footprint is **not** extrapolated — it comes back as NaN and is written to the output as NaN. Use a grid that lies entirely inside the footprint, or fill those points from a global product before running ROMS.
    * It requires xESMF (install ROMS-Tools via conda), and ``correct_radiation`` must be ``False``: the ERA5 correction climatology is matched by exact lat/lon coordinate value, which a curvilinear grid cannot satisfy.
 
-   Note also that CONUS404 carries no instantaneous radiation fields, only accumulations since the 1979 model start. ROMS-Tools differences them, which leaves an intrinsic ~±4.6 W/m² quantization noise floor on ``swrad`` and ``lwrad`` (the accumulations are float32 and reach ~2.4 × 10¹¹ J/m² by 2020, where one float32 step is 4.55 W/m² per hour).
+   Note also that CONUS404 carries no instantaneous radiation fields, only accumulations since the 1979 model start. ROMS-Tools differences them, and because the accumulations are float32, each hourly ``swrad`` and ``lwrad`` value is quantized to one float32 step of the running total. That step grows over the record and is larger for longwave, whose accumulation is bigger: about 1 W/m² in the 1980s; by 2020 about 4.6–9.1 W/m² for ``swrad`` and 9.1 W/m² for ``lwrad``; up to 18 W/m² for ``lwrad`` in 2024. Negative one-step artifacts are clipped to zero.
 
 .. dropdown:: Required fields
 

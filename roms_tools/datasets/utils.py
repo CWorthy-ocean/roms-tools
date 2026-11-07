@@ -518,11 +518,9 @@ def specific_humidity_from_dewpoint(
     from Buck's formula with its pressure enhancement factor, and specific
     humidity from ``q = 0.62197 e / (p - 0.378 e)``.
 
-    Extracted from :meth:`ERA5Dataset.post_process` so that every surface-forcing
-    source computes ``qair`` with the same arithmetic. Sources that will be
-    layered over one another **must** share this function: a different formula
-    per source produces a step discontinuity at the seam between them, even when
-    each formula is individually defensible.
+    Extracted from ``ERA5Dataset.post_process`` so that every surface-forcing
+    source computes ``qair`` with the same arithmetic. Every source should use it,
+    so that ``qair`` is computed identically across products.
 
     Parameters
     ----------

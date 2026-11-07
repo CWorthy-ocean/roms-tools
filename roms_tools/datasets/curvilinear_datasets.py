@@ -18,8 +18,8 @@ Regridding onto a ROMS grid goes through
 :class:`~roms_tools.regrid.LateralRegridFromROMS`, which handles a curvilinear
 source natively via xESMF. That regridder uses ``unmapped_to_nan=True`` with no
 destination extrapolation, so a target point outside the source footprint comes
-back as NaN rather than being silently extrapolated -- the property that lets a
-limited-extent source be layered over a global one.
+back as NaN rather than being silently extrapolated, so a target point outside
+the footprint is marked as missing rather than filled with made-up values.
 """
 
 from __future__ import annotations
@@ -72,15 +72,15 @@ CONUS404_STORAGE_OPTIONS: dict[str, Any] = {
     "client_kwargs": {"endpoint_url": "https://usgs.osn.mghpcc.org/"},
 }
 
-# Quantization noise floor of CONUS404 radiation, in W/m^2.
+# One float32 step of a CONUS404 radiation accumulation, differenced over an hour,
+# in W/m^2, for an accumulation between 2**37 and 2**38 J/m^2 (16384 J/m^2 / 3600 s).
 #
-# The radiation fields are stored as float32 accumulations since the 1979-10-01
-# model start. By 2020 they reach ~2.4e11 J/m^2, where one float32 ULP is
-# 16384 J/m^2 -- i.e. 4.55 W/m^2 once differenced over an hour. Measured on the
-# real store (2020-06-15): night-time differences come out exactly 0.0, daytime
-# peaks reach ~1030 W/m^2, and occasional -4.55 W/m^2 artifacts appear (which
-# CONUS404Dataset.post_process clips to zero). Intrinsic to the product; it
-# cannot be recovered.
+# The radiation fields are float32 accumulations since the 1979-10-01 model start,
+# so the step doubles each time the running total crosses a power of two: it is
+# ~1.1 W/m^2 in the 1980s and reaches 4.55 W/m^2 (ACSWDNB, ~2005-2020) and
+# 9.1-18.2 W/m^2 (ACLWDNB, 2020-2024) -- see the CONUS404Dataset Notes for the
+# measured table. Negative one-step artifacts are clipped to zero by
+# CONUS404Dataset.post_process. Intrinsic to the product; it cannot be recovered.
 CONUS404_RADIATION_NOISE_FLOOR_W_M2 = 4.55
 
 
@@ -557,8 +557,13 @@ class CONUS404Dataset(CurvilinearDataset):
 
     A 4 km Lambert Conformal Conic reanalysis over the conterminous United States
     and surrounding waters, hourly from 1979-10-01 to 2024-10-01, distributed as a
-    zarr store on the USGS Open Storage Network pod (see
-    :data:`DEFAULT_CONUS404_PATH`).
+    zarr store on the USGS Open Storage Network pod
+    (``s3://hytest/conus404/conus404_hourly.zarr``).
+
+    Users normally do not construct this class directly: select it with
+    ``SurfaceForcing(source={"name": "CONUS404"}, ...)``. Its other parameters
+    (``filename``, ``start_time``, ``end_time``, ``use_dask``, ...) have the same
+    meaning as for the ERA5 dataset class.
 
     **Footprint.** The lat/lon bounding box (17.65-57.34 N, 138.73-57.07 W)
     substantially overstates coverage, because the domain is a rectangle in
@@ -576,8 +581,7 @@ class CONUS404Dataset(CurvilinearDataset):
 
     :meth:`post_process` emits exactly the variables and units that
     ``ERA5Dataset`` does (``uwnd``, ``vwnd``, ``swrad``, ``lwrad``, ``Tair``,
-    ``qair``, ``rain``), so the two products are interchangeable and can be
-    layered over one another without a unit or convention step at the seam.
+    ``qair``, ``rain``), so the two products are interchangeable.
 
     Parameters
     ----------
@@ -588,15 +592,10 @@ class CONUS404Dataset(CurvilinearDataset):
 
         - ``"psfc"`` (default) uses CONUS404's own ``PSFC`` field, and is what you
           want. ``ERA5Dataset`` likewise uses ERA5's own surface pressure, so the
-          two derive humidity by an identical route and contribute no *methodological*
-          step at a layering boundary. They will still differ there by however much
-          the two reanalyses genuinely disagree -- of order a few percent, since one
-          resolves 4 km and the other 28 km. That residual is physical, not an
-          artefact, and is what the planned feathering is for.
-        - ``"fixed_pressure"`` substitutes a constant 1010 hPa. Its only use is
-          matching an ERA5 source whose extract carries *no* pressure field, where
-          ``ERA5Dataset`` falls back to the same constant; better still is to
-          include ``sp`` in that download.
+          two products derive humidity by the same route.
+        - ``"fixed_pressure"`` substitutes a constant 1010 hPa, the same constant
+          ``ERA5Dataset`` falls back to when its extract carries no pressure field.
+          Not recommended.
 
         The difference is not small or one-signed: measured against ``PSFC`` on
         2020-06-15 CONUS404 data it is ~1.1% (max 1.3%) over open ocean off
@@ -607,18 +606,31 @@ class CONUS404Dataset(CurvilinearDataset):
         the quantity that matters.
 
         CONUS404's own ``Q2`` is deliberately *not* used: it is a mixing ratio
-        rather than specific humidity, and deriving humidity by a different route
-        than a layering partner would put a step at the seam even though each
-        route is individually defensible.
+        rather than specific humidity, and using it would mean CONUS404 and ERA5
+        derive ``qair`` by different routes.
 
     Notes
     -----
     **Radiation.** The store carries no instantaneous fluxes, only
     ``ACSWDNB``/``ACSWUPB``/``ACLWDNB`` accumulated in J/m^2 since the model
     start. :meth:`post_process` differences them, which consumes one leading
-    record -- hence the :meth:`select_relevant_times` override. See
-    :data:`CONUS404_RADIATION_NOISE_FLOOR_W_M2` for the resulting
-    ~+/-4.6 W/m^2 quantization noise, which is intrinsic to the product.
+    record -- hence the :meth:`select_relevant_times` override.
+
+    Because the accumulations are float32, each hourly difference is quantized to
+    one float32 step of the running total, which grows with time and with the
+    size of the flux. Measured on the store, the step is about:
+
+    ============  ===========================  ===========================
+    Date          ``swrad`` (``ACSWDNB``)      ``lwrad`` (``ACLWDNB``)
+    ============  ===========================  ===========================
+    1985          1.1 W/m^2                    1.1-2.3 W/m^2
+    2005          4.6 W/m^2                    4.6-9.1 W/m^2
+    2020          4.6-9.1 W/m^2                9.1 W/m^2
+    2024          9.1 W/m^2                    9.1-18.2 W/m^2
+    ============  ===========================  ===========================
+
+    This noise is intrinsic to the product and cannot be recovered. Negative
+    one-step artifacts are clipped to zero; night-time ``swrad`` is exactly zero.
 
     Differencing a since-model-start accumulation with ``label="upper"`` yields
     the mean flux over ``(t-1h, t]``, labelled at ``t`` -- the same
@@ -627,8 +639,7 @@ class CONUS404Dataset(CurvilinearDataset):
 
     ``rain`` is also a backward hourly mean, yet ROMS reads it on ``time`` rather
     than ``rad_time``. That is inherited from the existing ERA5 handling and kept
-    deliberately: consistency with the blend partner beats unilaterally changing
-    one source.
+    deliberately, for consistency with ERA5.
 
     **Winds.** ``U10``/``V10`` are relative to the Lambert Conformal *model*
     grid, not to east/north. :meth:`post_process` rotates them with
@@ -636,11 +647,13 @@ class CONUS404Dataset(CurvilinearDataset):
     ROMS grid angle.
 
     **Regridding.** Being curvilinear, this source must be regridded with xESMF
-    (via :class:`~roms_tools.regrid.LateralRegridFromROMS`); the scipy engine
+    (via ``roms_tools.regrid.LateralRegridFromROMS``); the scipy engine
     interpolates on 1D coordinate axes and cannot handle it. Because that
     regridder does not extrapolate, target points outside the CONUS404 footprint
-    come back as NaN. Pass ``bypass_validation=True``, use a fully contained
-    grid, or layer this source over a global one.
+    come back as NaN and are written to the output as NaN: ``SurfaceForcing``
+    skips its NaN-to-zero fill and its wet-point NaN validation for curvilinear
+    sources. Use a grid that lies inside the footprint, or fill those points from
+    a global product before running ROMS.
     """
 
     # The on-disk zarr chunk is (time=144, y=175, x=175). Only relevant on a
@@ -770,8 +783,10 @@ class CONUS404Dataset(CurvilinearDataset):
         WRF stores 10 m winds relative to the projected model grid. ``COSALPHA``
         and ``SINALPHA`` are the local cosine and sine of the map rotation, so:
 
-        ``u_east  = u_grid * COSALPHA - v_grid * SINALPHA``
-        ``v_north = v_grid * COSALPHA + u_grid * SINALPHA``
+        ::
+
+            u_east  = u_grid * COSALPHA - v_grid * SINALPHA
+            v_north = v_grid * COSALPHA + u_grid * SINALPHA
 
         Equivalent to ``rotate_velocities(u, v, -arctan2(SINALPHA, COSALPHA))``,
         but applied directly to avoid a needless ``arctan2``/``cos``/``sin`` round
@@ -840,8 +855,8 @@ class CONUS404Dataset(CurvilinearDataset):
 
         updates = {
             # Net shortwave, to match ERA5's `ssr`. Downward-only would be ~6%
-            # high over the ocean -- both a seam step and a systematic heat-flux
-            # bias across the whole CONUS404 region.
+            # high over the ocean -- a systematic heat-flux bias across the whole
+            # CONUS404 region.
             vn["swrad"]: (sw_down - sw_up).clip(min=0.0),
             # Downward longwave, to match ERA5's `strd`. ROMS' bulk formulation
             # derives the upward component from its own SST, so ACLWUPB is not

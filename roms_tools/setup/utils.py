@@ -58,13 +58,6 @@ HEADER_CHAR = "="
 
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
-# Fields whose value is a source dict, and which therefore need the nested
-# path/grid handling in `serialize_source_dict` / `deserialize_source_dict` rather
-# than the generic path walk. A plain dict would round-trip through the generic
-# path either way (both `serialize_paths` and `normalize_paths` recurse into
-# dicts), but routing them here keeps one place to change and handles a nested
-# `grid`.
-_SOURCE_DICT_FIELDS = ("source", "bgc_source")
 # BGC sources that fetch their own data when the source dict carries no "path",
 # so the usual "`source` must include a 'path'" check does not apply to them.
 _SELF_DOWNLOADING_BGC: frozenset[str] = frozenset({"WOA"})
@@ -3150,11 +3143,8 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
 
         value = getattr(forcing_object, name)
 
-        if name in _SOURCE_DICT_FIELDS:
-            if value is None:
-                forcing_data[name] = None
-            else:
-                forcing_data[name] = serialize_source_dict(value)
+        if name in {"source", "bgc_source"}:
+            forcing_data[name] = serialize_source_dict(value)
             continue
         if name == "bgc_sources":
             forcing_data[name] = serialize_bgc_sources(value)
@@ -3234,9 +3224,9 @@ def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
     # Convert path-like strings back to Path objects
     forcing_data = normalize_paths(forcing_data)
 
-    # Deserialize the nested source dictionaries
-    for key in _SOURCE_DICT_FIELDS:
-        if forcing_data.get(key) is not None:
+    # Deserialize source and bgc_source nested dictionaries
+    for key in ["source", "bgc_source"]:
+        if key in forcing_data:
             forcing_data[key] = deserialize_source_dict(forcing_data[key])
     if "bgc_sources" in forcing_data:
         forcing_data["bgc_sources"] = deserialize_bgc_sources(

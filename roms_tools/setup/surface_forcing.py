@@ -102,7 +102,9 @@ class SurfaceForcing:
             - A single string (supports wildcards),
             - A single Path object,
             - A list of strings or Path objects.
-            If omitted or set to the ARCO URL, the data will be streamed from the cloud.
+            If omitted or set to the ARCO URL, ERA5 is streamed from the cloud. For
+            "CONUS404", omitting it streams from the USGS/OSN zarr store
+            (``s3://hytest/conus404/conus404_hourly.zarr``).
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str
@@ -113,7 +115,8 @@ class SurfaceForcing:
           - "restoring": for restoring forces.
 
     correct_radiation : bool
-        Whether to correct shortwave and longwave radiation. Default is True.
+        Whether to correct shortwave and longwave radiation. Default is True. Only
+        supported for ERA5; must be ``False`` for ``"CONUS404"``.
 
     wind_dropoff : bool, optional
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
@@ -146,7 +149,9 @@ class SurfaceForcing:
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
-        in the processed dataset is bypassed. Defaults to False.
+        in the processed dataset is bypassed. Defaults to False. Has no effect for a
+        curvilinear source (CONUS404), whose NaN outside the footprint is always
+        written as-is without validation.
 
 
     Notes
@@ -165,17 +170,19 @@ class SurfaceForcing:
       footprint comes back as **NaN by design**. Those NaNs are written to the
       output as-is: the usual NaN-to-zero substitution and the wet-point NaN
       validation are skipped for curvilinear sources, so that the NaNs mark where
-      the source has no coverage. ROMS cannot run on NaN forcing, so either use a
-      grid that lies entirely inside the footprint or fill the NaN points from a
-      global product before running. It requires xESMF; the scipy engine cannot
-      interpolate a 2D source grid.
+      the source has no coverage; the output carries the global attribute
+      ``nan_outside_source_footprint="True"``. ROMS cannot run on NaN forcing, so
+      either use a grid that lies entirely inside the footprint or fill the NaN
+      points from a global product before running. It requires xESMF; the scipy
+      engine cannot interpolate a 2D source grid.
     - ``correct_radiation`` must be ``False``: the ERA5 correction climatology is
       matched by exact lat/lon coordinate value, which a curvilinear grid cannot
       satisfy.
     - Its radiation is derived by differencing float32 accumulations since the
-      1979 model start, which carries an intrinsic ~+/-4.6 W/m^2 quantization
-      noise floor. See
-      :data:`~roms_tools.datasets.curvilinear_datasets.CONUS404_RADIATION_NOISE_FLOOR_W_M2`.
+      1979 model start, which quantizes hourly ``swrad`` and ``lwrad``. The step
+      grows with time and flux: about 1 W/m^2 in the 1980s, and by 2020 about
+      4.6-9.1 W/m^2 for ``swrad`` and 9.1 W/m^2 for ``lwrad`` (see
+      :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`).
 
     Examples
     --------
@@ -403,11 +410,8 @@ class SurfaceForcing:
     ) -> dict[str, Any]:
         """Validate one source dict and fill in its defaults.
 
-        Returns a new dict rather than mutating in place, so the same normalization
-        can be applied to more than one source without the order of the two
-        mattering. Factored out of :meth:`_input_checks` for exactly that reason:
-        any divergence between how two sources are normalized would surface as a
-        YAML round-trip inequality rather than as an obvious bug.
+        Returns a new dict rather than mutating the one passed in, so the caller's
+        dict -- and the YAML written from it -- is left as given.
 
         Parameters
         ----------
@@ -585,9 +589,8 @@ class SurfaceForcing:
         Everything from here is per-source: subdomain selection, the coverage
         guard, the source fills, the lateral regrid, and that source's own
         radiation correction. Wind rotation and the coastal wind drop-off are
-        deliberately *not* here -- they are target-grid operations that belong
-        after any combination of sources, and rotation is linear so its position
-        relative to a merge is immaterial anyway.
+        deliberately *not* here -- they are target-grid operations, applied by the
+        caller once the fields are on the ROMS grid.
 
         Parameters
         ----------
@@ -649,7 +652,7 @@ class SurfaceForcing:
 
         # The radiation correction is welded to its source: the climatology is
         # regridded through that source's own lat/lon grid and borrows its mask, so
-        # it has to be applied here rather than after any merge.
+        # it has to be applied here, while that source's grid is still at hand.
         if self.type == "physics" and self.correct_radiation:
             (
                 processed_fields["swrad"],
@@ -752,8 +755,6 @@ class SurfaceForcing:
     ) -> "LatLonDataset | CurvilinearDataset":
         """Build the source-dataset object for one normalized source dict.
 
-        Parameterized on the given source dict rather than reading
-        ``self.source``, so the same dispatch can serve any number of sources.
         Note that the ERA5 and CONUS404 branches write a resolved default path
         back into the dict they are handed, which the caller relies on for the
         YAML round-trip.
@@ -978,8 +979,8 @@ class SurfaceForcing:
             ERA5 dataset providing the mask and spatial coordinates used to
             align the correction data.
         source_name : str
-            Name of the source these fields came from. A source with no registered
-            correction is returned unchanged.
+            Name of the source these fields came from; only ``"ERA5"`` has a
+            correction (see ``_get_correction_data``, which raises otherwise).
 
         Returns
         -------
@@ -989,8 +990,6 @@ class SurfaceForcing:
             Longwave radiation scaled by the STRD correction factor.
         """
         correction_data = self._get_correction_data(source_name)
-        if correction_data is None:
-            return swrad, lwrad
 
         coords_correction = {
             "lat": data.ds[data.dim_names["latitude"]],
@@ -1369,7 +1368,9 @@ class SurfaceForcing:
             With ``use_dask=True``, if a variable has NaN at an ocean point. The data
             are first computed here, so this is where that check runs; the files this
             call started writing are removed, including a file that was already at an
-            output path (it is truncated when the write opens it).
+            output path (it is truncated when the write opens it). Not raised for a
+            curvilinear source such as CONUS404, whose NaN outside the footprint is
+            written as-is.
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)

@@ -3026,7 +3026,12 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
 @dataclass(kw_only=True)
 class ERA5Dataset(LatLonDataset):
-    """Represents ERA5 data on original grid."""
+    """Represents ERA5 data on original grid.
+
+    Specific humidity is derived from 2 m dewpoint and the source's own surface
+    pressure: ``sp`` if present, else ``msl``, else a fixed 1010 hPa with a warning
+    (see ``_resolve_surface_pressure``).
+    """
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
@@ -3078,7 +3083,8 @@ class ERA5Dataset(LatLonDataset):
     # was the value hardcoded for every point and every time step before ERA5's
     # own surface pressure was used; it is a fair global mean but a poor ocean
     # value (the sea surface averages ~1013 hPa, and 1018-1023 under a summer
-    # subtropical high), which biased `qair` high by ~1%.
+    # subtropical high), which biased `qair` by ~1% over the open ocean (usually
+    # high; low under low pressure) and by more over land.
     _FALLBACK_PATM_HPA: ClassVar[float] = 1010.0
 
     def _resolve_surface_pressure(self, ds: xr.Dataset) -> xr.DataArray | float:
@@ -3125,7 +3131,9 @@ class ERA5Dataset(LatLonDataset):
         - Convert radiation values from J/m^2 to W/m^2.
         - Convert rainfall from meters to cm/day.
         - Convert temperature from Kelvin to Celsius.
-        - Compute relative humidity if not present, convert to absolute humidity.
+        - Compute specific humidity ``qair`` from 2 m dewpoint if not present, using
+          the surface pressure ``sp`` (or ``msl``); falls back to a fixed 1010 hPa,
+          with a warning, if neither is present.
         - Use SST to create mask.
 
         revised to be dask-lazy
@@ -3164,8 +3172,8 @@ class ERA5Dataset(LatLonDataset):
 
             # Magnus relative humidity -> specific humidity, using ERA5's own
             # surface pressure. Shared with every other surface-forcing source
-            # (see `specific_humidity_from_dewpoint`) so that two sources layered
-            # over one another cannot disagree at the seam.
+            # (see `specific_humidity_from_dewpoint`) so that `qair` is computed
+            # identically across products.
             patm = self._resolve_surface_pressure(ds)
             qair_abs = specific_humidity_from_dewpoint(tair, d2m, patm=patm)
 

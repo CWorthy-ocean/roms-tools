@@ -446,6 +446,9 @@ def _load_data_dask(
     initial_slice_bounds_use_isel : bool, optional
         Passed to :class:`DaskInitalSliceLoader`. Use ``True`` for inclusive integer
         index bounds on ROMS rho dimensions.
+    storage_options : dict, optional
+        fsspec storage options for a remote zarr store (e.g. anonymous S3 access with
+        a custom endpoint). Used only when ``read_zarr=True``.
 
     Returns
     -------

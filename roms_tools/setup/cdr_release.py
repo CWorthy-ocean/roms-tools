@@ -256,7 +256,7 @@ class Release(BaseModel):
     tracer_set : {"marbl", "cdr_lite", "passive"}, optional
         Tracer schema. ``"marbl"`` (default) specifies tracer values by MARBL
         tracer name. ``"cdr_lite"`` targets the dedicated CDR tracers of a
-        ROMS ``CDR_TRACER`` build: the release specifies ``"ALK"`` and/or
+        ROMS ``CDR_LITE`` build: the release specifies ``"ALK"`` and/or
         ``"DIC"`` fluxes, and ``CDRForcing`` assigns tracers automatically —
         a release with ``"ALK"`` (an OAE or combined OAE+DOR intervention)
         gets the next ``CDR_OAE_ALK{k}``/``CDR_OAE_DIC{k}`` pair; a release

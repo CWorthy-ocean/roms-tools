@@ -22,11 +22,12 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "xarray>=2022.6.0,<2025.8.0",
-    "numpy>2.0,<2.3",
+    "xarray>=2022.6.0",
+    "numpy>2.0,<2.4",
     "pooch",
     "matplotlib<3.11",
     "cartopy",
@@ -40,7 +41,7 @@ dependencies = [
     "regionmask>=0.11.0",
     "xgcm>0.10.0,<0.11",
     "gsw",
-    "numba>=0.61.2",
+    "numba>=0.62",
     "pydantic>2,<3",
     "dask[diagnostics]",
     "h5netcdf",
@@ -72,6 +73,9 @@ dev = [
     # for the base test suite to collect and pass without conda):
     "h5py",
     "zarr",
+    # kerchunk reference files (Forge's GLORYS subchunk references are .parquet)
+    "kerchunk",
+    "fastparquet",
 ]
 docs = [
     "sphinx",

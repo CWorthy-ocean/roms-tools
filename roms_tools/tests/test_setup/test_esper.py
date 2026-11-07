@@ -39,15 +39,16 @@ from roms_tools.datasets.download import download_test_data
 from roms_tools.setup import esper as esper_module
 from roms_tools.setup.esper import (
     _MAX_POINTS_PER_CHUNK,
+    ESPER_FLOORS,
     ESPER_SUPPORTED_VARS,
-    _apply_chunk_plan,
     _decimal_year,
     _pyesper_chunk_plan,
     _pyesper_point_budget,
-    _time_dim,
     estimate_bgc_fields,
     validate_esper_source,
 )
+from roms_tools.setup.utils import apply_chunk_plan as _apply_chunk_plan
+from roms_tools.setup.utils import time_dim_of as _time_dim
 
 _PYESPER_PATH = os.environ.get("ROMS_TOOLS_PYESPER_PATH")
 
@@ -1206,8 +1207,28 @@ def test_missing_pyesper_points_at_the_cworthy_fork(monkeypatch):
 
     msg = str(excinfo.value)
     assert "https://github.com/CWorthy-ocean/PyESPER" in msg
+    assert "git clone --branch v1.1.1+cworthy.1" in msg
     assert "pip install -e ." in msg
     assert "No PyESPER is importable" in msg
+
+
+def test_missing_conditioning_module_names_the_fork_tag(monkeypatch):
+    """An installed PyESPER without `salinity_conditioning` (upstream, or the fork
+    before the tag) is reported with the tag to clone, not a branch name.
+    """
+    import sys
+
+    class _Block:
+        def find_spec(self, name, path=None, target=None):
+            if name == "PyESPER.salinity_conditioning":
+                raise ImportError(f"No module named {name!r}")
+
+    monkeypatch.delitem(sys.modules, "PyESPER.salinity_conditioning", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_Block(), *sys.meta_path])
+    with pytest.raises(ImportError, match="v1.1.1\\+cworthy.1"):
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": {"woa_salinity_path": "/x.nc"}}
+        )
 
 
 def test_ensure_pyesper_rolls_back_sys_path_insertion_on_failure(monkeypatch):
@@ -1523,3 +1544,551 @@ class TestWrappersPreflightPyESPER:
         preflight_esper_sources(
             [{"source": {"name": "constants", "constants": {"NO3": 1.0}}}]
         )  # no raise
+
+
+# --------------------------------------------------------------------------------------
+# Salinity conditioning (source["salinity_conditioning"] -> PyESPER)
+# --------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def woa_salinity_file(tmp_path) -> Path:
+    """A tiny file in the WOA layout (``s_an(time, depth, lat, lon)``, 1-degree
+    centres, NaN over land) -- enough for PyESPER's lookup; no real data needed.
+    """
+    depth = np.array([0.0, 50.0, 200.0])
+    lat = np.arange(-89.5, 90.0, 1.0)
+    lon = np.arange(-179.5, 180.0, 1.0)
+    d, la, _lo = np.meshgrid(depth, lat, lon, indexing="ij")
+    s = (34.0 + d / 100.0 + la / 90.0).astype("float32")
+    ds = xr.Dataset(
+        {"s_an": (("time", "depth", "lat", "lon"), s[None])},
+        coords={"time": [0.0], "depth": depth, "lat": lat, "lon": lon},
+    )
+    path = tmp_path / "woa23_decav_s00_01.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+def test_salinity_conditioning_off_by_default():
+    assert esper_module._salinity_conditioning({"name": "ESPER"}) is None
+    assert (
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": None}
+        )
+        is None
+    )
+
+
+def test_salinity_conditioning_rejects_non_mapping():
+    with pytest.raises(ValueError, match="must be a mapping"):
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": True}
+        )
+
+
+def test_salinity_conditioning_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="unknown key"):
+        esper_module._salinity_conditioning(
+            {
+                "name": "ESPER",
+                "salinity_conditioning": {"woa_salinity_path": "/x", "band": [31, 34]},
+            }
+        )
+
+
+def test_salinity_conditioning_requires_a_path():
+    with pytest.raises(ValueError, match="woa_salinity_path"):
+        esper_module._salinity_conditioning(
+            {"name": "ESPER", "salinity_conditioning": {"low": 31}}
+        )
+
+
+@needs_pyesper
+def test_salinity_conditioning_missing_file_names_the_download_url(tmp_path):
+    with pytest.raises(FileNotFoundError, match="ncei.noaa.gov"):
+        validate_esper_source(
+            {
+                "name": "ESPER",
+                "salinity_conditioning": {
+                    "woa_salinity_path": str(tmp_path / "missing.nc")
+                },
+            }
+        )
+
+
+@needs_pyesper
+def test_salinity_conditioning_builds_pyesper_object(woa_salinity_file):
+    from PyESPER.salinity_conditioning import SalinityConditioning
+
+    cond = esper_module._salinity_conditioning(
+        {
+            "name": "ESPER",
+            "salinity_conditioning": {
+                "woa_salinity_path": str(woa_salinity_file),
+                "low": 30,
+                "high": 33,
+            },
+        }
+    )
+    assert isinstance(cond, SalinityConditioning)
+    assert (cond.low, cond.high) == (30.0, 33.0)
+    # Defaults come from PyESPER, not from roms-tools.
+    cond = esper_module._salinity_conditioning(
+        {
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": str(woa_salinity_file)},
+        }
+    )
+    assert (cond.low, cond.high) == (31.0, 34.0)
+
+
+def _spy_pyesper(monkeypatch):
+    """Replace the PyESPER entry points with a spy that records its kwargs and returns
+    zeros, so the pass-through can be checked without the nets or their data.
+    """
+    calls: list[dict] = []
+
+    def fake(salinity, temperature, longitude, latitude, depth, *, variables, **kw):
+        calls.append(kw)
+        sal, *_ = xr.broadcast(salinity, temperature, longitude, latitude, depth)
+        return {v: xr.zeros_like(sal) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module,
+        "_ensure_pyesper",
+        lambda path=None: {"lir": fake, "nn": fake, "mixed": fake},
+    )
+    return calls
+
+
+def _tiny_inputs():
+    temp = xr.DataArray(np.full((2, 3), 10.0), dims=("s", "y"))
+    salt = xr.DataArray(np.full((2, 3), 35.0), dims=("s", "y"))
+    lon = xr.DataArray(np.zeros(3), dims=("y",))
+    lat = xr.DataArray(np.full(3, 40.0), dims=("y",))
+    depth = xr.DataArray(np.array([-5.0, -50.0]), dims=("s",))
+    return temp, salt, lon, lat, depth
+
+
+@needs_pyesper
+def test_estimate_bgc_fields_forwards_salinity_conditioning(
+    monkeypatch, woa_salinity_file
+):
+    from PyESPER.salinity_conditioning import SalinityConditioning
+
+    calls = _spy_pyesper(monkeypatch)
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": str(woa_salinity_file)},
+        },
+        roms_variables=["NO3", "ALK"],
+        est_dates=2014.0,
+    )
+    cond = calls[-1]["salinity_conditioning"]
+    assert isinstance(cond, SalinityConditioning)
+    assert Path(cond.woa_salinity_path) == woa_salinity_file.resolve()
+    for da in out.values():
+        attr = da.attrs["esper_salinity_conditioning"]
+        assert "31-34 PSU" in attr and "woa23_decav_s00_01.nc" in attr
+
+
+def test_estimate_bgc_fields_without_conditioning_omits_the_keyword(monkeypatch):
+    """Off means the keyword is not sent at all -- not sent as None -- so a PyESPER
+    fork that predates salinity conditioning keeps working (no PyESPER needed here:
+    the entry points are stubbed).
+    """
+    calls = _spy_pyesper(monkeypatch)
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={"name": "ESPER"},
+        roms_variables=["NO3"],
+        est_dates=2014.0,
+    )
+    assert "salinity_conditioning" not in calls[-1]
+    assert "esper_salinity_conditioning" not in out["NO3"].attrs
+
+
+def test_estimate_bgc_fields_works_with_a_pyesper_that_predates_conditioning(
+    monkeypatch,
+):
+    """Regression: the fork before salinity conditioning declares exactly this
+    signature (no ``salinity_conditioning``, no ``**kwargs``); passing the keyword
+    as None raised ``TypeError`` after the physics regrid had already run.
+    """
+
+    def old_nn_xr(
+        salinity,
+        temperature,
+        longitude,
+        latitude,
+        depth,
+        *,
+        variables,
+        path="",
+        equation=8,
+        est_dates=None,
+        max_points_per_chunk=None,
+    ):
+        sal, *_ = xr.broadcast(salinity, temperature, longitude, latitude, depth)
+        return {v: xr.zeros_like(sal) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module,
+        "_ensure_pyesper",
+        lambda path=None: {"lir": old_nn_xr, "nn": old_nn_xr, "mixed": old_nn_xr},
+    )
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={"name": "ESPER", "method": "nn"},
+        roms_variables=["NO3", "O2"],
+        est_dates=2014.0,
+    )
+    assert set(out) == {"NO3", "O2"}
+
+
+@needs_pyesper
+def test_boundary_forcing_esper_with_salinity_conditioning(woa_salinity_file):
+    """End to end through the real nets: the option reaches PyESPER (the attr is
+    stamped on every ESPER variable) and the result is still a complete BGC set.
+    """
+    grid = _small_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    with dask.config.set(scheduler="synchronous"):
+        phys = BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            type="physics",
+            source={"name": "GLORYS", "path": fname},
+            use_dask=False,
+        )
+        bf = BoundaryForcingSource(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            type="bgc",
+            source={
+                "name": "ESPER",
+                "path": _PYESPER_PATH,
+                "salinity_conditioning": {"woa_salinity_path": str(woa_salinity_file)},
+            },
+            physics_forcing=phys,
+            use_dask=False,
+        )
+    active = [d for d, on in bf.boundaries.items() if on]
+    for d in active:
+        for var in ESPER_SUPPORTED_VARS:
+            da = bf.ds[f"{var}_{d}"]
+            assert "31-34 PSU" in da.attrs["esper_salinity_conditioning"]
+            assert np.isfinite(da.values).any()
+
+
+# --------------------------------------------------------------------------------------
+# Per-variable floors (ESPER_FLOORS)
+# --------------------------------------------------------------------------------------
+
+
+def test_every_supported_variable_has_a_floor():
+    assert set(ESPER_FLOORS) == set(ESPER_SUPPORTED_VARS)
+    assert ESPER_FLOORS["O2"] == 5.0
+    assert all(ESPER_FLOORS[v] == 0.0 for v in ESPER_SUPPORTED_VARS if v != "O2")
+
+
+def test_estimate_bgc_fields_floors_oxygen_at_five_and_nutrients_at_zero(monkeypatch):
+    """The nets overshoot below the physical range at the low end (OMZ oxygen,
+    oligotrophic nutrients). Nutrients clamp at 0; O2 at 5.0 mmol/m3, MARBL's
+    ``parm_o2_min``, below which its biology cannot take O2. The attr records the
+    floor on O2 only.
+    """
+    calls = _spy_pyesper(monkeypatch)
+
+    def fake(salinity, temperature, longitude, latitude, depth, *, variables, **kw):
+        calls.append(kw)
+        sal, *_ = xr.broadcast(salinity, temperature, longitude, latitude, depth)
+        # -3 umol/kg everywhere: below every floor once converted.
+        return {v: xr.full_like(sal, -3.0) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module,
+        "_ensure_pyesper",
+        lambda path=None: {"lir": fake, "nn": fake, "mixed": fake},
+    )
+    out = estimate_bgc_fields(
+        *_tiny_inputs(),
+        source={"name": "ESPER"},
+        roms_variables=["NO3", "O2", "ALK"],
+        est_dates=2014.0,
+    )
+    assert float(out["NO3"].min()) == 0.0 and float(out["NO3"].max()) == 0.0
+    assert float(out["ALK"].min()) == 0.0
+    assert float(out["O2"].min()) == 5.0 and float(out["O2"].max()) == 5.0
+    assert "5 mmol/m^3" in out["O2"].attrs["esper_floor"]
+    assert "esper_floor" not in out["NO3"].attrs
+
+
+@needs_pyesper
+@pytest.mark.parametrize("wrapper", ["initial_conditions", "boundary_forcing"])
+def test_conditioned_source_survives_yaml_round_trips(
+    woa_salinity_file, tmp_path, wrapper
+):
+    """A conditioned ESPER source carries a nested path. It must serialize (as a
+    ``Path`` or a ``str``), load back, and serialize again: ``normalize_paths``
+    turns the nested string into a ``Path`` on load, which ``to_yaml`` then has to
+    handle a second time.
+    """
+    from roms_tools import BoundaryForcing, InitialConditions
+
+    grid = _small_grid()
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    bgc_sources = [
+        {
+            "source": {
+                "name": "ESPER",
+                "salinity_conditioning": {"woa_salinity_path": woa_salinity_file},
+            },
+            "use_vars": ["ALK", "DIC"],
+        }
+    ]
+    with dask.config.set(scheduler="synchronous"):
+        if wrapper == "initial_conditions":
+            obj = InitialConditions(
+                grid=grid,
+                ini_time=datetime(2021, 6, 29),
+                source={"name": "GLORYS", "path": fname},
+                bgc_sources=bgc_sources,
+                bgc_model=BGCMarbl,
+                use_dask=False,
+            )
+            cls = InitialConditions
+        else:
+            obj = BoundaryForcing(
+                grid=grid,
+                start_time=datetime(2021, 6, 29),
+                end_time=datetime(2021, 6, 30),
+                source={"name": "GLORYS", "path": fname},
+                bgc_sources=bgc_sources,
+                bgc_model=BGCMarbl,
+                use_dask=False,
+            )
+            cls = BoundaryForcing
+        first = tmp_path / "first.yaml"
+        obj.to_yaml(first)
+        reloaded = cls.from_yaml(first, use_dask=False)
+        second = tmp_path / "second.yaml"
+        reloaded.to_yaml(second)  # the loaded nested path serializes again
+    src = reloaded.bgc[0].source
+    assert Path(src["salinity_conditioning"]["woa_salinity_path"]) == woa_salinity_file
+    assert (
+        "esper_salinity_conditioning"
+        in reloaded.bgc[0]
+        .ds[next(v for v in reloaded.bgc[0].ds.data_vars if str(v).startswith("ALK"))]
+        .attrs
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Grooming of ESPER-derived tracers (InitialConditions/BoundaryForcing groom, groom_settings)
+# --------------------------------------------------------------------------------------
+
+
+def _mock_esper_with_dic_spike(monkeypatch):
+    """Patch PyESPER with plausible fields (ALK/DIC on the 770 mixing line, DIC/ALK =
+    0.9) and one planted DIC spike (DIC/ALK = 1.2) in every estimate, at the last cell,
+    which is wet in ``_small_grid`` for the IC and the boundaries that have water.
+    """
+
+    def fake_estimate(
+        temp, salt, lon, lat, depth, *, source, roms_variables, est_dates=None
+    ):
+        s = np.asarray(salt, dtype=float)
+        alk = 770.0 + (2300.0 - 770.0) * s / 35.0
+        base = {
+            "ALK": alk,
+            "DIC": 0.9 * alk,
+            "NO3": np.full(s.shape, 10.0),
+            "PO4": np.full(s.shape, 1.0),
+            "SiO3": np.full(s.shape, 20.0),
+            "O2": np.full(s.shape, 200.0),
+        }
+        base["DIC"].flat[np.flatnonzero(np.isfinite(s))[-1]] *= 1.2 / 0.9
+        return {n: salt.copy(data=base[n]) for n in roms_variables}
+
+    monkeypatch.setattr(esper_module, "validate_esper_source", lambda source: None)
+    monkeypatch.setattr(esper_module, "estimate_bgc_fields", fake_estimate)
+
+
+def _esper_wrapper(kind: str, **kwargs):
+    """An ESPER InitialConditions or BoundaryForcing on ``_small_grid`` (mocked ESPER)."""
+    common = dict(
+        grid=_small_grid(),
+        source={
+            "name": "GLORYS",
+            "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
+        },
+        bgc_sources=[{"source": {"name": "ESPER"}, "use_vars": ["ALK", "DIC"]}],
+        bgc_model=BGCMarbl,
+        use_dask=False,
+        bypass_validation=True,
+        **kwargs,
+    )
+    if kind == "ic":
+        return InitialConditions(ini_time=datetime(2021, 6, 29), **common)
+    return BoundaryForcing(
+        start_time=datetime(2021, 6, 29), end_time=datetime(2021, 6, 30), **common
+    )
+
+
+def _bgc_ds(obj) -> xr.Dataset:
+    return obj.ds if isinstance(obj, InitialConditions) else obj.bgc[0].ds
+
+
+def _max_dic_alk_ratios(obj) -> dict[str, float]:
+    """Largest DIC/ALK over wet cells, per boundary side (BF) or for the IC."""
+    from roms_tools.setup.utils import get_boundary_coords
+
+    ds, mask = _bgc_ds(obj), obj.grid.ds.mask_rho
+    if isinstance(obj, InitialConditions):
+        parts = {"ic": ("", mask.values > 0)}
+    else:
+        parts = {
+            side: (f"_{side}", mask.isel(**sl).values > 0)
+            for side, sl in get_boundary_coords()["rho"].items()
+            if f"DIC_{side}" in ds
+        }
+    out = {}
+    for name, (suffix, wet) in parts.items():
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r = ds[f"DIC{suffix}"].values / ds[f"ALK{suffix}"].values
+        out[name] = float(np.nanmax(np.where(np.broadcast_to(wet, r.shape), r, np.nan)))
+    return out
+
+
+@pytest.mark.parametrize("kind", ["ic", "bf"])
+@pytest.mark.parametrize("groom", [True, False])
+def test_groom_fixes_a_planted_spike_and_alt_co2_follows(monkeypatch, kind, groom):
+    """groom=True changes the planted DIC spike, groom=False keeps it (so the spike sits
+    on a wet cell and the groomed case is a real test). The ALT_CO2 copies are made
+    after grooming, so they equal the groomed values; use_dask=False data is in memory.
+    """
+    _mock_esper_with_dic_spike(monkeypatch)
+    obj = _esper_wrapper(kind, groom=groom)
+    ratio = max(_max_dic_alk_ratios(obj).values())
+    if groom:
+        assert ratio <= 1.05
+    else:
+        assert ratio == pytest.approx(1.2, rel=1e-3)
+    ds = _bgc_ds(obj)
+    for v in [str(n) for n in ds.data_vars if str(n).startswith(("DIC", "ALK"))]:
+        if "ALT_CO2" in v:
+            continue
+        alt = v.replace("DIC", "DIC_ALT_CO2", 1).replace("ALK", "ALK_ALT_CO2", 1)
+        np.testing.assert_array_equal(ds[alt].values, ds[v].values)
+        assert isinstance(ds[v].data, np.ndarray)
+
+
+@pytest.mark.parametrize("kind", ["ic", "bf"])
+def test_groom_and_settings_round_trip_through_yaml_and_regenerate(
+    monkeypatch, tmp_path, kind
+):
+    """Groom and groom_settings are recorded in the YAML, and the YAML regenerates
+    identical data.
+    """
+    _mock_esper_with_dic_spike(monkeypatch)
+    settings = {"passes": 4, "checks": {"DIC": {"max_jump": 80.0}}}
+    obj = _esper_wrapper(kind, groom=True, groom_settings=settings)
+    path = tmp_path / f"{kind}.yaml"
+    obj.to_yaml(path)
+    cls = type(obj)
+    reloaded = cls.from_yaml(path, use_dask=False)
+    assert reloaded.groom is True
+    assert reloaded.groom_settings == settings
+    a, b = _bgc_ds(obj), _bgc_ds(reloaded)
+    for v in a.data_vars:
+        np.testing.assert_array_equal(a[v].values, b[v].values, err_msg=str(v))
+
+
+@pytest.mark.parametrize("kind", ["ic", "bf"])
+def test_yaml_without_groom_keys_grooms(monkeypatch, tmp_path, kind):
+    """A YAML written before groom existed loads with grooming on."""
+    import yaml
+
+    _mock_esper_with_dic_spike(monkeypatch)
+    obj = _esper_wrapper(kind, groom=False)
+    path = tmp_path / f"{kind}.yaml"
+    obj.to_yaml(path)
+    docs = list(yaml.safe_load_all(path.read_text()))
+    for doc in docs:
+        for block in doc.values() if isinstance(doc, dict) else ():
+            if isinstance(block, dict):
+                block.pop("groom", None)
+                block.pop("groom_settings", None)
+    legacy = tmp_path / "legacy.yaml"
+    legacy.write_text(yaml.safe_dump_all(docs, sort_keys=False))
+    assert "groom" not in legacy.read_text()
+    old = type(obj).from_yaml(legacy, use_dask=False)
+    assert old.groom is True
+    assert max(_max_dic_alk_ratios(old).values()) <= 1.05
+
+
+def test_groom_settings_change_the_result(monkeypatch):
+    """Switching off the DIC checks that catch the planted spike leaves it in place."""
+    _mock_esper_with_dic_spike(monkeypatch)
+    off = {"checks": {"DIC": {"physical_reality": None, "max_jump": None}}}
+    ic = _esper_wrapper("ic", groom=True, groom_settings=off)
+    assert max(_max_dic_alk_ratios(ic).values()) == pytest.approx(1.2, rel=1e-3)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"pases": 4},
+        {"checks": {"XX": {}}},
+        {"checks": {"ALK": {"bound": [0, 1]}}},
+        {"checks": {"O2": {"ceiling": "x"}}},
+    ],
+)
+def test_bad_groom_settings_raise_before_any_regrid(settings):
+    with pytest.raises(ValueError, match="groom_settings"):
+        InitialConditions(
+            grid=_small_grid(),
+            ini_time=datetime(2021, 6, 29),
+            source={"name": "GLORYS", "path": "never-opened.nc"},
+            groom_settings=settings,
+        )
+
+
+def test_groom_settings_with_groom_false_raise():
+    with pytest.raises(ValueError, match="only applies when `groom=True`"):
+        InitialConditions(
+            grid=_small_grid(),
+            ini_time=datetime(2021, 6, 29),
+            source={"name": "GLORYS", "path": "never-opened.nc"},
+            groom=False,
+            groom_settings={"passes": 2},
+        )
+
+
+def test_groom_is_not_a_source_setting():
+    """Only the wrappers groom: an ESPER source dict refuses a groom key, and the
+    Source classes have no groom argument.
+    """
+    with pytest.raises(ValueError, match="no longer a key of the ESPER source"):
+        esper_module.validate_esper_source({"name": "ESPER", "groom": True})
+    for cls in (InitialConditionsSource, BoundaryForcingSource):
+        assert "groom" not in cls.__dataclass_fields__
+        assert "groom_settings" not in cls.__dataclass_fields__
+
+
+def test_bgc_groom_refuses_objects_and_bgc_check_accepts_them(monkeypatch):
+    from roms_tools import bgc_check, bgc_groom
+
+    _mock_esper_with_dic_spike(monkeypatch)
+    ic = _esper_wrapper("ic", groom=False)
+    with pytest.raises(TypeError, match="groom_settings"):
+        bgc_groom(ic, variables=["ALK", "DIC"])
+    assert isinstance(bgc_check(ic, variables=["ALK", "DIC"]), xr.Dataset)
+    out = bgc_groom(ic.ds, ic.grid, variables=["ALK", "DIC"])
+    assert isinstance(out, xr.Dataset)

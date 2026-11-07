@@ -2,20 +2,22 @@ import copy
 import logging
 import os
 import textwrap
+import warnings
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
 from roms_tools import BGCMarbl, BoundaryForcing, BoundaryForcingSource, Grid
 from roms_tools.datasets.download import download_test_data
-from roms_tools.setup.boundary_forcing import _interpolate_phys_to_bgc_time
 from roms_tools.setup.utils import _xesmf_available
+from roms_tools.tests.glodap_test_utils import write_synthetic_glodap
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -555,6 +557,92 @@ def test_invalid_extrap_kwargs_raises(use_dask):
         )
 
 
+@pytest.mark.parametrize("value", [-1.0, float("nan"), "25"])
+def test_invalid_bottom_fill_blend_m_raises(use_dask, value):
+    """A negative, NaN or non-numeric blend length is rejected before any data loads,
+    by the source and by the wrapper alike.
+    """
+    kwargs = {**_coarse_glorys_kwargs(use_dask), "bottom_fill_blend_m": value}
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        BoundaryForcingSource(**kwargs)
+    with pytest.raises(ValueError, match="bottom_fill_blend_m"):
+        BoundaryForcing(**kwargs)
+
+
+@pytest.mark.parametrize("blend_m", [0.0, 40.0, np.inf])
+def test_bottom_fill_blend_m_yaml_round_trip_and_attrs(use_dask, tmp_path, blend_m):
+    """``bottom_fill_blend_m`` (also 0 and inf) survives a to_yaml -> from_yaml
+    round-trip and is recorded, as a float, in the saved-dataset metadata.
+    """
+    bf = BoundaryForcingSource(
+        **_coarse_glorys_kwargs(use_dask), bottom_fill_blend_m=blend_m
+    )
+    fp = tmp_path / "bf.yaml"
+    bf.to_yaml(fp)
+    assert "bottom_fill_blend_m" in fp.read_text()
+    bf2 = BoundaryForcingSource.from_yaml(fp, use_dask=use_dask)
+
+    assert bf2.bottom_fill_blend_m == bf.bottom_fill_blend_m == blend_m
+    for obj in (bf, bf2):
+        assert isinstance(obj.ds.attrs["bottom_fill_blend_m"], float)
+        assert obj.ds.attrs["bottom_fill_blend_m"] == blend_m
+
+
+def test_bottom_fill_blend_m_is_stored_as_a_builtin_float(use_dask, tmp_path):
+    """A NumPy scalar is stored as a ``float`` by the wrapper and its sources: YAML
+    cannot represent a NumPy scalar, and ``to_yaml`` raised after the whole build.
+    """
+    bf = BoundaryForcing(
+        **_coarse_glorys_kwargs(use_dask), bottom_fill_blend_m=np.float64(40.0)
+    )
+    assert type(bf.bottom_fill_blend_m) is float
+    assert type(bf.physics.bottom_fill_blend_m) is float
+
+    fp = tmp_path / "bf_type.yaml"
+    bf.to_yaml(fp)
+    bf2 = BoundaryForcing.from_yaml(fp, use_dask=use_dask)
+    assert type(bf2.bottom_fill_blend_m) is float
+    assert bf2.bottom_fill_blend_m == 40.0
+
+
+def test_default_bottom_fill_blend_m_is_recorded(use_dask):
+    bf = BoundaryForcingSource(**_coarse_glorys_kwargs(use_dask))
+    assert bf.bottom_fill_blend_m == 25.0
+    assert bf.ds.attrs["bottom_fill_blend_m"] == 25.0
+
+
+@pytest.mark.parametrize("prefill", [None, "2d_lateral_fill"])
+def test_bottom_fill_blend_m_changes_tracers_but_not_velocities(
+    small_grid, use_dask, prefill
+):
+    """Below a source column's bottom, tracers take the nearest column's water at that
+    depth, which a blend length of ``inf`` (copy the bottom value down) does not;
+    velocities always copy the bottom value down. Both fill code paths (with and
+    without a source prefill) pass the blend length on.
+    """
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    bfs = {
+        blend_m: BoundaryForcingSource(
+            grid=small_grid,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2012, 12, 31),
+            source={"name": "GLORYS", "path": [fname1, fname2]},
+            prefill=prefill,
+            regrid_method="scipy",
+            bottom_fill_blend_m=blend_m,
+            use_dask=use_dask,
+        )
+        for blend_m in (0.0, np.inf)
+    }
+    tracers = [v for v in bfs[0.0].ds.data_vars if v.startswith(("temp_", "salt_"))]
+    others = [v for v in bfs[0.0].ds.data_vars if v not in tracers]
+    assert tracers and others
+    for name in others:
+        np.testing.assert_array_equal(bfs[0.0].ds[name], bfs[np.inf].ds[name])
+    assert any((bfs[0.0].ds[v] != bfs[np.inf].ds[v]).any() for v in tracers)
+
+
 def test_regrid_method_xesmf_requires_xesmf(use_dask, monkeypatch):
     monkeypatch.setattr(
         "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
@@ -785,6 +873,37 @@ def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):
             assert saved_filenames == [expected_filepath]
             assert expected_filepath.exists()
             expected_filepath.unlink()
+
+
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "boundary_forcing",
+        "bgc_boundary_forcing_from_climatology",
+    ],
+)
+def test_boundary_forcing_save_has_no_stale_unlimited_dim(
+    boundary_forcing_fixture, request, tmp_path
+):
+    """Saving must not declare the renamed-away ``time`` dimension unlimited.
+
+    A stale ``unlimited_dims`` naming a dimension that is not in the dataset is a
+    ``ValueError`` or a ``UserWarning`` depending on the xarray release; before
+    2025.8 it silently wrote an empty, unlimited ``time`` dimension. ``bry_time``
+    stays a fixed dimension.
+    """
+    import netCDF4
+
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        (filepath,) = boundary_forcing.save(tmp_path / "test_bf", group=False)
+
+    assert not [w for w in caught if "Unlimited dimension" in str(w.message)]
+    with netCDF4.Dataset(filepath) as ncds:
+        assert "time" not in ncds.dimensions
+        assert not ncds.dimensions["bry_time"].isunlimited()
 
 
 @pytest.mark.parametrize(
@@ -1138,6 +1257,11 @@ def test_bgc_bc_with_physics_forcing(use_dask):
 
     assert bgc_bc.bgc_interpolation_method == "density"
     assert bgc_bc.physics_forcing is physics_bc
+    # On the physics time axis (one record here), not the source's 12-month cycle.
+    np.testing.assert_array_equal(
+        bgc_bc.ds["bry_time"].values, physics_bc.ds["bry_time"].values
+    )
+    assert "cycle_length" not in bgc_bc.ds["bry_time"].attrs
     for direction in ["south", "east", "north", "west"]:
         if bgc_bc.boundaries[direction]:
             assert f"NO3_{direction}" in bgc_bc.ds
@@ -1166,21 +1290,25 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
-    any_diff = False
-    for direction in ["south", "east", "north", "west"]:
-        if not bgc_bc.boundaries[direction]:
-            continue
-        for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
-            name = f"{var}_{direction}"
-            if name in bgc_bc.ds and name in bgc_bc_depth.ds:
-                a = bgc_bc.ds[name].values
-                b = bgc_bc_depth.ds[name].values
-                valid = ~(np.isnan(a) | np.isnan(b))
-                if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
-                    any_diff = True
-                    break
-        if any_diff:
-            break
+
+    # The density outputs sit on the physics time axis (one record, 1 Jan 2012); the
+    # depth output is the cycled 12-record climatology, so compare against its
+    # January record.
+    def _differs(density_bc) -> bool:
+        for direction in ["south", "east", "north", "west"]:
+            if not density_bc.boundaries[direction]:
+                continue
+            for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+                name = f"{var}_{direction}"
+                if name in density_bc.ds and name in bgc_bc_depth.ds:
+                    a = density_bc.ds[name].isel(bry_time=0).values
+                    b = bgc_bc_depth.ds[name].isel(bry_time=0).values
+                    valid = ~(np.isnan(a) | np.isnan(b))
+                    if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
+                        return True
+        return False
+
+    any_diff = _differs(bgc_bc)
 
     # MLD-anchored interpolation: builds, produces BGC vars, and never leaks T/S.
     bgc_bc_mld = BoundaryForcingSource(
@@ -1199,21 +1327,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         str(v).startswith(("temp_", "salt_")) for v in bgc_bc_mld.ds.data_vars
     )
 
-    mld_diff = False
-    for direction in ["south", "east", "north", "west"]:
-        if not bgc_bc.boundaries[direction]:
-            continue
-        for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
-            name = f"{var}_{direction}"
-            if name in bgc_bc_mld.ds and name in bgc_bc_depth.ds:
-                a = bgc_bc_mld.ds[name].values
-                b = bgc_bc_depth.ds[name].values
-                valid = ~(np.isnan(a) | np.isnan(b))
-                if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
-                    mld_diff = True
-                    break
-        if mld_diff:
-            break
+    mld_diff = _differs(bgc_bc_mld)
 
     if source_has_ts:
         # Wiring guard: confirm the density methods actually fire (do not silently fall
@@ -1232,6 +1346,72 @@ def test_bgc_bc_with_physics_forcing(use_dask):
             "BGC source has no temperature/salinity, so MLD interpolation "
             "should fall back to depth-based and match exactly"
         )
+
+
+def test_bgc_bc_density_inherits_a_climatological_physics_cycle(tmp_path, use_dask):
+    """Climatological physics plus a density method gives a cyclic BGC output.
+
+    The BGC is placed on the physics's 12 cyclic records and must carry the same
+    ``cycle_length`` and ``climatology`` labelling, so ROMS finds a BGC record in
+    every year, not only the reference year. (Dated BGC beside cyclic physics would
+    leave every other year without boundary data.)
+    """
+    from roms_tools.setup.utils import climatology_mid_month_days
+
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    # Twelve copies of one GLORYS day, timed as a climatology (timedelta since the
+    # start of the year, the form the climatology path accepts).
+    one_day = xr.open_dataset(download_test_data("GLORYS_NA_20120101.nc"))
+    days = np.array(climatology_mid_month_days(), dtype="timedelta64[D]")
+    clim = xr.concat([one_day.isel(time=0, drop=True)] * 12, dim="time")
+    clim = clim.assign_coords(time=("time", days.astype("timedelta64[ns]")))
+    fname_phys = tmp_path / "glorys_clim.nc"
+    clim.to_netcdf(fname_phys)
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+
+    physics_bc = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_phys, "name": "GLORYS", "climatology": True},
+        type="physics",
+        apply_2d_horizontal_fill=False,
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    assert physics_bc.ds["bry_time"].attrs["cycle_length"] == 365.25
+    bgc_bc = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        physics_forcing=physics_bc,
+        bgc_interpolation_method="density_mld",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    assert bgc_bc.ds.attrs["bgc_time_axis"] == "physics"
+    assert (
+        bgc_bc.ds.attrs["climatology"] == physics_bc.ds.attrs["climatology"] == "True"
+    )
+    assert bgc_bc.ds["bry_time"].attrs["cycle_length"] == 365.25
+    np.testing.assert_array_equal(
+        bgc_bc.ds["bry_time"].values, physics_bc.ds["bry_time"].values
+    )
+    assert bgc_bc.ds.sizes["bry_time"] == 12
 
 
 def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
@@ -1293,38 +1473,93 @@ def test_physics_forcing_survives_yaml_roundtrip(
                     xr.testing.assert_allclose(reloaded.ds[name], bf.ds[name])
 
 
-def test_interpolate_phys_to_bgc_time_nearest_noncyclic():
-    """Non-climatology alignment takes the nearest physics time and works on dask."""
-    ptime = np.array(["2013-01-01", "2013-01-11", "2013-01-21"], dtype="datetime64[ns]")
-    phys = xr.DataArray([10.0, 20.0, 30.0], dims="time", coords={"time": ptime})
-    targets = xr.DataArray(
-        np.array(["2013-01-02", "2013-01-19"], dtype="datetime64[ns]"), dims="time"
+def test_bgc_bc_density_follows_the_physics_time_axis(use_dask):
+    """A density method places the climatology on *every* physics record: the output
+    carries the physics time axis (no ``cycle_length``, monthly grouping), while the
+    same source on ``depth`` stays a cycled 12-record climatology. With two physics
+    days that have different stratification (1 Jan and 31 Dec 2012) the two records
+    differ, which the old one-sampled-day climatology could never do.
+    """
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
     )
-
-    out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=False)
-    np.testing.assert_array_equal(out.values, [10.0, 30.0])
-
-    # Chunked along time must also work (nearest selection needs no rechunk).
-    out_chunked = _interpolate_phys_to_bgc_time(
-        phys.chunk({"time": 1}), "time", targets, bgc_climatology=False
+    fname_phys = Path(download_test_data("GLORYS_NA_2012.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+    physics_bc = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_phys, "name": "GLORYS"},
+        type="physics",
+        apply_2d_horizontal_fill=False,
+        regrid_method="scipy",
+        use_dask=use_dask,
     )
-    np.testing.assert_array_equal(out_chunked.values, [10.0, 30.0])
-
-
-def test_interpolate_phys_to_bgc_time_nearest_cyclic_wraps():
-    """Climatology alignment picks the cyclically nearest day-of-year (year wrap)."""
-    # Physics at day-of-year ~10, ~180, ~364 (values encode which slice is chosen).
-    ptime = np.array(["2013-01-10", "2013-06-29", "2013-12-30"], dtype="datetime64[ns]")
-    phys = xr.DataArray([1.0, 2.0, 3.0], dims="time", coords={"time": ptime})
-
-    # Target ~ day-of-year 2 (timedelta of 1 day from year start). The cyclically
-    # nearest physics is late December (doy 364), not early January (doy 10).
-    targets = xr.DataArray(
-        np.array([np.timedelta64(1, "D")], dtype="timedelta64[ns]"), dims="time"
+    assert physics_bc.ds.sizes["bry_time"] == 2
+    kwargs = dict(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
     )
+    on_physics = BoundaryForcingSource(
+        physics_forcing=physics_bc, bgc_interpolation_method="density_mld", **kwargs
+    )
+    on_depth = BoundaryForcingSource(bgc_interpolation_method="depth", **kwargs)
 
-    out = _interpolate_phys_to_bgc_time(phys, "time", targets, bgc_climatology=True)
-    np.testing.assert_array_equal(out.values, [3.0])
+    # Physics time axis, not a climatology.
+    np.testing.assert_array_equal(
+        on_physics.ds["bry_time"].values, physics_bc.ds["bry_time"].values
+    )
+    assert "cycle_length" not in on_physics.ds["bry_time"].attrs
+    assert "climatology" not in on_physics.ds.attrs
+    assert on_physics.ds.attrs["bgc_time_axis"] == "physics"
+    assert on_physics.ds.attrs["bgc_interpolation_method"] == "density_mld"
+    # The depth path is untouched: a cycled 12-record climatology.
+    assert on_depth.ds.sizes["bry_time"] == 12
+    assert on_depth.ds["bry_time"].attrs["cycle_length"] == 365.25
+    assert on_depth.ds.attrs["bgc_time_axis"] == "source"
+
+    # The two records differ *because of the vertical placement*, not merely because
+    # the climatology is read at two different days of year: compare against the depth
+    # output cycled to the same two dates, which carries only the time-of-year change.
+    from roms_tools.setup.utils import cycle_to_times
+
+    direction = next(d for d, on in on_physics.boundaries.items() if on)
+    no3 = on_physics.ds[f"NO3_{direction}"]
+    depth_no3 = on_depth.ds[f"NO3_{direction}"].swap_dims({"bry_time": "bry_time"})
+    depth_clim = depth_no3.assign_coords(
+        time=("bry_time", pd.to_timedelta(on_depth.ds["bry_time"].values, unit="D"))
+    ).swap_dims({"bry_time": "time"})
+    depth_cycled = cycle_to_times(
+        depth_clim, "time", on_physics.ds["abs_time"], climatology=True
+    )
+    for k in (0, 1):
+        a = no3.isel(bry_time=k).values
+        b = depth_cycled.isel(time=k).values
+        valid = np.isfinite(a) & np.isfinite(b)
+        assert valid.any()
+        assert np.abs(a[valid] - b[valid]).max() > 0, f"record {k} == depth cycled"
+    jan, dec = no3.isel(bry_time=0).values, no3.isel(bry_time=1).values
+    valid = np.isfinite(jan) & np.isfinite(dec)
+    assert np.abs(jan[valid] - dec[valid]).max() > 0
+    # The source T/S used for the density coordinate never reach the output.
+    assert not any(
+        str(v).startswith(("temp_", "salt_")) for v in on_physics.ds.data_vars
+    )
 
 
 def test_bgc_source_names_match_the_dataset_map():
@@ -1453,6 +1688,214 @@ def test_static_bgc_source_without_the_flag_still_brackets():
     assert bf.ds.sizes["bry_time"] == 2
 
 
+@pytest.mark.parametrize("direction", ["south", "east", "north", "west"])
+@pytest.mark.parametrize("name", ["temp", "u", "v"])
+def test_fill_nans_over_land_uses_the_mask_of_the_variable_on_its_boundary(
+    use_dask, name, direction
+):
+    """Each boundary variable is checked against its own mask, cut at its own boundary.
+
+    Rho cells are made dry, which dries the u and v points that touch them. At a point
+    of a boundary that is dry for the variable, a NaN is plain land and
+    becomes 0; for u and v there is such a point where the rho mask says wet. At a wet
+    point a NaN raises, naming the variable.
+    """
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    boundaries = {"south": True, "east": True, "north": True, "west": True}
+    bf = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={
+            "name": "GLORYS",
+            "path": [
+                Path(download_test_data("GLORYS_NA_20120101.nc")),
+                Path(download_test_data("GLORYS_NA_20121231.nc")),
+            ],
+        },
+        boundaries=boundaries,
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    rho = np.ones(grid.ds["mask_rho"].shape, dtype=int)
+    # Each edge gets a dry rho cell, plus a cell whose u (v) point on that edge is dry
+    # while the edge rho point is wet.
+    rho[2, 1] = rho[2, -2] = rho[3, -1] = rho[3, 0] = rho[0, 3] = rho[1, 1] = 0
+    rho[-1, 1] = 0
+    grid.ds["mask_rho"].values[...] = rho
+    grid.ds["mask_u"].values[...] = rho[:, :-1] * rho[:, 1:]
+    grid.ds["mask_v"].values[...] = rho[:-1] * rho[1:]
+
+    # The mask along the boundary, written out here rather than taken from the code.
+    edge = {
+        "south": (0, slice(None)),
+        "east": (slice(None), -1),
+        "north": (-1, slice(None)),
+        "west": (slice(None), 0),
+    }[direction]
+    mask = {
+        "temp": rho,
+        "u": grid.ds["mask_u"].values,
+        "v": grid.ds["mask_v"].values,
+    }[name][edge]
+    wet = int(np.argwhere(mask == 1)[0, 0])
+    dry = int(np.argwhere(mask == 0)[0, 0])
+    if name != "temp":
+        assert rho[edge][dry] == 1  # dry for u (v), though wet for rho
+
+    var_name = f"{name}_{direction}"
+    boundary_dim = bf.ds[var_name].dims[-1]
+
+    def with_nan_at(index):
+        ds = bf.ds.copy()
+        hole = xr.DataArray(np.arange(mask.size) == index, dims=boundary_dim)
+        ds[var_name] = ds[var_name].where(~hole)
+        return ds
+
+    with pytest.raises(ValueError, match=rf"{var_name} has \d+ NaN value"):
+        bf._fill_nans_over_land(with_nan_at(wet))[var_name].compute()
+
+    filled = bf._fill_nans_over_land(with_nan_at(dry)).compute()
+    assert not filled[var_name].isnull().any()
+    assert (filled[var_name].isel({boundary_dim: dry}) == 0).all()
+
+
+@pytest.mark.parametrize(
+    "prefill", [pytest.param(None, marks=requires_xesmf), "2d_lateral_fill"]
+)
+def test_glodap_variables_missing_a_wet_column_leave_no_hole_on_the_boundary(
+    tmp_path, use_dask, prefill
+):
+    """A GLODAP variable with no data in a column the others have regrids without a hole.
+
+    Silicate lacks the source column at 53N/0E and TCO2 the one at 53N/1E, near the
+    south boundary, though NO3 (which the shared mask was taken from) has both. With
+    that one mask the NaN stayed inside it: the regridded boundary held a NaN, which
+    the output writes as 0, and the lateral fill refused the source outright.
+    """
+
+    def field_fn(name, values):
+        gap = {"silicate": (18, 30), "TCO2": (18, 31)}.get(name)  # lat 53, lon 0 / 1
+        if gap is not None:
+            values[:, gap[0], gap[1]] = np.nan
+        return values
+
+    glodap_dir = write_synthetic_glodap(tmp_path / "glodap", field_fn=field_fn)
+    grid = Grid(
+        nx=20,
+        ny=20,
+        size_x=400,
+        size_y=400,
+        center_lon=0,
+        center_lat=55,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    bf = BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 30),
+        end_time=datetime(2012, 2, 1),
+        boundaries={"south": True, "east": False, "north": False, "west": False},
+        source={"name": "GLODAP", "path": str(glodap_dir)},
+        type="bgc",
+        use_vars=["ALK", "DIC", "SiO3"],
+        prefill=prefill,
+        use_dask=use_dask,
+        bypass_validation=True,
+    )
+
+    # The source is uniform (about 2300 umol/kg ALK, 2100 DIC, 10 SiO3), so a NaN read
+    # as 0 would show as a minimum far below these bounds.
+    for name, lower in (("ALK", 1000.0), ("DIC", 1000.0), ("SiO3", 5.0)):
+        assert float(bf.ds[f"{name}_south"].min()) > lower, name
+
+
+def _boundary_with_a_salt_hole(tmp_path, use_dask, **kwargs):
+    """South boundary from a GLORYS source with salinity NaN in a block near it.
+
+    The GLORYS mask comes from sea-surface height, which has data there, so the source
+    calls the block ocean. The NaN starts at the surface, where no fill reaches it, and
+    the masked regrid carries it onto the boundary.
+    """
+    paths = []
+    for name in ("GLORYS_NA_20120101.nc", "GLORYS_NA_20121231.nc"):
+        source = xr.open_dataset(download_test_data(name)).load()
+        block = (abs(source["latitude"] - 56.2) < 0.6) & (
+            abs(source["longitude"] + 8) < 1.0
+        )
+        source["so"] = source["so"].where(~block)
+        source.to_netcdf(tmp_path / name)
+        source.close()
+        paths.append(tmp_path / name)
+    grid = Grid(
+        nx=20,
+        ny=20,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    return BoundaryForcingSource(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        boundaries={"south": True, "east": False, "north": False, "west": False},
+        source={"name": "GLORYS", "path": paths},
+        use_dask=use_dask,
+        **kwargs,
+    )
+
+
+@requires_xesmf
+def test_nan_at_a_wet_boundary_point_raises_instead_of_becoming_zero(
+    tmp_path, use_dask
+):
+    """A boundary variable the source leaves NaN at ocean points is an error, not a 0.
+
+    The boundary forcing used to write such a NaN as 0 without a message. Without dask
+    the error is raised while the object is built; with dask, when the variable is
+    computed.
+    """
+    match = r"salt_south has \d+ NaN value.* at ocean points"
+    if use_dask:
+        bf = _boundary_with_a_salt_hole(tmp_path, use_dask)
+        with pytest.raises(ValueError, match=match):
+            bf.ds["salt_south"].compute()
+    else:
+        with pytest.raises(ValueError, match=match):
+            _boundary_with_a_salt_hole(tmp_path, use_dask)
+
+
+@requires_xesmf
+def test_bypass_validation_still_fills_a_wet_boundary_nan_with_zero(tmp_path, use_dask):
+    """``bypass_validation=True`` keeps the plain fill, so the hole is written as 0."""
+    bf = _boundary_with_a_salt_hole(tmp_path, use_dask, bypass_validation=True)
+
+    # Salinity is never 0 in the ocean, so a 0 on the boundary is the filled NaN.
+    assert float(bf.ds["salt_south"].min()) == 0.0
+    assert not bf.ds["salt_south"].isnull().any()
+
+
 def test_use_vars_on_physics_type_raises():
     """`use_vars` only makes sense down-selecting a BGC source; setting it on a
     `type="physics"` object is a configuration error, not a silent no-op.
@@ -1506,6 +1949,83 @@ class TestBoundaryForcingWrapper:
             bgc_model=BGCMarbl,
             **kwargs,
         )
+
+    @staticmethod
+    def _unified_density_item():
+        fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset_v2_1.nc"))
+        return {
+            "source": {"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+            "bgc_interpolation_method": "density",
+        }
+
+    def test_physics_ts_is_realized_before_companions_that_derive_from_it(
+        self, small_grid, monkeypatch
+    ):
+        """A density-interpolated companion with its own T/S reads the physics T/S,
+        so the wrapper realizes those strips before building it. Every companion
+        save then depends on small in-memory arrays instead of the shared lazy
+        source regrid -- the graph shape that made ESPER boundary saves grow in
+        memory without bound. Only T/S are realized -- and re-wrapped as dask so
+        ESPER stays chunk-planned; the rest of the physics keeps its real lazy graph.
+        """
+        from roms_tools.setup import boundary_forcing as bfm
+
+        calls = []
+        real = bfm.materialize_physics_ts
+        monkeypatch.setattr(
+            bfm,
+            "materialize_physics_ts",
+            lambda ds, names: (calls.append(list(names)), real(ds, names)),
+        )
+        bf = self._make(
+            small_grid, use_dask=True, bgc_sources=[self._unified_density_item()]
+        )
+        assert len(calls) == 1
+        active = [d for d, on in bf.physics.boundaries.items() if on]
+        assert active
+        for d in active:
+            for var in ("temp", "salt"):
+                data = bf.physics.ds[f"{var}_{d}"].data
+                # Still dask -- PyESPER's chunk plan must keep applying -- but
+                # backed by memory: nothing in its graph reads the source anymore.
+                assert bf.physics.ds[f"{var}_{d}"].chunks is not None
+                assert len(dict(data.dask)) <= data.npartitions + 1
+            zeta = bf.physics.ds[f"zeta_{d}"].data
+            assert len(dict(zeta.dask)) > zeta.npartitions + 1  # the real lazy graph
+
+    @pytest.mark.parametrize(
+        "bgc_sources",
+        [
+            [{"source": {"name": "constants", "constants": {"NO3": 24.0}}}],
+            # Constants never interpolate, whatever method the item names.
+            [
+                {
+                    "source": {"name": "constants", "constants": {"Fe": 3.0e-3}},
+                    "bgc_interpolation_method": "density",
+                }
+            ],
+        ],
+        ids=["constants-depth", "constants-density"],
+    )
+    def test_physics_ts_stays_lazy_when_no_companion_needs_it(
+        self, small_grid, monkeypatch, bgc_sources
+    ):
+        """Nothing reads the physics T/S here, so nothing is realized -- asserted on
+        the call itself, since a realized strip is re-wrapped as dask and would
+        still look lazy to a dask-type check.
+        """
+        from roms_tools.setup import boundary_forcing as bfm
+
+        monkeypatch.setattr(
+            bfm,
+            "materialize_physics_ts",
+            lambda *a, **k: pytest.fail("materialize_physics_ts must not run"),
+        )
+        bf = self._make(small_grid, use_dask=True, bgc_sources=bgc_sources)
+        active = [d for d, on in bf.physics.boundaries.items() if on]
+        for d in active:
+            salt = bf.physics.ds[f"salt_{d}"].data
+            assert len(dict(salt.dask)) > salt.npartitions + 1  # the real lazy graph
 
     def test_save_honours_group_and_format_and_returns_real_paths(
         self, small_grid, use_dask, tmp_path
@@ -1591,10 +2111,13 @@ class TestBoundaryForcingWrapper:
         on each bgc companion (previously two hand-maintained kwargs lists that
         could -- and did -- diverge).
         """
-        bf = self._make(small_grid, use_dask, prefill="nearest_neighbor")
+        bf = self._make(
+            small_grid, use_dask, prefill="nearest_neighbor", bottom_fill_blend_m=40.0
+        )
         for obj in (bf.physics, *bf.bgc):
             assert obj.regrid_method == "scipy"
             assert obj.prefill == "nearest_neighbor"
+            assert obj.bottom_fill_blend_m == 40.0
             assert obj.model_reference_date == bf.model_reference_date
             assert obj.bypass_validation is bf.bypass_validation
         # Per-companion identity is preserved by build_bgc_companions.

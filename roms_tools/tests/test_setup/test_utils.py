@@ -19,7 +19,9 @@ from roms_tools.setup.utils import (
     compute_in_situ_density,
     compute_mld,
     compute_potential_density,
+    cycle_to_times,
     expand_monthly_climatology_time_axis,
+    fill_nans_over_land,
     gc_dist,
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
@@ -31,6 +33,7 @@ from roms_tools.setup.utils import (
     query_kdtree_nearest,
     tile_monthly_climatology_on_calendar,
     validate_names,
+    wet_mask,
 )
 
 
@@ -920,6 +923,129 @@ def test_nan_check_batch():
         )
 
 
+def test_wet_mask_picks_the_mask_at_the_location():
+    grid_ds = xr.Dataset(
+        {
+            "mask_rho": ("x", [1, 1]),
+            "mask_u": ("x", [1, 0]),
+            "mask_v": ("x", [0, 1]),
+        }
+    )
+    for location in ("rho", "u", "v"):
+        assert wet_mask(grid_ds, location).identical(grid_ds[f"mask_{location}"])
+
+
+def test_fill_nans_over_land_fills_land_and_keeps_the_rest():
+    """NaN at land becomes the fill value; metadata and everything else is kept."""
+    mask = xr.DataArray([1, 1, 0], dims="x")
+    field = xr.DataArray(
+        np.array([1.0, 2.0, np.nan], dtype="float32"),
+        dims="x",
+        coords={"x": [10, 20, 30]},
+        name="temp",
+        attrs={"units": "C"},
+    )
+
+    filled = fill_nans_over_land(field, mask, "temp")
+
+    expected = field.fillna(0.0)
+    xr.testing.assert_identical(filled, expected)
+    assert filled.dtype == np.float32
+    assert filled.attrs == {"units": "C"}
+    assert float(filled[2]) == 0.0
+
+
+@pytest.mark.parametrize("use_chunks", [False, True])
+def test_fill_nans_over_land_raises_for_nan_at_a_wet_point(use_chunks):
+    """A NaN at a wet point raises, naming the variable and how many there are.
+
+    Backed by numpy the error is immediate. Backed by dask it must not appear when
+    the call is made (the check adds no compute of its own), only when the data are
+    computed.
+    """
+    mask = xr.DataArray([1, 1, 0, 1], dims="x")
+    field = xr.DataArray([1.0, np.nan, np.nan, np.nan], dims="x", name="silicate")
+    if use_chunks:
+        field = field.chunk({"x": 2})
+
+    if use_chunks:
+        lazy = fill_nans_over_land(field, mask, "silicate")  # no raise yet
+        assert lazy.chunks is not None
+        with pytest.raises(ValueError, match="silicate has 1 NaN value.* in one chunk"):
+            lazy.compute()
+    else:
+        with pytest.raises(ValueError, match="silicate has 2 NaN value"):
+            fill_nans_over_land(field, mask, "silicate")
+
+
+def test_fill_nans_over_land_does_not_compute_dask_inputs():
+    """Building the fill must not realize a dask-backed field."""
+    import dask
+
+    calls = []
+
+    def source(block):
+        calls.append(1)
+        return block
+
+    field = xr.DataArray(np.ones((4, 4)), dims=("y", "x")).chunk({"y": 2})
+    field = field.copy(data=field.data.map_blocks(source, meta=np.empty((0, 0))))
+    mask = xr.DataArray(np.ones((4, 4)), dims=("y", "x"))
+
+    with dask.config.set(scheduler="synchronous"):
+        out = fill_nans_over_land(field, mask, "v")
+        assert calls == []
+        out.compute()
+    assert calls
+
+
+def test_fill_nans_over_land_passes_non_float_through():
+    """Integer data have no NaN: returned as they are, even where the mask is wet."""
+    field = xr.DataArray(np.arange(3), dims="x")
+    mask = xr.DataArray([1, 0, 1], dims="x")
+    assert fill_nans_over_land(field, mask, "i") is field
+
+
+@pytest.mark.parametrize("chunk_mask", [False, True])
+@pytest.mark.parametrize("use_chunks", [False, True])
+def test_fill_nans_over_land_broadcasts_the_mask_over_extra_dims(
+    use_chunks, chunk_mask
+):
+    """A 2-D mask applies to every time and s_rho level of a 4-D field.
+
+    The mask need not be chunked like the field; coordinates of the mask play no part.
+    """
+    field = xr.DataArray(
+        np.ones((2, 3, 4, 5)),
+        dims=("time", "s_rho", "eta_rho", "xi_rho"),
+        coords={"time": [0, 1]},
+        name="temp",
+    )
+    mask_values = np.ones((4, 5), dtype=int)
+    mask_values[0, :] = 0
+    mask = xr.DataArray(
+        mask_values, dims=("eta_rho", "xi_rho"), coords={"eta_rho": np.arange(4) + 7}
+    )
+    field[:, :, 0, 2] = np.nan  # land row: filled for every time and level
+    if use_chunks:
+        field = field.chunk({"time": 1, "s_rho": 2, "eta_rho": 2})
+    if chunk_mask:
+        mask = mask.chunk({"eta_rho": 3, "xi_rho": 2})
+
+    filled = fill_nans_over_land(field, mask, "temp").compute()
+
+    assert filled.dims == field.dims
+    assert not filled.isnull().any()
+    assert (filled[:, :, 0, 2] == 0).all()
+
+    field = field.compute()
+    field[1, 2, 3, 4] = np.nan  # a wet point, at the last time and level
+    if use_chunks:
+        field = field.chunk({"time": 1, "s_rho": 2, "eta_rho": 2})
+    with pytest.raises(ValueError, match="temp has 1 NaN value"):
+        fill_nans_over_land(field, mask, "temp").compute()
+
+
 def test_materialize_before_check_realizes_and_preserves_metadata():
     """`materialize_before_check` computes each named variable via one combined
     `dask.compute()` call and writes the realized (non-dask-backed) result back
@@ -1324,6 +1450,7 @@ class TestForwardableFields:
             "regrid_method",
             "extrap_method",
             "extrap_kwargs",
+            "bottom_fill_blend_m",
         }
     )
 
@@ -1387,3 +1514,370 @@ class TestForwardableFields:
 
         assert forwardable_fields(A, B) == {"x", "y"}
         assert forwardable_fields(A, B, exclude=("y",)) == {"x"}
+
+
+class TestSourceDictNestedPaths:
+    """``serialize_source_dict`` / ``deserialize_source_dict`` handle paths anywhere in
+    the dict, not only under ``"path"`` -- an ESPER source's
+    ``salinity_conditioning.woa_salinity_path`` is the case that broke.
+    """
+
+    def test_nested_path_round_trips_twice(self):
+        from roms_tools.setup.utils import (
+            deserialize_source_dict,
+            serialize_source_dict,
+        )
+
+        woa = Path("/data/WOA23/woa23_decav_s00_01.nc")
+        src = {
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": woa, "low": 31.0},
+        }
+        once = serialize_source_dict(src)
+        # str(Path) is platform-specific (backslashes on Windows); compare to it, not
+        # to a POSIX literal.
+        assert once["salinity_conditioning"]["woa_salinity_path"] == str(woa)
+        assert once["salinity_conditioning"]["low"] == 31.0
+        back = deserialize_source_dict(once)
+        assert isinstance(back["salinity_conditioning"]["woa_salinity_path"], Path)
+        twice = serialize_source_dict(back)
+        assert twice == once
+        assert (
+            src["salinity_conditioning"]["woa_salinity_path"]
+            != once["salinity_conditioning"]["woa_salinity_path"]
+        )  # input untouched
+
+    def test_yaml_can_represent_the_serialized_dict(self):
+        import yaml
+
+        from roms_tools.setup.utils import serialize_source_dict
+
+        src = {
+            "name": "ESPER",
+            "salinity_conditioning": {"woa_salinity_path": Path("/x/s00.nc")},
+        }
+        yaml.safe_dump(serialize_source_dict(src))  # no RepresenterError
+
+
+# ---------------------------------------------------------------------------
+# companions_derive_from_physics_ts: which bgc companions read the physics T/S
+# ---------------------------------------------------------------------------
+class TestCompanionsDeriveFromPhysicsTS:
+    """The gate must fire only for companions that will *actually* read the physics
+    T/S: ESPER, or a dataset with its own T/S on a non-depth method. Constants never
+    interpolate; a dataset without its own T/S falls back to depth.
+    """
+
+    @staticmethod
+    def _has_ts(name):
+        return name in {"UNIFIED", "WOA", "GLODAP"}
+
+    def _f(self, items, default="depth"):
+        from roms_tools.setup.utils import companions_derive_from_physics_ts
+
+        return companions_derive_from_physics_ts(items, default, self._has_ts)
+
+    def test_no_sources_is_false(self):
+        assert self._f(None) is False
+        assert self._f([]) is False
+
+    def test_esper_always_derives(self):
+        assert self._f([{"source": {"name": "ESPER"}}]) is True
+
+    @pytest.mark.parametrize("method", ["density", "density_mld"])
+    def test_density_methods_derive_per_item(self, method):
+        items = [{"source": {"name": "UNIFIED"}, "bgc_interpolation_method": method}]
+        assert self._f(items) is True
+
+    @pytest.mark.parametrize("method", ["density", "density_mld"])
+    def test_density_methods_derive_via_the_wrapper_default(self, method):
+        items = [{"source": {"name": "UNIFIED"}}]  # inherits the section default
+        assert self._f(items, default=method) is True
+
+    def test_depth_only_climatology_does_not(self):
+        items = [
+            {"source": {"name": "UNIFIED"}, "bgc_interpolation_method": "depth"},
+            {"source": {"name": "constants", "constants": {"NO3": 1.0}}},
+        ]
+        assert self._f(items, default="depth") is False
+
+    @pytest.mark.parametrize("method", ["density", "density_mld"])
+    def test_constants_on_a_density_method_do_not(self, method):
+        """A constants source returns before any interpolation runs."""
+        items = [
+            {
+                "source": {"name": "constants", "constants": {"Fe": 3e-3}},
+                "bgc_interpolation_method": method,
+            }
+        ]
+        assert self._f(items) is False
+        assert self._f(items[:1], default=method) is False
+
+    def test_a_dataset_without_its_own_ts_falls_back_to_depth_and_does_not(self):
+        items = [
+            {
+                "source": {"name": "CESM_REGRIDDED"},
+                "bgc_interpolation_method": "density",
+            }
+        ]
+        assert self._f(items) is False
+
+    def test_bgc_source_has_own_ts_reads_the_dataset_map(self):
+        from collections import defaultdict
+
+        from roms_tools.setup.boundary_forcing import _DATASET_MAP
+        from roms_tools.setup.utils import bgc_source_has_own_ts
+
+        bgc = _DATASET_MAP["bgc"]
+        assert bgc_source_has_own_ts(bgc, "UNIFIED")
+        assert bgc_source_has_own_ts(bgc, "WOA")
+        assert not bgc_source_has_own_ts(bgc, "CESM_REGRIDDED")
+        for name in ("constants", "ESPER", None):
+            assert not bgc_source_has_own_ts(bgc, name)
+
+        # Explicit external/default entries work too.
+        class WithTS:
+            bgc_source_ts = ("temp_bgc", "salt_bgc")
+
+        assert bgc_source_has_own_ts({"X": {"default": WithTS}}, "X")
+        assert bgc_source_has_own_ts({"X": defaultdict(lambda: WithTS)}, "X")
+
+
+class TestMaterializePhysicsTS:
+    def _ds(self, n_time=20):
+        rng = np.random.default_rng(0)
+        data = rng.random((n_time, 3, 4))
+        return (
+            xr.Dataset(
+                {
+                    "temp_west": (("bry_time", "s_rho", "eta_rho"), data),
+                    "salt_west": (("bry_time", "s_rho", "eta_rho"), data + 30),
+                    "zeta_west": (("bry_time", "eta_rho"), data[:, 0, :]),
+                }
+            ).chunk({"bry_time": 1}),
+            data,
+        )
+
+    def test_computes_one_time_chunk_at_a_time_and_rewraps_with_original_chunks(
+        self, monkeypatch
+    ):
+        from roms_tools.setup import utils as u
+
+        ds, data = self._ds(n_time=20)  # chunked one step per chunk
+        calls = []
+        real = u.dask.compute
+
+        def counting(*args, **kwargs):
+            calls.append(len(args))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(u.dask, "compute", counting)
+        u.materialize_physics_ts(ds, ["temp_west", "salt_west", "missing"])
+
+        assert len(calls) == 20  # one compute per time chunk ...
+        assert all(c == 2 for c in calls)  # ... covering both strips
+        for var, offset in (("temp_west", 0.0), ("salt_west", 30.0)):
+            out = ds[var]
+            assert out.chunks is not None
+            assert out.chunks[0] == tuple([1] * 20)  # original chunking restored
+            assert len(dict(out.data.dask)) <= out.data.npartitions + 1  # memory-backed
+            np.testing.assert_allclose(out.values, data + offset)
+        assert len(dict(ds["zeta_west"].data.dask)) > 0  # untouched
+
+    def test_each_upstream_chunk_is_computed_exactly_once(self):
+        """Slicing finer than the strip's own time chunks would recompute every
+        upstream chunk once per step (a 4-step chunk sliced one step at a time runs
+        its upstream four times). Iterating the strip's own chunks runs each once.
+        """
+        import dask.array as da
+
+        from roms_tools.setup import utils as u
+
+        seen = []
+
+        def upstream(block, block_info=None):
+            seen.append(block_info[None]["chunk-location"])
+            return block * 2.0
+
+        base = da.from_array(
+            np.arange(8 * 3 * 4, dtype="float64").reshape(8, 3, 4), chunks=(4, 3, 4)
+        )
+        lazy = base.map_blocks(upstream, dtype="float64")
+        ds = xr.Dataset({"temp_west": (("bry_time", "s_rho", "eta_rho"), lazy)})
+        u.materialize_physics_ts(ds, ["temp_west"])
+        assert sorted(seen) == [(0, 0, 0), (1, 0, 0)]  # two chunks, each once
+        np.testing.assert_allclose(ds["temp_west"].values, base.compute() * 2.0)
+        assert ds["temp_west"].chunks[0] == (4, 4)
+
+    def test_noop_without_dask_or_names(self):
+        from roms_tools.setup import utils as u
+
+        ds, data = self._ds()
+        eager = ds.compute()
+        u.materialize_physics_ts(eager, ["temp_west"])  # numpy: nothing to do
+        np.testing.assert_allclose(eager["temp_west"].values, data)
+        u.materialize_physics_ts(ds, [])  # empty: nothing to do
+
+    def test_logs_start_progress_and_completion(self, caplog):
+        """A multi-hour read with no files appearing needs to say so: one line up
+        front, one every 10 % of the time chunks, one at the end.
+        """
+        from roms_tools.setup import utils as u
+
+        ds, _ = self._ds(n_time=20)
+        with caplog.at_level(logging.INFO):
+            u.materialize_physics_ts(ds, ["temp_west", "salt_west"])
+        msgs = [r.getMessage() for r in caplog.records]
+        assert msgs[0].startswith("Reading the physics temp_west, salt_west")
+        assert "can take hours" in msgs[0]
+        progress = [m for m in msgs if "time steps read in" in m]
+        assert len(progress) == 10
+        assert progress[0].startswith("  temp_west, salt_west: 2/20 time steps")
+        assert progress[-1].startswith("  temp_west, salt_west: 20/20 time steps")
+        assert msgs[-1].startswith("Physics temp_west, salt_west realized in")
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            u.materialize_physics_ts(ds.compute(), ["temp_west"])  # no-op: silent
+        assert not caplog.records
+
+
+class TestCycleToTimes:
+    """``cycle_to_times`` puts a BGC source on the physics ``time`` axis."""
+
+    @staticmethod
+    def _clim():
+        from roms_tools.setup.utils import assign_dates_to_climatology
+
+        da = xr.DataArray(np.arange(1.0, 13.0), dims="time")
+        return assign_dates_to_climatology(da.to_dataset(name="v"), "time")["v"]
+
+    def test_exact_at_mid_month_and_linear_between(self):
+        from roms_tools.setup.utils import climatology_mid_month_days
+
+        clim = self._clim()
+        jan, feb = climatology_mid_month_days()[:2]  # days since 1 January (0-based)
+        base = np.datetime64("2012-01-01", "ns")
+        day = np.timedelta64(1, "D")
+        targets = xr.DataArray(
+            np.array(
+                [base + jan * day, base + feb * day, base + (jan + feb) // 2 * day]
+            ),
+            dims="time",
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True)
+        assert out.dims == ("time",)
+        np.testing.assert_array_equal(out["time"].values, targets.values)
+        np.testing.assert_allclose(out.values[:2], [1.0, 2.0], atol=1e-9)
+        assert 1.0 < out.values[2] < 2.0
+
+    def test_wraps_december_into_january(self):
+        clim = self._clim()
+        targets = xr.DataArray(
+            np.array(["2013-01-01", "2013-12-31T12"], dtype="datetime64[ns]"),
+            dims="time",
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True).values
+        # 1 Jan sits between mid-December (12) and mid-January (1): a blend, not an edge.
+        assert 1.0 < out[0] < 12.0 and 1.0 < out[1] < 12.0
+        # 1 Jan: ~6.3 (just below the 6.5 midpoint, so nearer January's value); 31 Dec
+        # evenly between December and the wrapped January.
+        assert out[0] > 6.0 and out[1] > 6.0
+
+    def test_dask_input_stays_lazy_and_matches(self):
+        clim = self._clim().chunk({"time": 4})
+        targets = xr.DataArray(
+            np.array(["2012-03-01", "2012-07-04"], dtype="datetime64[ns]"), dims="time"
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True)
+        assert hasattr(out.data, "chunks")
+        ref = cycle_to_times(self._clim(), "time", targets, climatology=True)
+        np.testing.assert_allclose(out.values, ref.values)
+
+    def test_output_is_blocked_one_month_per_chunk_and_each_block_stands_alone(self):
+        """``save_mfdataset`` computes every monthly file separately, so the cycled
+        array must come out blocked by month, with each block depending only on the
+        padded source -- not on one whole-run interpolation recomputed per file.
+        """
+        import dask
+
+        clim = self._clim().chunk({"time": -1})
+        targets = xr.DataArray(
+            np.arange("2012-01-01", "2012-05-01", dtype="datetime64[D]").astype(
+                "datetime64[ns]"
+            ),
+            dims="time",
+        )
+        out = cycle_to_times(clim, "time", targets, climatology=True)
+        assert out.chunks[0] == (31, 29, 31, 30)  # Jan, Feb, Mar, Apr 2012
+        # Computing one month runs a fraction of the whole graph's tasks.
+        seen: list = []
+
+        class Count(dask.callbacks.Callback):
+            def _pretask(self, key, dsk, state):
+                seen.append(key)
+
+        with Count():
+            out.isel(time=slice(0, 31)).compute()
+        one_month = len(seen)
+        seen.clear()
+        with Count():
+            out.compute()
+        assert one_month < len(seen) / 2
+        ref = cycle_to_times(self._clim(), "time", targets, climatology=True)
+        np.testing.assert_allclose(out.values, ref.values)
+
+    def test_non_climatology_source_shorter_than_the_physics_warns(self, caplog):
+        import logging
+
+        src = xr.DataArray(
+            [10.0, 20.0],
+            dims="t",
+            coords={
+                "t": np.array(["2012-01-01", "2012-01-11"], dtype="datetime64[ns]")
+            },
+        )
+        targets = xr.DataArray(
+            np.array(["2012-01-06", "2012-02-01"], dtype="datetime64[ns]"), dims="time"
+        )
+        with caplog.at_level(logging.WARNING):
+            out = cycle_to_times(src, "t", targets, climatology=False)
+        assert any(
+            "does not cover the physics times" in r.message for r in caplog.records
+        )
+        np.testing.assert_allclose(out.values, [15.0, 20.0])
+
+    def test_non_climatology_interpolates_and_holds_the_ends(self):
+        src = xr.DataArray(
+            [10.0, 20.0],
+            dims="t",
+            coords={
+                "t": np.array(["2012-01-01", "2012-01-11"], dtype="datetime64[ns]")
+            },
+        )
+        targets = xr.DataArray(
+            np.array(
+                ["2011-12-01", "2012-01-06", "2012-02-01"], dtype="datetime64[ns]"
+            ),
+            dims="time",
+        )
+        out = cycle_to_times(src, "t", targets, climatology=False)
+        assert out.dims == ("time",)
+        np.testing.assert_allclose(out.values, [10.0, 15.0, 20.0])
+
+    def test_static_field_is_broadcast(self):
+        src = xr.DataArray(np.ones((2, 3)), dims=("depth", "x"))
+        targets = xr.DataArray(
+            np.array(["2012-01-01", "2012-01-02"], dtype="datetime64[ns]"), dims="time"
+        )
+        out = cycle_to_times(src, None, targets, climatology=True)
+        assert out.dims == ("time", "depth", "x") and out.sizes["time"] == 2
+        np.testing.assert_array_equal(out["time"].values, targets.values)
+
+    def test_rejects_a_climatology_without_timedelta_axis(self):
+        src = xr.DataArray([1.0, 2.0], dims="time", coords={"time": [0, 1]})
+        targets = xr.DataArray(
+            np.array(["2012-01-01"], dtype="datetime64[ns]"), dims="time"
+        )
+        with pytest.raises(ValueError, match="timedelta64"):
+            cycle_to_times(src, "time", targets, climatology=True)

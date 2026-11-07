@@ -46,13 +46,27 @@ manual ``serialize_dask`` escape hatch is what remains of it.)
 
 from __future__ import annotations
 
-import itertools
+import dataclasses
+import logging
+import os
 import sys
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import xarray as xr
 
-from roms_tools.setup.utils import compute_in_situ_density, get_variable_metadata
+from roms_tools.setup.bgc_model import MARBL_PARM_O2_MIN
+from roms_tools.setup.utils import (
+    apply_chunk_plan,
+    compute_in_situ_density,
+    get_variable_metadata,
+    month_aligned_time_chunks,
+    time_dim_of,
+)
+
+if TYPE_CHECKING:
+    from PyESPER.salinity_conditioning import SalinityConditioning
 
 # Fallback ceiling on ESPER chunk size, used only when PyESPER does not expose its
 # own budget helper. Equal to the value PyESPER itself hard-coded before it made the
@@ -94,10 +108,6 @@ def _pyesper_point_budget(method: str, n_variables: int) -> int:
         return _MAX_POINTS_PER_CHUNK
 
 
-# Dim names treated as the time axis when no datetime coordinate identifies one
-# (see _time_dim). Ordered by how specific they are to a real time axis.
-_TIME_DIM_NAMES = ("time", "bry_time", "abs_time")
-
 # ROMS/MARBL tracer name -> PyESPER "DesiredVariable" name.
 ROMS_TO_ESPER = {
     "NO3": "nitrate",
@@ -112,6 +122,32 @@ ESPER_TO_ROMS = {v: k for k, v in ROMS_TO_ESPER.items()}
 #: ROMS/MARBL tracers the ESPER source can derive from T/S.
 ESPER_SUPPORTED_VARS = tuple(ROMS_TO_ESPER)
 
+#: Lower bound (mmol/m³) applied to EVERY estimate after the unit conversion, with or
+#: without salinity conditioning. The nets are unconstrained regressions, so they
+#: overshoot below the physical range at the low end: nutrients and oxygen go negative.
+#: Zero is the obvious floor for the nutrients. Oxygen gets 5.0, MARBL's default
+#: ``parm_o2_min``: ESPER's negative excursions sit in the oxygen minimum zones (Bay of
+#: Bengal, eastern tropical Pacific, ~300-700 m), and below ``parm_o2_min`` MARBL's
+#: biology is flat -- O2 consumption is fully off and denitrification fully on for any
+#: O2 in [0, 5] (``parm_o2_min_delta`` = 5 ramps both between 5 and 10) -- so no interior
+#: tendency can take O2 below 5. Values under it in ICs or boundary forcing are water
+#: the model cannot produce: they change no rate, only the inventory, and a boundary
+#: that keeps feeding them holds water suboxic longer as it mixes (more mixing is needed
+#: to cross 5 and 10), widening the denitrifying volume. WOA23 sits at 3-10 µmol/kg at
+#: these points on the 12 km Indo-Pacific and California Current boundaries measured
+#: (2010/2014), so the floor is at or above observations there. The value is
+#: ``MARBL_PARM_O2_MIN``. ALK and DIC never approach zero and keep the generic floor. Any
+#: point that ESPER put below 5.0 now reads 5.0 -- an output change relative to the
+#: earlier floors (0, then 2.0).
+ESPER_FLOORS: dict[str, float] = {
+    "ALK": 0.0,
+    "DIC": 0.0,
+    "NO3": 0.0,
+    "PO4": 0.0,
+    "SiO3": 0.0,
+    "O2": MARBL_PARM_O2_MIN,
+}
+
 _VALID_METHODS = ("lir", "nn", "mixed")
 
 #: Shared install guidance. ``{problem}`` names which of the two failure modes was hit
@@ -119,6 +155,10 @@ _VALID_METHODS = ("lir", "nn", "mixed")
 #: upstream rather than the fork. The second is the confusing one: the package imports
 #: fine and only fails on the ``*_xr`` names, which reads like a version skew rather
 #: than the wrong project.
+# The fork is installed from a clone at a tag, never from PyPI/conda; its versions are
+# `<upstream>+cworthy.<n>` with a matching tag. Bump this with each fork tag.
+_PYESPER_FORK_TAG = "v1.1.1+cworthy.1"
+
 _PYESPER_INSTALL_HINT = (
     "The ESPER BGC source requires CWorthy's PyESPER fork. PyESPER support is "
     "considered experimental at this time.\n"
@@ -127,7 +167,7 @@ _PYESPER_INSTALL_HINT = (
     "\n"
     "Install it from source:\n"
     "\n"
-    "    git clone https://github.com/CWorthy-ocean/PyESPER\n"
+    f"    git clone --branch {_PYESPER_FORK_TAG} https://github.com/CWorthy-ocean/PyESPER\n"
     "    cd PyESPER\n"
     "    pip install -e .\n"
     "\n"
@@ -196,70 +236,6 @@ def _ensure_pyesper(path=None):
                 del sys.modules[name]
 
 
-def _time_dim(da: xr.DataArray) -> str | None:
-    """Name of ``da``'s time dimension, or None when it has no usable one.
-
-    Prefers a dim carrying a datetime64 coordinate -- what the boundary path
-    hands us, since ``BoundaryForcing._process_bgc_esper`` renames ``abs_time``
-    to ``time`` precisely so the datetime view *is* the dim -- and falls back to
-    a conventional name for a bare dim with no coordinate. Initial conditions
-    have no time dim at all (one instant, one level-set), so this returns None
-    there and :func:`_pyesper_chunk_plan` keeps its spatial-split behaviour.
-    """
-    for dim in da.dims:
-        coord = da.coords.get(dim)
-        if coord is not None and np.issubdtype(coord.dtype, np.datetime64):
-            return str(dim)
-    for name in _TIME_DIM_NAMES:
-        if name in da.dims:
-            return name
-    return None
-
-
-def _month_aligned_time_chunks(
-    da: xr.DataArray, time_dim: str, max_steps: int
-) -> tuple[int, ...] | int:
-    """Chunk lengths along ``time_dim``: exactly one block per calendar month, or
-    a uniform ``max_steps`` when the coordinate isn't datetimes (or one month
-    alone would exceed ``max_steps``, e.g. sub-daily forcing on a large grid).
-
-    One block per month -- never several months bundled into one, even when they
-    would fit ``max_steps`` -- because a block is recomputed once per output file
-    it feeds. ``xarray.save_mfdataset(compute=True)`` issues a *separate*
-    ``dask.compute`` per file (``writes = [w.sync(compute=compute) for w in
-    writers]``), so nothing is shared between files: a block spanning N monthly
-    files is computed in full N times. Measured on the 12-month Pacific boundary
-    axis (367 daily steps, 14 monthly files), counting the time steps each file's
-    graph forces:
-
-        one block per month      2.8x the useful work
-        two months per block     4.8x
-        time collapsed to one    14.0x   (every block spans every file)
-
-    Undersized blocks only cost PyESPER's fixed per-call setup (~2.4 s measured),
-    which is cheap next to recomputing whole months; oversized ones cost real
-    duplicated estimation. So this errs small. For data coarse enough that
-    ``group_dataset`` writes yearly rather than monthly files, monthly blocks are
-    finer than the file partition -- a few extra calls, still no recompute, since
-    each block feeds exactly one file.
-    """
-    coord = da.coords.get(time_dim)
-    if coord is None or not np.issubdtype(coord.dtype, np.datetime64):
-        return max_steps
-    index = coord.to_index()
-    # Run lengths of consecutive (year, month). `group_by_month` groups by the
-    # (year, month) *value*; for the monotonic time axes ROMS forcing carries
-    # that is the same partition, and run lengths are what `.chunk()` needs --
-    # dask blocks have to be contiguous.
-    months = [
-        sum(1 for _ in group)
-        for _, group in itertools.groupby(zip(index.year, index.month, strict=True))
-    ]
-    if not months or max(months) > max_steps:
-        return max_steps
-    return tuple(months)
-
-
 def _pyesper_chunk_plan(
     da: xr.DataArray, max_points: int | None = None
 ) -> dict[str, int | tuple[int, ...]]:
@@ -268,10 +244,10 @@ def _pyesper_chunk_plan(
     the ceiling comes from and why matching it matters) -- one plan, not each
     input rechunked independently, so they stay consistently blocked with each
     other. Apply it with
-    :func:`_apply_chunk_plan`, which drops the entries a given input can't take.
+    :func:`~roms_tools.setup.utils.apply_chunk_plan`, which drops the entries a given input can't take.
 
     Cuts along **time** whenever there is a time axis to cut (see
-    :func:`_time_dim`), leaving the spatial dims whole. That is a memory choice,
+    :func:`~roms_tools.setup.utils.time_dim_of`), leaving the spatial dims whole. That is a memory choice,
     not a chunk-count one. Cutting a boundary slab spatially leaves every chunk
     needing the *entire* time range of the upstream regrid behind it, so a
     year-long run has to hold a year-long GLORYS slab per chunk and nothing can
@@ -295,14 +271,14 @@ def _pyesper_chunk_plan(
         return {d: -1 for d in da.dims}
 
     plan: dict[str, int | tuple[int, ...]] = {d: -1 for d in da.dims}
-    time_dim = _time_dim(da)
+    time_dim = time_dim_of(da)
 
     if time_dim is not None and da.sizes[time_dim] > 1:
         per_step = max(1, da.size // da.sizes[time_dim])
         if per_step <= cap:
             # The ordinary case: one time step's spatial slab fits the budget, so
             # time is the only axis that needs cutting.
-            plan[time_dim] = _month_aligned_time_chunks(
+            plan[time_dim] = month_aligned_time_chunks(
                 da, time_dim, max(1, cap // per_step)
             )
             return plan
@@ -324,29 +300,6 @@ def _pyesper_chunk_plan(
     per_slice = max(1, da.size // da.sizes[chunk_dim])
     plan[chunk_dim] = max(1, cap // per_slice)
     return plan
-
-
-def _apply_chunk_plan(
-    da: xr.DataArray, plan: dict[str, int | tuple[int, ...]]
-) -> xr.DataArray:
-    """Apply as much of ``plan`` as ``da`` can take, and return the result.
-
-    ``DataArray.chunk`` raises on a mapping key that isn't one of the array's own
-    dims, so a plan derived from ``temp`` has to be filtered per input: 2D
-    ``lon``/``lat`` against a 3D ``temp``, and a boundary ``depth`` that need not
-    carry the time dim at all. A tuple entry additionally has to sum to that
-    input's own length along the dim; where it doesn't, fall back to a single
-    chunk for that dim rather than raising -- the inputs are broadcast against
-    each other downstream regardless.
-    """
-    filtered: dict[str, int | tuple[int, ...]] = {}
-    for dim, spec in plan.items():
-        if dim not in da.dims:
-            continue
-        if isinstance(spec, tuple) and sum(spec) != da.sizes[dim]:
-            spec = -1
-        filtered[dim] = spec
-    return da.chunk(filtered) if filtered else da
 
 
 def _decimal_year(time_da: xr.DataArray) -> xr.DataArray:
@@ -376,7 +329,136 @@ def validate_esper_source(source: dict) -> None:
             "ESPER source 'equation' must be 8 (salinity+temperature) or 16 "
             f"(salinity only), got {equation!r}."
         )
+    if "groom" in source:
+        raise ValueError(
+            "Grooming is no longer a key of the ESPER source: pass groom=True/False "
+            "(and optionally groom_settings) to InitialConditions or BoundaryForcing."
+        )
     _ensure_pyesper(source.get("path"))
+    _salinity_conditioning(source)
+
+
+def _groomed_esper_vars(companion: Any) -> list[str]:
+    """ESPER-derived tracers present in ``companion.ds`` (bare or ``_<side>`` names), or
+    none when the companion is not an ESPER source.
+    """
+    if companion.source.get("name") != "ESPER":
+        return []
+    want = set(companion.use_vars or ESPER_SUPPORTED_VARS)
+    present = set(companion.ds.data_vars)
+    return [
+        v
+        for v in ESPER_SUPPORTED_VARS
+        if v in want and (v in present or any(n.startswith(f"{v}_") for n in present))
+    ]
+
+
+def _groom_checks(variables: list[str], ds_vars: Iterable[str], checks: dict) -> dict:
+    """``checks`` for ``variables``; DIC drops its ALK-based check when no ALK is
+    available (e.g. an ESPER boundary file without ALK).
+    """
+    out = {v: checks[v] for v in variables}
+    names = set(ds_vars)
+    has_alk = "ALK" in names or any(n.startswith("ALK_") for n in names)
+    if "DIC" in out and not has_alk:
+        out["DIC"] = dataclasses.replace(out["DIC"], physical_reality=None, requires=())
+    return out
+
+
+def groom_esper_companions(
+    companions: Iterable[Any],
+    grid: Any,
+    physics_ds: xr.Dataset,
+    settings: dict | None = None,
+    load: bool = False,
+) -> None:
+    """Groom, in place, the tracers each ESPER companion supplies (initial conditions or
+    boundary forcing); other companions are left alone. ``physics_ds`` supplies salt and
+    temp; ``settings`` is a ``groom_settings`` dict (see
+    :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`).
+
+    Lazy unless ``load``: an object built with ``use_dask=False`` passes True, so its data
+    is in memory and the groom is not recomputed on every access.
+
+    Call it before ``process_bgc_fields``, so the tracers that model derives from DIC and
+    ALK (``DIC_ALT_CO2``, ``ALK_ALT_CO2``) are copied from the groomed values.
+    """
+    from roms_tools.setup.bgc_groom import bgc_groom, resolve_groom_settings
+
+    checks, params = resolve_groom_settings(settings)
+    groomed_any = False
+    for c in companions:
+        variables = _groomed_esper_vars(c)
+        if not variables:
+            continue
+        groomed_any = True
+        groomed = bgc_groom(
+            c.ds,
+            grid,
+            physics_ds,
+            checks=_groom_checks(variables, c.ds.data_vars, checks),
+            variables=variables,
+            **params,
+        )
+        assert isinstance(groomed, xr.Dataset)
+        c.ds = groomed.load() if load else groomed
+    if settings is not None and not groomed_any:
+        logging.getLogger(__name__).info(
+            "groom_settings has no effect: no ESPER source supplies groomable tracers."
+        )
+
+
+def _salinity_conditioning(source: dict) -> SalinityConditioning | None:
+    """The ``PyESPER.salinity_conditioning.SalinityConditioning`` for ``source``, or
+    ``None`` when the source does not ask for it.
+
+    ``source["salinity_conditioning"]`` is a mapping with ``woa_salinity_path`` (the
+    WOA23 1-degree annual-mean salinity file, ``woa23_decav_s00_01.nc``) and optional
+    ``low``/``high`` band edges in PSU (PyESPER's defaults: 31 and 34). PyESPER does
+    not download the file; a missing one raises ``FileNotFoundError`` naming the NCEI
+    URL. ``None``/``False``/an empty mapping mean off.
+
+    ESPER's nets have no training data at river-plume salinities and extrapolate
+    unphysically there (silicate > 100 µmol/kg, negative nutrients, DIC above TA);
+    conditioning blends the salinity *they see* toward climatology below the band and
+    leaves everything above it bit-identical. The rationale and measurements are in
+    PyESPER's module docstring.
+    """
+    spec = source.get("salinity_conditioning")
+    if not spec:
+        return None
+    if not isinstance(spec, dict):
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' must be a mapping with "
+            "'woa_salinity_path' (and optional 'low'/'high' band edges in PSU), "
+            f"got {spec!r}."
+        )
+    unknown = set(spec) - {"woa_salinity_path", "low", "high"}
+    if unknown:
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' has unknown key(s) "
+            f"{sorted(unknown)}; allowed: 'woa_salinity_path', 'low', 'high'."
+        )
+    if not spec.get("woa_salinity_path"):
+        raise ValueError(
+            "ESPER source 'salinity_conditioning' needs 'woa_salinity_path': the WOA23 "
+            "1-degree annual-mean salinity file (woa23_decav_s00_01.nc). PyESPER does "
+            "not download it: roms_tools.datasets.download.download_woa23_bgc("
+            "variables=['salt_bgc']) fetches it into pooch.os_cache('roms-tools')/WOA23, "
+            "or see PyESPER.salinity_conditioning.WOA23_SALINITY_URL."
+        )
+    try:
+        from PyESPER.salinity_conditioning import SalinityConditioning
+    except ImportError as exc:
+        raise ImportError(
+            "The installed PyESPER has no `salinity_conditioning` module. Salinity "
+            f"conditioning needs the CWorthy fork at tag {_PYESPER_FORK_TAG} or later "
+            f"(git clone --branch {_PYESPER_FORK_TAG} "
+            "https://github.com/CWorthy-ocean/PyESPER; pip install -e .)."
+        ) from exc
+    band = {k: float(spec[k]) for k in ("low", "high") if k in spec}
+    # FileNotFoundError (with the download URL) and band ValueError propagate as-is.
+    return SalinityConditioning(spec["woa_salinity_path"], **band)
 
 
 def estimate_bgc_fields(
@@ -406,6 +488,9 @@ def estimate_bgc_fields(
         (default ``"nn"``), ``equation`` (default 8). ``path`` points at a PyESPER
         repository checkout; omit it when PyESPER is installed in the environment
         (``pip install -e <checkout>``), in which case PyESPER finds its own data.
+        ``salinity_conditioning`` (optional mapping, see :func:`_salinity_conditioning`)
+        makes PyESPER evaluate the nets at a climatological salinity wherever the
+        model salinity is below the nets' training support.
     roms_variables : sequence of str
         ROMS/MARBL tracer names to derive (subset of :data:`ESPER_SUPPORTED_VARS`).
     est_dates : float or xarray.DataArray, optional
@@ -422,6 +507,7 @@ def estimate_bgc_fields(
     method = str(source.get("method", "nn")).lower()
     equation = source.get("equation", 8)
     path = source.get("path") or ""
+    conditioning = _salinity_conditioning(source)
 
     unknown = [v for v in roms_variables if v not in ROMS_TO_ESPER]
     if unknown:
@@ -447,12 +533,12 @@ def estimate_bgc_fields(
         chunk_plan = _pyesper_chunk_plan(
             temp, _pyesper_point_budget(method, len(esper_vars))
         )
-        salt = _apply_chunk_plan(salt, chunk_plan)
-        temp = _apply_chunk_plan(temp, chunk_plan)
-        lon = _apply_chunk_plan(lon, chunk_plan) if hasattr(lon.data, "chunks") else lon
-        lat = _apply_chunk_plan(lat, chunk_plan) if hasattr(lat.data, "chunks") else lat
+        salt = apply_chunk_plan(salt, chunk_plan)
+        temp = apply_chunk_plan(temp, chunk_plan)
+        lon = apply_chunk_plan(lon, chunk_plan) if hasattr(lon.data, "chunks") else lon
+        lat = apply_chunk_plan(lat, chunk_plan) if hasattr(lat.data, "chunks") else lat
         depth_pos = (
-            _apply_chunk_plan(depth_pos, chunk_plan)
+            apply_chunk_plan(depth_pos, chunk_plan)
             if hasattr(depth_pos.data, "chunks")
             else depth_pos
         )
@@ -467,6 +553,11 @@ def estimate_bgc_fields(
         path=str(path),
         equation=equation,
         est_dates=est_dates,
+        # Only when asked for: a PyESPER fork that predates the keyword must keep
+        # working with conditioning off (the convention _pyesper_point_budget's
+        # fallback follows too), and passing it explicitly as None broke exactly
+        # that, after the physics regrid had already run.
+        **({} if conditioning is None else {"salinity_conditioning": conditioning}),
     )
 
     # Results are deliberately left lazy: PyESPER's own kernel lock keeps its
@@ -476,8 +567,8 @@ def estimate_bgc_fields(
     # share this call's per-chunk upstream work (they are all one graph).
 
     # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
-    # depth), matching the GLODAP/WOA adapters' convention; then clamp
-    # physically non-negative tracers at 0.
+    # depth), matching the GLODAP/WOA adapters' convention; then clamp each tracer
+    # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 5.0 for O2).
     density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()
@@ -485,11 +576,34 @@ def estimate_bgc_fields(
     out: dict[str, xr.DataArray] = {}
     for roms_name in roms_variables:
         da = est[ROMS_TO_ESPER[roms_name]] * factor
-        da = da.clip(min=0.0)
+        floor = ESPER_FLOORS[roms_name]
+        da = da.clip(min=floor)
         meta = d_meta.get(roms_name, {})
         if "long_name" in meta:
             da.attrs["long_name"] = meta["long_name"]
         if "units" in meta:
             da.attrs["units"] = meta["units"]
+        if floor > 0:
+            da.attrs["esper_floor"] = (
+                f"PyESPER estimate clamped at {floor:g} mmol/m^3 (see "
+                "roms_tools.setup.esper.ESPER_FLOORS)"
+            )
+        if conditioning is not None:
+            da.attrs["esper_salinity_conditioning"] = (
+                f"salinity fed to PyESPER blended (raised cosine, "
+                f"{conditioning.low:g}-{conditioning.high:g} PSU) toward "
+                f"{os.path.basename(conditioning.woa_salinity_path)}"
+            )
+            if roms_name in ("ALK", "DIC"):
+                endmember = (
+                    conditioning.ta_endmember
+                    if roms_name == "ALK"
+                    else conditioning.dic_endmember
+                )
+                da.attrs["esper_salinity_conditioning"] += (
+                    "; estimate diluted back to the model salinity along a "
+                    f"conservative mixing line (freshwater endmember {endmember:g} "
+                    "umol/kg)"
+                )
         out[roms_name] = da
     return out

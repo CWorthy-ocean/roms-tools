@@ -69,12 +69,38 @@ html_theme_options = {
 }
 
 
+def _strip_ipython_syntax(notebook):
+    """Rewrite IPython-only cell syntax so the exported script runs under plain Python.
+
+    nbconvert turns cell magics into ``get_ipython()`` calls, which fail outside
+    IPython. Bare ``%%time``/``%time`` lines are dropped and ``%%bash`` cells become
+    ``subprocess.run`` calls.
+    """
+    for cell in notebook.cells:
+        if cell.cell_type != "code":
+            continue
+        lines = [
+            line
+            for line in cell.source.splitlines()
+            if line.strip() not in ("%%time", "%time")
+        ]
+        if lines and lines[0].strip() == "%%bash":
+            body = "\n".join(lines[1:]).strip("\n") + "\n"
+            lines = [
+                "import subprocess",
+                "",
+                f'subprocess.run({body!r}, shell=True, executable="/bin/bash")',
+            ]
+        cell.source = "\n".join(lines)
+
+
 def export_notebooks_as_scripts(app):
     """Export select tutorial notebooks as plain .py scripts for download.
 
     Not all tutorials benefit from a script version, so this is opt-in via
     the `SCRIPT_EXPORT_NOTEBOOKS` list rather than applied to every notebook.
     """
+    import nbformat
     from nbconvert import PythonExporter
 
     docs_dir = os.path.abspath(os.path.dirname(__file__))
@@ -84,7 +110,9 @@ def export_notebooks_as_scripts(app):
     exporter = PythonExporter()
     for name in SCRIPT_EXPORT_NOTEBOOKS:
         notebook_path = os.path.join(docs_dir, f"{name}.ipynb")
-        script, _ = exporter.from_filename(notebook_path)
+        notebook = nbformat.read(notebook_path, as_version=4)
+        _strip_ipython_syntax(notebook)
+        script, _ = exporter.from_notebook_node(notebook)
         with open(os.path.join(static_dir, f"{name}.py"), "w") as f:
             f.write(script)
 

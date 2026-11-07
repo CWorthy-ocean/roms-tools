@@ -1,5 +1,164 @@
 # Release notes
 
+## 5.3.0
+
+### Breaking Changes
+
+* River order and `nriver` IDs in output files change: rivers are now ordered largest first by `vol_stn` (ties by name) instead of by mean discharge over the requested window. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* GloFAS river files now contain rivers below `min_discharge_m3s` (default 1 m³/s) with zero discharge instead of omitting them, so files have more rivers. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* At grid cells shared by several rivers, `river_index` now points to the merged `overlap_*` river, and repeated merged-river names get `_2`, `_3`, … suffixes. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+
+### Bug Fixes
+
+* `compute_cdr_metrics` (and `ROMSOutput.cdr_metrics`) counted the perturbation in a domain's outermost boundary rows and columns, which a nested child has already exported to its parent, so `UpscaledCDR` counted it twice and its `closure_residual` did not close. ([#713](https://github.com/CWorthy-ocean/roms-tools/pull/713))
+  * Both the flux-based and the DIC-difference uptake now sum over the interior rho points only, for release and transfer domains alike.
+  * `UpscaledCDR`'s `<parent>_DIC_difference_inside_<child>` diagnostic uses the child's interior as its footprint, to match.
+* Discharge from rivers sharing a grid cell now reaches the grid; previously the merged river was overwritten by a zero-volume original and its discharge was lost. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* Rivers split across several cells, some shared, no longer have the discharge on their remaining cells cut twice. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* Merged rivers for overlapping cells now always get unique names; a river in two overlaps no longer produces duplicate names that lose a cell. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* grids whose domain has no land from the mask_shapefile (e.g. open ocean) no longer crash in mask creation. you get an all-water mask. ([#711](https://github.com/CWorthy-ocean/roms-tools/pull/711))
+* Initial conditions from a ROMS restart no longer repeat the parent's deepest water at child levels below the parent's bottom; those tracers now come from the nearest deeper parent column at the same depth. ([#709](https://github.com/CWorthy-ocean/roms-tools/pull/709))
+  * This changes the initial state of any nested child that is deeper than its parent somewhere, for physics and BGC tracers alike; velocities are unchanged.
+  * If no parent column anywhere is deep enough, the old value is kept and a warning reports how many cells were affected.
+
+### Improvements
+
+* River order and river IDs no longer depend on `start_time`/`end_time`, and YAML round trips produce the same order. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* Rivers below the minimum discharge keep their IDs and grid cells, so the river set is the same for every time window. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+
+### Miscellaneous
+
+* The end-to-end notebook now creates its BGC boundary forcing with `BoundaryForcing` and `bgc_model=BGCMarbl`, so the file it writes includes `Lig`, `DIC_ALT_CO2` and `ALK_ALT_CO2`. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
+* The end-to-end tutorial's "Download as .py script" file now runs with plain `python` instead of failing on IPython-only syntax. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
+* The end-to-end notebook's outputs before "Running ROMS" were re-run against current ROMS-Tools, and several small text errors are fixed. ([#712](https://github.com/CWorthy-ocean/roms-tools/pull/712))
+* The CDR analysis docs say that both uptake integrals leave out the boundary rows and columns. ([#713](https://github.com/CWorthy-ocean/roms-tools/pull/713))
+* River forcing documentation updated for the new river ordering and overlap handling (executed notebook outputs not re-run). ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* `river_forcing_no_climatology` and `river_forcing_with_bgc` reference fixtures regenerated; per-river volumes and tracers are unchanged, only river order and the owner of the one shared cell differ. ([#707](https://github.com/CWorthy-ocean/roms-tools/pull/707))
+* The methods page and the initial-conditions and nesting notebooks explain how levels below the parent's bottom are filled. ([#709](https://github.com/CWorthy-ocean/roms-tools/pull/709))
+
+## 5.2.2
+
+### New Features
+
+* roms-tools now supports Python 3.14. ([#708](https://github.com/CWorthy-ocean/roms-tools/pull/708))
+  * On Python 3.14, `pip install roms-tools` builds pyamg from source (it has no 3.14 wheel yet), which needs a C++ compiler; conda-forge installs are unaffected.
+
+### Bug Fixes
+
+* Fixed `align_grids` blending the wrong child edge when a boundary is closed: with one boundary closed (by the user, or inferred because that edge is entirely land), the child's topography and mask on a different, open boundary were left unblended and could differ substantially from the parent's there. ([#705](https://github.com/CWorthy-ocean/roms-tools/pull/705))
+
+### Improvements
+
+* roms-tools now accepts numpy 2.3 (previously capped below 2.3). ([#708](https://github.com/CWorthy-ocean/roms-tools/pull/708))
+
+### Miscellaneous
+
+* CI runs the `use_dask=False` test job on Python 3.14 in addition to 3.12 and 3.13. ([#708](https://github.com/CWorthy-ocean/roms-tools/pull/708))
+
+## 5.2.1
+
+### Breaking Changes
+
+* `UpscaledCDR` takes its per-domain metrics as `domains=` instead of `members=`, and writes the domain list to the `domains` attribute instead of `members`. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+
+### New Features
+
+* `UpscaledCDR.plot_domains()` maps the outline of every nested domain, labelled with its role, on a map with coastlines, zoomed out around the outermost domain so the location of the experiment is clear. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+
+### Improvements
+
+* `Ensemble` rejects the metrics of a parent ("transfer") domain of a nested experiment, with an error pointing to the combined `UpscaledCDR` dataset; previously this failed later with an unclear error. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+* The `closure_residual` description of `UpscaledCDR` no longer claims the residual should be small, which does not hold once the perturbation leaves a domain. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+
+### Miscellaneous
+
+* The CDR analysis notebook's nested-experiment section is revised. ([#700](https://github.com/CWorthy-ocean/roms-tools/pull/700))
+  * It maps the nested domains with `plot_domains()`.
+  * It corrects where the uptake and the DIC perturbation sit at the end of the example run.
+  * It explains that the combined `UpscaledCDR` dataset, not a single domain, represents a nested experiment in an `Ensemble`.
+
+## 5.2.0
+
+### Breaking Changes
+
+* ESPER-derived `O2` is now floored at 2.0 mmol/m³ instead of 0 (every ESPER estimate, with or without conditioning): the nets go negative inside the oxygen minimum zones where the WOA23 climatology sits at 3–10 mmol/m³ on the boundaries measured, so the old clip handed MARBL anoxic boundary water. Points ESPER put in [0, 2) now read 2.0; MARBL's suboxic behaviour (`parm_o2_min` = 5) is unchanged by it. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* BGC `BoundaryForcing` built with `bgc_interpolation_method='density'` or `'density_mld'` is now a series on the physics boundary time axis, grouped into files like the physics (monthly for daily physics) instead of one 12-record `_clim` file. It is cyclic (`cycle_length`) only when the physics itself is a climatology. It is about N_physics/12 times larger and covers only the physics window: ~11 GB per year against 0.37 GB before for a 600×600×100 grid with 32 tracers, and ~12 more forcing files per simulated year per density source (ucla-roms caps `frcfiles` at `max_frc_files = 360`). `'depth'` is unchanged. The old anchored-climatology output is removed, not optional. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+
+### New Features
+
+* ESPER sources take `salinity_conditioning: {"woa_salinity_path": ..., "low": 31, "high": 34}` (needs the PyESPER fork at tag `v1.1.1+cworthy.1` or later): PyESPER evaluates the nets at a salinity blended toward the WOA23 annual climatology below the band (raised cosine), then dilutes TA and DIC back to the model salinity along a conservative mixing line. Above the band nothing changes. The file is `woa23_decav_s00_01.nc`, which `download_woa23_bgc(variables=["salt_bgc"])` fetches; a missing file fails before any regridding, naming the URL. Output variables record the conditioning and floor in `esper_salinity_conditioning` / `esper_floor` attributes. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* `roms_tools.setup.utils.cycle_to_times` puts a climatology (or a dated BGC series, or a static field) on a physics time axis by linear interpolation in day of year with the December→January wrap, blocked one calendar month per chunk. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* BGC boundary datasets record `bgc_interpolation_method` (the method actually used, after any fallback to depth) and `bgc_time_axis` (`physics`, `source` or `static`). ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* `compute_cdr_metrics` and `ROMSOutput.cdr_metrics` take `source_role="release"` (default) or `"transfer"` for a parent domain that receives a child's boundary perturbation. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+  * For a transfer the sign checks on `ALK_source`/`DIC_source` are skipped and the efficiency curves are NaN (the member's source is not a release); uptake in tonnes CO₂ is computed as before.
+  * `ds_cdr` now also contains `cdr_cumulative_source`, a `tonnes_co2_per_native_unit` attribute on both uptake variables, and a `cdr_source_role` dataset attribute, so saved metrics can be recombined later.
+* `roms_tools.UpscaledCDR(members)` combines the `ds_cdr` of a child → parent chain of domains into a single CDR efficiency and CO₂ uptake dataset with the same variable names as `ds_cdr`, plus per-member uptake series and a `plot()` method. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+  * Uptake is summed over all members; the efficiency denominator is the cumulative source of the release members only.
+  * Construction fails with a clear error if two members share a grid, members are not strictly nested in the given order, no member is a release, or members differ in averaging window or native carbon units.
+  * Two diagnostics are emitted: `closure_residual` (flux-based minus inventory-based uptake) and `{parent}_DIC_difference_inside_{child}` (parent perturbation inside the child's footprint, i.e. double counting if nonzero).
+
+### Bug Fixes
+
+* Loading a kerchunk `.parquet` reference with `use_dask=False` no longer fails (`GroupNotFoundError`: the directory was taken for a zarr store), and kerchunk references opened without dask no longer come back as dask arrays. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* Boundary forcing and initial conditions with an ESPER or density-interpolated BGC source no longer re-run the physics regrid for every BGC variable at save time, which grew memory without bound (~12 GB/h on a 12 km ESPER boundary month, the signature that ended a 5-year run at >112 GB). The physics temperature and salinity are computed once when the object is built, one time chunk at a time, and held in memory until saved; the footprint scales with the run length (order 16 GB per year on a 100-level 1858×962 grid). ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* A source dict with nested paths (the conditioning key) now survives `to_yaml` → `from_yaml` → `to_yaml`: `serialize_source_dict` / `deserialize_source_dict` convert paths anywhere in the dict, not only under `path`. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* Density-interpolated BGC boundaries no longer place every year of a run on the density structure of a single sampled physics day. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* Opening a parquet kerchunk reference no longer fails intermittently with `TypeError` under pandas 3. The `remote_protocol` is read from the reference and passed to the kerchunk backend, so fsspec no longer guesses it from padding rows. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+
+### Improvements
+
+* Tests run with `--use_copernicus` now check the Copernicus Marine credentials once per session instead of failing test by test. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
+  * If the Copernicus auth server is unreachable or doesn't answer within 60 s, every Copernicus test is skipped with the reason shown.
+  * Missing or rejected credentials make every Copernicus test error with a message naming the environment variables to set.
+* `materialize_physics_ts` logs when the whole-run physics T/S read starts (naming what is read and that it can take hours), every 10 % of the time chunks with the elapsed time, and when it is done, so a multi-hour boundary build is no longer silent. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* Kerchunk reference files (e.g. Forge's GLORYS subchunk references) are read through a single dask layer and keep the reference's own lateral chunking, so a boundary crop reads the slabs it needs instead of decoding whole global levels: one day's 12 km crop went from 19.7 s to 0.8 s. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* `estimate_bgc_fields` forwards `salinity_conditioning` to PyESPER only when set, so a PyESPER fork that predates the keyword keeps working with conditioning off. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* The PyESPER install guidance (import error, missing-module error, docs) clones the fork at tag `v1.1.1+cworthy.1`; the tag lives in one constant, bumped with each fork tag. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* The physics-time helpers the ESPER path grew (`time_dim_of`, `month_aligned_time_chunks`, `apply_chunk_plan`, `physics_time_view`) live in `roms_tools.setup.utils` and are shared by both companions. ([#694](https://github.com/CWorthy-ocean/roms-tools/pull/694))
+* A parquet kerchunk reference directory is recognised by its contents (`.zmetadata` plus `<var>/refs.*.parq`), not only by a `.parquet` suffix. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+* `load_data` raises a clear `ValueError` when kerchunk references are mixed with other files in one call, or when references loaded together point at files on different filesystems. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+* A `ds_cdr` produced before source roles existed is treated as a release by `ROMSOutput.cdr_metrics`. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+
+### Miscellaneous
+
+* The CDR forcing docs and API docstrings now refer to the ucla-roms CDR-LiTE CPP option by its new name, `CDR_LITE`. ([#691](https://github.com/CWorthy-ocean/roms-tools/pull/691))
+* CI no longer runs `copernicusmarine login` before the Copernicus tests; credentials come from the `COPERNICUSMARINE_SERVICE_*` environment variables. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
+* CI test steps for the two Copernicus jobs stop on the first failing command, print skip reasons, and the GLORYS invariance step is capped at 30 minutes. ([#696](https://github.com/CWorthy-ocean/roms-tools/pull/696))
+* `kerchunk` and `fastparquet` are dev/CI dependencies, so the kerchunk reference tests now run in CI over both `.json` and `.parquet` references. ([#692](https://github.com/CWorthy-ocean/roms-tools/pull/692))
+* `docs/datasets_overview.rst` gains an ESPER section (keys, conditioning, floors, attributes). ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* Two ESPER tests that stub the PyESPER entry points no longer need PyESPER, so the floor and the keyword contract have CI coverage. ([#693](https://github.com/CWorthy-ocean/roms-tools/pull/693))
+* The GLORYS subchunking recipe in `docs/datasets_read.ipynb` now opens the reference with `engine="kerchunk"`, `open_dataset_options={"chunks": None}` and `storage_options={"remote_protocol": "file"}`. A new note explains each option and that ROMS-Tools does this automatically when the reference is given as the source `path`. ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+* New tests: ([#698](https://github.com/CWorthy-ocean/roms-tools/pull/698))
+  * A parquet fixture with padding rows is opened under several hash seeds in subprocesses. Each seed fails without the fix.
+  * Protocol detection, and that JSON references are not read for it.
+  * The protocol cache re-reads a rewritten reference.
+  * An unreadable reference falls back with a debug log.
+  * A parquet directory without the suffix, and the mixed-input and mixed-filesystem errors.
+* The CDR analysis notebook gains a section on nested (upscaled) experiments: per-domain metrics with source roles, `UpscaledCDR`, its diagnostics and the wrong-grid error, executed on a three-domain test case. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+* `UpscaledCDR` is listed in the API reference. ([#695](https://github.com/CWorthy-ocean/roms-tools/pull/695))
+
+## 5.1.1
+
+### Bug Fixes
+
+* Switching from a regular to an editable install no longer fails with `cannot import name 'Grid' from 'roms_tools' (unknown location)` due to leftover numba cache files in site-packages. ([#688](https://github.com/CWorthy-ocean/roms-tools/pull/688))
+* Saving boundary forcing no longer fails (xarray 2025.8) or warns (later releases) about an unlimited `time` dimension the dataset no longer has. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+  * Boundary files also no longer carry the empty, unused `time` dimension that older xarray wrote; `bry_time` is unchanged.
+* Saving with `format="NETCDF3_64BIT_OFFSET"` or `"NETCDF3_64BIT_DATA"` works with xarray 2026.9 and newer. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+
+### Improvements
+
+* Compiled numba kernels are now cached in `roms-tools-numba` under the user cache directory (e.g. `~/Library/Caches/roms-tools-numba`), or under `NUMBA_CACHE_DIR` if set. ([#688](https://github.com/CWorthy-ocean/roms-tools/pull/688))
+* Merge and concat calls that xarray warns will change default behaviour now spell out today's defaults, so a future xarray default change cannot silently alter results. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+
+### Miscellaneous
+
+* Release notes no longer truncate PR-description bullets that are wrapped across several lines, and no longer include `N/A (reason)`-style placeholders. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* The release-notes branch is now deleted when a release is published and recreated from `main`, so a finalize PR can no longer re-include the previous release's notes and conflict with them. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* The release-notes workflows run `main`'s copy of their scripts, so a fix to them applies immediately rather than whenever the notes branch next catches up with `main`. ([#686](https://github.com/CWorthy-ocean/roms-tools/pull/686))
+* Minimum numba version raised to 0.62. ([#688](https://github.com/CWorthy-ocean/roms-tools/pull/688))
+* The xarray upper bound is removed; roms-tools now runs with xarray 2026.9 and newer. ([#689](https://github.com/CWorthy-ocean/roms-tools/pull/689))
+
 ## 5.1.0
 
 ### Breaking Changes

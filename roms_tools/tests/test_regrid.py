@@ -2,7 +2,13 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.regrid import VerticalRegrid
+from roms_tools.regrid import (
+    VerticalRegrid,
+    per_variable_mask_name,
+    select_source_mask,
+    select_source_mask_name,
+    source_mask_name,
+)
 
 try:
     import xesmf  # type: ignore
@@ -299,3 +305,85 @@ def test_vertical_regrid_mask_edges():
     assert np.isnan(out[0])
     assert np.isnan(out[-1])
     assert not np.isnan(out[1])
+
+
+# Source mask selection
+def _masked_source(*mask_names):
+    """A source with a tracer ``silicate``, a ``u`` and the named 1 x 2 masks."""
+    ds = xr.Dataset(
+        {"silicate": (("y", "x"), np.ones((1, 2))), "u": (("y", "x"), np.ones((1, 2)))}
+    )
+    for name in mask_names:
+        ds[name] = (("y", "x"), np.array([[1, 0]]))
+    return ds
+
+
+@pytest.mark.parametrize(
+    ("masks", "var_name", "is_vector", "expected"),
+    [
+        (("mask", "mask_vel", "mask_silicate"), "silicate", False, "mask_silicate"),
+        # The variable's own mask wins over mask_vel, even for a vector.
+        (("mask", "mask_vel", "mask_silicate"), "silicate", True, "mask_silicate"),
+        (("mask", "mask_vel", "mask_silicate"), "u", True, "mask_vel"),
+        (("mask", "mask_vel"), "u", False, "mask"),
+        (("mask",), "u", True, "mask"),
+        (("mask", "mask_vel"), None, True, "mask_vel"),
+        (("mask", "mask_vel"), None, False, "mask"),
+        ((), "silicate", False, None),
+        ((), "u", True, None),
+        # A mask of a variable that is not in the source is not that variable's.
+        (("mask", "mask_oxygen"), "silicate", False, "mask"),
+    ],
+)
+def test_source_mask_name_precedence(masks, var_name, is_vector, expected):
+    ds = _masked_source(*masks)
+    assert source_mask_name(ds, var_name, is_vector=is_vector) == expected
+
+
+def test_per_variable_mask_name():
+    assert per_variable_mask_name("silicate") == "mask_silicate"
+
+
+def test_select_source_mask_picks_a_shared_mask_only_on_the_masked_path():
+    ds = _masked_source("mask", "mask_vel", "mask_silicate")
+    kwargs = {"use_xesmf": True, "prefill": None}
+    assert select_source_mask(ds, is_vector=False, **kwargs).name == "mask"
+    assert select_source_mask(ds, is_vector=True, **kwargs).name == "mask_vel"
+    # A prefilled source, or the scipy path, uses no mask at all.
+    assert (
+        select_source_mask(
+            ds, is_vector=False, use_xesmf=True, prefill="2d_lateral_fill"
+        )
+        is None
+    )
+    assert (
+        select_source_mask(ds, is_vector=False, use_xesmf=False, prefill=None) is None
+    )
+    # No mask in the source: nothing to select.
+    assert select_source_mask(_masked_source(), is_vector=False, **kwargs) is None
+
+
+def test_select_source_mask_name_applies_the_guard_once():
+    ds = _masked_source("mask", "mask_vel", "mask_silicate")
+    kwargs = {"is_vector": False, "var_name": "silicate"}
+    assert (
+        select_source_mask_name(ds, use_xesmf=True, prefill=None, **kwargs)
+        == "mask_silicate"
+    )
+    assert (
+        select_source_mask_name(ds, is_vector=True, use_xesmf=True, prefill=None)
+        == "mask_vel"
+    )
+    # A prefilled source, or the scipy path, uses no mask at all.
+    assert (
+        select_source_mask_name(ds, use_xesmf=True, prefill="2d_lateral_fill", **kwargs)
+        is None
+    )
+    assert select_source_mask_name(ds, use_xesmf=False, prefill=None, **kwargs) is None
+    # No mask in the source: nothing to select.
+    assert (
+        select_source_mask_name(
+            _masked_source(), use_xesmf=True, prefill=None, **kwargs
+        )
+        is None
+    )

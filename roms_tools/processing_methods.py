@@ -13,6 +13,8 @@ representation, and the :class:`RegridConfig` model is built behind the construc
 """
 
 import logging
+import math
+import numbers
 import warnings
 from enum import StrEnum
 
@@ -167,6 +169,40 @@ def validate_extrap(extrap_method: str | None, extrap_kwargs: dict | None) -> No
             f"extrap_kwargs {sorted(extra)} are not valid for "
             f"extrap_method={str(method)!r}. Allowed keys: {allowed_keys_str}."
         )
+
+
+#: Default blend length (m) below the source bottom: over this depth a tracer goes from
+#: the column's own bottom value to the value of the nearest source column that has
+#: water at that depth.
+BOTTOM_FILL_BLEND_M = 25.0
+
+
+def validate_bottom_fill_blend_m(value) -> float:
+    """Return ``value`` as a ``float``; raise ``ValueError`` unless it is >= 0.
+
+    ``value`` must be a real number (``inf`` allowed). The result is a builtin
+    ``float``, so a NumPy scalar or an int is stored (and written to YAML) as one.
+
+    Parameters
+    ----------
+    value : float
+        The ``bottom_fill_blend_m`` option to validate.
+
+    Returns
+    -------
+    float
+        ``value`` as a builtin ``float``.
+    """
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, numbers.Real)
+        or math.isnan(value)
+        or value < 0
+    ):
+        raise ValueError(
+            f"`bottom_fill_blend_m` must be a number >= 0 (inf allowed), got {value!r}."
+        )
+    return float(value)
 
 
 def resolve_regrid_engine(regrid_method: str | None, *, xesmf_available: bool) -> bool:

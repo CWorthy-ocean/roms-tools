@@ -1,7 +1,8 @@
 {
   "attributes": {
     "title": "ROMS boundary forcing file created by ROMS-Tools",
-    "roms_tools_version": "4.0.0a2.dev10+g01456a412.d20260630",
+    "roms_tools_version": "4.0.0a3.dev6+g18150aeee.d20260702",
+    "roms_tools_git_commit": "11fcf5cb-dirty",
     "start_time": "2012-01-01 00:00:00",
     "end_time": "2012-01-02 00:00:00",
     "source": "UNIFIED",
@@ -9,11 +10,13 @@
     "prefill": "2d_lateral_fill",
     "regrid_method": "scipy",
     "extrap_method": "inverse_dist",
+    "bottom_fill_blend_m": 25.0,
     "adjust_depth_for_sea_surface_height": "False",
     "theta_s": 5.0,
     "theta_b": 2.0,
     "hc": 250.0,
-    "climatology": "True"
+    "bgc_interpolation_method": "density",
+    "bgc_time_axis": "physics"
   },
   "zarr_format": 3,
   "consolidated_metadata": {
@@ -22,14 +25,14 @@
     "metadata": {
       "abs_time": {
         "shape": [
-          12
+          1
         ],
         "data_type": "int64",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12
+              1
             ]
           }
         },
@@ -57,7 +60,7 @@
         ],
         "attributes": {
           "long_name": "absolute time",
-          "units": "hours since 2000-01-16 12:00:00",
+          "units": "days since 2012-01-01 12:00:00",
           "calendar": "proleptic_gregorian"
         },
         "dimension_names": [
@@ -69,7 +72,7 @@
       },
       "ALK_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -78,7 +81,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -109,7 +112,7 @@
         "attributes": {
           "long_name": "eastern boundary alkalinity",
           "units": "meq/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -123,7 +126,7 @@
       },
       "ALK_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -132,7 +135,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -163,7 +166,7 @@
         "attributes": {
           "long_name": "northern boundary alkalinity",
           "units": "meq/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -177,7 +180,7 @@
       },
       "ALK_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -186,7 +189,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -217,7 +220,7 @@
         "attributes": {
           "long_name": "southern boundary alkalinity",
           "units": "meq/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -231,7 +234,7 @@
       },
       "ALK_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -240,7 +243,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -271,7 +274,7 @@
         "attributes": {
           "long_name": "western boundary alkalinity",
           "units": "meq/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -285,14 +288,14 @@
       },
       "bry_time": {
         "shape": [
-          12
+          1
         ],
         "data_type": "float64",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12
+              1
             ]
           }
         },
@@ -319,7 +322,6 @@
           }
         ],
         "attributes": {
-          "cycle_length": 365.25,
           "long_name": "relative time: days since 2000-01-01 00:00:00",
           "units": "days",
           "_FillValue": "AAAAAAAA+H8="
@@ -333,7 +335,7 @@
       },
       "CHL_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -342,7 +344,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -373,7 +375,7 @@
         "attributes": {
           "long_name": "eastern boundary total chlorophyll",
           "units": "mg/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -387,7 +389,7 @@
       },
       "CHL_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -396,7 +398,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -427,7 +429,7 @@
         "attributes": {
           "long_name": "northern boundary total chlorophyll",
           "units": "mg/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -441,7 +443,7 @@
       },
       "CHL_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -450,7 +452,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -481,7 +483,7 @@
         "attributes": {
           "long_name": "southern boundary total chlorophyll",
           "units": "mg/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -495,7 +497,7 @@
       },
       "CHL_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -504,7 +506,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -535,7 +537,7 @@
         "attributes": {
           "long_name": "western boundary total chlorophyll",
           "units": "mg/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -549,7 +551,7 @@
       },
       "DIC_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -558,7 +560,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -589,7 +591,7 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -603,7 +605,7 @@
       },
       "DIC_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -612,7 +614,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -643,7 +645,7 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -657,7 +659,7 @@
       },
       "DIC_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -666,7 +668,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -697,7 +699,7 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -711,7 +713,7 @@
       },
       "DIC_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -720,7 +722,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -751,7 +753,7 @@
         "attributes": {
           "long_name": "western boundary dissolved inorganic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -765,7 +767,7 @@
       },
       "DOC_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -774,7 +776,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -805,7 +807,7 @@
         "attributes": {
           "long_name": "eastern boundary dissolved organic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -819,7 +821,7 @@
       },
       "DOC_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -828,7 +830,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -859,7 +861,7 @@
         "attributes": {
           "long_name": "northern boundary dissolved organic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -873,7 +875,7 @@
       },
       "DOC_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -882,7 +884,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -913,7 +915,7 @@
         "attributes": {
           "long_name": "southern boundary dissolved organic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -927,7 +929,7 @@
       },
       "DOC_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -936,7 +938,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -967,7 +969,7 @@
         "attributes": {
           "long_name": "western boundary dissolved organic carbon",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -981,7 +983,7 @@
       },
       "Fe_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -990,7 +992,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1021,7 +1023,7 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic iron",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1035,7 +1037,7 @@
       },
       "Fe_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1044,7 +1046,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1075,7 +1077,7 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic iron",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1089,7 +1091,7 @@
       },
       "Fe_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1098,7 +1100,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1129,7 +1131,7 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic iron",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1143,7 +1145,7 @@
       },
       "Fe_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1152,7 +1154,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1183,7 +1185,7 @@
         "attributes": {
           "long_name": "western boundary dissolved inorganic iron",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1195,54 +1197,9 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "month": {
-        "shape": [
-          12
-        ],
-        "data_type": "int64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              12
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Month index (1-12)"
-        },
-        "dimension_names": [
-          "bry_time"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
       "NO3_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1251,7 +1208,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1282,7 +1239,7 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic nitrate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1296,7 +1253,7 @@
       },
       "NO3_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1305,7 +1262,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1336,7 +1293,7 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic nitrate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1350,7 +1307,7 @@
       },
       "NO3_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1359,7 +1316,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1390,7 +1347,7 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic nitrate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1404,7 +1361,7 @@
       },
       "NO3_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1413,7 +1370,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1444,7 +1401,7 @@
         "attributes": {
           "long_name": "western boundary dissolved inorganic nitrate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1458,7 +1415,7 @@
       },
       "O2_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1467,7 +1424,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1498,7 +1455,7 @@
         "attributes": {
           "long_name": "eastern boundary dissolved oxygen",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1512,7 +1469,7 @@
       },
       "O2_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1521,7 +1478,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1552,7 +1509,7 @@
         "attributes": {
           "long_name": "northern boundary dissolved oxygen",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1566,7 +1523,7 @@
       },
       "O2_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1575,7 +1532,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1606,7 +1563,7 @@
         "attributes": {
           "long_name": "southern boundary dissolved oxygen",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1620,7 +1577,7 @@
       },
       "O2_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1629,7 +1586,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1660,7 +1617,7 @@
         "attributes": {
           "long_name": "western boundary dissolved oxygen",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1674,7 +1631,7 @@
       },
       "PO4_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1683,7 +1640,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1714,7 +1671,7 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic phosphate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1728,7 +1685,7 @@
       },
       "PO4_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1737,7 +1694,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1768,7 +1725,7 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic phosphate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1782,7 +1739,7 @@
       },
       "PO4_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1791,7 +1748,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1822,7 +1779,7 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic phosphate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1836,7 +1793,7 @@
       },
       "PO4_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1845,7 +1802,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1876,7 +1833,7 @@
         "attributes": {
           "long_name": "western boundary dissolved inorganic phosphate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1890,7 +1847,7 @@
       },
       "SiO3_east": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1899,7 +1856,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1930,7 +1887,7 @@
         "attributes": {
           "long_name": "eastern boundary dissolved inorganic silicate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1944,7 +1901,7 @@
       },
       "SiO3_north": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -1953,7 +1910,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -1984,7 +1941,7 @@
         "attributes": {
           "long_name": "northern boundary dissolved inorganic silicate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -1998,7 +1955,7 @@
       },
       "SiO3_south": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -2007,7 +1964,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -2038,7 +1995,7 @@
         "attributes": {
           "long_name": "southern boundary dissolved inorganic silicate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -2052,7 +2009,7 @@
       },
       "SiO3_west": {
         "shape": [
-          12,
+          1,
           3,
           5
         ],
@@ -2061,7 +2018,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              1,
               3,
               5
             ]
@@ -2092,7 +2049,7 @@
         "attributes": {
           "long_name": "western boundary dissolved inorganic silicate",
           "units": "mmol/m^3",
-          "coordinates": "abs_time month",
+          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [

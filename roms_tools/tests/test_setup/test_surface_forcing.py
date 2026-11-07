@@ -570,6 +570,84 @@ def test_nans_filled_in(
             assert not sfc_forcing.ds[var].isnull().any().values.item()
 
 
+def _surface_forcing_with_a_hole_in_rain(
+    grid, tmp_path, use_dask, coarse_grid_mode, hole=True, **kwargs
+):
+    """Surface forcing from an ERA5 source with a block of NaN in the ocean.
+
+    ``hole=False`` leaves the source as it is, for a control.
+
+    ERA5's source mask is taken from the sea surface temperature, so a block of NaN in
+    the precipitation, which the construction-time check does not look at, is ocean to
+    the source mask: nothing fills it and it reaches the target points around it.
+    """
+    era5 = xr.open_dataset(download_test_data("ERA5_regional_test_data.nc")).load()
+    if hole:
+        era5["tp"][:, 66:86, 150:170] = np.nan  # around the centre of the grid
+    fname = tmp_path / f"era5_{'with' if hole else 'without'}_a_hole.nc"
+    era5.to_netcdf(fname)
+    era5.close()
+    return SurfaceForcing(
+        grid=grid,
+        coarse_grid_mode=coarse_grid_mode,
+        start_time=datetime(2020, 1, 31),
+        end_time=datetime(2020, 2, 2),
+        source={"name": "ERA5", "path": fname},
+        use_dask=use_dask,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("coarse_grid_mode", ["always", "never"])
+def test_nan_at_a_wet_point_in_surface_forcing_raises_instead_of_becoming_zero(
+    grid_that_straddles_dateline, tmp_path, use_dask, coarse_grid_mode
+):
+    """A surface field the source leaves NaN at ocean points is an error, not a 0.
+
+    Surface forcing used to write such a NaN as 0 (no rain at ocean points) without a
+    message. Without dask the error is raised while the object is built; with dask,
+    when the variable is computed. Both the fine and the coarse mask are exercised.
+    """
+    match = r"rain has \d+ NaN value.* at ocean points"
+    if use_dask:
+        sfc_forcing = _surface_forcing_with_a_hole_in_rain(
+            grid_that_straddles_dateline, tmp_path, use_dask, coarse_grid_mode
+        )
+        with pytest.raises(ValueError, match=match):
+            sfc_forcing.ds["rain"].compute()
+    else:
+        with pytest.raises(ValueError, match=match):
+            _surface_forcing_with_a_hole_in_rain(
+                grid_that_straddles_dateline, tmp_path, use_dask, coarse_grid_mode
+            )
+
+
+def test_surface_forcing_bypass_validation_still_fills_a_wet_point_nan_with_zero(
+    grid_that_straddles_dateline, tmp_path, use_dask
+):
+    """``bypass_validation=True`` keeps the plain fill, so the hole is written as 0."""
+    sfc_forcing = _surface_forcing_with_a_hole_in_rain(
+        grid_that_straddles_dateline,
+        tmp_path,
+        use_dask,
+        "never",
+        bypass_validation=True,
+    )
+
+    control = _surface_forcing_with_a_hole_in_rain(
+        grid_that_straddles_dateline, tmp_path, use_dask, "never", hole=False
+    )
+
+    # Rain is 0 over land and sometimes at sea, so count the zeros at ocean points
+    # against a build from the source without the hole.
+    wet = grid_that_straddles_dateline.ds["mask_rho"] == 1
+    rain = sfc_forcing.ds["rain"].compute()
+    assert not rain.isnull().any()
+    n_zero = int((rain.where(wet, 1.0) == 0).sum())
+    n_zero_control = int((control.ds["rain"].compute().where(wet, 1.0) == 0).sum())
+    assert n_zero > n_zero_control
+
+
 @pytest.mark.parametrize(
     "bgc_surface_forcing_fixture",
     [

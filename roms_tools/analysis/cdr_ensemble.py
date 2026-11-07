@@ -13,11 +13,22 @@ class Ensemble:
 
     Loads, aligns, and analyzes efficiency metrics across multiple members.
 
+    For a nested (upscaled) experiment, use the combined dataset of
+    :class:`roms_tools.UpscaledCDR` (``UpscaledCDR(...).ds``) as the member, not
+    the metrics of a single domain. A parent domain (``cdr_source_role ==
+    "transfer"``) is rejected, and the release (child) domain alone would miss the
+    uptake in its parents; that case cannot be detected from the dataset.
+
     Parameters
     ----------
     members : dict[str, str | xr.Dataset]
         Dictionary mapping member names to either file paths (NetCDF) or
         xarray.Dataset objects containing the CDR metrics.
+
+    Raises
+    ------
+    ValueError
+        If a member is a parent ("transfer") domain of a nested experiment.
     """
 
     members: dict[str, str | xr.Dataset]
@@ -31,6 +42,7 @@ class Ensemble:
         ensemble statistics, and stores in ``self.ds``.
         """
         datasets = self._load_members()
+        self._validate_members(datasets)
         effs = {}
         uptakes = {}
         for name, ds in datasets.items():
@@ -66,6 +78,29 @@ class Ensemble:
             name: xr.open_dataset(path) if isinstance(path, str | Path) else path
             for name, path in self.members.items()
         }
+
+    def _validate_members(self, datasets: dict[str, xr.Dataset]) -> None:
+        """
+        Reject members that are parent domains of a nested experiment.
+
+        Raises
+        ------
+        ValueError
+            If any member has ``cdr_source_role == "transfer"``; the message names
+            all of them.
+        """
+        transfer = [
+            name
+            for name, ds in datasets.items()
+            if ds.attrs.get("cdr_source_role") == "transfer"
+        ]
+        if transfer:
+            raise ValueError(
+                f"Members {transfer} have cdr_source_role='transfer': they are "
+                "parent domains of a nested experiment, whose metrics are "
+                "incomplete on their own. Combine the experiment's domains with "
+                "`UpscaledCDR` and use its `.ds` as the ensemble member instead."
+            )
 
     def _get_time_coord(self, da: xr.DataArray, ds: xr.Dataset) -> xr.DataArray:
         """Return the absolute time coordinate for a member variable."""

@@ -1,9 +1,10 @@
 import importlib.metadata
+import itertools
 import logging
 import time
 import typing
 import warnings
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -22,6 +23,9 @@ import yaml
 from pydantic import BaseModel
 from scipy.spatial import cKDTree
 
+# Must precede the ``cache=True`` kernels below: numba picks the cache location
+# when the decorator runs.
+import roms_tools._numba_cache  # noqa: F401
 from roms_tools.constants import R_EARTH
 
 # Re-exported from the single-source-of-truth ``processing_methods`` module so that
@@ -289,6 +293,93 @@ def nan_check_batch(items) -> None:
             raise ValueError(error_message or _DEFAULT_NAN_CHECK_MESSAGE)
 
 
+def wet_mask(grid_ds: xr.Dataset, location: Literal["rho", "u", "v"]) -> xr.DataArray:
+    """Return the grid's wet/dry mask at ``location`` (``mask_rho``/``mask_u``/``mask_v``)."""
+    return grid_ds[f"mask_{location}"]
+
+
+#: Default advice in :func:`fill_nans_over_land`'s error, for regridded lat/lon sources.
+WET_NAN_HINT_REGRID = (
+    "Likely causes: a source variable has NaN where the source's own mask says ocean, "
+    "or a wet target point has no wet source data nearby (e.g. no `prefill` and no "
+    "extrapolation), in which case try a `prefill` method."
+)
+
+
+def fill_nans_over_land(
+    field: xr.DataArray,
+    mask: xr.DataArray,
+    var_name: str,
+    fill_value: float = 0.0,
+    hint: str = WET_NAN_HINT_REGRID,
+) -> xr.DataArray:
+    """Replace NaN by ``fill_value`` over land, raising if any NaN sits at a wet point.
+
+    Unlike :func:`substitute_nans_by_fillvalue`, a NaN at an ocean point (``mask == 1``)
+    is an error rather than being silently turned into ``fill_value``.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The data to fill. Non-floating dtypes are returned unchanged.
+    mask : xr.DataArray
+        Wet (``1``) / dry (``0``) mask. Its dimensions must be a subset of those of
+        ``field``; it is broadcast against ``field`` by dimension name.
+    var_name : str
+        Name of the variable, used in the error message.
+    fill_value : float, optional
+        Value that replaces NaN over land. Default is 0.0.
+    hint : str, optional
+        Likely cause and remedy, appended to the error message. Defaults to advice for
+        regridded lat/lon sources.
+
+    Returns
+    -------
+    xr.DataArray
+        ``field`` with NaN replaced by ``fill_value``.
+
+    Raises
+    ------
+    ValueError
+        If ``field`` has NaN at any wet point. For numpy-backed data this is raised
+        immediately; for dask-backed data the check is part of the lazy graph, adds no
+        compute of its own, and is raised when the data are computed (e.g. at
+        ``.save()``), for the first offending chunk.
+    """
+    if not np.issubdtype(field.dtype, np.floating):
+        return field
+
+    in_chunks = (
+        " in one chunk of the data (other chunks or variables may also have some)"
+        if field.chunks is not None
+        else ""
+    )
+
+    def _fill(values, wet):
+        is_nan = np.isnan(values)
+        n_wet_nan = np.count_nonzero(is_nan & (wet == 1))
+        if n_wet_nan:
+            raise ValueError(
+                f"{var_name} has {n_wet_nan} NaN value(s) at ocean points "
+                f"(mask == 1){in_chunks}, so no value reached them. {hint} With "
+                f"`bypass_validation=True` they are written as {fill_value}."
+            )
+        return np.where(is_nan, values.dtype.type(fill_value), values)
+
+    # Hand the mask over as bare data + dims so only dimension names (never
+    # coordinate labels) are used to line it up with the field.
+    bare_mask = xr.DataArray(mask.data, dims=mask.dims)
+    # Like ``fillna``: attrs and coords are kept, encoding is not.
+    return xr.apply_ufunc(
+        _fill,
+        field,
+        bare_mask,
+        dask="parallelized",
+        output_dtypes=[field.dtype],
+        keep_attrs=True,
+    ).rename(field.name)
+
+
 def materialize_before_check(ds, var_names, materialize: bool) -> None:
     """Realize each of ``var_names`` in ``ds`` via one combined ``dask.compute()`` call
     and write the results back into ``ds`` in place, *before* any NaN-check view is
@@ -351,6 +442,339 @@ def materialize_before_check(ds, var_names, materialize: bool) -> None:
     realized = dask.compute(*(ds[v] for v in names))
     for v, value in zip(names, realized):
         ds[v] = value
+
+
+#: Dim names a time axis may go by on the arrays these helpers see (the boundary path
+#: renames the physics ``abs_time`` view to ``time``; ``bry_time`` is the ROMS output dim).
+TIME_DIM_NAMES = ("time", "bry_time", "abs_time")
+
+
+def time_dim_of(da: xr.DataArray) -> str | None:
+    """Name of ``da``'s time dimension, or None when it has no usable one.
+
+    Prefers a dim carrying a datetime64 coordinate and falls back to a conventional
+    name (:data:`TIME_DIM_NAMES`) for a bare dim with no coordinate. Initial conditions
+    have no time dim at all (one instant), so this returns None there.
+    """
+    for dim in da.dims:
+        coord = da.coords.get(dim)
+        if coord is not None and np.issubdtype(coord.dtype, np.datetime64):
+            return str(dim)
+    for name in TIME_DIM_NAMES:
+        if name in da.dims:
+            return name
+    return None
+
+
+def month_aligned_time_chunks(
+    da: xr.DataArray, time_dim: str, max_steps: int
+) -> tuple[int, ...] | int:
+    """Chunk lengths along ``time_dim``: exactly one block per calendar month, or a
+    uniform ``max_steps`` when the coordinate isn't datetimes (or one month alone would
+    exceed ``max_steps``, e.g. sub-daily forcing on a large grid).
+
+    One block per month -- never several months bundled into one, even when they would
+    fit ``max_steps`` -- because a block is recomputed once per output file it feeds.
+    ``xarray.save_mfdataset(compute=True)`` issues a *separate* ``dask.compute`` per
+    file, so nothing is shared between files: a block spanning N monthly files is
+    computed in full N times. Measured on a 12-month daily Pacific boundary axis (14
+    monthly files): one block per month 2.8x the useful work, two months per block 4.8x,
+    time collapsed to one block 14x. Undersized blocks cost only fixed per-call setup,
+    so this errs small. The same partition suits every per-record companion computation
+    on the physics time axis (PyESPER, density placement of a climatology).
+    """
+    coord = da.coords.get(time_dim)
+    if coord is None or not np.issubdtype(coord.dtype, np.datetime64):
+        return max_steps
+    index = coord.to_index()
+    months = [
+        sum(1 for _ in group)
+        for _, group in itertools.groupby(zip(index.year, index.month, strict=True))
+    ]
+    if not months or max(months) > max_steps:
+        return max_steps
+    return tuple(months)
+
+
+def apply_chunk_plan(
+    da: xr.DataArray, plan: Mapping[str, int | tuple[int, ...]]
+) -> xr.DataArray:
+    """Apply as much of ``plan`` as ``da`` can take, and return the result.
+
+    ``DataArray.chunk`` raises on a mapping key that isn't one of the array's own dims,
+    so a plan derived from one array has to be filtered per input (2D ``lon``/``lat``
+    against a 3D ``temp``; a boundary ``depth`` that need not carry the time dim). A
+    tuple entry additionally has to sum to the input's own length along the dim; where
+    it doesn't, that dim falls back to a single chunk rather than raising. Non-dask
+    inputs are returned untouched.
+    """
+    if not hasattr(da.data, "chunks"):
+        return da
+    usable: dict[str, int | tuple[int, ...]] = {}
+    for dim, size in plan.items():
+        if dim not in da.dims:
+            continue
+        if isinstance(size, tuple) and sum(size) != da.sizes[dim]:
+            usable[dim] = -1
+        else:
+            usable[dim] = size
+    return da.chunk(usable) if usable else da
+
+
+def physics_time_view(
+    ds: xr.Dataset, direction: str
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """The physics boundary ``temp``/``salt`` strips for ``direction`` with their datetime
+    axis as the ``time`` dim.
+
+    A saved/processed physics boundary dataset carries ``bry_time`` (relative days) as
+    the time dim with an ``abs_time`` datetime64 companion coordinate. Every companion
+    that works per physics record (PyESPER, density placement of a BGC climatology)
+    wants the datetime view, named ``time`` so the shared ``_add_global_metadata`` can
+    rebuild ``bry_time`` from it afterwards.
+    """
+    temp = ds[f"temp_{direction}"]
+    salt = ds[f"salt_{direction}"]
+    if "abs_time" in temp.coords:
+        temp = temp.swap_dims({"bry_time": "abs_time"}).rename({"abs_time": "time"})
+        salt = salt.swap_dims({"bry_time": "abs_time"}).rename({"abs_time": "time"})
+    return temp, salt
+
+
+def _day_of_year(times: np.ndarray) -> np.ndarray:
+    """Fractional day of year (1-based) of datetime64 ``times``."""
+    index = pd.DatetimeIndex(times)
+    year_start = pd.to_datetime(index.year.astype(str) + "-01-01")
+    return (index - year_start).total_seconds() / 86400.0 + 1.0
+
+
+def cycle_to_times(
+    da: xr.DataArray,
+    time_dim: str | None,
+    target_times: xr.DataArray,
+    *,
+    climatology: bool,
+    cycle: float = 365.25,
+) -> xr.DataArray:
+    """Put ``da`` on the physics time axis ``target_times`` (datetime64), named ``time``.
+
+    A climatology (``time_dim`` holding timedelta64 since the start of the year, as
+    :func:`assign_dates_to_climatology` sets) is interpolated linearly in day of year,
+    with December wrapped into January by padding one record at each end -- what ROMS
+    does at runtime with ``cycle_length``, so a boundary file built this way and one
+    cycled by ROMS agree to within a day of phase (ROMS cycles over
+    ``cycle_length`` days, which is not an integer number of calendar days). A
+    non-climatology axis (datetime64) is interpolated linearly in time with the ends
+    held and a warning when the source does not cover the targets. An array with no
+    time axis is broadcast (lazily) to every target record.
+
+    The result is blocked **one calendar month per chunk** along ``time``
+    (:func:`month_aligned_time_chunks`), each block interpolated on its own: the
+    monthly output files are written by ``xr.save_mfdataset``, which computes every
+    file separately, so a single whole-run interpolation would be recomputed once per
+    file -- about 14x for a year of daily physics -- and would hold the whole run in
+    one block. Each block depends only on the (padded) source, which for a 12-record
+    climatology is nothing. The interpolation dim of the source is gathered into one
+    chunk first (xarray's ``interp`` needs that).
+    """
+    target = np.asarray(target_times.values, dtype="datetime64[ns]")
+    if time_dim is None or time_dim not in da.dims:
+        out = da.expand_dims({"time": len(target)}, axis=0)
+        return out.assign_coords(time=("time", target))
+    if da.chunks is not None:
+        da = da.chunk({time_dim: -1})
+    if climatology:
+        src = da[time_dim].values
+        if not np.issubdtype(src.dtype, np.timedelta64):
+            raise ValueError(
+                f"a climatology's {time_dim!r} axis must be timedelta64 (days since the "
+                f"start of the year), got {src.dtype}; was assign_dates_to_climatology "
+                "applied?"
+            )
+        doy_src = src.astype("timedelta64[ns]").astype("int64") / 86400e9 + 1.0
+        source = xr.concat(
+            [
+                da.isel({time_dim: [-1]}).assign_coords(
+                    {time_dim: [doy_src[-1] - cycle]}
+                ),
+                da.assign_coords({time_dim: doy_src}),
+                da.isel({time_dim: [0]}).assign_coords(
+                    {time_dim: [doy_src[0] + cycle]}
+                ),
+            ],
+            dim=time_dim,
+        )
+        query = _day_of_year(target)
+    else:
+        src = da[time_dim].values.astype("datetime64[ns]")
+        if target.min() < src.min() or target.max() > src.max():
+            logging.warning(
+                f"the BGC source's {time_dim!r} axis ({src.min()} .. {src.max()}) does "
+                f"not cover the physics times ({target.min()} .. {target.max()}); its "
+                "first/last record is held outside that range."
+            )
+        source = da
+        query = np.clip(target, src.min(), src.max())  # hold the ends
+
+    # One interpolation per calendar month of targets (see the docstring).
+    blocks = month_aligned_time_chunks(
+        xr.DataArray(target, dims="time", coords={"time": target}), "time", len(target)
+    )
+    if isinstance(blocks, int):
+        blocks = (len(target),)
+    pieces = []
+    for start, stop in itertools.pairwise(np.cumsum((0, *blocks))):
+        piece = source.interp({time_dim: query[start:stop]}, method="linear")
+        if time_dim != "time":
+            piece = piece.rename({time_dim: "time"})
+        pieces.append(piece.assign_coords(time=("time", target[start:stop])))
+    out = xr.concat(pieces, dim="time") if len(pieces) > 1 else pieces[0]
+    if out.chunks is not None:
+        out = out.chunk({"time": blocks})
+    return out
+
+
+def bgc_source_has_own_ts(bgc_dataset_map: Mapping[str, Any], name: str | None) -> bool:
+    """Whether the dataset class registered for BGC source ``name`` carries its own
+    temperature/salinity pair (``bgc_source_ts``), which density interpolation needs
+    as the source coordinate. ``bgc_dataset_map`` is a wrapper module's
+    ``_DATASET_MAP["bgc"]``: name -> {"external"/"default": class} (a ``defaultdict``
+    when one class serves both). Unknown names (``constants``, ``ESPER``) are False.
+    """
+    entry = bgc_dataset_map.get(name) if name else None
+    if entry is None:
+        return False
+    factory = getattr(entry, "default_factory", None)
+    cls = factory() if factory is not None else entry.get("default")
+    return bool(getattr(cls, "bgc_source_ts", ()))
+
+
+def companions_derive_from_physics_ts(
+    bgc_sources: Sequence[Mapping[str, Any]] | None,
+    default_interpolation: str,
+    has_source_ts: Callable[[str | None], bool],
+) -> bool:
+    """True when any bgc companion will actually read the physics temperature/salinity.
+
+    Two kinds do: an ``ESPER`` source (PyESPER's inputs *are* T/S) and a dataset source
+    whose *effective* interpolation is not ``"depth"`` -- ``"density"`` and
+    ``"density_mld"`` need sigma-0 from T/S. "Effective" is the point: a ``constants``
+    source never interpolates at all, and a dataset without its own T/S falls back to
+    depth (:func:`resolve_bgc_interp_method`), so neither reads the physics whatever
+    method the item asks for. ``has_source_ts`` answers that per source name (the
+    wrappers pass :func:`bgc_source_has_own_ts` over their dataset map).
+    """
+    for item in bgc_sources or ():
+        name = (item.get("source") or {}).get("name")
+        if name == "ESPER":
+            return True
+        if name == "constants":
+            continue
+        method = BgcInterpMethod(
+            item.get("bgc_interpolation_method") or default_interpolation
+        )
+        if method != BgcInterpMethod.depth and has_source_ts(name):
+            return True
+    return False
+
+
+def materialize_physics_ts(ds, var_names: Iterable[str]) -> None:
+    """Realize the physics T/S fields the bgc companions derive from, in place.
+
+    Called by the ``BoundaryForcing``/``InitialConditions`` wrappers *before*
+    ``build_bgc_companions``, so that ESPER's inputs and every density-based
+    interpolation are built on data already in memory rather than on the lazy
+    source regrid graph.
+
+    Why: a companion's own ``.save()`` computes all of its variables in one graph
+    (18 per monthly boundary file for ESPER: six tracers, three directions). Left
+    lazy, every one of them reaches back through the same per-day regrids of the
+    source slabs, and dask's ordering over that wide, shared graph materialises
+    many days of ~190 MB domain-bbox temp+salt slabs before their consumers run.
+    Measured on a 12 km ESPER boundary month under the synchronous scheduler: RSS
+    rose linearly at ~12 GB/h through the save and no monthly file completed in
+    the time a single variable took to compute alone (which stayed flat) -- the
+    same signature that ended a 5-year run at >112 GB. Realizing the regridded
+    strips here severs the companions' graphs from the source entirely, and the
+    physics save writes T/S from memory too. Every other physics variable stays
+    lazy.
+
+    How: the strips are computed **one of their own time chunks at a time** and
+    written into a preallocated array. The chunk, not the whole span, bounds peak
+    memory: realizing a 34-day month in one compute peaked at 25 GB, because the
+    regrid reads whole global GLORYS slabs and one decoded day of temp+salt is ~7 GB
+    whatever the ROMS grid looks like, and dask holds several days' intermediates at
+    once; one day at a time peaked at 18.6 GB and built faster (392 s vs 583 s). The
+    physics regrid leaves the strips chunked per source day, so iterating the strip's
+    own chunks is the per-day loop -- and never recomputes an upstream chunk, which
+    slicing at a finer step than the chunking would (a chunk of four steps sliced one
+    step at a time runs its upstream four times).
+
+    The realized strips are re-wrapped as dask arrays carrying the chunks they had,
+    because ``estimate_bgc_fields`` only applies PyESPER's chunk plan and point budget
+    to dask inputs; numpy would make PyESPER run eagerly on the full span, bypassing
+    the ``_max_points_per_chunk`` guard that exists because a 4 km / 100-level grid
+    OOM-killed a 251 GB machine.
+
+    **What it costs, and the trade it makes.** The strips are held in memory from
+    construction until the physics and companion saves are done, and they scale with
+    the run length: 1.8 MB per variable per direction per month at 12 km (about 0.5 GB
+    for five years of three boundaries), order 16 GB per year on a 100-level 1858x962
+    grid. That is the data the physics save writes regardless, held earlier -- and it
+    is paid by density-interpolated companions too, which until this change were
+    built fully lazily (at the cost of the unbounded save above). A wrapper that only
+    needs the companions' YAML still pays it. If a very long high-resolution run finds
+    this too much, realizing per save group (month) at write time is the next step;
+    it is not done here.
+
+    A no-op for names that are absent or not dask-backed.
+    """
+    names = [v for v in var_names if v in ds and ds[v].chunks is not None]
+    if not names:
+        return
+    original_chunks = {v: dict(ds[v].chunksizes) for v in names}
+    time_dims = {
+        v: next((d for d in ds[v].dims if "time" in str(d)), None) for v in names
+    }
+
+    started = time.time()
+    logging.info(
+        f"Reading the physics {', '.join(names)} from the source for the whole run "
+        "(the BGC sources derive from them). The source is read once, end to end, "
+        "before anything is written -- this can take hours for a multi-year run."
+    )
+    # Group by time dimension so one compute slices every strip on the same axis;
+    # the first strip's own chunks along it set the block boundaries.
+    for time_dim in {*time_dims.values()}:
+        group = [v for v in names if time_dims[v] == time_dim]
+        out = {v: np.empty(ds[v].shape, dtype=ds[v].dtype) for v in group}
+        if time_dim is None:
+            for v, val in zip(group, dask.compute(*(ds[v].data for v in group))):
+                out[v][...] = val
+        else:
+            axis = ds[group[0]].dims.index(time_dim)
+            bounds = np.cumsum((0, *ds[group[0]].chunks[axis]))
+            n_blocks = len(bounds) - 1
+            next_report = 0.1  # progress every 10 % of the chunks (ten lines at most)
+            for i, (start, stop) in enumerate(itertools.pairwise(bounds), 1):
+                block = slice(int(start), int(stop))
+                vals = dask.compute(
+                    *(ds[v].isel({time_dim: block}).data for v in group)
+                )
+                for v, val in zip(group, vals):
+                    out[v][(slice(None),) * axis + (block,)] = val
+                if i == n_blocks or i >= next_report * n_blocks:
+                    logging.info(
+                        f"  {', '.join(group)}: {int(stop)}/{int(bounds[-1])} time "
+                        f"steps read in {(time.time() - started) / 60:.1f} min"
+                    )
+                    while next_report * n_blocks <= i:
+                        next_report += 0.1
+        for v in group:
+            ds[v] = ds[v].copy(data=out[v]).chunk(original_chunks[v])
+    logging.info(
+        f"Physics {', '.join(names)} realized in {(time.time() - started) / 60:.1f} min."
+    )
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
@@ -462,7 +886,16 @@ def tile_monthly_climatology_on_calendar(
     pieces = [
         ds_base.isel({time_dim: month_to_index[dt.month]}) for dt in calendar_dates
     ]
-    ds_tiled = xr.concat(pieces, dim=time_dim)
+    # Spell out xarray's current combine defaults so a future change to them cannot
+    # alter the result.
+    ds_tiled = xr.concat(
+        pieces,
+        dim=time_dim,
+        data_vars="all",
+        coords="different",
+        compat="equals",
+        join="outer",
+    )
     return ds_tiled.assign_coords(
         {time_dim: np.array(calendar_dates, dtype="datetime64[ns]")}
     )
@@ -1805,14 +2238,17 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
 # The explicit signatures below make numba compile at import time (they are
 # needed so ``min_dist_to_land`` can call the ufuncs from nopython code and
 # so xarray objects dispatch through ``__array_ufunc__``). ``cache=True``
-# keeps that behaviour but persists the compiled machine code next to this
-# file (or under ``NUMBA_CACHE_DIR``), so only the first import in a fresh
-# environment pays the ~1.5 s compile cost instead of every process.
-# Caveat: numba invalidates the cache when *this file* changes (mtime/size)
-# or numba is upgraded, but NOT when a global imported from another module
-# changes -- ``R_EARTH`` is frozen into the cached machine code. If you edit
-# ``roms_tools/constants.py`` in an editable install, delete the ``.nbi``/
-# ``.nbc`` files in ``__pycache__`` (or touch this file) to force a rebuild.
+# keeps that behaviour but persists the compiled machine code, so only the
+# first import in a fresh environment pays the ~1.5 s compile cost instead of
+# every process. The cache lives under ``<user cache dir>/roms-tools-numba``
+# (see ``roms_tools/_numba_cache.py``), or under ``NUMBA_CACHE_DIR`` if set --
+# not in ``__pycache__``, where it would outlive an uninstall.
+# Caveat: numba invalidates the cache when *this file* changes or numba is
+# upgraded, but NOT when a global imported from another module changes --
+# ``R_EARTH`` is frozen into the cached machine code. If you edit
+# ``roms_tools/constants.py`` in an editable install, delete
+# ``<user cache dir>/roms-tools-numba`` (``~/Library/Caches/roms-tools-numba``
+# on macOS, ``~/.cache/roms-tools-numba`` on Linux) or touch this file.
 @nb.vectorize(
     [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)],
     nopython=True,
@@ -2407,9 +2843,12 @@ def serialize_source_dict(
     else:
         src = deepcopy(src)
 
-    # Serialize paths
-    if "path" in src:
-        src["path"] = serialize_paths(src["path"])
+    # Serialize paths anywhere in the dict, not just under "path": an ESPER source
+    # carries salinity_conditioning={"woa_salinity_path": ...}, and
+    # deserialize_forcing_data's normalize_paths turns such nested strings back into
+    # Path objects on load, so a loaded source has to serialize again. (Grid objects
+    # pass through serialize_paths untouched and are handled below.)
+    src = serialize_paths(src)
 
     # Serialize nested grid
     if "grid" in src and src["grid"] is not None:
@@ -2438,11 +2877,9 @@ def deserialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None
 
     src = deepcopy(src)
 
-    # Deserialize paths
-    if "path" in src:
-        src["path"] = normalize_paths(src["path"])
-
-    return src
+    # Deserialize paths anywhere in the dict (the "path" key and nested ones such as
+    # salinity_conditioning.woa_salinity_path), mirroring serialize_source_dict.
+    return normalize_paths(src)
 
 
 def serialize_bgc_sources(

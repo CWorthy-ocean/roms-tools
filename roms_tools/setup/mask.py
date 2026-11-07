@@ -58,11 +58,11 @@ def add_mask(
             coast = gpd.read_file(shapefile)
 
             try:
-                # 3D method: returns a boolean array for each region, then take max along the region dimension
+                # 3D method: returns a boolean array for each region, then take any along the region dimension
                 # Pros: more memory-efficient for high-res grids if number of regions isn't extreme
                 mask = ~regionmask.mask_3D_geopandas(
                     coast, ds["lon_rho"], ds["lat_rho"]
-                ).max(dim="region")
+                ).any(dim="region")
 
             except MemoryError:
                 logging.info(

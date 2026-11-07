@@ -21,16 +21,20 @@ from roms_tools.datasets.lat_lon_datasets import (
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.processing_methods import (
     BGC_INTERPOLATION_METHODS,
+    BOTTOM_FILL_BLEND_M,
     BgcInterpMethod,
     RegridConfig,
     _xesmf_available,
     resolve_bgc_interp_method,
+    validate_bottom_fill_blend_m,
 )
 from roms_tools.regrid import (
     VerticalRegrid,
     build_lateral_regridder,
     select_source_mask,
+    select_source_mask_name,
 )
+from roms_tools.setup.bgc_groom import resolve_groom_settings
 from roms_tools.setup.bgc_model import (
     BGCModel,
     bgc_model_from_name,
@@ -43,12 +47,17 @@ from roms_tools.setup.utils import (
     _SELF_DOWNLOADING_BGC,
     RawDataSource,
     add_time_info_to_ds,
+    apply_chunk_plan,
     bgc_source_extra_kwargs,
+    bgc_source_has_own_ts,
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_and_set_boundaries,
+    companions_derive_from_physics_ts,
     compute_barotropic_velocity,
+    cycle_to_times,
     deserialize_forcing_data,
+    fill_nans_over_land,
     forwardable_fields,
     from_yaml,
     get_boundary_coords,
@@ -57,11 +66,15 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     materialize_before_check,
+    materialize_physics_ts,
+    month_aligned_time_chunks,
     nan_check_batch,
+    physics_time_view,
     pop_grid_data,
     preflight_esper_sources,
     substitute_nans_by_fillvalue,
     to_dict,
+    wet_mask,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -74,60 +87,6 @@ from roms_tools.utils import (
     transpose_dimensions,
 )
 from roms_tools.vertical_coordinate import compute_depth
-
-
-def _interpolate_phys_to_bgc_time(
-    phys_da: xr.DataArray,
-    time_dim: str,
-    bgc_time_coord: xr.DataArray,
-    bgc_climatology: bool,
-) -> xr.DataArray:
-    """Sample a physics DataArray at the BGC times using nearest-time selection.
-
-    Parameters
-    ----------
-    phys_da : xr.DataArray
-        Physics data with a ``datetime64`` time dimension named ``time_dim``.
-    time_dim : str
-        Name of the time dimension in ``phys_da``.
-    bgc_time_coord : xr.DataArray
-        Target time coordinate from the BGC dataset (1-D).
-    bgc_climatology : bool
-        Whether the BGC dataset is a climatology. If True, ``bgc_time_coord``
-        is expected to be ``timedelta64`` from the start of the year (as set by
-        ``assign_dates_to_climatology``), and the nearest neighbour is taken
-        cyclically in fractional day-of-year space (so an early-January target can
-        match late-December physics). If False, nearest selection is performed in
-        ``datetime64`` space.
-
-    Returns
-    -------
-    xr.DataArray
-        ``phys_da`` sampled at ``bgc_time_coord``, with time dimension still named
-        ``time_dim`` and coordinate set to ``bgc_time_coord``.
-
-    Notes
-    -----
-    The BGC boundary output is typically a 12-step climatology, and ROMS linearly
-    interpolates boundary records in time at runtime, so sub-monthly precision in the
-    physics T/S used only as the density/MLD anchor is washed out. Nearest-time
-    selection is therefore sufficient and, unlike ``xr.interp``, requires no rechunk of
-    the time axis (which would otherwise pull the entire physics time series into a
-    single in-memory chunk); only the selected slices are read.
-    """
-    if bgc_climatology:
-        # Circular nearest neighbour in fractional day-of-year space.
-        bgc_doy = (bgc_time_coord / np.timedelta64(1, "D")).values + 1.0
-        phys_doy = phys_da[time_dim].dt.dayofyear.values.astype(float)
-        period = 365.25
-        diff = np.abs(phys_doy[None, :] - np.asarray(bgc_doy)[:, None])
-        nearest = np.minimum(diff, period - diff).argmin(axis=1)
-        result = phys_da.isel({time_dim: nearest})
-        return result.assign_coords({time_dim: bgc_time_coord.values})
-
-    # Non-climatology: nearest selection in datetime64 space.
-    return phys_da.sel({time_dim: bgc_time_coord}, method="nearest")
-
 
 #: Which dataset class implements each ``source["name"]``, per forcing type. This is the
 #: single source of truth for *which source names BoundaryForcing supports*: both
@@ -253,6 +212,17 @@ class BoundaryForcingSource:
     extrap_kwargs : dict, optional
         Method-specific options for ``extrap_method``: ``num_src_pnts`` /
         ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
+    bottom_fill_blend_m : float, optional
+        Where the model column is deeper than the source column, the cells below the
+        source bottom hold no source data. A tracer (temperature, salinity, BGC) there
+        takes the value of the nearest source column that has water at that depth,
+        blended in from the column's own bottom value over ``bottom_fill_blend_m``
+        metres below the bottom: ``0`` takes the nearest column's value immediately,
+        ``inf`` copies each column's bottom value down instead. The nearest column
+        can lie across a sill and hold lighter water than the column's own bottom
+        water; consider ``inf`` for semi-enclosed basins and overflow regions.
+        Velocities always copy their bottom value down. See the methods documentation
+        for choosing a value. Defaults to 25 m.
     apply_2d_horizontal_fill : bool, optional
         **Deprecated** -- use ``prefill`` instead. ``True`` maps to
         ``prefill="2d_lateral_fill"`` and ``False`` to ``prefill=None``; setting
@@ -293,6 +263,17 @@ class BoundaryForcingSource:
         carrying temperature/salinity; otherwise interpolation falls back to depth space.
         Interpolation uses ``xgcm.Grid.transform`` with the linear method inside the
         source range and edge-value extrapolation outside (``mask_edges=False``).
+
+        With a density method the BGC fields are placed on **every physics record**: the
+        source (a 12-month climatology, usually) is cycled onto the physics time axis by
+        linear interpolation in day of year and the vertical placement is done against
+        that record's own density/MLD, so the result follows the physics through the run
+        rather than being a climatology anchored on one sampled physics day. The output
+        therefore carries the physics time axis -- grouped into files like the physics
+        (monthly for daily physics), cyclic only when the physics itself is a
+        climatology -- and ``source["climatology"]`` describes only how the input
+        dataset is read. With ``"depth"`` the output of a climatological source stays
+        a cycled climatology.
     physics_forcing : BoundaryForcingSource, optional
         A physics ``BoundaryForcingSource`` object (``type='physics'``) whose T/S fields
         supply the target density coordinate for BGC tracer interpolation. When None and
@@ -340,6 +321,13 @@ class BoundaryForcingSource:
     treated as ``"inverse_dist"``. Ignored when ``prefill`` is set."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method`` (e.g. ``num_src_pnts``/``dist_exponent``)."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom, over which a tracer in a cell deeper than
+    the source column goes from the column's own bottom value to the value of the nearest
+    source column with water at that depth. ``0`` takes the nearest column's value
+    immediately, ``inf`` copies the bottom value down instead. Velocities are
+    unaffected (they always copy the bottom value down). See the methods documentation
+    for choosing a value."""
     apply_2d_horizontal_fill: bool | None = None
     """Deprecated alias for ``prefill`` (sentinel ``None`` = unset). ``True`` ->
     ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``; emits a DeprecationWarning."""
@@ -437,7 +425,7 @@ class BoundaryForcingSource:
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
-            data.extrapolate_deepest_to_bottom()
+            data.extrapolate_deepest_to_bottom(blend_m=self.bottom_fill_blend_m)
             data.apply_prefill(
                 prefill,
                 prefill_kwargs=self.prefill_kwargs,
@@ -468,6 +456,12 @@ class BoundaryForcingSource:
             }
         )
 
+        # Set when a density method placed the BGC fields on the physics time axis:
+        # the output is then time-varying, not a climatology, whatever the source was.
+        on_physics_time = False
+        # The vertical interpolation methods actually used (after any fallback to
+        # depth), recorded on the output rather than the requested one.
+        resolved_methods: set[str] = set()
         for direction, is_enabled in self.boundaries.items():
             if not is_enabled:
                 continue
@@ -494,7 +488,9 @@ class BoundaryForcingSource:
                 # Default (no source prefill) path. Prep happens per boundary.
                 # Enforce double precision to ensure reproducibility
                 bdry_data.convert_to_float64()
-                bdry_data.extrapolate_deepest_to_bottom()
+                bdry_data.extrapolate_deepest_to_bottom(
+                    blend_m=self.bottom_fill_blend_m
+                )
                 if not use_xesmf:
                     # xESMF unavailable: nearest-neighbor pre-fill the source so the
                     # subsequent scipy interpolation cannot propagate NaNs.
@@ -504,7 +500,8 @@ class BoundaryForcingSource:
 
             # Precomputed static source masks for the xESMF masked-bilinear
             # path, matched to the field type: ``mask`` (scalar-field validity)
-            # for tracers and ``zeta``, ``mask_vel`` (velocity validity) for u/v.
+            # for ``zeta``, ``mask_vel`` (velocity validity) for u/v. Tracers
+            # pick their mask per variable in the tracer loop below.
             # Reusing these stored 2D fields avoids recomputing a mask from the
             # full (lazy) source series. ``None`` means the source is already
             # NaN-free (e.g. the pre-filled UNIFIED BGC dataset, which carries
@@ -563,12 +560,27 @@ class BoundaryForcingSource:
             if filtered_vars:
                 lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
                 lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
-                lateral_regrid = build_lateral_regridder(
-                    {"lat": lat, "lon": lon}, bdry_data, regrid, scalar_mask
-                )
+                # One regridder per distinct tracer mask (a source with
+                # per-variable masks needs several; otherwise just one), keyed by
+                # the mask's content so masks with the same wet pattern share one.
+                tracer_regridders = {}
                 for var_name in filtered_vars:
-                    processed_fields[var_name] = lateral_regrid.apply(
-                        bdry_data.ds[var_names[var_name]["name"]]
+                    src_name = var_names[var_name]["name"]
+                    mask_name = select_source_mask_name(
+                        bdry_data.ds,
+                        is_vector=False,
+                        use_xesmf=use_xesmf,
+                        prefill=prefill,
+                        var_name=src_name,
+                    )
+                    mask = None if mask_name is None else bdry_data.ds[mask_name]
+                    key = None if mask is None else mask.values.tobytes()
+                    if key not in tracer_regridders:
+                        tracer_regridders[key] = build_lateral_regridder(
+                            {"lat": lat, "lon": lon}, bdry_data, regrid, mask
+                        )
+                    processed_fields[var_name] = tracer_regridders[key].apply(
+                        bdry_data.ds[src_name]
                     )
 
             # rotation of velocities and interpolation to u/v points
@@ -657,13 +669,20 @@ class BoundaryForcingSource:
                             has_source_ts=has_source_ts,
                             where=f"{direction} boundary",
                         )
+                        resolved_methods.add(str(method))
 
                     source_coord = None
                     target_coord = None
                     if method != BgcInterpMethod.depth:
-                        source_coord, target_coord = self._compute_bgc_vertical_coords(
-                            method, direction, bdry_data, processed_fields
+                        source_coord, target_coord = self._place_bgc_on_physics_time(
+                            method,
+                            direction,
+                            bdry_data,
+                            processed_fields,
+                            tracer_vars,
+                            aux_ts_vars,
                         )
+                        on_physics_time = True
 
                     for var_name in tracer_vars:
                         if var_name not in processed_fields:
@@ -718,8 +737,26 @@ class BoundaryForcingSource:
             # Static BGC dataset source (no time axis, e.g. GLODAP climatology).
             ds = self._bracket_static_time(ds)
 
-        # Add global information
-        ds = self._add_global_metadata(data, ds)
+        # Add global information. A density method puts the BGC fields on the physics
+        # time axis (see _place_bgc_on_physics_time), so the output is a climatology
+        # exactly when the PHYSICS is one -- cyclic BGC beside cyclic physics, dated
+        # BGC beside dated physics -- whatever the BGC source itself was.
+        if on_physics_time:
+            assert self.physics_forcing is not None
+            clim = self.physics_forcing.ds.attrs.get("climatology") == "True"
+            if clim:
+                # The physics view carries absolute dates in the reference year
+                # (``add_time_info_to_ds``: model_reference_date + timedelta); hand
+                # the timedeltas back so the same routine labels this output cyclic.
+                ds = ds.assign_coords(
+                    time=ds["time"] - np.datetime64(self.model_reference_date, "ns")
+                )
+            ds = self._add_global_metadata(data, ds, climatology=clim)
+        else:
+            ds = self._add_global_metadata(data, ds)
+        if self.type == "bgc":
+            ds.attrs["bgc_interpolation_method"] = ",".join(sorted(resolved_methods))
+            ds.attrs["bgc_time_axis"] = "physics" if on_physics_time else "source"
 
         if self.type == "bgc":
             # Describe the BGC variables actually present model-agnostically (only ALK is
@@ -730,10 +767,34 @@ class BoundaryForcingSource:
             self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+        ds = self._fill_nans_over_land(ds)
 
         self.ds = ds
+
+    def _fill_nans_over_land(self, ds):
+        """Fill NaN over land with 0, raising on NaN at a wet point.
+
+        The mask of each boundary variable is the grid's mask at the variable's
+        location, cut to the boundary the same way ``_validate`` does. The check is
+        skipped (plain fill) under ``bypass_validation``.
+        """
+        locations = {
+            f"{name}_{direction}": (info["location"], direction)
+            for name, info in self.variable_info.items()
+            for direction, is_enabled in self.boundaries.items()
+            if is_enabled
+        }
+        for var_name in ds.data_vars:
+            if self.bypass_validation or var_name not in locations:
+                # No grid-point location, so no mask to check against.
+                ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+            else:
+                location, direction = locations[var_name]
+                mask = wet_mask(self.grid.ds, location).isel(
+                    **self.bdry_coords[location][direction]
+                )
+                ds[var_name] = fill_nans_over_land(ds[var_name], mask, var_name)
+        return ds
 
     def _resolve_prefill_options(self) -> None:
         """Build the validated :class:`RegridConfig` from the public options.
@@ -763,72 +824,62 @@ class BoundaryForcingSource:
         )
         self.apply_2d_horizontal_fill = None
 
-    def _compute_bgc_vertical_coords(
+    def _place_bgc_on_physics_time(
         self,
         method: str,
         direction: str,
         bdry_data,
         processed_fields: dict,
+        tracer_vars: list[str],
+        aux_ts_vars: list[str],
     ) -> tuple[xr.DataArray, xr.DataArray]:
-        """Build source and target vertical coordinates for non-depth BGC
-        interpolation (``"density"`` or ``"density_mld"``) at one boundary.
+        """Put the BGC fields on the physics time axis and build the per-record vertical
+        coordinates for ``"density"`` / ``"density_mld"`` interpolation at one boundary.
 
-        The source T/S comes from the BGC dataset's OWN pair (``temp_bgc``/``salt_bgc``,
-        carried at the boundary on the BGC depth and time grid). No regridding or time
-        alignment is needed: it shares the tracers' grid and time axis.
+        The BGC source is (almost always) a 12-month climatology, while the physics it
+        has to sit on varies day by day and year by year. Placing the climatology on the
+        isopycnals or mixed layer of *one* sampled physics day and cycling that record
+        (what this did before) puts the tracers on a density structure that matches
+        neither the sampled year nor the years the record is reused in. So, like the
+        ESPER companion, the BGC fields are first cycled onto the physics ``time`` axis
+        (:func:`cycle_to_times`: linear in day of year, December wrapped into January --
+        ROMS's own ``cycle_length`` arithmetic), and the source/target coordinates are
+        then built per physics record from the cycled BGC T/S and the physics T/S as
+        they are. The output inherits the physics time axis -- grouped into files like
+        the physics (monthly for daily physics) and cyclic only when the physics is a
+        climatology; ``source["climatology"]`` keeps describing the input dataset.
 
-        The target T/S comes from the model's (physics) sigma-level fields supplied by
-        ``physics_forcing``, interpolated onto the BGC time axis. The actual coordinate
-        construction (density vs. MLD-warped depth) is delegated to
-        :func:`build_bgc_vertical_coords`.
-
-        Returns
-        -------
-        tuple[xr.DataArray, xr.DataArray]
-            ``(source_coord, target_coord)``.
+        Every array that enters the xgcm transform is blocked one calendar month per
+        chunk along ``time`` (``month_aligned_time_chunks``), the same partition the
+        PyESPER companion uses: ``apply_ufunc`` needs the inputs' chunks to agree, and a
+        block is recomputed once per output file it feeds. ``processed_fields`` is
+        updated in place (tracers and the source T/S cycled); the ``(source, target)``
+        coordinate pair is returned for :meth:`VerticalRegrid.apply`.
         """
         assert self.physics_forcing is not None
         bgc_climatology = bool(self.source["climatology"])
         bgc_depth_dim = bdry_data.dim_names["depth"]
+        bgc_time_dim = bdry_data.dim_names.get("time")
         temp_key, salt_key = bdry_data.bgc_source_ts
 
-        # BGC time axis (shared with the tracers) — taken from the source T/S.
-        bgc_time_dim = bdry_data.dim_names.get("time")
-        bgc_time_coord = None
-        src_temp = processed_fields[temp_key]
-        if bgc_time_dim is not None and bgc_time_dim in src_temp.dims:
-            bgc_time_coord = src_temp[bgc_time_dim]
+        temp_sigma, salt_sigma = physics_time_view(self.physics_forcing.ds, direction)
+        times = temp_sigma["time"]
+        plan = {"time": month_aligned_time_chunks(temp_sigma, "time", times.size)}
+        temp_sigma = apply_chunk_plan(temp_sigma, plan)
+        salt_sigma = apply_chunk_plan(salt_sigma, plan)
 
-        def _align_time(da: xr.DataArray, time_dim: str) -> xr.DataArray:
-            """Align ``da``'s ``time_dim`` to the BGC time axis, or collapse it."""
-            if time_dim not in da.dims:
-                return da
-            if bgc_time_coord is not None:
-                return _interpolate_phys_to_bgc_time(
-                    da, time_dim, bgc_time_coord, bgc_climatology
-                )
-            return da.mean(time_dim)
-
-        # --- Target density: physics (model) sigma-level T/S, aligned to BGC time ---
-        # Physics BC dataset uses "bry_time" as the time dim with an "abs_time"
-        # datetime64 companion coord. Swap to the datetime view before time-aligning.
-        temp_sigma = self.physics_forcing.ds[f"temp_{direction}"]
-        salt_sigma = self.physics_forcing.ds[f"salt_{direction}"]
-        if "abs_time" in temp_sigma.coords:
-            temp_sigma = temp_sigma.swap_dims({"bry_time": "abs_time"}).rename(
-                {"abs_time": "time"}
+        for var_name in [*tracer_vars, *aux_ts_vars]:
+            if var_name not in processed_fields:
+                continue
+            cycled = cycle_to_times(
+                processed_fields[var_name],
+                bgc_time_dim,
+                times,
+                climatology=bgc_climatology,
             )
-            salt_sigma = salt_sigma.swap_dims({"bry_time": "abs_time"}).rename(
-                {"abs_time": "time"}
-            )
-            temp_sigma = _align_time(temp_sigma, "time")
-            salt_sigma = _align_time(salt_sigma, "time")
-        else:
-            temp_sigma = _align_time(temp_sigma, "bry_time")
-            salt_sigma = _align_time(salt_sigma, "bry_time")
+            processed_fields[var_name] = apply_chunk_plan(cycled, plan)
 
         s_dim = next(d for d in temp_sigma.dims if d.startswith("s_"))
-
         return build_bgc_vertical_coords(
             method,
             source_temp=processed_fields[temp_key],
@@ -883,16 +934,15 @@ class BoundaryForcingSource:
         ds = self._bracket_static_time(ds)
 
         ds = self._add_global_metadata(None, ds, climatology=False)
+        ds.attrs["bgc_interpolation_method"] = "none"
+        ds.attrs["bgc_time_axis"] = "static"
 
         self.variable_info = bgc_variable_info(self._present_bgc_bare_names(ds))
 
         if not self.bypass_validation:
             self._validate(ds)
 
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
-
-        return ds
+        return self._fill_nans_over_land(ds)
 
     def _reject_climatology_on_static_source(self) -> None:
         """Reject ``climatology=True`` on a BGC source that carries no time axis.
@@ -980,18 +1030,9 @@ class BoundaryForcingSource:
             self._get_depth_coordinates(0, direction, "rho", "interface")
             depth = self.ds_depth_coords[f"layer_depth_rho_{direction}"]
 
-            temp = pf.ds[f"temp_{direction}"]
-            salt = pf.ds[f"salt_{direction}"]
-            # Physics BC vars carry a "bry_time" dim with an "abs_time" datetime coord.
-            # Swap to the datetime view named "time" so the shared _add_global_metadata
-            # can rebuild bry_time from it (as the dataset/constants paths do).
-            if "abs_time" in temp.coords:
-                temp = temp.swap_dims({"bry_time": "abs_time"}).rename(
-                    {"abs_time": "time"}
-                )
-                salt = salt.swap_dims({"bry_time": "abs_time"}).rename(
-                    {"abs_time": "time"}
-                )
+            # The datetime view named "time", so the shared _add_global_metadata can
+            # rebuild bry_time from it (as the dataset/constants paths do).
+            temp, salt = physics_time_view(pf.ds, direction)
             est_dates = _decimal_year(temp["time"]) if "time" in temp.dims else None
 
             lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
@@ -1014,16 +1055,15 @@ class BoundaryForcingSource:
 
         # ds carries a "time" dim inherited from physics_forcing; convert to bry_time.
         ds = self._add_global_metadata(None, ds, climatology=climatology)
+        ds.attrs["bgc_interpolation_method"] = "none"
+        ds.attrs["bgc_time_axis"] = "physics"
 
         self.variable_info = bgc_variable_info(self._present_bgc_bare_names(ds))
 
         if not self.bypass_validation:
             self._validate(ds)
 
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
-
-        return ds
+        return self._fill_nans_over_land(ds)
 
     def _apply_use_vars(self, fields: dict) -> dict:
         """Down-select ``fields`` (bare BGC var name -> DataArray) to ``self.use_vars``.
@@ -1088,6 +1128,9 @@ class BoundaryForcingSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
 
         # -------------------------------------------------------
         # Source configuration checks
@@ -1441,6 +1484,7 @@ class BoundaryForcingSource:
         ds.attrs["prefill"] = str(self.prefill)
         ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
         ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
+        ds.attrs["bottom_fill_blend_m"] = float(self.bottom_fill_blend_m)
         ds.attrs["adjust_depth_for_sea_surface_height"] = str(
             self.adjust_depth_for_sea_surface_height
         )
@@ -1449,13 +1493,22 @@ class BoundaryForcingSource:
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
 
-        # ``data`` is None for a "constants" source; fall back to the explicit flag.
-        clim = data.climatology if data is not None else bool(climatology)
+        # An explicit ``climatology`` wins (a density method's physics-time output is
+        # never a climatology; the ESPER/constants paths have no ``data``); otherwise
+        # the loaded dataset says what it is.
+        if climatology is not None:
+            clim = bool(climatology)
+        else:
+            clim = bool(data.climatology) if data is not None else False
         ds, bry_time = add_time_info_to_ds(ds, self.model_reference_date, clim)
 
         ds = ds.assign_coords({"bry_time": bry_time})
         ds = ds.swap_dims({"time": "bry_time"})
         ds = ds.drop_vars("time")
+        # `add_time_info_to_ds` declared "time" unlimited, but that dimension is
+        # gone. Drop the stale entry rather than retarget it, so `bry_time` stays a
+        # fixed dimension; older xarray turned the entry into an empty `time` dim.
+        ds.encoding.pop("unlimited_dims", None)
 
         return ds
 
@@ -1508,13 +1561,7 @@ class BoundaryForcingSource:
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
 
-                # Select the appropriate mask based on variable location
-                if location == "rho":
-                    mask = self.grid.ds.mask_rho
-                elif location == "u":
-                    mask = self.grid.ds.mask_u
-                elif location == "v":
-                    mask = self.grid.ds.mask_v
+                mask = wet_mask(self.grid.ds, location)
 
                 for direction, is_enabled in self.boundaries.items():
                     if is_enabled:
@@ -1581,15 +1628,9 @@ class BoundaryForcingSource:
         var_name_wo_direction, direction = var_name.split("_")
         location = self.variable_info[var_name_wo_direction]["location"]
 
-        # Find correct mask
-        if location == "rho":
-            mask = self.grid.ds.mask_rho
-        elif location == "u":
-            mask = self.grid.ds.mask_u
-        elif location == "v":
-            mask = self.grid.ds.mask_v
-
-        mask = mask.isel(**self.bdry_coords[location][direction])
+        mask = wet_mask(self.grid.ds, location).isel(
+            **self.bdry_coords[location][direction]
+        )
 
         # Load the data
         if self.use_dask:
@@ -1705,6 +1746,14 @@ class BoundaryForcingSource:
         -------
         List[Path]
             A list of Path objects for the filenames that were saved.
+
+        Raises
+        ------
+        ValueError
+            With ``use_dask=True``, if a variable has NaN at an ocean point. The data
+            are first computed here, so this is where that check runs; the files this
+            call started writing are removed, including a file that was already at an
+            output path (it is truncated when the write opens it).
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)
@@ -1848,9 +1897,9 @@ class BoundaryForcing:
     Parameters
     ----------
     grid, start_time, end_time, boundaries, prefill, prefill_kwargs, regrid_method,
-    extrap_method, extrap_kwargs, apply_2d_horizontal_fill, model_reference_date,
-    use_dask, chunks, initial_slice_bounds, bypass_validation, start_time_pad,
-    end_time_pad
+    extrap_method, extrap_kwargs, bottom_fill_blend_m, apply_2d_horizontal_fill,
+    model_reference_date, use_dask, chunks, initial_slice_bounds, bypass_validation,
+    start_time_pad, end_time_pad
         Forwarded to the internal physics :class:`BoundaryForcingSource` (and, for
         the fields that apply to a lat/lon bgc source too, to each bgc companion).
         See :class:`BoundaryForcingSource` for the full description of each.
@@ -1861,6 +1910,12 @@ class BoundaryForcing:
         ``{"source": RawDataSource, "use_vars": list[str] | None,
         "bgc_interpolation_method": str | None}``. A per-item
         ``bgc_interpolation_method`` overrides the wrapper-level default below.
+        When any item derives from the physics temperature/salinity (an ``ESPER``
+        source, or a dataset with its own T/S on a density method), those physics
+        fields are computed at construction and held in memory until saved, so the
+        footprint scales with the run length (see
+        :func:`~roms_tools.setup.utils.materialize_physics_ts` for the numbers and
+        why).
     bgc_model : type[BGCModel], optional
         The :class:`~roms_tools.setup.bgc_model.BGCModel` subclass (e.g.
         :class:`~roms_tools.setup.bgc_model.BGCMarbl`) used to complete the tracer
@@ -1927,8 +1982,21 @@ class BoundaryForcing:
     """xESMF destination extrapolation used on the default no-prefill path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom; see :class:`BoundaryForcingSource`."""
     apply_2d_horizontal_fill: bool | None = None
     """Deprecated alias for ``prefill``; see :class:`BoundaryForcingSource`."""
+    groom: bool = True
+    """Groom the tracers supplied by ESPER BGC sources: implausible values (spikes, zeros
+    beside ordinary water, DIC inconsistent with ALK, supersaturated oxygen) are detected
+    and refilled from the surrounding water (:func:`roms_tools.bgc_groom`), before the
+    MARBL tracer set is completed. Recorded in the YAML, so regenerating reproduces the
+    file. Other BGC sources are never groomed."""
+    groom_settings: dict | None = None
+    """Optional overrides of the grooming thresholds and fill parameters; see
+    :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`. ``None`` uses this
+    roms-tools version's built-ins, which the groomed variables record in their
+    ``bgc_groom`` attribute."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the model."""
     use_dask: bool = False
@@ -1969,6 +2037,15 @@ class BoundaryForcing:
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
         bgc_sources = self.bgc_sources or []
+        if not isinstance(self.groom, bool):
+            raise TypeError(f"`groom` must be True or False, got {self.groom!r}.")
+        # Fail on bad or contradictory settings before any regrid.
+        resolve_groom_settings(self.groom_settings)
+        if self.groom_settings is not None and not self.groom:
+            raise ValueError(
+                "`groom_settings` only applies when `groom=True`; remove it or set "
+                "`groom=True`."
+            )
         if bgc_sources:
             if self.bgc_model is None:
                 raise ValueError(
@@ -1977,6 +2054,11 @@ class BoundaryForcing:
                 )
             validate_bgc_model(self.bgc_model)
             preflight_esper_sources(bgc_sources)
+        # Normalized here too (the sources do the same) so this wrapper's own
+        # `to_yaml` writes a builtin float.
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
         # Every constructor argument this wrapper shares by name with
         # BoundaryForcingSource is forwarded to the physics object and to each bgc
         # companion -- derived from the two dataclasses (see forwardable_fields)
@@ -1991,6 +2073,24 @@ class BoundaryForcing:
         self.physics = BoundaryForcingSource(**{**shared_kwargs, "type": "physics"})
 
         if bgc_sources:
+            # Realize the boundary T/S strips the companions derive from (ESPER's
+            # inputs, density_mld's sigma-0) before their graphs are built, so their
+            # saves depend on small in-memory arrays rather than on the shared lazy
+            # source regrid -- which is what made every companion save climb in
+            # memory without bound. See materialize_physics_ts.
+            if companions_derive_from_physics_ts(
+                bgc_sources,
+                self.bgc_interpolation_method,
+                lambda name: bgc_source_has_own_ts(_DATASET_MAP["bgc"], name),
+            ):
+                materialize_physics_ts(
+                    self.physics.ds,
+                    [
+                        name
+                        for name in self.physics.ds.data_vars
+                        if str(name).split("_")[0] in ("temp", "salt")
+                    ],
+                )
             self.bgc = build_bgc_companions(
                 BoundaryForcingSource,
                 self.grid,
@@ -1999,9 +2099,26 @@ class BoundaryForcing:
                 shared_kwargs,
                 type_="bgc",
             )
+            self._groom_bgc()
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
+
+    def _groom_bgc(self) -> None:
+        """Groom the ESPER companions' tracers in place when ``groom`` is set. Runs
+        before ``process_bgc_fields``, which copies DIC/ALK to ``*_ALT_CO2``.
+        """
+        if not self.groom:
+            return
+        from roms_tools.setup.esper import groom_esper_companions
+
+        groom_esper_companions(
+            self.bgc,
+            self.grid,
+            self.physics.ds,
+            self.groom_settings,
+            load=not self.use_dask,
+        )
 
     def save(
         self,

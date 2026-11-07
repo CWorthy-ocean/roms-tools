@@ -1,3 +1,9 @@
+import json
+import os
+import shutil
+import subprocess
+import sys
+import textwrap
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -206,6 +212,331 @@ def test_load_data_open_dataset(
         assert fn_od.called
 
     assert expected_dim in ds.dims
+
+
+def _from_array_source_chain(dask_array) -> list:
+    """The objects ``dask.from_array`` wrapped, outermost first, for each source key."""
+    import dask
+
+    chain = []
+    for key, task in dict(dask_array.dask).items():
+        if isinstance(key, tuple) or callable(task):
+            continue
+        obj = getattr(task, "value", task)
+        while obj is not None:
+            chain.append(obj)
+            if dask.is_dask_collection(obj):
+                break
+            obj = getattr(obj, "array", None)
+    return chain
+
+
+@pytest.fixture(params=["json", "parquet"])
+def kerchunk_reference(tmp_path: Path, request) -> tuple[Path, xr.Dataset]:
+    """A kerchunk reference to a small netCDF file, plus the source dataset.
+
+    Parametrised over the two reference formats: a ``.json`` file and a ``.parquet``
+    *directory* (what Forge writes by default). The directory form matters because
+    ``_is_zarr_store`` takes any directory for a zarr store.
+    """
+    kerchunk = pytest.importorskip("kerchunk")  # in the dev extras; CI runs these
+    from kerchunk.hdf import SingleHdf5ToZarr
+
+    rng = np.random.default_rng(0)
+    src = xr.Dataset(
+        {"temp": (("time", "lat", "lon"), rng.random((4, 5, 6), dtype="float32"))},
+        coords={
+            "time": np.arange(4, dtype="int64"),
+            "lat": np.linspace(-2, 2, 5, dtype="float32"),
+            "lon": np.linspace(0, 5, 6, dtype="float32"),
+        },
+    )
+    nc = tmp_path / "src.nc"
+    src.to_netcdf(nc, engine="h5netcdf")
+    refs = SingleHdf5ToZarr(str(nc), inline_threshold=0).translate()
+    if request.param == "json":
+        ref = tmp_path / "src.json"
+        ref.write_text(json.dumps(refs))
+    else:
+        pytest.importorskip("fastparquet")
+        from kerchunk.df import refs_to_dataframe
+
+        ref = tmp_path / "src.parquet"
+        refs_to_dataframe(refs, str(ref))
+    del kerchunk
+    return ref, src
+
+
+def test_kerchunk_parquet_reference_wins_over_the_zarr_directory_guess(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """A ``.parquet`` reference is a directory, so ``_is_zarr_store`` says "zarr" --
+    and opening it with the zarr engine raises ``GroupNotFoundError``. The eager path
+    must let the kerchunk engine take precedence (``{"engine": engine} |
+    _kerchunk_open_kwargs(file)``); this pins that order.
+    """
+    from roms_tools.utils import _is_kerchunk_reference, _is_zarr_store
+
+    ref, src = kerchunk_reference
+    if ref.suffix != ".parquet":
+        pytest.skip("the precedence only matters for the directory form")
+    assert _is_zarr_store(ref) and _is_kerchunk_reference(ref)
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=False
+    )
+    xr.testing.assert_allclose(ds["temp"], src["temp"])
+
+
+def test_load_data_kerchunk_reference_uses_a_single_dask_layer(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """A kerchunk reference must not come back as dask-inside-dask.
+
+    The kerchunk backend's ``open_zarr`` defaults to ``chunks="auto"``, and xarray
+    wraps whatever the backend returns before applying the outer ``chunks=`` -- so
+    without ``_kerchunk_open_kwargs`` every outer chunk hides a nested ``compute()``
+    of an inner dask array. Walk the objects ``from_array`` wrapped and require that
+    none of them is a dask collection.
+    """
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=True
+    )
+    data = ds["temp"].data
+    assert hasattr(data, "dask"), "expected a dask-backed variable with use_dask=True"
+
+    chain = _from_array_source_chain(data)
+    assert chain, "no from_array source found in the graph"
+    nested = [type(o).__name__ for o in chain if hasattr(o, "dask")]
+    assert not nested, f"kerchunk reference is wrapped dask-inside-dask via {nested}"
+
+    xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
+
+
+def test_load_data_kerchunk_reference_ignores_lateral_chunks(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """Lateral dask tiles over a reference would re-read every source chunk per
+    tile; the loader keeps time chunking and inherits the source's lateral extent.
+    """
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref,
+        {"time": "time", "latitude": "lat", "longitude": "lon"},
+        use_dask=True,
+        chunks={"time": 1, "lat": 2, "lon": 2},
+    )
+    chunks = ds["temp"].chunksizes
+    assert chunks["time"] == (1, 1, 1, 1)  # time chunking honoured
+    assert chunks["lat"] == (src.sizes["lat"],)  # lateral tiles dropped
+    assert chunks["lon"] == (src.sizes["lon"],)
+    xr.testing.assert_allclose(ds["temp"].load(), src["temp"])
+
+
+def test_load_data_kerchunk_reference_eager_is_not_dask(
+    kerchunk_reference: tuple[Path, xr.Dataset],
+) -> None:
+    """With ``use_dask=False`` the backend must not smuggle dask arrays in either."""
+    ref, src = kerchunk_reference
+    ds = load_data(
+        ref, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=False
+    )
+    assert not hasattr(ds["temp"].data, "dask")
+    xr.testing.assert_allclose(ds["temp"], src["temp"])
+
+
+@pytest.fixture(scope="module")
+def padded_parquet_reference(tmp_path_factory) -> Path:
+    """A parquet reference to three files whose partitions carry padding rows.
+
+    ``kerchunk_reference`` has one chunk per variable, so its partitions are full.
+    Here each variable has three chunks in a 10-row record, which is what exposes
+    fsspec's ``remote_protocol`` guess (see `_reference_protocol`).
+    """
+    pytest.importorskip("kerchunk")
+    pytest.importorskip("fastparquet")
+    from fsspec.implementations.reference import LazyReferenceMapper
+    from kerchunk.combine import MultiZarrToZarr
+    from kerchunk.hdf import SingleHdf5ToZarr
+
+    root = tmp_path_factory.mktemp("padded_parquet")
+    refs = []
+    for i in range(3):
+        src = xr.Dataset(
+            {"temp": (("time", "lat", "lon"), np.full((2, 5, 6), i, dtype="float32"))},
+            coords={
+                "time": np.arange(2 * i, 2 * i + 2, dtype="int64"),
+                "lat": np.linspace(-2, 2, 5, dtype="float32"),
+                "lon": np.linspace(0, 5, 6, dtype="float32"),
+            },
+        )
+        nc = root / f"src{i}.nc"
+        src.to_netcdf(nc, engine="h5netcdf")
+        refs.append(SingleHdf5ToZarr(str(nc), inline_threshold=0).translate())
+    combined = MultiZarrToZarr(
+        refs, concat_dims=["time"], identical_dims=["lat", "lon"]
+    ).translate()
+
+    # Metadata first: LazyReferenceMapper only sees a variable's .zarray once flushed.
+    ref = root / "src.parquet"
+    out = LazyReferenceMapper.create(str(ref), record_size=10)
+    for key, value in combined["refs"].items():
+        if ".z" in key or "/" not in key:
+            out[key] = value
+    out.flush()
+    for key, value in combined["refs"].items():
+        if ".z" not in key and "/" in key:
+            out[key] = value
+    out.flush()
+    return ref
+
+
+@pytest.mark.parametrize("seed", ["0", "2", "4"])
+def test_load_data_parquet_reference_opens_under_any_hash_seed(
+    padded_parquet_reference: Path, seed: str
+) -> None:
+    """Without a ``remote_protocol``, fsspec guesses one by scanning the references;
+    for some hash seeds that scan meets a padding row first and raises ``TypeError``.
+    Run in a subprocess so the seed can be set.
+    """
+    import roms_tools
+
+    code = textwrap.dedent(
+        f"""
+        from roms_tools.utils import load_data
+        dims = {{"time": "time", "latitude": "lat", "longitude": "lon"}}
+        for use_dask in (True, False):
+            ds = load_data({str(padded_parquet_reference)!r}, dims, use_dask=use_dask)
+            assert ds["temp"].sizes["time"] == 6
+            ds["temp"].load()
+        """
+    )
+    env = {
+        **os.environ,
+        "PYTHONHASHSEED": seed,
+        "PYTHONPATH": os.pathsep.join(
+            [
+                str(Path(roms_tools.__file__).parents[1]),
+                os.environ.get("PYTHONPATH", ""),
+            ]
+        ),
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_reference_protocol(
+    kerchunk_reference: tuple[Path, xr.Dataset], tmp_path: Path
+) -> None:
+    """A parquet reference gives the protocol of the files it points at, and the
+    kerchunk open passes it on; a JSON reference is left to fsspec, unread.
+    """
+    from roms_tools.utils import _kerchunk_open_kwargs, _reference_protocol
+
+    ref, _ = kerchunk_reference
+    backend_kwargs = _kerchunk_open_kwargs(ref)["backend_kwargs"]
+    if ref.suffix == ".parquet":
+        assert _reference_protocol(ref) == "file"
+        assert backend_kwargs["storage_options"] == {"remote_protocol": "file"}
+    else:
+        with mock.patch("fsspec.open") as fsspec_open:
+            assert _reference_protocol(ref) is None
+        fsspec_open.assert_not_called()
+        assert "storage_options" not in backend_kwargs
+    assert _reference_protocol(tmp_path / "missing.parquet") is None
+
+
+def test_reference_protocol_logs_unreadable_reference(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unreadable reference falls back to fsspec's guess, and says why at debug level."""
+    from roms_tools.utils import _reference_protocol
+
+    ref = tmp_path / "broken.parquet"
+    ref.mkdir()
+    (ref / ".zmetadata").write_text("not json")
+    with caplog.at_level("DEBUG"):
+        assert _reference_protocol(ref) is None
+    assert any(str(ref) in r.getMessage() and r.exc_info for r in caplog.records)
+
+
+def test_reference_protocol_rereads_rewritten_reference(
+    kerchunk_reference: tuple[Path, xr.Dataset], tmp_path: Path
+) -> None:
+    """The memo is keyed on ``.zmetadata``, which changes whenever the reference is
+    rewritten; the directory's own mtime does not change when files inside it are.
+    """
+    from roms_tools.utils import _reference_protocol
+
+    ref, _ = kerchunk_reference
+    if ref.suffix != ".parquet":
+        pytest.skip("only parquet references are read")
+    copy = tmp_path / "copy.parquet"
+    shutil.copytree(ref, copy)
+    assert _reference_protocol(copy) == "file"
+
+    with mock.patch("roms_tools.utils.pd.read_parquet", wraps=pd.read_parquet) as rp:
+        assert _reference_protocol(copy) == "file"
+        assert rp.call_count == 0  # memoised
+        with (copy / ".zmetadata").open("a") as fh:
+            fh.write("\n")
+        assert _reference_protocol(copy) == "file"
+        assert rp.call_count == 1  # read again after the rewrite
+
+
+def test_load_data_rejects_kerchunk_references_on_different_filesystems(
+    tmp_path: Path,
+) -> None:
+    """``open_mfdataset`` passes one ``remote_protocol`` to every reference, so
+    references that point at different filesystems cannot be loaded together.
+    """
+    local, remote = tmp_path / "local.parquet", tmp_path / "remote.parquet"
+    protocols = {str(local): "file", str(remote): "s3"}
+    with (
+        mock.patch(
+            "roms_tools.utils._reference_protocol",
+            side_effect=lambda p: protocols.get(str(p)),
+        ),
+        pytest.raises(ValueError, match="one filesystem"),
+    ):
+        load_data([local, remote], {"time": "time"}, use_dask=True)
+
+
+def test_kerchunk_parquet_reference_without_suffix(
+    kerchunk_reference: tuple[Path, xr.Dataset], tmp_path: Path
+) -> None:
+    """A parquet reference directory is recognised by its contents, not its name."""
+    from roms_tools.utils import _is_kerchunk_reference
+
+    ref, src = kerchunk_reference
+    if ref.suffix != ".parquet":
+        pytest.skip("only the directory form can be renamed this way")
+    renamed = tmp_path / "refs_without_suffix"
+    shutil.copytree(ref, renamed)
+    plain = tmp_path / "plain_dir"
+    plain.mkdir()
+
+    assert _is_kerchunk_reference(renamed)
+    assert not _is_kerchunk_reference(plain)
+    ds = load_data(
+        renamed, {"time": "time", "latitude": "lat", "longitude": "lon"}, use_dask=False
+    )
+    xr.testing.assert_allclose(ds["temp"], src["temp"])
+
+
+def test_load_data_rejects_kerchunk_references_mixed_with_files(
+    kerchunk_reference: tuple[Path, xr.Dataset], tmp_path: Path
+) -> None:
+    """References and other files cannot be loaded together: ``open_mfdataset`` takes
+    one engine for all of them.
+    """
+    ref, src = kerchunk_reference
+    nc = tmp_path / "other.nc"
+    src.to_netcdf(nc, engine="h5netcdf")
+    with pytest.raises(ValueError, match="kerchunk references"):
+        load_data([ref, nc], {"time": "time"}, use_dask=False)
 
 
 # test get_dask_chunks

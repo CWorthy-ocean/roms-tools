@@ -21,14 +21,21 @@ from roms_tools.datasets.lat_lon_datasets import (
     WOABGCDataset,
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
+from roms_tools.fill import fill_below_source_bottom
 from roms_tools.plot import plot
-from roms_tools.processing_methods import RegridConfig, _xesmf_available
+from roms_tools.processing_methods import (
+    BOTTOM_FILL_BLEND_M,
+    RegridConfig,
+    _xesmf_available,
+    validate_bottom_fill_blend_m,
+)
 from roms_tools.regrid import (
     LateralRegridFromROMS,
     VerticalRegrid,
     build_lateral_regridder,
-    select_source_mask,
+    select_source_mask_name,
 )
+from roms_tools.setup.bgc_groom import resolve_groom_settings
 from roms_tools.setup.bgc_model import (
     BGCModel,
     bgc_model_from_name,
@@ -40,26 +47,32 @@ from roms_tools.setup.utils import (
     _CLIMATOLOGY_ONLY_BGC,
     _SELF_DOWNLOADING_BGC,
     BGC_INTERPOLATION_METHODS,
+    WET_NAN_HINT_REGRID,
     RawDataSource,
     apply_scipy_fallback_fill,
     apply_source_prefill,
     bgc_source_extra_kwargs,
+    bgc_source_has_own_ts,
     build_bgc_companions,
     build_bgc_vertical_coords,
     check_source_coverage,
+    companions_derive_from_physics_ts,
     compute_barotropic_velocity,
     deserialize_forcing_data,
+    fill_nans_over_land,
     forwardable_fields,
     from_yaml,
     get_roms_tools_version_info,
     get_target_coords,
     get_variable_metadata,
     materialize_before_check,
+    materialize_physics_ts,
     nan_check_batch,
     pop_grid_data,
     preflight_esper_sources,
     substitute_nans_by_fillvalue,
     to_dict,
+    wet_mask,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -108,6 +121,15 @@ _BGC_SOURCE_NAMES: frozenset[str] = frozenset(_DATASET_MAP["bgc"]) | {
 
 #: Model reference date used when neither the caller nor a ``"ROMS"`` source sets one.
 _DEFAULT_MODEL_REFERENCE_DATE: datetime = datetime(2000, 1, 1)
+
+#: Advice in the wet-point NaN error for a ``"ROMS"`` restart source, which ignores
+#: ``prefill`` (see :func:`~roms_tools.setup.utils.fill_nans_over_land`).
+_WET_NAN_HINT_ROMS = (
+    "The source is a ROMS restart, so `prefill` does not apply. Most likely the child "
+    "grid reaches the parent grid's edge, where the parent has no value (velocities "
+    "on the outermost ring need a parent neighbour beyond the edge); shrink the child "
+    "domain so it lies inside the parent."
+)
 
 
 @dataclass(kw_only=True)
@@ -276,6 +298,18 @@ class InitialConditionsSource:
     extrap_kwargs : dict, optional
         Method-specific options for ``extrap_method``: ``num_src_pnts`` /
         ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
+    bottom_fill_blend_m : float, optional
+        Where the model column is deeper than the source column, the cells below the
+        source bottom hold no source data. A tracer (temperature, salinity, BGC) there
+        takes the value of the nearest source column that has water at that depth,
+        blended in from the column's own bottom value over ``bottom_fill_blend_m``
+        metres below the bottom: ``0`` takes the nearest column's value immediately,
+        ``inf`` copies each column's bottom value down instead. The nearest column
+        can lie across a sill and hold lighter water than the column's own bottom
+        water; consider ``inf`` for semi-enclosed basins and overflow regions.
+        Velocities always copy their bottom value down. Applies to lat/lon and ROMS
+        restart sources. See the methods documentation for choosing a value. Defaults
+        to 25 m.
 
     Examples
     --------
@@ -364,6 +398,13 @@ class InitialConditionsSource:
     source."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``. Applies only to lat/lon sources."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom, over which a tracer in a cell deeper than
+    the source column goes from the column's own bottom value to the value of the nearest
+    source column with water at that depth. ``0`` takes the nearest column's value
+    immediately, ``inf`` copies the bottom value down instead. Velocities are
+    unaffected (they always copy the bottom value down). See the methods documentation
+    for choosing a value."""
     # `compare=False`: `xr.Dataset.__eq__` returns an elementwise Dataset (truthy in
     # a way that makes `==` comparisons on this dataclass vacuously true/broken)
     # rather than a bool, so equality between two objects of this class is defined
@@ -453,10 +494,36 @@ class InitialConditionsSource:
             self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+        ds = self._fill_nans_over_land(ds)
 
         self.ds = ds
+
+    @property
+    def _variable_info(self):
+        """Metadata of the variables this object produces (physics or bgc)."""
+        if self.type == "bgc":
+            return {**self.variable_info_physics, **self.variable_info_bgc}
+        return self.variable_info_physics
+
+    def _fill_nans_over_land(self, ds):
+        """Fill NaN over land with 0, raising on NaN at a wet point.
+
+        The check is skipped (plain fill) under ``bypass_validation``.
+        """
+        variable_info = self._variable_info
+        hint = (
+            _WET_NAN_HINT_ROMS if self.source["name"] == "ROMS" else WET_NAN_HINT_REGRID
+        )
+        for var_name in ds.data_vars:
+            if self.bypass_validation or var_name not in variable_info:
+                # No grid-point location (e.g. Cs_r, Cs_w), so no mask to check against.
+                ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+            else:
+                mask = wet_mask(self.grid.ds, variable_info[var_name]["location"])
+                ds[var_name] = fill_nans_over_land(
+                    ds[var_name], mask, var_name, hint=hint
+                )
+        return ds
 
     def _resolve_prefill_options(self) -> None:
         """Build the validated :class:`RegridConfig` from the public options.
@@ -564,8 +631,8 @@ class InitialConditionsSource:
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
-        data.extrapolate_deepest_to_bottom()
         if isinstance(data, ROMSDataset):
+            data.extrapolate_deepest_to_bottom()
             # ROMS restart source: the bespoke ROMS-grid fill feeds only
             # ``LateralRegridFromROMS`` (unchanged). The prefill/regrid/extrap options
             # do not apply here; warn if the user explicitly set any of them.
@@ -576,6 +643,7 @@ class InitialConditionsSource:
                 self.model_reference_date = data.model_reference_date
             data.apply_lateral_fill()
         else:
+            data.extrapolate_deepest_to_bottom(blend_m=self.bottom_fill_blend_m)
             # `self.source` is always the source relevant to `type` now (contextual
             # on `self.type`), so no physics-vs-bgc branch is needed here anymore.
             source_name = self.source["name"]
@@ -750,41 +818,39 @@ class InitialConditionsSource:
             for var_name in var_names:
                 processed_fields[var_name] = ds_rho[var_name]
 
-            # Regrid depth coordinates
+            # Regrid depth coordinates, and the source bottom depth, which tells
+            # `_regrid_vertically` where the source has no data.
             processed_fields["layer_depth_rho"] = lateral_regrid_from_roms.apply(
                 data.ds_depth_coords["layer_depth_rho"]
             )
+            processed_fields["bottom_depth_rho"] = lateral_regrid_from_roms.apply(
+                data.grid.ds["h"]
+            )
 
         else:
-            # Velocity fields (location "u"/"v") use the velocity mask; build a
-            # separate vector regridder only when a velocity var is present so
+            # Each variable regrids with the source mask `select_source_mask_name` picks
+            # for it (its own mask, `mask_vel` for velocity fields (location "u"/"v"), or
+            # `mask`); one regridder is built per distinct mask, lazily, so
             # mask_vel-less sources (e.g. BGC) don't pay for unused xESMF weights.
-            def _mask(is_vector):
-                return select_source_mask(
+            # Keyed by the mask's content, not its name: per-variable masks with the
+            # same wet pattern (most of GLODAP's) share one regridder.
+            regridders = {}
+            for var_name in var_names:
+                src_name = var_names[var_name]["name"]
+                mask_name = select_source_mask_name(
                     data.ds,
-                    is_vector=is_vector,
+                    is_vector=var_names[var_name]["location"] in ("u", "v"),
                     use_xesmf=self._regrid.use_xesmf,
                     prefill=self._regrid.prefill,
+                    var_name=src_name,
                 )
-
-            scalar_rg = build_lateral_regridder(
-                target_coords, data, self._regrid, _mask(False)
-            )
-            has_vel = any(var_names[v]["location"] in ("u", "v") for v in var_names)
-            vector_rg = (
-                build_lateral_regridder(target_coords, data, self._regrid, _mask(True))
-                if has_vel
-                else scalar_rg
-            )
-            for var_name in var_names:
-                rg = (
-                    vector_rg
-                    if var_names[var_name]["location"] in ("u", "v")
-                    else scalar_rg
-                )
-                processed_fields[var_name] = rg.apply(
-                    data.ds[var_names[var_name]["name"]]
-                )
+                mask = None if mask_name is None else data.ds[mask_name]
+                key = None if mask is None else mask.values.tobytes()
+                if key not in regridders:
+                    regridders[key] = build_lateral_regridder(
+                        target_coords, data, self._regrid, mask
+                    )
+                processed_fields[var_name] = regridders[key].apply(data.ds[src_name])
 
         return processed_fields
 
@@ -861,6 +927,31 @@ class InitialConditionsSource:
                             ],
                             mask_edges=False,
                         )
+
+                if location == "rho":
+                    # Regridding clamps below the source's deepest layer: replace the
+                    # clamped values where the child is deeper than the parent, from
+                    # the native parent columns.
+                    tracers = [v for v in filtered_vars if v in processed_fields]
+                    processed_fields.update(
+                        fill_below_source_bottom(
+                            regridded={v: processed_fields[v] for v in tracers},
+                            target_depth=self.ds_depth_coords["layer_depth_rho"],
+                            source_bottom=processed_fields["bottom_depth_rho"],
+                            lon=self.grid.ds["lon_rho"],
+                            lat=self.grid.ds["lat_rho"],
+                            mask=self.grid.ds["mask_rho"],
+                            parent_fields={
+                                v: data.ds[var_names[v]["name"]] for v in tracers
+                            },
+                            parent_depth=data.ds_depth_coords["layer_depth_rho"],
+                            parent_h=data.grid.ds["h"],
+                            parent_mask=data.grid.ds["mask_rho"],
+                            parent_lon=data.grid.ds["lon_rho"],
+                            parent_lat=data.grid.ds["lat_rho"],
+                            blend_m=self.bottom_fill_blend_m,
+                        )
+                    )
             else:
                 # LatLonDataset: create a regrid object for all variables
                 vertical_regrid = VerticalRegrid(
@@ -1012,6 +1103,9 @@ class InitialConditionsSource:
                 f"`bgc_interpolation_method` must be one of "
                 f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
 
     def _get_data(
         self, forcing_type=Literal["physics", "bgc"]
@@ -1335,10 +1429,7 @@ class InitialConditionsSource:
         ESPER -- every variable is materialised first and cached, so the check does
         not force a second compute; see :func:`~roms_tools.setup.utils.materialize_before_check`.
         """
-        if self.type == "bgc":
-            variable_info = {**self.variable_info_physics, **self.variable_info_bgc}
-        else:
-            variable_info = self.variable_info_physics
+        variable_info = self._variable_info
 
         # Materialize every variable sharing this source's expensive computation (not
         # just the ones actually NaN-checked below -- bgc_variable_info() flags only
@@ -1356,12 +1447,7 @@ class InitialConditionsSource:
         checks = []
         for var_name in variable_info:
             if variable_info[var_name]["validate"]:
-                if variable_info[var_name]["location"] == "rho":
-                    mask = self.grid.ds.mask_rho
-                elif variable_info[var_name]["location"] == "u":
-                    mask = self.grid.ds.mask_u
-                elif variable_info[var_name]["location"] == "v":
-                    mask = self.grid.ds.mask_v
+                mask = wet_mask(self.grid.ds, variable_info[var_name]["location"])
                 checks.append((ds[var_name].squeeze(), mask, None))
 
         nan_check_batch(checks)
@@ -1397,6 +1483,7 @@ class InitialConditionsSource:
         ds.attrs["prefill"] = str(self.prefill)
         ds.attrs["regrid_method"] = "xesmf" if self._regrid.use_xesmf else "scipy"
         ds.attrs["extrap_method"] = str(self._regrid.effective_extrap)
+        ds.attrs["bottom_fill_blend_m"] = float(self.bottom_fill_blend_m)
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
@@ -1546,6 +1633,14 @@ class InitialConditionsSource:
         -------
         Path
             A `Path` object representing the location of the saved file.
+
+        Raises
+        ------
+        ValueError
+            With ``use_dask=True``, if a variable has NaN at an ocean point. The data
+            are first computed here, so this is where that check runs; the files this
+            call started writing are removed, including a file that was already at an
+            output path (it is truncated when the write opens it).
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)
@@ -1824,7 +1919,7 @@ class InitialConditions:
     ----------
     grid, ini_time, model_reference_date, allow_flex_time, use_dask, chunks,
     initial_slice_bounds, bypass_validation, prefill, prefill_kwargs,
-    regrid_method, extrap_method, extrap_kwargs
+    regrid_method, extrap_method, extrap_kwargs, bottom_fill_blend_m
         Forwarded to the internal physics :class:`InitialConditionsSource` (and, for
         the fields that apply to a lat/lon bgc source too, to each bgc companion).
         See :class:`InitialConditionsSource` for the full description of each.
@@ -1844,6 +1939,12 @@ class InitialConditions:
         ``{"source": RawDataSource, "use_vars": list[str] | None,
         "bgc_interpolation_method": str | None}``. A per-item
         ``bgc_interpolation_method`` overrides the wrapper-level default below.
+        When any item derives from the physics temperature/salinity (an ``ESPER``
+        source, or a dataset with its own T/S on a density method), those physics
+        fields are computed at construction and held in memory until saved, so the
+        footprint scales with the run length (see
+        :func:`~roms_tools.setup.utils.materialize_physics_ts` for the numbers and
+        why).
     bgc_model : type[BGCModel], optional
         The :class:`~roms_tools.setup.bgc_model.BGCModel` subclass (e.g.
         :class:`~roms_tools.setup.bgc_model.BGCMarbl`) used to complete the tracer
@@ -1931,6 +2032,19 @@ class InitialConditions:
     """xESMF destination extrapolation used on the default no-prefill path."""
     extrap_kwargs: dict | None = None
     """Method-specific options for ``extrap_method``."""
+    bottom_fill_blend_m: float = BOTTOM_FILL_BLEND_M
+    """Blend length (m) below the source bottom; see :class:`InitialConditionsSource`."""
+    groom: bool = True
+    """Groom the tracers supplied by ESPER BGC sources: implausible values (spikes, zeros
+    beside ordinary water, DIC inconsistent with ALK, supersaturated oxygen) are detected
+    and refilled from the surrounding water (:func:`roms_tools.bgc_groom`), before the
+    MARBL tracer set is completed. Recorded in the YAML, so regenerating reproduces the
+    file. Other BGC sources are never groomed."""
+    groom_settings: dict | None = None
+    """Optional overrides of the grooming thresholds and fill parameters; see
+    :func:`roms_tools.setup.bgc_groom.resolve_groom_settings`. ``None`` uses this
+    roms-tools version's built-ins, which the groomed variables record in their
+    ``bgc_groom`` attribute."""
 
     # `compare=False` on all three: `physics`/`bgc` hold constituent
     # `InitialConditionsSource` objects and `ds` is the merged `xr.Dataset` itself
@@ -1971,6 +2085,15 @@ class InitialConditions:
         if self.bgc_source is not None:
             bgc_sources = [{"source": self.bgc_source, "use_vars": self.use_vars}]
         bgc_sources = bgc_sources or []
+        if not isinstance(self.groom, bool):
+            raise TypeError(f"`groom` must be True or False, got {self.groom!r}.")
+        # Fail on bad or contradictory settings before any regrid.
+        resolve_groom_settings(self.groom_settings)
+        if self.groom_settings is not None and not self.groom:
+            raise ValueError(
+                "`groom_settings` only applies when `groom=True`; remove it or set "
+                "`groom=True`."
+            )
         # Validate `bgc_model` BEFORE building the physics source: a wrong value
         # (None, an instance, an unrelated class) should fail here, not after
         # the physics regrid has already been paid for.
@@ -1982,6 +2105,11 @@ class InitialConditions:
                 )
             validate_bgc_model(self.bgc_model)
             preflight_esper_sources(bgc_sources)
+        # Normalized here too (the sources do the same) so this wrapper's own
+        # `to_yaml` writes a builtin float.
+        self.bottom_fill_blend_m = validate_bottom_fill_blend_m(
+            self.bottom_fill_blend_m
+        )
 
         # Every constructor argument this wrapper shares by name with
         # InitialConditionsSource is forwarded to the physics object and to each
@@ -2004,6 +2132,14 @@ class InitialConditions:
         self.model_reference_date = self.physics.model_reference_date
 
         if bgc_sources:
+            # Realize the T/S fields the companions derive from before their graphs
+            # are built; see materialize_physics_ts and the boundary-forcing wrapper.
+            if companions_derive_from_physics_ts(
+                bgc_sources,
+                self.bgc_interpolation_method,
+                lambda name: bgc_source_has_own_ts(_DATASET_MAP["bgc"], name),
+            ):
+                materialize_physics_ts(self.physics.ds, ["temp", "salt"])
             self.bgc = build_bgc_companions(
                 InitialConditionsSource,
                 self.grid,
@@ -2012,6 +2148,7 @@ class InitialConditions:
                 shared_kwargs,
                 type_="bgc",
             )
+            self._groom_bgc()
             self.bgc_model().process_bgc_fields(self.bgc)
         else:
             self.bgc = []
@@ -2020,6 +2157,22 @@ class InitialConditions:
             self.ds = InitialConditionsSource.merge(self.physics, self.bgc)
         else:
             self.ds = self.physics.ds
+
+    def _groom_bgc(self) -> None:
+        """Groom the ESPER companions' tracers in place when ``groom`` is set. Runs
+        before ``process_bgc_fields``, which copies DIC/ALK to ``*_ALT_CO2``.
+        """
+        if not self.groom:
+            return
+        from roms_tools.setup.esper import groom_esper_companions
+
+        groom_esper_companions(
+            self.bgc,
+            self.grid,
+            self.physics.ds,
+            self.groom_settings,
+            load=not self.use_dask,
+        )
 
     def plot(
         self,

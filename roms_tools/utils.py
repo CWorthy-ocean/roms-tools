@@ -1,6 +1,8 @@
 import contextlib
 import glob
+import json
 import logging
+import os
 import re
 import textwrap
 import time
@@ -99,6 +101,10 @@ NetCDFFormat = Literal[
     "NETCDF3_64BIT_DATA",
 ]
 DEFAULT_NETCDF_FORMAT: NetCDFFormat = "NETCDF4"
+# Always name the write engine: since xarray 2026.9 the default engine is chosen from
+# `format` and refuses NETCDF3_64BIT_OFFSET / NETCDF3_64BIT_DATA. netcdf4 is what
+# roms-tools has always written with and supports every `NetCDFFormat`.
+NETCDF_WRITE_ENGINE: Literal["netcdf4"] = "netcdf4"
 
 
 def _path_list_from_input(files: FilePaths) -> list[Path]:
@@ -481,6 +487,13 @@ def _load_data_dask(
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
+        if _is_kerchunk_reference(filenames[0]):
+            # open_mfdataset takes one set of open keywords for every file. load_data
+            # has checked that the references agree on their remote protocol, so take
+            # the keywords from the first one whose protocol is known.
+            known = next((f for f in filenames if _reference_protocol(f)), filenames[0])
+            kwargs.update(_kerchunk_open_kwargs(known))
+            chunks = _without_lateral_chunks(chunks, dim_names)
 
         preprocessor = (
             _get_ds_preprocessor(initial_slice_bounds, initial_slice_bounds_use_isel)
@@ -495,6 +508,167 @@ def _load_data_dask(
             preprocess=preprocessor,
             **kwargs,
         )
+
+
+_KERCHUNK_SUFFIXES = (".json", ".json.zstd", ".parquet")
+
+
+def _is_kerchunk_reference(path: str | Path) -> bool:
+    """True for a kerchunk reference: a ``.json`` / ``.json.zstd`` file or a ``.parquet``
+    directory. Wider than ``KerchunkBackend.guess_can_open`` (kerchunk 0.2.10 does not
+    list ``.json.zstd``), so a zstd-compressed reference is still opened explicitly
+    through the kerchunk engine instead of falling to xarray's engine guessing.
+
+    A local directory holding ``.zmetadata`` plus ``<var>/refs.<n>.parq`` files is
+    also a parquet reference, whatever its name.
+    """
+    if str(path).rstrip("/").endswith(_KERCHUNK_SUFFIXES):
+        return True
+    p = Path(path)
+    return (
+        p.is_dir()
+        and (p / ".zmetadata").is_file()
+        and next(p.glob("*/refs.*.parq"), None) is not None
+    )
+
+
+# `_reference_protocol` memo: the answer costs a parquet read (a remote one for a
+# remote reference), and every open of the same reference would otherwise pay it again.
+_REFERENCE_PROTOCOLS: dict[object, str] = {}
+
+
+def _reference_protocol(path: str | Path) -> str | None:
+    """Return the protocol of the files a parquet kerchunk reference points at.
+
+    This is not the protocol of the reference itself: a reference on local disk can
+    index ``s3://`` files. fsspec's ``ReferenceFileSystem`` guesses it when it is not
+    given, by scanning every reference value. A parquet reference pads each partition
+    to its record size, the padding rows read back as missing paths, and with pandas 3
+    that scan raises ``TypeError`` for some hash seeds (whichever row it meets first).
+    Passing the protocol skips the scan.
+
+    JSON references give `None` without being read: they have no padding rows, so
+    fsspec's guess is safe, and reading one here would parse the whole reference a
+    second time.
+
+    For a parquet reference only the first non-empty ``path`` of the first
+    ``<var>/refs.0.parq`` is read. The answer is memoised per path plus the mtime and
+    size of ``.zmetadata`` for a local reference (``.zmetadata`` is rewritten whenever
+    the reference is), and per path for a remote one. Anything unexpected gives `None`,
+    leaving fsspec to guess as before; this never raises.
+
+    Parameters
+    ----------
+    path : str | Path
+        A kerchunk reference (see `_is_kerchunk_reference`).
+    """
+    locator = str(path).rstrip("/")
+    if locator.endswith((".json", ".json.zstd")):
+        return None
+    try:
+        key: object = locator
+        if "://" not in locator:
+            st = os.stat(os.path.join(os.path.expanduser(locator), ".zmetadata"))
+            key = (locator, st.st_mtime_ns, st.st_size)
+        if key in _REFERENCE_PROTOCOLS:
+            return _REFERENCE_PROTOCOLS[key]
+
+        import fsspec
+        from fsspec.core import split_protocol
+
+        found = None
+        with fsspec.open(f"{locator}/.zmetadata", "rt") as fh:
+            meta = json.load(fh).get("metadata", {})
+        fs, _, _ = fsspec.get_fs_token_paths(locator)
+        for name in meta:
+            if not name.endswith("/.zarray"):
+                continue
+            part = f"{locator}/{name[: -len('/.zarray')]}/refs.0.parq"
+            if not fs.exists(part):
+                continue
+            with fsspec.open(part, "rb") as fh:
+                column = pd.read_parquet(fh, columns=["path"])["path"].dropna()
+            column = column[column.astype(str).str.len() > 0]
+            if len(column):
+                found = str(column.iloc[0])
+                break
+
+        if found is None:
+            return None
+        protocol = split_protocol(found)[0] or "file"
+        _REFERENCE_PROTOCOLS[key] = protocol
+        return protocol
+    except Exception:
+        logging.debug(
+            "Could not read the remote protocol of %s; fsspec will guess it.",
+            locator,
+            exc_info=True,
+        )
+        return None
+
+
+def _without_lateral_chunks(
+    chunks: dict[str, int] | None, dim_names: dict[str, str] | None
+) -> dict[str, int] | None:
+    """Drop the latitude/longitude entries from a dask ``chunks`` dict.
+
+    For a kerchunk reference the source is zarr-chunked, and GLORYS references
+    carry one chunk per (day, depth level) spanning the whole 2041x4320 level.
+    Imposing lateral dask tiles on top of that -- ``LatLonDataset``'s default
+    ``_default_lateral_dask_chunk`` of 50 gives 41x87 tiles per level -- makes
+    every tile's getter read and CF-decode the entire level slab and keep a 50x50
+    corner. Cropping a 12 km domain then touches 195 tiles per level, i.e. a 195x
+    read-and-decode amplification: one day's bbox crop took 19.7 s tiled against
+    0.8 s with the lateral dims inherited (0.3 s per-level), bit-identical.
+    ``read_zarr`` already avoids this by passing ``chunks={}``; this applies the
+    same rule to references. Time and depth entries are kept: one outer chunk per
+    day with the water column whole suits the vertical interpolation.
+    """
+    if not chunks or not dim_names:
+        return chunks
+    lateral = {dim_names.get("latitude"), dim_names.get("longitude")} - {None}
+    return {dim: size for dim, size in chunks.items() if dim not in lateral}
+
+
+def _kerchunk_open_kwargs(path: str | Path) -> dict:
+    """Extra ``xr.open_dataset`` kwargs so a kerchunk reference is read through ONE dask layer.
+
+    The kerchunk backend implements ``open_dataset`` as ``xr.open_zarr(store, ...)``,
+    and ``open_zarr`` defaults to ``chunks="auto"`` -- so the *backend* already hands
+    xarray dask-backed variables. xarray then wraps every backend variable in
+    ``CopyOnWriteArray`` unconditionally (``_protect_dataset_variables_inplace`` has
+    no dask check), and ``Variable.chunk()`` cannot see through that wrapper, so the
+    outer ``chunks=`` we pass ends up as ``dask.from_array`` over an indexing adapter
+    whose leaf is the inner dask array:
+
+        ImplicitToExplicitIndexingAdapter -> CopyOnWriteArray -> DaskIndexingAdapter -> dask.Array
+
+    Every outer chunk then runs a *nested* ``compute()`` of the inner array inside its
+    own task, and because CF decoding lives in that inner graph it is applied to whole
+    chunks *before* the outer task slices them. Profiled with py-spy on a 12 km ESPER
+    boundary month against the GLORYS subchunk reference (18 400 chunks per 3-D
+    variable, one per day and depth level): 84 % of all compute samples sat inside
+    those nested computes, 64 % of them decoding full 2041x4320 global slabs
+    (mask/scale/offset) and concatenating 50 levels into a ~1.8 GB array that the
+    outer task then cut down to a boundary strip; PyESPER itself was 0.1 %. A single
+    (time, depth) chunk read cost 0.49 s against 0.15 s once fixed, and the lazy
+    decode then runs on the slice rather than the slab.
+
+    Telling the backend's ``open_zarr`` ``chunks=None`` makes it return plain lazy
+    zarr wrappers, so the outer ``chunks=`` builds the only dask layer. The engine is
+    pinned too: ``open_mfdataset`` would otherwise re-run xarray's engine guessing per
+    file. Returns ``{}`` for anything that is not a reference file.
+
+    For a parquet reference the ``remote_protocol`` storage option is filled in from
+    the reference (see `_reference_protocol`), so fsspec does not have to guess it.
+    """
+    if not _is_kerchunk_reference(path):
+        return {}
+    backend_kwargs: dict = {"open_dataset_options": {"chunks": None}}
+    protocol = _reference_protocol(path)
+    if protocol:
+        backend_kwargs["storage_options"] = {"remote_protocol": protocol}
+    return {"engine": "kerchunk", "backend_kwargs": backend_kwargs}
 
 
 def _check_load_data_dask(use_dask: bool) -> None:
@@ -629,6 +803,9 @@ def load_data(
     chunks : dict[str, int], optional
         Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
         If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        For a kerchunk reference the latitude/longitude entries are ignored, caller-supplied
+        or not: the reference is read with the source's own lateral chunking (see
+        ``_without_lateral_chunks``) and only the time/depth entries apply.
         Defaults to None.
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
         Optional horizontal subset to apply when loading.
@@ -650,7 +827,9 @@ def load_data(
     FileNotFoundError
         If the specified file does not exist.
     ValueError
-        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+        If a list of files is provided but dim_names["time"] is not available or use_dask=False,
+        or if kerchunk references are mixed with other files or point at files on
+        different filesystems.
     RuntimeError
         If loading the dataset fails
     """
@@ -661,6 +840,21 @@ def load_data(
     _check_load_data_filename(filename, dim_names.keys())
 
     match_result = _get_file_matches(filename)
+
+    is_reference = [_is_kerchunk_reference(f) for f in match_result.matches]
+    if any(is_reference) and not all(is_reference):
+        msg = "kerchunk references cannot be combined with other files in one load."
+        raise ValueError(msg)
+    if all(is_reference) and len(match_result.matches) > 1:
+        protocols = {
+            p for f in match_result.matches if (p := _reference_protocol(f)) is not None
+        }
+        if len(protocols) > 1:
+            msg = (
+                "kerchunk references loaded together must point at files on one "
+                f"filesystem, but these use {sorted(protocols)}."
+            )
+            raise ValueError(msg)
 
     load_kwargs = _get_ds_combination_params(
         force_combine_nested,
@@ -689,14 +883,16 @@ def load_data(
         ds_list = []
         for file in match_result.matches:
             # Decide the engine explicitly for zarr stores rather than letting
-            # xr.open_dataset auto-detect it; see `_is_zarr_store` for why.
+            # xr.open_dataset auto-detect it; see `_is_zarr_store` for why. A kerchunk
+            # reference would otherwise come back dask-backed from its own backend even
+            # on this eager path; see `_kerchunk_open_kwargs`.
             engine = "zarr" if _is_zarr_store(file) else None
             ds = xr.open_dataset(
                 file,
-                engine=engine,
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
                 chunks=None,
+                **({"engine": engine} | _kerchunk_open_kwargs(file)),
             )
             ds_list.append(ds)
 
@@ -1070,6 +1266,37 @@ def save_datasets(
     _patch_1d_encodings(dataset_list)
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
+
+    def _file_state(path: str) -> tuple[int, int, int] | None:
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return None
+        return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+    def _save_mfdataset() -> None:
+        """Write ``dataset_list``, removing the files this write touched if it fails.
+
+        ``save_mfdataset`` creates every file before the one compute that fills them,
+        so an error raised by that compute (e.g. a NaN at an ocean point, see
+        :func:`~roms_tools.setup.utils.fill_nans_over_land`) would otherwise leave
+        partly written files that look finished. Files the write never touched are
+        left alone.
+        """
+        before = {f: _file_state(f) for f in output_filenames}
+        try:
+            xr.save_mfdataset(
+                dataset_list,
+                output_filenames,
+                format=format,
+                engine=NETCDF_WRITE_ENGINE,
+            )
+        except BaseException:
+            for f in output_filenames:
+                if _file_state(f) != before[f]:
+                    Path(f).unlink(missing_ok=True)
+            raise
+
     if verbose:
         logging.info(
             "Writing the following NetCDF files:\n%s", "\n".join(output_filenames)
@@ -1113,7 +1340,7 @@ def save_datasets(
                 logging.info("Writing NetCDF file(s)...")
             _start = time.perf_counter()
             with serialize_dask_and_boost_threads(serialize_dask):
-                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+                _save_mfdataset()
             if verbose:
                 logging.info(
                     "Finished writing NetCDF file(s) in %s",
@@ -1123,11 +1350,11 @@ def save_datasets(
             from dask.diagnostics import ProgressBar
 
             with ProgressBar():
-                xr.save_mfdataset(dataset_list, output_filenames, format=format)
+                _save_mfdataset()
         else:
-            xr.save_mfdataset(dataset_list, output_filenames, format=format)
+            _save_mfdataset()
     else:
-        xr.save_mfdataset(dataset_list, output_filenames, format=format)
+        _save_mfdataset()
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

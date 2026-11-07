@@ -13,6 +13,7 @@ from typing import Any, ClassVar, Literal, cast
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
 
+import dask
 import fsspec
 import numpy as np
 import xarray as xr
@@ -27,14 +28,26 @@ from roms_tools.datasets.download import (
 from roms_tools.datasets.utils import (
     check_dataset,
     convert_to_float64,
-    extrapolate_deepest_to_bottom,
     select_relevant_fields,
     select_relevant_times,
     validate_start_end_time,
 )
-from roms_tools.fill import LateralFill, nearest_neighbor_fill
-from roms_tools.processing_methods import METHOD_META, PrefillMethod
-from roms_tools.regrid import _xesmf_extrap_kwargs
+from roms_tools.fill import (
+    BelowBottomFill,
+    LateralFill,
+    nearest_neighbor_fill,
+    one_dim_fill,
+)
+from roms_tools.processing_methods import (
+    BOTTOM_FILL_BLEND_M,
+    METHOD_META,
+    PrefillMethod,
+)
+from roms_tools.regrid import (
+    _xesmf_extrap_kwargs,
+    per_variable_mask_name,
+    source_mask_name,
+)
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
@@ -757,31 +770,31 @@ class LatLonDataset:
     def _iter_fillable_vars(self):
         """Yield ``(var_name, mask_name)`` for each non-mask data variable.
 
-        Centralizes the mask-selection rule shared by every fill method: a
-        velocity component uses ``"mask_vel"`` when that mask is present and both
-        ``u`` and ``v`` are known source variables; everything else uses
-        ``"mask"``. Iterating over ``self.ds.data_vars`` (not ``self.var_names``)
-        ensures each dataset variable is filled exactly once even when several
-        ``var_names`` entries alias the same variable.
+        Centralizes the mask-selection rule shared by every fill method, which is
+        :func:`roms_tools.regrid.source_mask_name`: a variable's own mask when the
+        source carries one (see :func:`roms_tools.regrid.per_variable_mask_name`),
+        else ``"mask_vel"`` for a velocity component when both ``u`` and ``v`` are
+        known source variables, else ``"mask"``. Iterating over ``self.ds.data_vars``
+        (not ``self.var_names``) ensures each dataset variable is filled exactly
+        once even when several ``var_names`` entries alias the same variable.
         """
-        use_vel_mask = (
-            "mask_vel" in self.ds.data_vars
-            and "u" in self.var_names
-            and "v" in self.var_names
-        )
-        vel_vars = {self.var_names["u"], self.var_names["v"]} if use_vel_mask else set()
+        has_vel = "u" in self.var_names and "v" in self.var_names
+        vel_vars = {self.var_names["u"], self.var_names["v"]} if has_vel else set()
         for var_name in self.ds.data_vars:
             if var_name.startswith("mask"):
                 continue
-            yield var_name, "mask_vel" if var_name in vel_vars else "mask"
+            yield (
+                var_name,
+                source_mask_name(self.ds, var_name, is_vector=var_name in vel_vars),
+            )
 
     def _fill_masked_vars(self, fill_one):
         """Apply ``fill_one(da, mask_name)`` to every fillable variable.
 
         ``fill_one`` receives the variable's DataArray and the name of the mask to
-        fill against (``"mask"`` or ``"mask_vel"``, chosen by
-        :meth:`_iter_fillable_vars`) and returns the filled DataArray. No-op when
-        the source is already NaN-free (``needs_lateral_fill`` is False).
+        fill against (chosen by :meth:`_iter_fillable_vars`) and returns the filled
+        DataArray. No-op when the source is already NaN-free (``needs_lateral_fill``
+        is False).
         """
         if not self.needs_lateral_fill:
             return
@@ -791,9 +804,9 @@ class LatLonDataset:
     def apply_lateral_fill(self):
         """Fill masked values in `self.ds` with the iterative `LateralFill` (AMG).
 
-        A separate mask (`mask_vel`) is used for velocity variables when present;
-        see :meth:`_iter_fillable_vars`. Assumes a ('latitude', 'longitude')
-        dimension ordering.
+        A separate mask (`mask_vel` for velocity variables, or a per-variable mask)
+        is used when present; see :meth:`_iter_fillable_vars`. Assumes a
+        ('latitude', 'longitude') dimension ordering.
         """
         dims = (self.dim_names["latitude"], self.dim_names["longitude"])
         fillers: dict[str, LateralFill] = {}
@@ -829,8 +842,8 @@ class LatLonDataset:
 
         Unlike destination-side extrapolation during the boundary regrid, this
         fills the 2D *source* field itself, where the valid ocean cells act as
-        seeds spread across the whole grid. Velocity variables use ``mask_vel``
-        when present, mirroring the other fills. The ``apply_xesmf_`` prefix
+        seeds spread across the whole grid. Each variable uses the same mask as in
+        the other fills (see :meth:`_iter_fillable_vars`). The ``apply_xesmf_`` prefix
         distinguishes this from the non-xESMF :meth:`apply_lateral_fill` (AMG) and
         :meth:`apply_nearest_neighbor_fill` (scipy) fills.
 
@@ -910,15 +923,70 @@ class LatLonDataset:
 
         self._fill_masked_vars(fill_one)
 
-    def extrapolate_deepest_to_bottom(self):
-        """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth
-        dimension.
+    def extrapolate_deepest_to_bottom(self, blend_m: float = BOTTOM_FILL_BLEND_M):
+        """Fill the NaNs below each column's bottom along the depth dimension.
 
-        For each variable with a depth dimension, fills missing values at the bottom by
-        propagating the deepest available data downward.
+        Velocities (``var_names["u"]``/``["v"]``) propagate the column's deepest value
+        downward. Every other variable with a depth dimension takes, below a column's
+        bottom, the value of the nearest column that has water at that depth, blended
+        in from the column's own deepest value over ``blend_m`` metres (see
+        :class:`~roms_tools.fill.BelowBottomFill`). The wet mask of a variable is its
+        NaN pattern at the first time record, and variables with the same mask share
+        one fill.
+
+        Parameters
+        ----------
+        blend_m : float, optional
+            Depth (m) below a column's bottom over which a cell goes from the column's
+            own deepest value to the nearest same-depth column's value; ``0`` takes the
+            nearest column's value immediately and ``inf`` copies the deepest value
+            down for every variable (a plain forward fill, with no wet mask or donor
+            map). Defaults to ``BOTTOM_FILL_BLEND_M``.
         """
-        if "depth" in self.dim_names:
-            self.ds = extrapolate_deepest_to_bottom(self.ds, self.dim_names["depth"])
+        if "depth" not in self.dim_names:
+            return
+        depth_dim = self.dim_names["depth"]
+        horizontal = (self.dim_names["latitude"], self.dim_names["longitude"])
+        velocities = {self.var_names[v] for v in ("u", "v") if v in self.var_names}
+        fillers: dict[bytes, BelowBottomFill] = {}
+        if not np.isinf(blend_m):
+            # The fill works on whole (depth, lat, lon) blocks; a copy-down needs none.
+            self.ds = unchunk_dask(self.ds, self.dim_names, time_chunking=False)
+
+        names = [
+            name
+            for name in self.ds.data_vars
+            if not name.startswith("mask") and depth_dim in self.ds[name].dims
+        ]
+        blended = []
+        for name in names:
+            if name in velocities or np.isinf(blend_m):
+                self.ds[name] = one_dim_fill(
+                    self.ds[name], depth_dim, direction="forward"
+                )
+            else:
+                blended.append(name)
+
+        # Only the first record of each 3D wet mask is computed, all in one compute so
+        # that a source read lazily (e.g. streamed) is traversed once, not per variable.
+        wet_masks = []
+        for name in blended:
+            da = self.ds[name]
+            first = {d: 0 for d in da.dims if d not in (depth_dim, *horizontal)}
+            wet_masks.append(da.isel(first).transpose(depth_dim, *horizontal).notnull())
+        for name, wet in zip(blended, dask.compute(*wet_masks), strict=True):
+            wet = wet.values
+            key = wet.tobytes()
+            if key not in fillers:
+                fillers[key] = BelowBottomFill(
+                    wet,
+                    self.ds[depth_dim].values,
+                    self.ds[horizontal[0]].values,
+                    self.ds[horizontal[1]].values,
+                    dims=(depth_dim, *horizontal),
+                    blend_m=blend_m,
+                )
+            self.ds[name] = fillers[key].apply(self.ds[name])
 
     def rotate_velocities_to_east_and_north(self) -> None:
         """
@@ -1360,6 +1428,95 @@ class GLORYSDefaultDataset(GLORYSDataset):
         return ds
 
 
+def _umol_kg_to_mmol_m3_factor(
+    ds: xr.Dataset,
+    temp_var: str | None,
+    salt_var: str | None,
+    depth_dim: str,
+    lat_dim: str,
+    lon_dim: str,
+    source_label: str,
+) -> xr.DataArray | float:
+    """Return the factor that converts a BGC tracer from umol/kg to mmol/m3.
+
+    Shared by the WOA and GLODAP BGC datasets, which must convert units by the same
+    rule. The factor is the in-situ density (kg/m3) divided by 1000, computed lazily
+    from the temperature and salinity in ``ds``. Where T or S is NaN but the tracer is
+    not, the density is replaced by its mean over the horizontal dimensions at that
+    depth level, so the tracer is not lost; the mean is taken over the whole loaded
+    source (before any subset to the model domain), and a level with no temperature or
+    salinity anywhere uses 1025 kg/m3. If T/S are absent from ``ds``, a uniform
+    density of 1025 kg/m3 is used and a warning is logged.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset holding the temperature and salinity variables.
+    temp_var, salt_var : str or None
+        Names of the temperature and salinity variables in ``ds``.
+    depth_dim, lat_dim, lon_dim : str
+        Names of the depth, latitude and longitude dimensions (and coordinates).
+    source_label : str
+        Name of the source dataset, used in the warning (e.g. ``"WOA"``).
+
+    Returns
+    -------
+    xarray.DataArray or float
+        The density divided by 1000, to multiply each tracer by.
+    """
+    if temp_var in ds.data_vars and salt_var in ds.data_vars:
+        density = compute_in_situ_density(
+            ds[temp_var], ds[salt_var], ds[depth_dim], ds[lat_dim]
+        )
+        density = density.fillna(density.mean(dim=(lat_dim, lon_dim))).fillna(1025.0)
+    else:
+        logging.warning(
+            "%s temperature/salinity unavailable; using a uniform 1025 kg m-3 "
+            "for the umol/kg -> mmol/m3 conversion.",
+            source_label,
+        )
+        density = 1025.0
+    return density / 1000.0
+
+
+def _surface_ocean_mask(
+    ds: xr.Dataset, depth_dim: str, time_dim: str | None = None
+) -> xr.DataArray | None:
+    """Return the land/ocean mask of the depth-filled WOA or GLODAP ``ds``.
+
+    A cell is ocean (1) only where every variable with a depth dimension, temperature
+    and salinity included, is finite at the first depth level (and first time record);
+    anywhere else it is land (0). A column where any variable has no data at all is
+    therefore land, and is filled laterally for every variable, so that no variable is
+    NaN where the mask is 1 (the lateral fill and the density regridding need that).
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset whose variables have already been filled along depth, so that a
+        variable with data at any depth is finite at the first level.
+    depth_dim : str
+        Name of the depth dimension.
+    time_dim : str, optional
+        Name of the time dimension, if any; only its first record is used.
+
+    Returns
+    -------
+    xarray.DataArray or None
+        The mask, 1 for ocean and 0 for land; ``None`` if no variable has a depth
+        dimension.
+    """
+    wet = None
+    for name, da in ds.data_vars.items():
+        if name.startswith("mask") or depth_dim not in da.dims:
+            continue
+        surface = da.isel({depth_dim: 0}, drop=True)
+        if time_dim in surface.dims:
+            surface = surface.isel({time_dim: 0}, drop=True)
+        wet = surface.notnull() if wet is None else wet & surface.notnull()
+    return None if wet is None else xr.where(wet, 1, 0)
+
+
 @dataclass(kw_only=True)
 class WOADataset(LatLonDataset):
     """Represents World Ocean Atlas data on original grid.
@@ -1514,7 +1671,9 @@ class WOABGCDataset(WOADataset):
     ts_decade: str = "decav"
     #: How to extend the shallow monthly fields to full depth: ``"annual_blend"``
     #: splices the full-depth annual climatology underneath with a linear taper
-    #: across the seam; ``"ffill"`` persists the deepest monthly value downward.
+    #: across the seam; ``"ffill"`` persists the deepest monthly value downward. In
+    #: both modes, cells below the seafloor are left to
+    #: :meth:`extrapolate_deepest_to_bottom`.
     deep_fill: str = "annual_blend"
     #: Half-width, in metres, of the ``"annual_blend"`` taper band, centred on each
     #: variable's own deepest monthly level. The default gives 700-900 m for the
@@ -1613,7 +1772,9 @@ class WOABGCDataset(WOADataset):
                 "them, or point the source at a directory that already holds them."
             )
 
-        merged = xr.merge(datasets)
+        # Spell out xarray's current merge defaults so a future change to them
+        # cannot alter the result.
+        merged = xr.merge(datasets, compat="no_conflicts", join="outer")
         if not self.use_dask:
             # `xr.open_mfdataset` (via `_open_monthly`) is always dask-backed
             # regardless of `use_dask` -- unlike every other dataset class here,
@@ -1685,10 +1846,16 @@ class WOABGCDataset(WOADataset):
         seam = float(monthly["depth"].max())
         # The shallow axis is an exact leading slice of the annual axis, so a plain
         # reindex places the monthly values on the full grid without interpolating.
-        extended = monthly.reindex(depth=annual["depth"]).ffill("depth")
+        monthly_on_annual_axis = monthly.reindex(depth=annual["depth"])
+        extended = monthly_on_annual_axis.ffill("depth")
+        # Both modes copy a value into every cell below the seafloor of both fields.
+        # Those cells are masked back to NaN on return, so
+        # extrapolate_deepest_to_bottom() can fill them with the same-depth value of
+        # the nearest column that has water there, as it does for other sources.
+        has_data = annual.notnull() | monthly_on_annual_axis.notnull()
 
         if self.deep_fill == "ffill":
-            return extended
+            return extended.where(has_data)
 
         depth = annual["depth"]
         low = seam - self.deep_blend_halfwidth
@@ -1704,7 +1871,7 @@ class WOABGCDataset(WOADataset):
         # has data.
         extended = extended.fillna(annual)
         annual = annual.fillna(extended)
-        return extended * weight + annual * (1.0 - weight)
+        return (extended * weight + annual * (1.0 - weight)).where(has_data)
 
     def post_process(self) -> None:
         """Convert the tracers to mmol/m3 and build the land/ocean mask.
@@ -1712,27 +1879,20 @@ class WOABGCDataset(WOADataset):
         WOA reports nutrients and oxygen in umol/kg, while ROMS expects mmol/m3.
         The conversion uses in-situ density (TEOS-10 gsw.rho with pressure from
         depth) from the loaded T/S, matching :meth:`GLODAPv2BGCDataset.post_process`.
-        T/S stay in ``self.ds`` so the pipeline can use them as the source density
-        coordinate; it drops them after vertical regridding via ``bgc_source_ts``.
+        Where T or S is NaN but a tracer is not, the mean density of that depth level
+        is used instead so the tracer is kept. T/S stay in ``self.ds`` so the
+        pipeline can use them as the source density coordinate; it drops them after
+        vertical regridding via ``bgc_source_ts``.
         """
-        temp_var = self.opt_var_names.get("temp_bgc")
-        salt_var = self.opt_var_names.get("salt_bgc")
-
-        if temp_var in self.ds.data_vars and salt_var in self.ds.data_vars:
-            density = compute_in_situ_density(
-                self.ds[temp_var],
-                self.ds[salt_var],
-                self.ds[self.dim_names["depth"]],
-                self.ds[self.dim_names["latitude"]],
-            )
-        else:
-            logging.warning(
-                "WOA temperature/salinity unavailable; using a uniform 1025 kg m-3 "
-                "for the umol/kg -> mmol/m3 conversion."
-            )
-            density = 1025.0
-
-        conversion_factor = density / 1000.0
+        conversion_factor = _umol_kg_to_mmol_m3_factor(
+            self.ds,
+            self.opt_var_names.get("temp_bgc"),
+            self.opt_var_names.get("salt_bgc"),
+            self.dim_names["depth"],
+            self.dim_names["latitude"],
+            self.dim_names["longitude"],
+            "WOA",
+        )
         for file_var in self.var_names.values():
             if file_var in self.ds.data_vars:
                 self.ds[file_var] = self.ds[file_var] * conversion_factor
@@ -1747,28 +1907,38 @@ class WOABGCDataset(WOADataset):
             )
             self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
 
-    def extrapolate_deepest_to_bottom(self) -> None:
+    def extrapolate_deepest_to_bottom(
+        self, blend_m: float = BOTTOM_FILL_BLEND_M
+    ) -> None:
         """Fill vertical NaN gaps downward and upward, then rebuild the mask.
 
-        A plain forward fill is not enough: WOA can be NaN at the surface where
-        deeper data exist, and coverage differs between variables, so the mask
-        built from the first tracer can mark a cell as ocean where another tracer
-        is NaN. This mirrors :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.
+        Downward this is :meth:`LatLonDataset.extrapolate_deepest_to_bottom`; NaN above
+        the data then takes the shallowest value below it. WOA can be NaN at the
+        surface where deeper data exist, and coverage differs between variables, so
+        the mask built from the first tracer can mark a cell as ocean where another
+        variable is NaN. The mask is therefore rebuilt after the fill: a cell is ocean
+        only where every variable, temperature and salinity included, has data at some
+        depth, and a column where any variable has none is land, filled laterally for
+        every variable. (GLODAP, whose variables differ in coverage, instead gives each
+        variable its own mask; see :meth:`GLODAPv2Dataset.extrapolate_deepest_to_bottom`.)
+
+        Parameters
+        ----------
+        blend_m : float, optional
+            See :meth:`LatLonDataset.extrapolate_deepest_to_bottom`.
         """
         if "depth" not in self.dim_names:
             return
         dim = self.dim_names["depth"]
+        super().extrapolate_deepest_to_bottom(blend_m=blend_m)
         for var_name in self.ds.data_vars:
             if var_name.startswith("mask") or dim not in self.ds[var_name].dims:
                 continue
-            self.ds[var_name] = self.ds[var_name].ffill(dim=dim).bfill(dim=dim)
+            self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
 
-        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
-        if data_vars:
-            surface = self.ds[data_vars[0]].isel({dim: 0}, drop=True)
-            if self.dim_names.get("time") in surface.dims:
-                surface = surface.isel({self.dim_names["time"]: 0}, drop=True)
-            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+        mask = _surface_ocean_mask(self.ds, dim, self.dim_names.get("time"))
+        if mask is not None:
+            self.ds["mask"] = mask
 
 
 @dataclass(kw_only=True)
@@ -2357,7 +2527,9 @@ class GLODAPv2Dataset(LatLonDataset):
                 f"No GLODAP files found in {base_dir} with prefix '{self._file_prefix}'."
             )
 
-        return xr.merge(datasets)
+        # Spell out xarray's current merge defaults so a future change to them
+        # cannot alter the result.
+        return xr.merge(datasets, compat="no_conflicts", join="outer")
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Rename GLODAP native coordinates/variables to roms-tools conventions.
@@ -2391,41 +2563,77 @@ class GLODAPv2Dataset(LatLonDataset):
         # surface depth of the first available data variable.  apply_lateral_fill()
         # expects self.ds["mask"] to exist.  For GLODAP the mask is rebuilt after
         # the depth-fill pass in extrapolate_deepest_to_bottom() so that variables
-        # whose shallowest data is below depth[0] are also correctly treated as ocean.
+        # whose shallowest data is below depth[0] are also correctly treated as
+        # ocean, and variables whose wet cells differ from the first one's get a
+        # per-variable mask of their own there.
         data_vars = [v for v in ds.data_vars if not v.startswith("mask")]
         if data_vars:
             surface = ds[data_vars[0]].isel(depth=0, drop=True)
             ds["mask"] = xr.where(surface.isnull(), 0, 1)
         return ds
 
-    def extrapolate_deepest_to_bottom(self) -> None:
-        """Forward- and backward-fill vertical NaN gaps for the sparse GLODAP grid.
+    def extrapolate_deepest_to_bottom(
+        self, blend_m: float = BOTTOM_FILL_BLEND_M
+    ) -> None:
+        """Fill the vertical NaN gaps of the sparse GLODAP grid, then rebuild the masks.
 
-        The standard forward (downward) fill is not enough for GLODAP: a variable
-        can be NaN at the surface even when data exists at a deeper level, or two
-        variables can have different surface coverage so the mask (built from the
-        first variable) marks a cell as ocean while a second variable has NaN there.
+        Downward this is :meth:`LatLonDataset.extrapolate_deepest_to_bottom`; a
+        backward (upward) fill then gives NaN above the data the shallowest value
+        below it. A variable can be NaN at the surface even when data exists at a
+        deeper level, or two variables can have different surface coverage so the
+        mask (built from the first variable) marks a cell as ocean while a second
+        variable has NaN there. The masks are therefore rebuilt so that the lateral
+        fills and regridders never encounter NaN values at ocean grid points:
+        ``mask`` comes from the first non-mask variable at depth=0, and every other
+        variable whose surface wet pattern differs from it also gets its own mask,
+        ``ds[per_variable_mask_name(var)]`` (a variable can have no data in a whole
+        column that the first variable calls ocean). Variables that match ``mask``
+        get none, so sources whose variables share one pattern carry only ``mask``.
 
-        This override adds a backward (upward) fill after the forward fill so that
-        the shallowest valid value is propagated to the surface.  The mask is then
-        rebuilt from the first non-mask variable at depth=0 so that apply_lateral_fill()
-        never encounters NaN values at ocean grid points.
+        Parameters
+        ----------
+        blend_m : float, optional
+            See :meth:`LatLonDataset.extrapolate_deepest_to_bottom`.
         """
         if "depth" not in self.dim_names:
             return
         dim = self.dim_names["depth"]
+        super().extrapolate_deepest_to_bottom(blend_m=blend_m)
         for var_name in self.ds.data_vars:
-            if dim not in self.ds[var_name].dims:
+            if var_name.startswith("mask") or dim not in self.ds[var_name].dims:
                 continue
-            self.ds[var_name] = self.ds[var_name].ffill(dim=dim)
             self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
 
-        # Rebuild the mask now that all variables have surface values wherever
-        # data exists at any depth.
+        # Rebuild the masks now that all variables have surface values wherever
+        # data exists at any depth. Drop per-variable masks from an earlier call so
+        # none go stale.
         data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
+        self.ds = self.ds.drop_vars(
+            [
+                per_variable_mask_name(v)
+                for v in data_vars
+                if per_variable_mask_name(v) in self.ds.data_vars
+            ]
+        )
         if data_vars:
-            surface = self.ds[data_vars[0]].isel(depth=0, drop=True)
-            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
+            # One compute for every variable's surface slab under dask, rather than
+            # one per `.equals` below (as the wet masks of the depth fill are batched).
+            wet = dict(
+                zip(
+                    data_vars,
+                    dask.compute(
+                        *(
+                            xr.where(self.ds[v].isel(depth=0, drop=True).isnull(), 0, 1)
+                            for v in data_vars
+                        )
+                    ),
+                )
+            )
+            mask = wet[data_vars[0]]
+            self.ds["mask"] = mask
+            for v in data_vars[1:]:
+                if not wet[v].equals(mask):
+                    self.ds[per_variable_mask_name(v)] = wet[v]
 
 
 @dataclass(kw_only=True)
@@ -2492,31 +2700,26 @@ class GLODAPv2BGCDataset(GLODAPv2Dataset):
         """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³.
 
         Uses in-situ density (TEOS-10 gsw.rho with pressure from depth) from
-        the loaded T/S to compute density (dask-lazy). T/S remain in
-        ``self.ds`` so the downstream pipeline can use them as the source
-        density coordinate for density-space vertical interpolation; the
-        pipeline drops them after regridding via ``bgc_source_ts``.
+        the loaded T/S to compute density (dask-lazy). Where T or S is NaN but a
+        tracer is not, the mean density of that depth level is used instead so the
+        tracer is kept. T/S remain in ``self.ds`` so the downstream pipeline can
+        use them as the source density coordinate for density-space vertical
+        interpolation; the pipeline drops them after regridding via
+        ``bgc_source_ts``.
 
         If T/S are absent (e.g. the file did not include them), falls back to a
         uniform 1025 kg m⁻³ density.
         """
-        from roms_tools.setup.utils import compute_in_situ_density
-
-        if "temperature" in self.ds.data_vars and "salinity" in self.ds.data_vars:
-            density = compute_in_situ_density(
-                self.ds["temperature"],
-                self.ds["salinity"],
-                self.ds[self.dim_names["depth"]],
-                self.ds[self.dim_names["latitude"]],
-            )
-        else:
-            logging.warning(
-                "GLODAP temperature/salinity unavailable; using a uniform 1025 "
-                "kg m-3 for the umol/kg -> mmol/m3 conversion."
-            )
-            density = 1025.0
-
-        conversion_factor = density / 1000.0  # µmol kg⁻¹ → mmol m⁻³
+        # µmol kg⁻¹ → mmol m⁻³
+        conversion_factor = _umol_kg_to_mmol_m3_factor(
+            self.ds,
+            self.opt_var_names.get("temp_bgc"),
+            self.opt_var_names.get("salt_bgc"),
+            self.dim_names["depth"],
+            self.dim_names["latitude"],
+            self.dim_names["longitude"],
+            "GLODAP",
+        )
 
         for file_var in self.var_names.values():
             if file_var in self.ds.data_vars:

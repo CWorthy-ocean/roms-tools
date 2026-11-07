@@ -197,6 +197,19 @@ class TestJoinROMSData:
             )
         assert grid.ds.attrs == joined_grid.attrs
 
+    @pytest.mark.parametrize("format", ["NETCDF3_64BIT_OFFSET", "NETCDF3_64BIT_DATA"])
+    def test_join_grid_netcdf_format(self, partitioned_grid_factory, format):
+        import netCDF4
+
+        _, partitions = partitioned_grid_factory(np_xi=3, np_eta=4)
+        joined_netcdf = join_netcdf(
+            partitions,
+            output_path=partitions[0].parent / "joined_grid.nc",
+            format=format,
+        )
+        with netCDF4.Dataset(joined_netcdf) as ncds:
+            assert ncds.data_model == format
+
     @pytest.mark.parametrize(
         "np_xi, np_eta",
         [

@@ -560,3 +560,17 @@ def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
         assert "cdr_efficiency_from_DIC_difference" in ds_cdr
         assert "cdr_carbon_uptake_from_flux" in ds_cdr
         assert "cdr_carbon_uptake_from_DIC_difference" in ds_cdr
+
+        # Re-plotting with the same role reuses the cached dataset
+        roms_output_with_cdr_vars.cdr_metrics(source_role="release")
+        assert ds_cdr is roms_output_with_cdr_vars.ds_cdr
+
+        # A different role must not silently reuse the cached dataset
+        with pytest.raises(ValueError, match="source_role"):
+            roms_output_with_cdr_vars.cdr_metrics(source_role="transfer")
+
+        # A ds_cdr from before roles existed is treated as a release
+        del roms_output_with_cdr_vars.ds_cdr.attrs["cdr_source_role"]
+        roms_output_with_cdr_vars.cdr_metrics()
+
+    plt.close("all")

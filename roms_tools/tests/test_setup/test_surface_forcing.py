@@ -1529,9 +1529,10 @@ def test_conus404_metadata_reports_no_extrapolation(synthetic_conus404_store):
 def test_conus404_outside_footprint_is_nan(synthetic_conus404_store):
     """A grid outrunning the source is partially NaN, not extrapolated or zeroed.
 
-    The NaNs are the coverage signal that tells a second source where to fill in,
-    so they must survive to ``ds`` (no NaN-to-zero substitution, no wet-point NaN
-    validation error).
+    The NaNs are the coverage signal that
+    ``roms_tools.scripts.blend_surface_forcing`` uses to know where a second source
+    must fill in, so they must survive to ``ds`` (no NaN-to-zero substitution, no
+    wet-point NaN validation error).
     """
     inside = SurfaceForcing(
         grid=_conus404_grid(150),
@@ -1596,6 +1597,36 @@ def test_conus404_time_step_with_no_data_raises_at_save(tmp_path):
     with pytest.raises(ValueError, match="Tair is NaN at every grid point"):
         sfc.save(tmp_path / "out")
     assert not list(tmp_path.glob("out*.nc"))
+
+
+@requires_xesmf
+def test_conus404_surface_forcing_blends_with_a_global_product(
+    synthetic_conus404_store,
+):
+    """End to end: a straddling CONUS404 SurfaceForcing filled from a second product."""
+    from roms_tools.scripts.blend_surface_forcing import blend_surface_forcing
+
+    primary = SurfaceForcing(
+        grid=_conus404_grid(300, center=(-125.6, 37.6)),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    # A stand-in global product: constant everywhere, same grid/time/attrs.
+    fallback_ds = primary.ds.fillna(0.0) * 0.0 + 1.0
+    fallback_ds = fallback_ds.assign_coords(rad_time=primary.ds["rad_time"])
+    fallback_ds.attrs = dict(primary.ds.attrs, source="ERA5")
+
+    blended = blend_surface_forcing(primary, fallback_ds, blend_width_km=50.0)
+    covered = primary.ds["qair"].isel(time=0).notnull().values
+    assert not bool(blended["qair"].isnull().any())
+    # Outside the footprint: pure fallback.
+    assert (blended["qair"].isel(time=0).values[~covered] == 1.0).all()
+    assert blended.attrs["blend_method"] == "feathered"
+    assert blended.attrs["fallback_source"] == "ERA5"
 
 
 @requires_xesmf

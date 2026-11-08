@@ -18,8 +18,8 @@ Regridding onto a ROMS grid goes through
 :class:`~roms_tools.regrid.LateralRegridFromROMS`, which handles a curvilinear
 source natively via xESMF. That regridder uses ``unmapped_to_nan=True`` with no
 destination extrapolation, so a target point outside the source footprint comes
-back as NaN rather than being silently extrapolated, so a target point outside
-the footprint is marked as missing rather than filled with made-up values.
+back as NaN rather than being silently extrapolated: a point outside the
+footprint is marked as missing rather than filled with made-up values.
 """
 
 from __future__ import annotations

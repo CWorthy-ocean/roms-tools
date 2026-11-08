@@ -1567,6 +1567,38 @@ def test_conus404_outside_footprint_is_nan(synthetic_conus404_store):
 
 
 @requires_xesmf
+def test_conus404_time_step_with_no_data_raises_at_save(tmp_path):
+    """A time step that is NaN everywhere on the grid is an error, raised at save.
+
+    NaN outside the footprint is kept by design, but a record with no value at
+    all means the source has nothing for this grid then; writing it would hand
+    ROMS a forcing record of pure NaN.
+    """
+    ds, _ = synthetic_conus404(
+        ny=100,
+        nx=120,
+        ntime=24,
+        center_lon=CONUS404_CENTER[0],
+        center_lat=CONUS404_CENTER[1],
+        rot_deg=15.0,
+    )
+    ds["T2"][5] = np.nan  # one record with no 2 m temperature anywhere
+    store = write_conus404_store(tmp_path / "gappy", ds, fmt="zarr")
+    sfc = SurfaceForcing(
+        grid=_conus404_grid(150),
+        start_time=CONUS404_START,
+        end_time=CONUS404_END,
+        source={"name": "CONUS404", "path": str(store)},
+        type="physics",
+        correct_radiation=False,
+        use_dask=True,
+    )
+    with pytest.raises(ValueError, match="Tair is NaN at every grid point"):
+        sfc.save(tmp_path / "out")
+    assert not list(tmp_path.glob("out*.nc"))
+
+
+@requires_xesmf
 def test_conus404_correct_radiation_raises(synthetic_conus404_store):
     """The ERA5 correction climatology cannot be matched to a curvilinear grid."""
     with pytest.raises(ValueError, match="not supported for the CONUS404 source"):

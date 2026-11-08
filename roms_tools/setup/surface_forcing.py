@@ -152,7 +152,7 @@ class SurfaceForcing:
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False. Has no effect for a
         curvilinear source (CONUS404), whose NaN outside the footprint is always
-        written as-is without validation.
+        written as-is, and which is always checked for time steps with no data.
 
 
     Notes
@@ -172,10 +172,13 @@ class SurfaceForcing:
       output as-is: the usual NaN-to-zero substitution and the wet-point NaN
       validation are skipped for curvilinear sources, so that the NaNs mark where
       the source has no coverage; the output carries the global attribute
-      ``nan_outside_source_footprint="True"``. ROMS cannot run on NaN forcing, so
-      either use a grid that lies entirely inside the footprint or fill the NaN
-      points from a global product before running. It requires xESMF; the scipy
-      engine cannot interpolate a 2D source grid.
+      ``nan_outside_source_footprint="True"``. A time step at which a variable is
+      NaN at *every* grid point is still an error (the source has no data for
+      the grid at that time, e.g. a gap in the record); it is raised when the
+      data are computed, at ``save()`` with ``use_dask=True``. ROMS cannot run on
+      NaN forcing, so either use a grid that lies entirely inside the footprint or
+      fill the NaN points from a global product before running. It requires
+      xESMF; the scipy engine cannot interpolate a 2D source grid.
     - ``correct_radiation`` must be ``False``: the ERA5 correction climatology is
       matched by exact lat/lon coordinate value, which a curvilinear grid cannot
       satisfy.
@@ -384,8 +387,11 @@ class SurfaceForcing:
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS. Not for
         # a regional curvilinear source: its NaNs outside the footprint mark where it
-        # has no coverage, and filling them with 0 would hide that.
-        if not self._source_is_curvilinear:
+        # has no coverage, and filling them with 0 would hide that. Such a source is
+        # instead checked for time steps with no data at all.
+        if self._source_is_curvilinear:
+            ds = ds.map(_raise_on_all_nan_time_steps, keep_attrs=True)
+        else:
             ds = self._fill_nans_over_land(ds)
 
         self.ds = ds
@@ -1372,6 +1378,10 @@ class SurfaceForcing:
             output path (it is truncated when the write opens it). Not raised for a
             curvilinear source such as CONUS404, whose NaN outside the footprint is
             written as-is.
+        ValueError
+            For a curvilinear source such as CONUS404 with ``use_dask=True``, if a
+            variable is NaN at every grid point at some time step. Partly written
+            files are removed in the same way.
         """
         # Ensure filepath is a Path object
         filepath = Path(filepath)
@@ -1433,3 +1443,72 @@ class SurfaceForcing:
         params = from_yaml(cls, filepath)
 
         return cls(grid=grid, **params, use_dask=use_dask)
+
+
+def _raise_on_all_nan_time_steps(field: xr.DataArray) -> xr.DataArray:
+    """Raise if ``field`` is NaN at every horizontal point at some time step.
+
+    Used for a regional (curvilinear) source, whose NaN outside its footprint is
+    kept. A time step with no value anywhere means the source has nothing for the
+    grid at that time (e.g. a gap or NaN record in the source), which ROMS cannot
+    run on. A grid with no overlap at all is rejected earlier, when the source is
+    subset to the grid.
+
+    For numpy-backed data the check runs immediately. For dask-backed data it is
+    part of the lazy graph and is raised when the data are computed (e.g. at
+    ``.save()``); it reuses the blocks being computed anyway.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The field to check. Fields without a time dimension, or with a non-floating
+        dtype, are returned unchanged.
+
+    Returns
+    -------
+    xr.DataArray
+        ``field``, unchanged in value.
+
+    Raises
+    ------
+    ValueError
+        If ``field`` is NaN at every non-time point for one or more time steps.
+    """
+    time_dims = [d for d in field.dims if d in ("time", "rad_time")]
+    if not time_dims or not np.issubdtype(field.dtype, np.floating):
+        return field
+    time_dim = time_dims[0]
+    other_dims = [d for d in field.dims if d != time_dim]
+    empty = field.isnull().all(dim=other_dims)
+    name = field.name
+
+    def _message(n: int, where: str) -> str:
+        return (
+            f"{name} is NaN at every grid point at {n} time step(s){where}: the "
+            "source has no data for this grid at those times. Check the source "
+            "record for gaps or NaN records in that period."
+        )
+
+    if field.chunks is None:
+        if bool(empty.any()):
+            times = field[time_dim].values[empty.values]
+            raise ValueError(
+                _message(len(times), f" ({', '.join(map(str, times[:5]))})")
+            )
+        return field
+
+    def _check(values, is_empty):
+        n = int(np.count_nonzero(is_empty))
+        if n:
+            raise ValueError(_message(n, " in one chunk of the data"))
+        return values
+
+    bare_empty = xr.DataArray(empty.data, dims=empty.dims)
+    return xr.apply_ufunc(
+        _check,
+        field,
+        bare_empty,
+        dask="parallelized",
+        output_dtypes=[field.dtype],
+        keep_attrs=True,
+    ).rename(name)

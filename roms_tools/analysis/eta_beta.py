@@ -220,11 +220,11 @@ class calculate_eta_beta:
             coords=ALK.coords,
         )
         ds["ddic_dco2"].attrs = {
-            "long_name": "surface carbonate sensitivity beta = dDIC/dCO2 (ALT_CO2)",
+            "long_name": "surface carbonate sensitivity beta = dDIC/dCO2",
             "units": "nondimensional",
         }
         ds["ddic_dalk"].attrs = {
-            "long_name": "surface carbonate sensitivity eta = dDIC/dALK (ALT_CO2)",
+            "long_name": "surface carbonate sensitivity eta = dDIC/dALK",
             "units": "nondimensional",
         }
 

@@ -38,7 +38,7 @@
     }
   ],
   "attributes": {
-    "long_name": "surface carbonate sensitivity eta = dDIC/dALK (ALT_CO2)",
+    "long_name": "surface carbonate sensitivity eta = dDIC/dALK",
     "units": "nondimensional",
     "coordinates": "abs_time lat_rho lon_rho ocean_time",
     "_FillValue": "AAAAAAAA+H8="

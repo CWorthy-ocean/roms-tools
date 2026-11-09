@@ -317,13 +317,16 @@ def _grid_ds():
         {
             "pm": (("eta_rho", "xi_rho"), np.full((NY, NX), 1 / 1000.0)),
             "pn": (("eta_rho", "xi_rho"), np.full((NY, NX), 1 / 1000.0)),
+            "mask_rho": (("eta_rho", "xi_rho"), np.ones((NY, NX), dtype=np.int32)),
         }
     )
 
 
 def test_dataset_blend_hard_edge_fills_the_hole():
     out = blend_surface_forcing(
-        _sf_dataset(1.0, hole_slice=slice(3, None)), _sf_dataset(2.0, source="Y")
+        _sf_dataset(1.0, hole_slice=slice(3, None)),
+        _sf_dataset(2.0, source="Y"),
+        grid=_grid_ds(),
     )
     assert (out["Tair"].isel(xi_rho=slice(0, 3)) == 1.0).all()
     assert (out["Tair"].isel(xi_rho=slice(3, None)) == 2.0).all()
@@ -345,12 +348,20 @@ def test_dataset_blend_feathered_is_monotone_across_the_band():
     assert out.attrs["blend_method"] == "feathered"
 
 
-def test_feathering_needs_a_grid():
-    with pytest.raises(ValueError, match="grid spacing"):
+def test_a_grid_is_required_without_a_surface_forcing_input():
+    """Without a grid there is no land mask, so leftover NaNs cannot be judged."""
+    with pytest.raises(ValueError, match="Pass `grid=`"):
+        blend_surface_forcing(
+            _sf_dataset(1.0, hole_slice=slice(3, None)), _sf_dataset(2.0)
+        )
+
+
+def test_a_grid_without_a_land_mask_is_rejected():
+    with pytest.raises(ValueError, match="has no `mask_rho`"):
         blend_surface_forcing(
             _sf_dataset(1.0, hole_slice=slice(3, None)),
             _sf_dataset(2.0),
-            blend_width_km=2.0,
+            grid=_grid_ds().drop_vars("mask_rho"),
         )
 
 
@@ -373,14 +384,16 @@ def test_unit_mismatch_is_caught():
     f = _sf_dataset(2.0)
     f["Tair"].attrs["units"] = "other"
     with pytest.raises(ValueError, match="units"):
-        blend_surface_forcing(_sf_dataset(1.0, hole_slice=slice(3, None)), f)
+        blend_surface_forcing(
+            _sf_dataset(1.0, hole_slice=slice(3, None)), f, grid=_grid_ds()
+        )
 
 
 def test_coarse_grid_mismatch_is_caught():
     f = _sf_dataset(2.0)
     f.attrs["use_coarse_grid"] = "True"
     with pytest.raises(ValueError, match="use_coarse_grid"):
-        blend_surface_forcing(_sf_dataset(1.0), f)
+        blend_surface_forcing(_sf_dataset(1.0), f, grid=_grid_ds())
 
 
 def test_differing_rad_time_offsets_shift_the_fallback_radiation():
@@ -390,17 +403,21 @@ def test_differing_rad_time_offsets_shift_the_fallback_radiation():
     fallback["swrad"] = fallback["swrad"] + xr.DataArray(
         np.arange(NT) * 10.0, dims="time"
     )
-    out = blend_surface_forcing(primary, fallback)
+    out = blend_surface_forcing(primary, fallback, grid=_grid_ds())
     got = out["swrad"].isel(xi_rho=-1, eta_rho=0).values
     # Shifted by half an hour: interior steps land half-way between samples.
     np.testing.assert_allclose(got[1:-1], 2.0 + np.arange(1, NT - 1) * 10.0 - 5.0)
+    # The first stamp falls half an hour before the fallback's record: it holds the
+    # first value rather than becoming a NaN record.
+    assert got[0] == 2.0
+    assert not bool(out["swrad"].isnull().any())
 
 
 def test_paths_are_accepted(tmp_path):
     p, f = tmp_path / "p.nc", tmp_path / "f.nc"
     _sf_dataset(1.0, hole_slice=slice(3, None)).to_netcdf(p)
     _sf_dataset(2.0, source="Y").to_netcdf(f)
-    out = blend_surface_forcing(p, f)
+    out = blend_surface_forcing(p, f, grid=_grid_ds())
     assert (out["Tair"].isel(xi_rho=slice(3, None)) == 2.0).all()
 
 
@@ -423,7 +440,7 @@ def test_save_blended_surface_forcing_writes_roms_safe_cdf5(tmp_path):
     f = _sf_dataset(2.0, source="Y")
     abs_time = np.datetime64("2020-06-30T22") + np.arange(NT) * np.timedelta64(1, "h")
     p = p.assign_coords(abs_time=("time", abs_time))
-    out = blend_surface_forcing(p, f)
+    out = blend_surface_forcing(p, f, grid=_grid_ds())
 
     files = save_blended_surface_forcing(
         out, tmp_path / "blended.nc", format="NETCDF3_64BIT_DATA"
@@ -466,7 +483,11 @@ def test_nearest_tolerance_accepts_timedelta_on_a_days_axis():
         time=f["time"] + 1.0 / 86400.0, rad_time=f["rad_time"] + 1.0 / 86400.0
     )  # one second of jitter
     out = blend_surface_forcing(
-        p, f, time_align="nearest", time_tolerance=np.timedelta64(1, "m")
+        p,
+        f,
+        grid=_grid_ds(),
+        time_align="nearest",
+        time_tolerance=np.timedelta64(1, "m"),
     )
     assert (out["Tair"].isel(xi_rho=slice(3, None)) == 2.0).all()
 
@@ -481,6 +502,7 @@ def test_fallback_only_variable_is_time_aligned():
     out = blend_surface_forcing(
         p,
         f,
+        grid=_grid_ds(),
         time_align="nearest",
         time_tolerance=np.timedelta64(1, "m"),
         on_missing_primary_var="fallback",
@@ -496,16 +518,17 @@ def test_ocean_nan_left_after_blending_raises():
     # Column 5 is uncovered by both products: fine on land, an error at sea.
     out = blend_surface_forcing(p, f, grid=_grid_ds_with_mask(land_cols=[5]))
     assert (out["Tair"].isel(xi_rho=5) == 0.0).all()
-    with pytest.raises(ValueError, match="NaN value"):
+    with pytest.raises(ValueError, match="NaN value") as err:
         blend_surface_forcing(p, f, grid=_grid_ds_with_mask())
+    # The way out named is the blend's own, not SurfaceForcing's.
+    assert "fill_value=None" in str(err.value)
+    assert "bypass_validation" not in str(err.value)
 
 
 def test_missing_grid_is_reported_before_any_file_is_opened(tmp_path):
-    with pytest.raises(ValueError, match="needs the grid spacing"):
+    with pytest.raises(ValueError, match="Pass `grid=`"):
         blend_surface_forcing(
-            tmp_path / "missing_primary.nc",
-            tmp_path / "missing_fallback.nc",
-            blend_width_km=10.0,
+            tmp_path / "missing_primary.nc", tmp_path / "missing_fallback.nc"
         )
 
 

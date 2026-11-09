@@ -18,7 +18,9 @@ on the ROMS grid, and a global product (e.g. ERA5) covers the whole grid. Build 
 
 Either argument may be a :class:`~roms_tools.SurfaceForcing`, an
 ``xarray.Dataset``, or a path, glob or list of paths to NetCDF files written by
-:meth:`~roms_tools.SurfaceForcing.save` (or a single zarr store). Write the result with
+:meth:`~roms_tools.SurfaceForcing.save` (or a single zarr store). Unless one of
+them is a ``SurfaceForcing``, also pass ``grid``, the ROMS grid both were built on:
+its land mask decides where leftover NaNs may be filled. Write the result with
 :func:`save_blended_surface_forcing`, which splits it into monthly files and applies
 the encodings ROMS needs, as ``SurfaceForcing.save`` does.
 
@@ -493,13 +495,13 @@ def blend_surface_forcing(
         variable the primary does, and have the same grid shape, units and
         resolved ``use_coarse_grid`` (build both with the same explicit
         ``coarse_grid_mode``). Each product applies its own radiation correction.
-    grid : Grid or xarray.Dataset, optional
+    grid : Grid or xarray.Dataset
         The ROMS grid the products were built on: a :class:`~roms_tools.Grid`, or
         a dataset with ``pm``, ``pn`` and ``mask_rho`` (and ``mask_coarse`` for
-        coarse-grid products). Taken from ``primary`` when that is a
-        ``SurfaceForcing``. Required when ``blend_width_km > 0``, to convert the
-        band width to grid cells. When available it is also used to check the
-        result for NaN at ocean points (see ``fill_value``).
+        coarse-grid products). Required: it may be omitted only when ``primary``
+        or ``fallback`` is a ``SurfaceForcing``, whose grid is then used. Its land
+        mask decides which NaNs may be filled (see ``fill_value``), and its
+        spacing converts ``blend_width_km`` to grid cells.
     blend_width_km : float, optional
         Width of the transition, in km. ``0.0`` (default) is a hard edge.
     blend_profile : {"smoothstep", "linear"}, optional
@@ -520,12 +522,11 @@ def blend_surface_forcing(
         What to do about a variable only the fallback has: raise (default), or
         take it from the fallback everywhere.
     fill_value : float or None, optional
-        Value for the NaNs left after blending, to avoid blow-up of ROMS. When a
-        grid is available, only land points are filled, as
-        :class:`~roms_tools.SurfaceForcing` does, and a NaN at an ocean point
+        Value for the NaNs left over land after blending, to avoid blow-up of
+        ROMS, as :class:`~roms_tools.SurfaceForcing` does. A NaN at an ocean point
         raises (when the data are computed, if they are lazy): it means neither
-        product reached that point at that time. Without a grid every NaN is
-        filled. ``None`` leaves all NaNs in place.
+        product reached that point at that time. ``None`` leaves all NaNs in
+        place, unchecked.
 
     Returns
     -------
@@ -541,24 +542,30 @@ def blend_surface_forcing(
     TypeError
         If ``primary`` or ``fallback`` is not a SurfaceForcing, Dataset or path(s).
     ValueError
-        If ``blend_width_km`` is negative, or positive with no grid available
-        (raised before any data are read); if the products disagree on grid
-        shape, units or ``use_coarse_grid``; if a primary variable is missing
+        If ``blend_width_km`` is negative, or no grid is given or available from
+        the inputs (both raised before any data are read); if the grid lacks the
+        land mask the products need, or does not match their shape; if the
+        products disagree on grid shape, units or ``use_coarse_grid``; if a primary variable is missing
         from the fallback, or a fallback-only variable is present and
         ``on_missing_primary_var="error"``; if ``time_align="exact"`` and the
         fallback lacks some of the primary's time stamps; if ``time_align``,
         ``on_missing_primary_var`` or ``blend_profile`` is not a known value; or
-        if a grid is available and a NaN is left at an ocean point.
+        if a NaN is left at an ocean point (unless ``fill_value`` is ``None``).
     """
     if blend_width_km < 0:
         raise ValueError(f"`blend_width_km` must be >= 0, got {blend_width_km}.")
 
-    if grid is None and hasattr(primary, "grid"):
-        grid = primary.grid  # type: ignore[union-attr]
-    if blend_width_km and grid is None:
+    if grid is None:
+        grid = next(
+            (p.grid for p in (primary, fallback) if hasattr(p, "grid")),  # type: ignore[union-attr]
+            None,
+        )
+    if grid is None:
         raise ValueError(
-            "`blend_width_km > 0` needs the grid spacing: pass `grid=` (a roms_tools "
-            "Grid, or a dataset with `pm` and `pn`), or give `primary` as a "
+            "Pass `grid=`: the roms_tools Grid the products were built on (or a "
+            "dataset with `pm`, `pn` and `mask_rho`). It is needed for the land "
+            "mask, so that only land points are filled, and for the grid spacing. "
+            "It can be left out only when `primary` or `fallback` is a "
             "SurfaceForcing."
         )
     ds_p = _as_dataset(primary, "primary")
@@ -585,10 +592,9 @@ def blend_surface_forcing(
     mask = _wet_mask(grid, ds_p)
     coverage = coverage_fraction(next(iter(p_fields.values())), mask)
     logging.info(
-        "Primary covers %.1f%% of the target %spoints; the remainder comes from the "
-        "fallback.",
+        "Primary covers %.1f%% of the target ocean points; the remainder comes from "
+        "the fallback.",
         100 * coverage,
-        "ocean " if mask is not None else "",
     )
     if coverage == 0.0:
         logging.warning(
@@ -612,19 +618,17 @@ def blend_surface_forcing(
         from roms_tools.setup.utils import fill_nans_over_land
 
         for name in combined:
-            if mask is None:
-                out[name] = out[name].fillna(fill_value)
-            else:
-                out[name] = fill_nans_over_land(
-                    out[name],
-                    mask,
-                    name,
-                    fill_value=fill_value,
-                    hint=(
-                        "Neither product has a value there: check that the fallback "
-                        "covers the whole grid and the primary's whole time range."
-                    ),
-                )
+            out[name] = fill_nans_over_land(
+                out[name],
+                mask,
+                name,
+                fill_value=fill_value,
+                hint=(
+                    "Neither product has a value there: check that the fallback "
+                    "covers the whole grid and the primary's whole time range."
+                ),
+                override_hint="With `fill_value=None` they are left as NaN.",
+            )
     out.attrs = dict(ds_p.attrs)
     # Describes the primary alone; the blended result has no such NaNs.
     out.attrs.pop("nan_outside_source_footprint", None)
@@ -795,12 +799,22 @@ def _align_radiation_time(
     # primary's ``rad_time`` stamps, then label it with the primary's ``time``.
     f_rad = ds_f["rad_time"] if "rad_time" in ds_f.coords else ds_f["time"]
     p_rad = ds_p["rad_time"] if "rad_time" in ds_p.coords else ds_p["time"]
+    f_t, p_t = f_rad.values, p_rad.values
+    # The shift moves the primary's first or last stamp up to ``|shift|`` past the
+    # fallback's record, where interpolation has nothing on one side. Hold the
+    # fallback's end value there (it is the flux for the adjacent interval) rather
+    # than leave a NaN record that the ocean-NaN check would reject.
+    tolerance: np.timedelta64 | float = abs(shift)
+    if not np.issubdtype(f_t.dtype, np.datetime64):
+        tolerance = float(tolerance / np.timedelta64(1, "D"))
+    past_end = xr.DataArray((p_t < f_t.min()) | (p_t > f_t.max()), dims="time")
     for name in RADIATION_VARS:
         if name in f_fields and "time" in f_fields[name].dims:
-            # NaN where the primary asks for an instant the fallback does not span;
-            # the caller's time range should pad both products equally.
-            shifted = f_fields[name].assign_coords(time=f_rad.values)
-            resampled = shifted.interp(time=p_rad.values)
+            shifted = f_fields[name].assign_coords(time=f_t)
+            resampled = shifted.interp(time=p_t)
+            if bool(past_end.any()):
+                held = shifted.reindex(time=p_t, method="nearest", tolerance=tolerance)
+                resampled = held.where(past_end, resampled)
             ds_f[name] = resampled.assign_coords(time=ds_p["time"].values)
     return ds_f
 
@@ -820,21 +834,20 @@ def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:
     return footprint.compute()
 
 
-def _wet_mask(grid: Grid | xr.Dataset | None, ds_p: xr.Dataset) -> xr.DataArray | None:
-    """The grid's wet mask on the product's (fine or coarse) rho points, if known."""
-    if grid is None:
-        return None
+def _wet_mask(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> xr.DataArray:
+    """The grid's wet mask on the product's (fine or coarse) rho points."""
     gds = cast("xr.Dataset", grid.ds if hasattr(grid, "ds") else grid)
-    if str(ds_p.attrs.get("use_coarse_grid")) == "True":
-        if "mask_coarse" not in gds:
-            return None
-        mask = gds["mask_coarse"].rename(
-            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+    coarse = str(ds_p.attrs.get("use_coarse_grid")) == "True"
+    name = "mask_coarse" if coarse else "mask_rho"
+    if name not in gds:
+        raise ValueError(
+            f"The grid has no `{name}`, which the "
+            f"{'coarse-grid ' if coarse else ''}products need for their land mask; "
+            "pass the roms_tools Grid they were built on."
         )
-    else:
-        if "mask_rho" not in gds:
-            return None
-        mask = gds["mask_rho"]
+    mask = gds[name]
+    if coarse:
+        mask = mask.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
     for dim in ("eta_rho", "xi_rho"):
         if dim in ds_p.dims and mask.sizes.get(dim) != ds_p.sizes[dim]:
             raise ValueError(
@@ -844,16 +857,8 @@ def _wet_mask(grid: Grid | xr.Dataset | None, ds_p: xr.Dataset) -> xr.DataArray 
     return mask
 
 
-def _cell_size_m(
-    grid: Grid | xr.Dataset | None, ds_p: xr.Dataset
-) -> tuple[float, float]:
+def _cell_size_m(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> tuple[float, float]:
     """Mean ``(dy, dx)`` in metres of the grid the product was written on."""
-    if grid is None:
-        raise ValueError(
-            "`blend_width_km > 0` needs the grid spacing: pass `grid=` (a roms_tools "
-            "Grid, or a dataset with `pm` and `pn`), or give `primary` as a "
-            "SurfaceForcing."
-        )
     gds = cast("xr.Dataset", grid.ds if hasattr(grid, "ds") else grid)
     # The coarse grid doubles the spacing.
     factor = 2.0 if str(ds_p.attrs.get("use_coarse_grid")) == "True" else 1.0

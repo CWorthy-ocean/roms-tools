@@ -312,6 +312,7 @@ def fill_nans_over_land(
     var_name: str,
     fill_value: float = 0.0,
     hint: str = WET_NAN_HINT_REGRID,
+    override_hint: str | None = None,
 ) -> xr.DataArray:
     """Replace NaN by ``fill_value`` over land, raising if any NaN sits at a wet point.
 
@@ -332,6 +333,9 @@ def fill_nans_over_land(
     hint : str, optional
         Likely cause and remedy, appended to the error message. Defaults to advice for
         regridded lat/lon sources.
+    override_hint : str, optional
+        How the caller can skip this check, appended last. Defaults to the advice
+        for the setup classes, whose ``bypass_validation=True`` fills every NaN.
 
     Returns
     -------
@@ -355,14 +359,20 @@ def fill_nans_over_land(
         else ""
     )
 
+    override = (
+        override_hint
+        if override_hint is not None
+        else f"With `bypass_validation=True` they are written as {fill_value}."
+    )
+
     def _fill(values, wet):
         is_nan = np.isnan(values)
         n_wet_nan = np.count_nonzero(is_nan & (wet == 1))
         if n_wet_nan:
             raise ValueError(
                 f"{var_name} has {n_wet_nan} NaN value(s) at ocean points "
-                f"(mask == 1){in_chunks}, so no value reached them. {hint} With "
-                f"`bypass_validation=True` they are written as {fill_value}."
+                f"(mask == 1){in_chunks}, so no value reached them. {hint} "
+                f"{override}"
             )
         return np.where(is_nan, values.dtype.type(fill_value), values)
 

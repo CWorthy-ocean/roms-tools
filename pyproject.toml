@@ -69,6 +69,8 @@ dev = [
     "pytest-xdist",
     "coverage",
     "pre-commit>=3.8",
+    # release notes: `towncrier build --draft` previews changes/ fragments
+    "towncrier>=26.9",
     # test-data/fixture dependencies (not lint/test tooling per se, but required
     # for the base test suite to collect and pass without conda):
     "h5py",
@@ -136,6 +138,53 @@ ignore = ["E501", "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104"
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
+
+# Release notes: one fragment per pull request in changes/, named
+# <PR number>.<type>.md, assembled into docs/releases.md by
+# `towncrier build --version <tag>` (finalize_release_notes.yaml).
+# See docs/contributing.rst.
+[tool.towncrier]
+directory = "changes"
+filename = "docs/releases.md"
+# Must end in .md: towncrier picks Markdown or RST output by this extension.
+template = "ci/towncrier_template.md"
+title_format = "## {version}"
+issue_pattern = "\\d+"
+# Any ignore list, even an empty one, makes `towncrier build` fail on a
+# misnamed file in changes/ instead of silently leaving it out of the release.
+# (README.md is always ignored.)
+ignore = []
+issue_format = "[#{issue}](https://github.com/CWorthy-ocean/roms-tools/pull/{issue})"
+
+[[tool.towncrier.type]]
+directory = "breaking"
+name = "Breaking Changes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecation"
+name = "Deprecations"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "New Features"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bug Fixes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "improvement"
+name = "Improvements"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "misc"
+name = "Miscellaneous"
+showcontent = true
 
 [mypy]
 files = "roms_tools/**/*.py"

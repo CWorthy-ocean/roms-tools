@@ -230,6 +230,79 @@ def test_linear_alignment_interpolates():
     assert aligned.sizes["time"] == NT
 
 
+def _ramp(times):
+    """A (time, eta_rho, xi_rho) float32 field that varies in time and space."""
+    n = len(times)
+    data = (np.arange(n)[:, None, None] ** 2 + np.arange(NY * NX).reshape(NY, NX)) * 1.0
+    return xr.DataArray(
+        data.astype(np.float32),
+        dims=("time", "eta_rho", "xi_rho"),
+        coords={"time": times},
+        name="Tair",
+        attrs={"units": "widgets"},
+    )
+
+
+@pytest.mark.parametrize("axis", ["datetime", "days"])
+def test_linear_alignment_matches_xarray_interp(axis):
+    """Same values as `interp`, NaN outside the record, dtype and attrs kept."""
+    if axis == "datetime":
+        start, hour = np.datetime64("2020-06-15T00", "ns"), np.timedelta64(1, "h")
+    else:
+        start, hour = 0.0, 1.0 / 24.0
+    src_times = np.array([start + hour * (2 * k) for k in range(6)])
+    # On a sample, between samples, on the last sample, and past either end.
+    target = np.array([start + hour * h for h in (-1, 0, 1, 2.5, 7, 10, 11)])
+    fallback = _ramp(src_times)
+
+    aligned = align_fallback_time(
+        fallback, xr.DataArray(target, dims="time"), method="linear"
+    )
+
+    expected = fallback.interp(time=target)
+    np.testing.assert_allclose(aligned.values, expected.values, rtol=1e-6)
+    assert bool(aligned.isel(time=[0, -1]).isnull().all())
+    assert aligned.dtype == np.float32
+    assert aligned.dims == fallback.dims
+    assert aligned.attrs == fallback.attrs
+    np.testing.assert_array_equal(aligned["time"].values, target)
+
+
+def _counting_blocks(field, counter):
+    """Chunk `field` by day and record which time block each read touches."""
+    import dask.array as dsa
+
+    def _read(block, block_info=None):
+        counter.append(block_info[0]["chunk-location"][0])
+        return block
+
+    data = dsa.from_array(field.values, chunks=(24, NY, NX)).map_blocks(
+        _read, dtype=field.dtype
+    )
+    return field.copy(data=data)
+
+
+def test_linear_alignment_reads_only_the_bracketing_blocks():
+    """One day of output must not read the fallback's whole record.
+
+    `xarray.interp` along a chunked dimension builds each output block from every
+    input block; on a year of hourly forcing that is tens of GB per variable.
+    """
+    hours = np.arange(10 * 24)
+    src_times = np.datetime64("2020-06-15T00", "ns") + hours * np.timedelta64(1, "h")
+    blocks_read: list[int] = []
+    fallback = _counting_blocks(_ramp(src_times), blocks_read)
+    target = xr.DataArray(src_times[:-1] + np.timedelta64(30, "m"), dims="time")
+
+    aligned = align_fallback_time(fallback, target, method="linear")
+    assert aligned.chunks is not None
+    assert blocks_read == [], "interpolating in time triggered a compute"
+
+    aligned.isel(time=slice(0, 24)).compute()
+    # The last stamp of day 0 sits between day 0's last record and day 1's first.
+    assert set(blocks_read) == {0, 1}
+
+
 def test_unknown_alignment_method_raises():
     with pytest.raises(ValueError, match="Unknown time alignment method"):
         align_fallback_time(_field(2.0), _field(1.0)["time"], method="bogus")
@@ -317,13 +390,13 @@ from roms_tools.scripts.blend_surface_forcing import (  # noqa: E402
 )
 
 
-def _sf_dataset(value, *, hole_slice=None, rad_offset_h=-0.5, source="X"):
+def _sf_dataset(value, *, hole_slice=None, rad_offset_h=-0.5, source="X", nt=NT):
     """A SurfaceForcing-like Dataset: time in days, rad_time, ROMS-named vars."""
-    days = np.arange(NT) / 24.0
+    days = np.arange(nt) / 24.0
     ds = xr.Dataset(
         {
             name: xr.DataArray(
-                np.full((NT, NY, NX), float(value)),
+                np.full((nt, NY, NX), float(value)),
                 dims=("time", "eta_rho", "xi_rho"),
                 attrs={"units": "u"},
             )
@@ -485,6 +558,22 @@ def test_retimed_radiation_survives_stamps_that_differ():
     # The first stamp precedes the fallback's record by the shift plus the jitter.
     assert got[0] == 2.0
     assert not bool(out["swrad"].isnull().any())
+
+
+def test_radiation_retiming_reads_only_the_bracketing_blocks():
+    """Re-timing radiation must stay chunk-local, like the rest of the blend."""
+    nt = 10 * 24
+    primary = _sf_dataset(1.0, hole_slice=slice(3, None), rad_offset_h=-0.5, nt=nt)
+    fallback = _sf_dataset(2.0, rad_offset_h=0.0, nt=nt)
+    blocks_read: list[int] = []
+    fallback["swrad"] = _counting_blocks(fallback["swrad"], blocks_read)
+
+    out = blend_surface_forcing(primary, fallback, grid=_grid_ds(), fill_value=None)
+    assert blocks_read == [], "the blend triggered a compute"
+
+    out["swrad"].isel(time=slice(24, 48)).compute()
+    # Day 1 of the output, shifted back half an hour, needs days 0 and 1.
+    assert set(blocks_read) == {0, 1}
 
 
 def test_paths_are_accepted(tmp_path):

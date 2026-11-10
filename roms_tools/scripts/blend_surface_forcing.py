@@ -149,7 +149,9 @@ def align_fallback_time(
         ``"exact"`` (default) requires every target stamp to be present in
         ``fallback`` and selects them, which is correct and free for two sources
         on the same hourly grid. ``"nearest"`` tolerates stamp jitter within
-        ``tolerance``, which it requires. ``"linear"`` interpolates.
+        ``tolerance``, which it requires. ``"linear"`` interpolates between the
+        two fallback records around each target stamp; stamps outside the
+        fallback's record become NaN.
     tolerance : np.timedelta64 or float, optional
         Maximum distance for ``method="nearest"``, which has no default: without
         a limit, the nearest record of a fallback from another period would be
@@ -224,7 +226,79 @@ def align_fallback_time(
         # primary's and silently produce an empty intersection.
         return aligned.assign_coords(time=target_time)
 
-    return fallback.interp(time=target_time)
+    return _interp_time_linear(fallback, target_time)
+
+
+def _interp_time_linear(
+    field: xr.DataArray,
+    target_time: xr.DataArray | np.ndarray,
+    *,
+    hold: Any = None,
+) -> xr.DataArray:
+    """Interpolate ``field`` linearly in time from the two bracketing records.
+
+    Gives what ``field.interp(time=target_time)`` gives, but stays chunk-local.
+    ``interp`` along a chunked dimension builds every output block from *all* the
+    input blocks, so one day of output would read the field's whole record: tens
+    of GB per variable for a year of hourly forcing on a large grid. Here each
+    output record is ``field[i] + a * (field[i + 1] - field[i])`` for the two
+    records around it, selected by position, so it reads only the blocks that
+    hold them.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The field to interpolate. Its ``time`` must be strictly increasing and
+        hold at least two records.
+    target_time : xr.DataArray or np.ndarray
+        The stamps to interpolate to.
+    hold : np.timedelta64 or float, optional
+        Target stamps up to this far outside the record take its end value.
+        Beyond it (anywhere outside, by default) they are NaN, as with
+        ``interp``. In the units of the time axis.
+
+    Returns
+    -------
+    xr.DataArray
+        ``field`` on ``target_time``, with its dtype, attributes and dimension
+        order. Lazy if ``field`` is.
+    """
+    src = np.asarray(field["time"].values)
+    tgt = np.asarray(getattr(target_time, "values", target_time))
+    if src.size < 2:
+        raise ValueError(
+            "Interpolating in time needs at least two records, but the field "
+            f"{field.name!r} has {src.size}."
+        )
+    if not bool(np.all(src[1:] > src[:-1])):
+        raise ValueError(
+            f"The time axis of {field.name!r} is not strictly increasing, so it "
+            "cannot be interpolated in time."
+        )
+
+    upper_idx = np.clip(np.searchsorted(src, tgt, side="right"), 1, src.size - 1)
+    lower_idx = upper_idx - 1
+    # Clipped to [0, 1]: a stamp outside the record gets the end value, which
+    # `outside` then keeps or blanks.
+    frac = np.clip((tgt - src[lower_idx]) / (src[upper_idx] - src[lower_idx]), 0.0, 1.0)
+    beyond = np.maximum(src[0] - tgt, tgt - src[-1])
+    outside = beyond > (np.zeros((), beyond.dtype) if hold is None else hold)
+
+    # Other coordinates along time (``rad_time``, ``abs_time``) would be carried
+    # over with the source's values; the caller's dataset holds the right ones.
+    field = field.drop_vars(
+        [n for n, c in field.coords.items() if n != "time" and "time" in c.dims]
+    )
+    lower = field.isel(time=lower_idx).assign_coords(time=tgt)
+    upper = field.isel(time=upper_idx).assign_coords(time=tgt)
+    weight = xr.DataArray(frac, dims="time", coords={"time": tgt})
+    inside = xr.DataArray(~outside, dims="time", coords={"time": tgt})
+    out = (lower + (upper - lower) * weight).where(inside)
+    if np.issubdtype(field.dtype, np.floating):
+        out = out.astype(field.dtype)
+    out = out.transpose(*field.dims)
+    out.attrs = dict(field.attrs)
+    return out
 
 
 def _axis_tolerance(
@@ -877,15 +951,11 @@ def _align_radiation_time(
     tolerance: Any = _axis_tolerance(abs(shift), f_t.dtype)
     if time_tolerance is not None:
         tolerance = tolerance + _axis_tolerance(time_tolerance, f_t.dtype)
-    past_end = xr.DataArray((p_t < f_t.min()) | (p_t > f_t.max()), dims="time")
     retimed: dict[str, xr.DataArray] = {}
     for name in RADIATION_VARS:
         if name in f_fields and "time" in f_fields[name].dims:
             shifted = f_fields[name].assign_coords(time=f_t)
-            resampled = shifted.interp(time=p_t)
-            if bool(past_end.any()):
-                held = shifted.reindex(time=p_t, method="nearest", tolerance=tolerance)
-                resampled = held.where(past_end, resampled)
+            resampled = _interp_time_linear(shifted, p_t, hold=tolerance)
             retimed[name] = resampled.assign_coords(time=ds_p["time"].values)
     return retimed
 

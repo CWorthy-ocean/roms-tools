@@ -966,13 +966,39 @@ def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:
     The intersection is the conservative reading: a variable missing at a point
     would fall back anyway, so including the point in the feather band would only
     smooth toward a value the merge does not use.
+
+    Raises
+    ------
+    ValueError
+        If the fields have data at the first time step but no point where all of
+        them do (one of them is all NaN there, say). Every blend weight would be
+        zero, and the feathered result would be the fallback alone, at all times.
     """
+    valid = {
+        name: (da.isel(time=0) if "time" in da.dims else da).notnull()
+        for name, da in p_fields.items()
+    }
     footprint = None
-    for da in p_fields.values():
-        valid = (da.isel(time=0) if "time" in da.dims else da).notnull()
-        footprint = valid if footprint is None else (footprint & valid)
+    for v in valid.values():
+        footprint = v if footprint is None else (footprint & v)
     assert footprint is not None
-    return footprint.compute()
+    footprint = footprint.compute()
+    if not bool(footprint.any()):
+        empty = [name for name, v in valid.items() if not bool(v.any())]
+        if len(empty) < len(valid):
+            detail = (
+                f"All NaN there: {empty}. "
+                if empty
+                else "Each has data there, but at different points. "
+            )
+            raise ValueError(
+                "The primary's variables share no footprint at the first time "
+                "step, so a feathered blend would take every variable from the "
+                f"fallback at all times. {detail}Check the primary's first "
+                "record, or use `blend_width_km=0` for a hard edge, which needs "
+                "no footprint."
+            )
+    return footprint
 
 
 def _wet_mask(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> xr.DataArray:

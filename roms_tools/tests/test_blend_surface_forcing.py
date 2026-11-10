@@ -448,6 +448,34 @@ def test_dataset_blend_feathered_is_monotone_across_the_band():
     assert out.attrs["blend_method"] == "feathered"
 
 
+def test_feathered_blend_rejects_an_empty_common_footprint():
+    """One variable all NaN in the first record must not zero every weight.
+
+    The footprint is where every primary variable has data at the first time
+    step. With `swrad` missing there it is empty, and the feathered blend would
+    silently be the fallback alone for all variables at all times.
+    """
+    primary = _sf_dataset(1.0, hole_slice=slice(3, None))
+    primary["swrad"][0] = np.nan
+    fallback = _sf_dataset(2.0, source="Y")
+
+    with pytest.raises(ValueError, match=r"share no footprint.*\['swrad'\]"):
+        blend_surface_forcing(primary, fallback, grid=_grid_ds(), blend_width_km=2.0)
+
+    # The hard edge needs no footprint and still uses the primary.
+    out = blend_surface_forcing(primary, fallback, grid=_grid_ds())
+    assert (out["Tair"].isel(xi_rho=slice(0, 3)) == 1.0).all()
+
+
+def test_feathered_blend_of_an_empty_primary_is_the_fallback():
+    """A primary with no data at all is still allowed: the result is the fallback."""
+    primary = _sf_dataset(1.0, hole_slice=slice(0, None))
+    out = blend_surface_forcing(
+        primary, _sf_dataset(2.0, source="Y"), grid=_grid_ds(), blend_width_km=2.0
+    )
+    assert (out["Tair"] == 2.0).all()
+
+
 def test_a_grid_is_required_without_a_surface_forcing_input():
     """Without a grid there is no land mask, so leftover NaNs cannot be judged."""
     with pytest.raises(ValueError, match="Pass `grid=`"):

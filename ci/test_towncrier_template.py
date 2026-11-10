@@ -134,6 +134,23 @@ def test_fragment_written_as_a_bullet(scratch):
     ) in text
 
 
+def test_link_stays_on_the_lead(scratch):
+    _add_fragments(
+        scratch,
+        {
+            "17.feature.md": "A feature.\n\n* A detail.\n",
+            "18.bugfix.md": "A fix:\n```python\nx = 1\n```\n",
+        },
+    )
+    result = _build(scratch, "5.4.0")
+    assert result.returncode == 0, result.stderr
+    text = (scratch / "docs" / "releases.md").read_text()
+    # A blank line before the sub-bullets is dropped.
+    assert f"* A feature. ([#17]({URL}/17))\n  * A detail.\n" in text
+    # The closing fence stays a fence.
+    assert f"  x = 1\n  ```\n  ([#18]({URL}/18))\n" in text
+
+
 def test_build_without_fragments_is_not_empty(scratch, monkeypatch):
     result = _build(scratch, "5.4.0")
     assert result.returncode == 0, result.stderr

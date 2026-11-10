@@ -1530,7 +1530,7 @@ def test_conus404_outside_footprint_is_nan(synthetic_conus404_store):
     """A grid outrunning the source is partially NaN, not extrapolated or zeroed.
 
     The NaNs are the coverage signal that
-    ``roms_tools.scripts.blend_surface_forcing`` uses to know where a second source
+    ``roms_tools.setup.surface_forcing_blend`` uses to know where a second source
     must fill in, so they must survive to ``ds`` (no NaN-to-zero substitution, no
     wet-point NaN validation error).
     """
@@ -1604,7 +1604,7 @@ def test_conus404_surface_forcing_blends_with_a_global_product(
     synthetic_conus404_store,
 ):
     """End to end: a straddling CONUS404 SurfaceForcing filled from a second product."""
-    from roms_tools.scripts.blend_surface_forcing import blend_surface_forcing
+    from roms_tools import blend_surface_forcing
 
     primary = SurfaceForcing(
         grid=_conus404_grid(300, center=(-125.6, 37.6)),

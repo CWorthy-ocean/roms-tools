@@ -1,4 +1,4 @@
-"""Tests for ``roms_tools.scripts.blend_surface_forcing``.
+"""Tests for ``roms_tools.setup.surface_forcing_blend``.
 
 Synthetic arrays and small datasets only: no source data, no regridding. Everything
 the merge can get wrong -- silent index alignment, a coarse/fine shape mismatch,
@@ -11,11 +11,15 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.scripts.blend_surface_forcing import (
+from roms_tools.setup.surface_forcing_blend import (
+    _interp_time_linear,
     align_fallback_time,
+    blend_surface_forcing,
+    compute_blend_weights,
     coverage_fraction,
     layer_field,
     layer_fields,
+    save_blended_surface_forcing,
 )
 
 NT, NY, NX = 4, 5, 6
@@ -294,8 +298,6 @@ def test_linear_alignment_of_a_single_record():
 
 
 def test_time_interpolation_holds_the_end_value_only_within_the_hold():
-    from roms_tools.scripts.blend_surface_forcing import _interp_time_linear
-
     times = np.arange(4) / 24.0
     field = _ramp(times)
     hour = 1.0 / 24.0
@@ -423,11 +425,6 @@ def test_coverage_fraction_respects_the_wet_mask():
 
 
 # --- dataset-level API -----------------------------------------------------
-
-from roms_tools.scripts.blend_surface_forcing import (  # noqa: E402
-    blend_surface_forcing,
-    compute_blend_weights,
-)
 
 
 def _sf_dataset(value, *, hole_slice=None, rad_offset_h=-0.5, source="X", nt=NT):
@@ -664,8 +661,6 @@ def test_feathered_blend_keeps_float32():
 def test_save_blended_surface_forcing_writes_roms_safe_cdf5(tmp_path):
     """A datetime abs_time is written as float64, not int64, in CDF5 month files."""
     import netCDF4
-
-    from roms_tools.scripts.blend_surface_forcing import save_blended_surface_forcing
 
     p = _sf_dataset(1.0, hole_slice=slice(3, None))
     f = _sf_dataset(2.0, source="Y")

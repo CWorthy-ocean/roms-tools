@@ -178,7 +178,7 @@ class SurfaceForcing:
       data are computed, at ``save()`` with ``use_dask=True``. ROMS cannot run on
       NaN forcing, so either use a grid that lies entirely inside the footprint or
       fill the NaN points from a global product with
-      :func:`~roms_tools.scripts.blend_surface_forcing.blend_surface_forcing`
+      :func:`~roms_tools.blend_surface_forcing`
       (see **Combining sources** below). It requires xESMF; the scipy engine
       cannot interpolate a 2D source grid.
     - ``correct_radiation`` must be ``False``: the ERA5 correction climatology is
@@ -195,9 +195,9 @@ class SurfaceForcing:
     those points from a global source, optionally with a smooth transition, build a
     second ``SurfaceForcing`` (e.g. ERA5) on the same grid, for the same times and
     with the same explicit ``coarse_grid_mode``, and combine the two with
-    :func:`~roms_tools.scripts.blend_surface_forcing.blend_surface_forcing`; write
+    :func:`~roms_tools.blend_surface_forcing`; write
     the result with
-    :func:`~roms_tools.scripts.blend_surface_forcing.save_blended_surface_forcing`.
+    :func:`~roms_tools.save_blended_surface_forcing`.
 
     Examples
     --------

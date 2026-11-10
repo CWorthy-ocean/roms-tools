@@ -4,10 +4,7 @@ Typical use: a regional product (e.g. CONUS404) leaves ``NaN`` outside its footp
 on the ROMS grid, and a global product (e.g. ERA5) covers the whole grid. Build one
 :class:`~roms_tools.SurfaceForcing` for each and blend them::
 
-    from roms_tools.scripts.blend_surface_forcing import (
-        blend_surface_forcing,
-        save_blended_surface_forcing,
-    )
+    from roms_tools import blend_surface_forcing, save_blended_surface_forcing
 
     blended = blend_surface_forcing(
         conus404_sf,  # primary: NaN outside its footprint
@@ -40,8 +37,7 @@ extrapolate it into territory it never simulated. Feathering removes the
 discontinuity caused by switching source mid-field; it does not make the boundary
 invisible -- what remains is the two products' genuine disagreement.
 
-The layering helpers below are deliberately free of any dependency on
-``roms_tools.setup``: they operate on already-regridded ``xarray.DataArray``
+The layering helpers below operate on already-regridded ``xarray.DataArray``
 objects on the target grid, so they can be tested with synthetic arrays and no I/O.
 The weighted form reduces *exactly* to the hard edge when the weights are zero or
 one, which keeps the two behaviours on one code path.
@@ -62,7 +58,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import xarray as xr
 
-from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat
+from roms_tools.setup.utils import fill_nans_over_land, group_dataset
+from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat, save_datasets
 
 if TYPE_CHECKING:
     from roms_tools import Grid, SurfaceForcing
@@ -752,8 +749,6 @@ def blend_surface_forcing(
         {name: da for name, da in combined.items()}
     )
     if fill_value is not None:
-        from roms_tools.setup.utils import fill_nans_over_land
-
         for name in combined:
             out[name] = fill_nans_over_land(
                 out[name],
@@ -816,9 +811,6 @@ def save_blended_surface_forcing(
     list[Path]
         The files written.
     """
-    from roms_tools.setup.utils import group_dataset
-    from roms_tools.utils import save_datasets
-
     filepath = Path(filepath)
     if filepath.suffix == ".nc":
         filepath = filepath.with_suffix("")

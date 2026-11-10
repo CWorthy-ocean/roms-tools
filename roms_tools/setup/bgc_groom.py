@@ -26,6 +26,12 @@ Each tracer gets a :class:`BgcCheck`:
   ALK against the salinity mixing line, DIC against ALK.
 - ``ceiling``: an optional upper limit that grooming clips every wet cell to after
   filling, e.g. O2 at 1.25 times saturation, which filling alone cannot always reach.
+- ``soft_floor``: an optional band width above ``floor``. After the last pass, values in
+  ``[floor, floor + soft_floor)`` are reshaped by :func:`soft_floor_blend` so a profile
+  meets its floored plateau with zero slope instead of a corner -- a corner the model's
+  (non-monotone) advection undershoots, e.g. O2 below MARBL's ``parm_o2_min`` at the
+  edges of a floored OMZ core. Values only move down toward ``floor`` (by at most
+  ~0.15 * ``soft_floor``), never below it; values outside the band are untouched.
 
 Horizontal neighbours only count when their layer depths differ by less than ``dz_max``:
 over steep topography one s-level spans very different depths, and the vertical profile
@@ -195,9 +201,11 @@ class BgcCheck:
     physical_reality: Callable[[Block], np.ndarray] | None = None
     ceiling: Callable[[Block], np.ndarray] | None = None
     requires: tuple[str, ...] = ()
+    soft_floor: float | None = None
 
     def describe(self) -> dict[str, Any]:
         """JSON-able description, recorded in output attrs."""
+        extra = {} if self.soft_floor is None else {"soft_floor": self.soft_floor}
         return {
             "bounds": list(self.bounds) if self.bounds else None,
             "floor": self.floor,
@@ -207,6 +215,8 @@ class BgcCheck:
             "physical_reality": getattr(self.physical_reality, "__name__", None),
             "ceiling": getattr(self.ceiling, "__name__", None),
             "requires": list(self.requires),
+            # only when set, so the attrs of files groomed without it are unchanged
+            **extra,
         }
 
 
@@ -507,6 +517,33 @@ def _stages(names: Sequence[str], checks: Mapping[str, BgcCheck]) -> list[list[s
     return stages
 
 
+def soft_floor_blend(values: np.ndarray, floor: float, band: float) -> np.ndarray:
+    """Reshape ``values`` in ``[floor, floor + band)`` so they meet ``floor`` smoothly.
+
+    With ``d = values - floor``, cells in the band become ``floor + d**2 / band *
+    (2 - d / band)``: ``floor`` stays ``floor`` with zero slope, and the curve meets the
+    identity with matching value and slope at ``floor + band``. It is monotone and never
+    above ``values``, so it only lowers values, by at most ``4 * band / 27`` (at ``d =
+    band / 3``), and never below ``floor``. Values below ``floor``, at or above ``floor +
+    band``, and NaN are returned unchanged.
+    """
+    d = values - floor
+    with np.errstate(invalid="ignore"):
+        band_cells = (d >= 0.0) & (d < band)
+    return np.where(band_cells, floor + d * d / band * (2.0 - d / band), values)
+
+
+def _soft_floor_kernel(
+    stack: np.ndarray, aux: np.ndarray, *, soft: tuple[tuple[int, float, float], ...]
+) -> np.ndarray:
+    """Apply :func:`soft_floor_blend` to wet cells of the ``(index, floor, band)`` rows."""
+    wet = aux[3] > 0.5
+    out = stack.copy()
+    for i, floor, band in soft:
+        out[i] = np.where(wet, soft_floor_blend(stack[i], floor, band), stack[i])
+    return out
+
+
 def _kernel(
     stack: np.ndarray,
     aux: np.ndarray,
@@ -735,6 +772,21 @@ def _run(
                 dtype=np.float64,
                 meta=np.array((), dtype=np.float64),
             )
+    # Once, after every pass: the blend is pointwise (no neighbours, so no overlap and no
+    # dependence on chunking) but not idempotent, so it must not run inside the passes.
+    soft = tuple(
+        (names.index(n), checks[n].floor, band)
+        for n in targets
+        if (band := checks[n].soft_floor) is not None
+    )
+    if soft:
+        stack = dsa.map_blocks(
+            partial(_soft_floor_kernel, soft=soft),
+            stack,
+            aux,
+            dtype=np.float64,
+            meta=np.array((), dtype=np.float64),
+        )
     return stack
 
 
@@ -943,6 +995,7 @@ _CHECK_OVERRIDES = (
     "normalize_by_salinity",
     "physical_reality",
     "ceiling",
+    "soft_floor",
 )
 
 
@@ -975,8 +1028,10 @@ def resolve_groom_settings(
     ints), ``dz_max`` (a positive number) and ``checks``: ``{tracer: {field: value}}``,
     partial overrides of :data:`DEFAULT_CHECKS` for ``bounds`` (``[low, high]`` or
     ``None``), ``floor``, ``floor_jump``, ``max_jump`` (a number or ``None``),
-    ``normalize_by_salinity`` (bool), and ``physical_reality``/``ceiling`` (``None`` only,
-    to switch them off). ``None`` returns the defaults. Anything else raises.
+    ``normalize_by_salinity`` (bool), ``soft_floor`` (a positive band width above
+    ``floor``, or ``None``: off, the default), and ``physical_reality``/``ceiling``
+    (``None`` only, to switch them off). ``None`` returns the defaults. Anything else
+    raises.
     """
     checks = dict(DEFAULT_CHECKS)
     if settings is None:
@@ -1035,7 +1090,7 @@ def resolve_groom_settings(
                 upd[f] = (lo, hi)
             elif f == "floor":
                 upd[f] = _number(v, f"{label}.floor")
-            elif f in ("floor_jump", "max_jump"):
+            elif f in ("floor_jump", "max_jump", "soft_floor"):
                 upd[f] = (
                     None if v is None else _number(v, f"{label}.{f}", positive=True)
                 )

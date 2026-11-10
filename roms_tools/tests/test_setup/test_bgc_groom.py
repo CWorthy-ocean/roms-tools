@@ -12,6 +12,7 @@ from roms_tools.setup.bgc_groom import (
     bgc_check,
     bgc_groom,
     resolve_groom_settings,
+    soft_floor_blend,
     summarize_flags,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates
@@ -225,6 +226,8 @@ def test_nan_o2_is_not_turned_into_the_ceiling(grid, clean):
         {"checks": {"ALK": {"bounds": (400.0, 3100.0)}}},
         {"checks": {"ALK": {"bounds": [3100.0, 400.0]}}},
         {"checks": {"O2": {"ceiling": "x"}}},
+        {"checks": {"O2": {"soft_floor": 0.0}}},
+        {"checks": {"O2": {"soft_floor": True}}},
         {"unknown": 1},
         [("passes", 2)],
     ],
@@ -443,3 +446,49 @@ def test_unknown_variable_and_bad_parameters_raise(grid, clean):
         bgc_check(_ic(clean), grid, variables=["FOO"])
     with pytest.raises(ValueError, match="relax_sweeps"):
         bgc_groom(_ic(clean), grid, relax_sweeps=-1)
+
+
+def test_soft_floor_blend_meets_floor_flat_and_values_above_the_band_unchanged():
+    floor, band = 5.0, 10.0
+    x = np.linspace(floor, floor + band, 30001)
+    g = soft_floor_blend(x, floor, band)
+    slope = np.gradient(g, x)
+    assert g[0] == floor and abs(slope[0]) < 1e-3  # flat onto the plateau
+    np.testing.assert_allclose([g[-1], slope[-1]], [floor + band, 1.0], atol=1e-3)
+    assert (np.diff(g) >= 0).all() and (g <= x).all() and (g >= floor).all()
+    np.testing.assert_allclose((x - g).max(), 4 * band / 27, rtol=1e-4)
+    outside = np.array([np.nan, 2.0, floor + band, 200.0])
+    np.testing.assert_array_equal(soft_floor_blend(outside, floor, band), outside)
+
+
+def test_soft_floor_smooths_an_omz_edge_once_and_only_when_asked(grid, clean):
+    """An O2 profile floored at 5 over a core: the band above the floor is lowered
+    toward 5, the floored core and the water above the band are untouched, and more
+    passes do not soften it again.
+    """
+    wet = clean["salt"] > 0
+    o2 = np.where(wet, np.clip(clean["O2"] - 80.0, 5.0, None), 0.0)  # floored core
+    clean["O2"] = o2
+    plain = bgc_groom(_ic(clean), grid, variables=["O2"]).compute()["O2"].values
+    settings = {"checks": {"O2": {"soft_floor": 10.0}}}
+    checks, _ = resolve_groom_settings(settings)
+    outs = [
+        bgc_groom(_ic(clean), grid, variables=["O2"], checks=checks, passes=p)
+        .compute()["O2"]
+        .values
+        for p in (1, 4)
+    ]
+    np.testing.assert_array_equal(outs[0], outs[1])  # applied once, after the passes
+    soft = outs[1]
+    band = wet & (plain > 5.0) & (plain < 15.0)
+    assert band.any() and (soft[band] < plain[band]).all()
+    np.testing.assert_allclose(
+        soft[band],
+        soft_floor_blend(plain[band].astype(np.float64), 5.0, 10.0),
+        rtol=1e-6,
+    )
+    keep = wet & ~band
+    np.testing.assert_array_equal(soft[keep], plain[keep])
+    assert soft[wet].min() >= 5.0 - 1e-5
+    assert checks["O2"].describe()["soft_floor"] == 10.0
+    assert "soft_floor" not in resolve_groom_settings(None)[0]["O2"].describe()

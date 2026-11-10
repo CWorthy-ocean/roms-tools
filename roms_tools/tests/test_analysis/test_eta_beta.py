@@ -112,15 +112,19 @@ def test_missing_variables(his_ds, bgc_ds, grid, tmp_path, var, source):
         )
 
 
-def test_no_nans_on_water_points(eta_beta_iceland):
+def test_zero_on_land_positive_on_water(eta_beta_iceland):
+    """No NaN anywhere: 0 over land (as ROMS writes), positive on water points.
+
+    A failed solve on a water point would also be 0, so positivity there checks
+    that the Iceland case has none.
+    """
     water = eta_beta_iceland.grid.ds.mask_rho == 1
-    ntimes = eta_beta_iceland.ds.sizes["time"]
 
     for var in ["ddic_dco2", "ddic_dalk"]:
-        assert (
-            eta_beta_iceland.ds[var].where(water).notnull().sum()
-            == water.sum() * ntimes
-        )
+        da = eta_beta_iceland.ds[var]
+        assert da.notnull().all(), var
+        assert (da.where(~water) == 0).sum() == (~water).sum() * da.sizes["time"], var
+        assert (da.where(water) > 0).sum() == water.sum() * da.sizes["time"], var
 
 
 def test_saved_file_matches_roms_forcing_names(his_ds, bgc_ds, grid, tmp_path):

@@ -210,6 +210,10 @@ class calculate_eta_beta:
         beta = (csys["dic"] - (csys["HCO3"] + 2.0 * csys["CO3"]) / iso_q) / csys["CO2"]
         eta = 1.0 / iso_q
 
+        valid = np.isfinite(beta) & np.isfinite(eta)
+        beta = np.where(valid, beta, 0.0)
+        eta = np.where(valid, eta, 0.0)
+
         # Variable names and attributes match what ROMS reads (surf_flux.F90)
         # and writes (cdr_gas_exch_output.F90).
         ds = xr.Dataset(

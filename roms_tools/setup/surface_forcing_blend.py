@@ -1038,13 +1038,19 @@ def _first_record_validity(
 ) -> dict[str, xr.DataArray]:
     """Where each primary field has a value at its first time step, computed.
 
-    Reads one record per variable. It is the only data the blend reads before
-    the result is computed.
+    Reads one record per variable, all in one compute so that lazy products
+    share the work of opening and regridding their source. It is the only data
+    the blend reads before the result is computed.
     """
-    return {
-        name: (da.isel(time=0) if "time" in da.dims else da).notnull().compute()
-        for name, da in p_fields.items()
-    }
+    masks = xr.Dataset(
+        {
+            name: (da.isel(time=0) if "time" in da.dims else da)
+            .notnull()
+            .reset_coords(drop=True)
+            for name, da in p_fields.items()
+        }
+    ).compute()
+    return {str(name): masks[name] for name in masks.data_vars}
 
 
 def _common_footprint(valid: list[xr.DataArray]) -> xr.DataArray:
@@ -1248,10 +1254,14 @@ def blend_surface_forcing_from_yaml(
     filepath = Path(filepath)
     with filepath.open() as f:
         documents = [doc for doc in yaml.safe_load_all(f) if doc is not None]
-    sections = [
-        doc["SurfaceForcingBlend"] for doc in documents if "SurfaceForcingBlend" in doc
-    ]
-    section = sections[0] if sections else None
+    section = next(
+        (
+            doc["SurfaceForcingBlend"]
+            for doc in documents
+            if "SurfaceForcingBlend" in doc
+        ),
+        None,
+    )
     if section is None:
         raise ValueError(f"No SurfaceForcingBlend section found in {filepath}.")
     _check_replayable(section, suffix="")

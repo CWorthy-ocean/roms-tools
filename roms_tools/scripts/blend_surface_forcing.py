@@ -149,12 +149,13 @@ def align_fallback_time(
         ``"exact"`` (default) requires every target stamp to be present in
         ``fallback`` and selects them, which is correct and free for two sources
         on the same hourly grid. ``"nearest"`` tolerates stamp jitter within
-        ``tolerance``. ``"linear"`` interpolates.
+        ``tolerance``, which it requires. ``"linear"`` interpolates.
     tolerance : np.timedelta64 or float, optional
-        Maximum distance for ``method="nearest"``. A ``np.timedelta64`` is converted
-        to days when the time axis is numeric, as in a ``SurfaceForcing`` dataset
-        (days since the model reference date); a float is used as is, in the
-        units of the time axis.
+        Maximum distance for ``method="nearest"``, which has no default: without
+        a limit, the nearest record of a fallback from another period would be
+        accepted. A ``np.timedelta64`` is converted to days when the time axis is
+        numeric, as in a ``SurfaceForcing`` dataset (days since the model
+        reference date); a float is used as is, in the units of the time axis.
     var_name : str, optional
         Used in error messages.
 
@@ -166,13 +167,21 @@ def align_fallback_time(
     Raises
     ------
     ValueError
-        If ``method="exact"`` and some target stamps are missing, or if ``method``
-        is unknown.
+        If ``method="exact"`` and some target stamps are missing; if
+        ``method="nearest"`` and ``tolerance`` is not given, or some target stamp
+        has no fallback record within it; or if ``method`` is unknown.
     """
     if method not in TIME_ALIGN_METHODS:
         raise ValueError(
             f"Unknown time alignment method {method!r}; expected one of "
             f"{list(TIME_ALIGN_METHODS)}."
+        )
+    if method == "nearest" and tolerance is None:
+        raise ValueError(
+            'time_align="nearest" needs a `time_tolerance`: the largest distance '
+            "between a primary time stamp and the fallback record used for it "
+            '(e.g. np.timedelta64(1, "m") for stamp jitter). Without one, a '
+            "fallback from another period would be accepted."
         )
 
     if "time" not in fallback.dims:
@@ -187,23 +196,51 @@ def align_fallback_time(
                 f"The fallback source is missing {missing.size} time step(s) that "
                 f"the primary source provides for {var_name!r}, so the two cannot "
                 f"be layered on an exact time match. First missing: {missing[0]}; "
-                f"last: {missing[-1]}. Widen the fallback's time range, or use "
-                f'time_align="nearest".'
+                f"last: {missing[-1]}. Widen the fallback's time range. If the two "
+                f"cover the same period and their stamps differ only slightly, "
+                f'use time_align="nearest" with a `time_tolerance`.'
             )
         return fallback.sel(time=target_time)
 
     if method == "nearest":
-        if isinstance(tolerance, np.timedelta64) and not np.issubdtype(
-            fallback["time"].dtype, np.datetime64
-        ):
-            tolerance = float(tolerance / np.timedelta64(1, "D"))
-        aligned = fallback.sel(time=target_time, method="nearest", tolerance=tolerance)
+        tolerance = _axis_tolerance(tolerance, fallback["time"].dtype)
+        try:
+            aligned = fallback.sel(
+                time=target_time, method="nearest", tolerance=tolerance
+            )
+        except KeyError as err:
+            raise ValueError(
+                f"The fallback source has no record within the time tolerance "
+                f"({tolerance}) of some of the primary's time stamps for "
+                f"{var_name!r}, so the two cannot be layered with "
+                f'time_align="nearest". The primary runs from '
+                f"{target_time.values.min()} to {target_time.values.max()} and the "
+                f"fallback from {fallback['time'].values.min()} to "
+                f"{fallback['time'].values.max()}. Check that both cover the same "
+                f"period."
+            ) from err
         # `sel(method="nearest")` keeps the *source's* time labels. Left as-is, the
         # combine would then align on a time index that does not match the
         # primary's and silently produce an empty intersection.
         return aligned.assign_coords(time=target_time)
 
     return fallback.interp(time=target_time)
+
+
+def _axis_tolerance(
+    tolerance: np.timedelta64 | float | None, time_dtype: np.dtype
+) -> np.timedelta64 | float | None:
+    """A time tolerance in the units of a time axis of ``time_dtype``.
+
+    A ``np.timedelta64`` becomes float days on a numeric axis (a ``SurfaceForcing``
+    dataset counts days since the model reference date); anything else is
+    returned unchanged.
+    """
+    if isinstance(tolerance, np.timedelta64) and not np.issubdtype(
+        time_dtype, np.datetime64
+    ):
+        return float(tolerance / np.timedelta64(1, "D"))
+    return tolerance
 
 
 def layer_fields(
@@ -516,8 +553,9 @@ def blend_surface_forcing(
         ``lwrad`` are re-timed onto the primary's convention by linear
         interpolation.
     time_tolerance : np.timedelta64 or float, optional
-        Tolerance for ``time_align="nearest"``. A ``np.timedelta64`` is converted
-        to the days of a ``SurfaceForcing`` time axis; a float is in days.
+        Tolerance for ``time_align="nearest"``, which requires it. A
+        ``np.timedelta64`` is converted to the days of a ``SurfaceForcing`` time
+        axis; a float is in days.
     on_missing_primary_var : {"error", "fallback"}, optional
         What to do about a variable only the fallback has: raise (default), or
         take it from the fallback everywhere.
@@ -545,10 +583,13 @@ def blend_surface_forcing(
         If ``blend_width_km`` is negative, or no grid is given or available from
         the inputs (both raised before any data are read); if the grid lacks the
         land mask the products need, or does not match their shape; if the
-        products disagree on grid shape, units or ``use_coarse_grid``; if a primary variable is missing
+        products disagree on grid shape, units, ``model_reference_date`` or
+        ``use_coarse_grid``; if a primary variable is missing
         from the fallback, or a fallback-only variable is present and
         ``on_missing_primary_var="error"``; if ``time_align="exact"`` and the
-        fallback lacks some of the primary's time stamps; if ``time_align``,
+        fallback lacks some of the primary's time stamps; if
+        ``time_align="nearest"`` and ``time_tolerance`` is not given, or the
+        fallback has no record within it of some primary time stamp; if ``time_align``,
         ``on_missing_primary_var`` or ``blend_profile`` is not a known value; or
         if a NaN is left at an ocean point (unless ``fill_value`` is ``None``).
     """
@@ -742,6 +783,15 @@ def _check_dataset_compatibility(ds_p: xr.Dataset, ds_f: xr.Dataset) -> None:
                 f"reports {p_units!r} and the fallback {f_units!r}. Both must "
                 f"carry the ROMS surface-forcing conventions."
             )
+    p_ref = ds_p.attrs.get("model_reference_date")
+    f_ref = ds_f.attrs.get("model_reference_date")
+    if p_ref is not None and f_ref is not None and str(p_ref) != str(f_ref):
+        raise ValueError(
+            f"The products count time from different reference dates (the primary "
+            f"from {p_ref}, the fallback from {f_ref}), so the same value of "
+            f"`time` is a different date in each. Build both with the same "
+            f"`model_reference_date`."
+        )
     p_coarse = ds_p.attrs.get("use_coarse_grid")
     f_coarse = ds_f.attrs.get("use_coarse_grid")
     if p_coarse is not None and f_coarse is not None and p_coarse != f_coarse:

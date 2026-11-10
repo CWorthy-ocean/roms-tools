@@ -193,6 +193,33 @@ def test_nearest_alignment_tolerates_jitter():
     np.testing.assert_array_equal(aligned["time"].values, primary["time"].values)
 
 
+def test_nearest_alignment_requires_a_tolerance():
+    """An unlimited "nearest" would match a fallback from any period."""
+    primary = _field(1.0)
+    with pytest.raises(ValueError, match="needs a `time_tolerance`"):
+        align_fallback_time(_field(2.0), primary["time"], method="nearest")
+
+
+def test_nearest_alignment_rejects_a_fallback_from_another_period():
+    primary = _field(1.0)
+    a_year_later = primary["time"].values + np.timedelta64(365, "D")
+    fallback = _field(2.0, times=a_year_later)
+    with pytest.raises(ValueError, match="no record within the time tolerance"):
+        align_fallback_time(
+            fallback,
+            primary["time"],
+            method="nearest",
+            tolerance=np.timedelta64(30, "m"),
+        )
+
+
+def test_exact_alignment_error_does_not_recommend_an_unlimited_nearest():
+    primary = _field(1.0)
+    fallback = _field(2.0).isel(time=slice(0, 2))
+    with pytest.raises(ValueError, match="time_tolerance"):
+        align_fallback_time(fallback, primary["time"])
+
+
 def test_linear_alignment_interpolates():
     times = np.array(
         [np.datetime64("2020-06-15T00") + np.timedelta64(2 * h, "h") for h in range(NT)]
@@ -394,6 +421,22 @@ def test_coarse_grid_mismatch_is_caught():
     f.attrs["use_coarse_grid"] = "True"
     with pytest.raises(ValueError, match="use_coarse_grid"):
         blend_surface_forcing(_sf_dataset(1.0), f, grid=_grid_ds())
+
+
+def test_differing_model_reference_dates_are_caught():
+    """Days since different dates are not comparable, whatever `time_align` is."""
+    p = _sf_dataset(1.0, hole_slice=slice(3, None))
+    f = _sf_dataset(2.0, source="Y")
+    p.attrs["model_reference_date"] = "2000-01-01 00:00:00"
+    f.attrs["model_reference_date"] = "2001-01-01 00:00:00"
+    with pytest.raises(ValueError, match="model_reference_date"):
+        blend_surface_forcing(
+            p,
+            f,
+            grid=_grid_ds(),
+            time_align="nearest",
+            time_tolerance=np.timedelta64(1, "m"),
+        )
 
 
 def test_differing_rad_time_offsets_shift_the_fallback_radiation():

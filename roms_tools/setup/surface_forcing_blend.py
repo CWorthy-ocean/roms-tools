@@ -26,7 +26,9 @@ settings and the blend arguments. :func:`save_blended_surface_forcing` writes it
 into the files, :func:`blend_to_yaml` writes it to a YAML file, and
 :func:`blend_surface_forcing_from_yaml` rebuilds the blend from that file. An input
 with no such attribute (a hand-made ``xarray.Dataset``) is recorded as having no
-recipe, and a blend that uses one cannot be rebuilt.
+recipe, and a blend that uses one cannot be rebuilt. The recipe says how each
+product was built, not what was done to it afterwards: if you edit a product's
+dataset before blending, the rebuilt blend will not have those edits.
 
 The layering model is "primary over fallback": wherever the primary has a value it
 wins, and wherever it does not -- because the target point lies outside a
@@ -332,13 +334,20 @@ def _axis_tolerance(
     """A time tolerance in the units of a time axis of ``time_dtype``.
 
     A ``np.timedelta64`` becomes float days on a numeric axis (a ``SurfaceForcing``
-    dataset counts days since the model reference date); anything else is
-    returned unchanged.
+    dataset counts days since the model reference date). A plain number is in
+    days and has no meaning on a datetime axis, where pandas would read it as
+    nanoseconds, so it is rejected there.
     """
-    if isinstance(tolerance, np.timedelta64) and not np.issubdtype(
-        time_dtype, np.datetime64
-    ):
+    on_datetime_axis = np.issubdtype(time_dtype, np.datetime64)
+    if isinstance(tolerance, np.timedelta64):
+        if on_datetime_axis:
+            return tolerance
         return float(tolerance / np.timedelta64(1, "D"))
+    if tolerance is not None and on_datetime_axis:
+        raise TypeError(
+            "On a datetime time axis, `time_tolerance` must be a np.timedelta64 "
+            f'(e.g. np.timedelta64(1, "m")), got {tolerance!r}.'
+        )
     return tolerance
 
 
@@ -732,18 +741,32 @@ def blend_surface_forcing(
     )
     f_fields.update(retimed)
 
+    valid = _first_record_validity(p_fields)
     weights = None
     if blend_width_km:
-        footprint = _footprint(p_fields)
         weights = compute_blend_weights(
-            footprint,
+            _footprint(valid),
             cell_size_m=_cell_size_m(grid, ds_p),
             width_km=blend_width_km,
             profile=blend_profile,
         )
 
     mask = _wet_mask(grid, ds_p)
-    coverage = coverage_fraction(next(iter(p_fields.values())), mask)
+    empty = [name for name, v in valid.items() if not bool(v.any())]
+    if empty and len(empty) < len(valid):
+        # Only a hard edge gets here: a feathered blend has no footprint to
+        # feather and was rejected above.
+        logging.warning(
+            "The primary product has no data at the first time step for %s; where "
+            "a variable is missing it comes from the fallback. The coverage "
+            "reported below is for the primary's other variables.",
+            empty,
+        )
+    covered = _common_footprint(
+        [v for name, v in valid.items() if name not in empty] or list(valid.values())
+    )
+    # `coverage_fraction` takes a field and counts its non-NaN points.
+    coverage = coverage_fraction(covered.where(covered), mask)
     logging.info(
         "Primary covers %.1f%% of the target ocean points; the remainder comes from "
         "the fallback.",
@@ -841,10 +864,26 @@ def save_blended_surface_forcing(
     -------
     list[Path]
         The files written.
+
+    Raises
+    ------
+    ValueError
+        If ``group=True`` and ``ds`` has no ``abs_time`` coordinate.
     """
     filepath = Path(filepath)
     if filepath.suffix == ".nc":
         filepath = filepath.with_suffix("")
+
+    if group and "abs_time" not in ds.variables:
+        raise ValueError(
+            "The dataset has no `abs_time` coordinate, which splitting it into "
+            "monthly or yearly files needs. Pass `group=False` to write one file."
+        )
+    if "time" in ds.dims:
+        # `SurfaceForcing` marks `time` unlimited through the dataset's encoding,
+        # which a product opened from files does not carry.
+        ds = ds.copy(deep=False)
+        ds.encoding = {**ds.encoding, "unlimited_dims": "time"}
 
     if group:
         dataset_list, output_filenames = group_dataset(ds, str(filepath))
@@ -994,8 +1033,32 @@ def _align_radiation_time(
     return retimed, float(shift / np.timedelta64(1, "s"))
 
 
-def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:
+def _first_record_validity(
+    p_fields: dict[str, xr.DataArray],
+) -> dict[str, xr.DataArray]:
+    """Where each primary field has a value at its first time step, computed.
+
+    Reads one record per variable. It is the only data the blend reads before
+    the result is computed.
+    """
+    return {
+        name: (da.isel(time=0) if "time" in da.dims else da).notnull().compute()
+        for name, da in p_fields.items()
+    }
+
+
+def _common_footprint(valid: list[xr.DataArray]) -> xr.DataArray:
+    """True where every one of the validity masks is."""
+    common = valid[0]
+    for v in valid[1:]:
+        common = common & v
+    return common
+
+
+def _footprint(valid: dict[str, xr.DataArray]) -> xr.DataArray:
     """True where *every* primary field has a value, at the first time step.
+
+    ``valid`` is the output of :func:`_first_record_validity`.
 
     The intersection is the conservative reading: a variable missing at a point
     would fall back anyway, so including the point in the feather band would only
@@ -1008,15 +1071,7 @@ def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:
         them do (one of them is all NaN there, say). Every blend weight would be
         zero, and the feathered result would be the fallback alone, at all times.
     """
-    valid = {
-        name: (da.isel(time=0) if "time" in da.dims else da).notnull()
-        for name, da in p_fields.items()
-    }
-    footprint = None
-    for v in valid.values():
-        footprint = v if footprint is None else (footprint & v)
-    assert footprint is not None
-    footprint = footprint.compute()
+    footprint = _common_footprint(list(valid.values()))
     if not bool(footprint.any()):
         empty = [name for name, v in valid.items() if not bool(v.any())]
         if len(empty) < len(valid):
@@ -1035,10 +1090,15 @@ def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:
     return footprint
 
 
+def _is_coarse(ds: xr.Dataset) -> bool:
+    """Whether a product is on the coarse grid. No attribute means the fine grid."""
+    return str(ds.attrs.get("use_coarse_grid")) == "True"
+
+
 def _wet_mask(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> xr.DataArray:
     """The grid's wet mask on the product's (fine or coarse) rho points."""
     gds = cast("xr.Dataset", grid.ds if hasattr(grid, "ds") else grid)
-    coarse = str(ds_p.attrs.get("use_coarse_grid")) == "True"
+    coarse = _is_coarse(ds_p)
     name = "mask_coarse" if coarse else "mask_rho"
     if name not in gds:
         raise ValueError(
@@ -1062,7 +1122,7 @@ def _cell_size_m(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> tuple[float, floa
     """Mean ``(dy, dx)`` in metres of the grid the product was written on."""
     gds = cast("xr.Dataset", grid.ds if hasattr(grid, "ds") else grid)
     # The coarse grid doubles the spacing.
-    factor = 2.0 if str(ds_p.attrs.get("use_coarse_grid")) == "True" else 1.0
+    factor = 2.0 if _is_coarse(ds_p) else 1.0
     dy = factor * float((1 / gds["pn"]).mean())
     dx = factor * float((1 / gds["pm"]).mean())
     return dy, dx

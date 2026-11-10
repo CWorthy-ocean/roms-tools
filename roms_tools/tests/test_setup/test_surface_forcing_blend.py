@@ -7,6 +7,8 @@ encodings of the written files -- is cheap to pin down here and expensive to
 diagnose once it is buried in a full SurfaceForcing run.
 """
 
+import logging
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -990,3 +992,57 @@ def test_radiation_shift_is_recorded_only_when_the_offsets_differ():
         grid=grid,
     )
     assert shifted.attrs["fallback_radiation_shift_s"] == "1800.0"
+
+
+def test_files_blended_from_disk_keep_time_unlimited(tmp_path):
+    """A product opened from files has lost the encoding that marks `time`."""
+    import netCDF4
+
+    p, f = tmp_path / "p.nc", tmp_path / "f.nc"
+    _sf_dataset(1.0, hole_slice=slice(3, None)).to_netcdf(p)
+    _sf_dataset(2.0, source="Y").to_netcdf(f)
+    out = blend_surface_forcing(p, f, grid=_grid_ds())
+
+    (written,) = save_blended_surface_forcing(out, tmp_path / "blended", group=False)
+
+    with netCDF4.Dataset(written) as nc:
+        assert nc.dimensions["time"].isunlimited()
+
+
+def test_saving_in_groups_without_abs_time_says_what_is_missing(tmp_path):
+    out = blend_surface_forcing(
+        _sf_dataset(1.0, hole_slice=slice(3, None)), _sf_dataset(2.0), grid=_grid_ds()
+    )
+    assert "abs_time" not in out.variables
+    with pytest.raises(ValueError, match="abs_time.*group=False"):
+        save_blended_surface_forcing(out, tmp_path / "blended")
+
+
+def test_float_tolerance_on_a_datetime_axis_is_rejected():
+    """A number is days; on a datetime axis pandas would read it as nanoseconds."""
+    primary = _field(1.0)
+    with pytest.raises(TypeError, match="np.timedelta64"):
+        align_fallback_time(
+            _field(2.0), primary["time"], method="nearest", tolerance=0.5
+        )
+
+
+def test_coverage_counts_points_where_every_variable_has_data():
+    primary = _sf_dataset(1.0, hole_slice=slice(3, None))
+    primary["swrad"][:, :, 2] = np.nan  # swrad covers one column less than Tair
+    out = blend_surface_forcing(primary, _sf_dataset(2.0), grid=_grid_ds())
+    assert out.attrs["primary_coverage_fraction"] == f"{2 / NX:.4f}"
+
+
+def test_hard_edge_warns_about_a_variable_empty_in_the_first_record(caplog):
+    """The coverage must not read as "no data" because one variable starts empty."""
+    primary = _sf_dataset(1.0, hole_slice=slice(3, None))
+    primary["Tair"][0] = np.nan  # the first variable, in the first record only
+
+    with caplog.at_level(logging.WARNING):
+        out = blend_surface_forcing(primary, _sf_dataset(2.0), grid=_grid_ds())
+
+    assert "no data at the first time step for ['Tair']" in caplog.text
+    assert "the result is the fallback alone" not in caplog.text
+    assert out.attrs["primary_coverage_fraction"] == f"{3 / NX:.4f}"
+    assert (out["Tair"].isel(time=1, xi_rho=slice(0, 3)) == 1.0).all()

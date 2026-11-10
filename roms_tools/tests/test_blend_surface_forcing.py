@@ -268,6 +268,46 @@ def test_linear_alignment_matches_xarray_interp(axis):
     np.testing.assert_array_equal(aligned["time"].values, target)
 
 
+def test_linear_alignment_on_a_sample_ignores_a_nan_neighbour():
+    """A stamp that is one of the samples takes that sample alone."""
+    times = np.arange(5) / 24.0
+    fallback = _ramp(times)
+    fallback[1] = np.nan
+    fallback[4] = np.nan
+    target = xr.DataArray(times[[0, 2, 3]], dims="time")
+
+    aligned = align_fallback_time(fallback, target, method="linear")
+
+    np.testing.assert_array_equal(aligned.values, fallback.values[[0, 2, 3]])
+
+
+def test_linear_alignment_of_a_single_record():
+    """One record serves its own stamp; any other stamp is outside it."""
+    times = np.array([0.5])
+    fallback = _ramp(times)
+    target = xr.DataArray(np.array([0.25, 0.5, 0.75]), dims="time")
+
+    aligned = align_fallback_time(fallback, target, method="linear")
+
+    np.testing.assert_array_equal(aligned.values[1], fallback.values[0])
+    assert bool(aligned.isel(time=[0, 2]).isnull().all())
+
+
+def test_time_interpolation_holds_the_end_value_only_within_the_hold():
+    from roms_tools.scripts.blend_surface_forcing import _interp_time_linear
+
+    times = np.arange(4) / 24.0
+    field = _ramp(times)
+    hour = 1.0 / 24.0
+    target = np.array([-2 * hour, -0.5 * hour, 3.5 * hour, 5 * hour])
+
+    out = _interp_time_linear(field, target, hold=hour)
+
+    np.testing.assert_array_equal(out.values[1], field.values[0])
+    np.testing.assert_array_equal(out.values[2], field.values[-1])
+    assert bool(out.isel(time=[0, 3]).isnull().all())
+
+
 def _counting_blocks(field, counter):
     """Chunk `field` by day and record which time block each read touches."""
     import dask.array as dsa

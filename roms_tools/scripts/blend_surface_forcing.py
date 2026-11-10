@@ -205,10 +205,11 @@ def align_fallback_time(
         return fallback.sel(time=target_time)
 
     if method == "nearest":
-        tolerance = _axis_tolerance(tolerance, fallback["time"].dtype)
         try:
             aligned = fallback.sel(
-                time=target_time, method="nearest", tolerance=tolerance
+                time=target_time,
+                method="nearest",
+                tolerance=_axis_tolerance(tolerance, fallback["time"].dtype),
             )
         except KeyError as err:
             raise ValueError(
@@ -237,7 +238,8 @@ def _interp_time_linear(
 ) -> xr.DataArray:
     """Interpolate ``field`` linearly in time from the two bracketing records.
 
-    Gives what ``field.interp(time=target_time)`` gives, but stays chunk-local.
+    Gives what ``field.interp(time=target_time)`` gives where the bracketing
+    records are valid, but stays chunk-local.
     ``interp`` along a chunked dimension builds every output block from *all* the
     input blocks, so one day of output would read the field's whole record: tens
     of GB per variable for a year of hourly forcing on a large grid. Here each
@@ -248,8 +250,7 @@ def _interp_time_linear(
     Parameters
     ----------
     field : xr.DataArray
-        The field to interpolate. Its ``time`` must be strictly increasing and
-        hold at least two records.
+        The field to interpolate. Its ``time`` must be strictly increasing.
     target_time : xr.DataArray or np.ndarray
         The stamps to interpolate to.
     hold : np.timedelta64 or float, optional
@@ -265,22 +266,33 @@ def _interp_time_linear(
     """
     src = np.asarray(field["time"].values)
     tgt = np.asarray(getattr(target_time, "values", target_time))
-    if src.size < 2:
-        raise ValueError(
-            "Interpolating in time needs at least two records, but the field "
-            f"{field.name!r} has {src.size}."
-        )
     if not bool(np.all(src[1:] > src[:-1])):
         raise ValueError(
             f"The time axis of {field.name!r} is not strictly increasing, so it "
             "cannot be interpolated in time."
         )
 
-    upper_idx = np.clip(np.searchsorted(src, tgt, side="right"), 1, src.size - 1)
-    lower_idx = upper_idx - 1
+    last = src.size - 1
+    lower_idx = np.clip(np.searchsorted(src, tgt, side="right") - 1, 0, last)
+    # A stamp that is one of the samples, or lies past the last one, uses that
+    # sample alone: a neighbour that happens to be NaN must not reach it through
+    # `0 * NaN`, and no second block is read for it.
+    upper_idx = np.where(
+        src[lower_idx] == tgt, lower_idx, np.minimum(lower_idx + 1, last)
+    )
+    span = src[upper_idx] - src[lower_idx]
+    flat = span == np.zeros((), span.dtype)
     # Clipped to [0, 1]: a stamp outside the record gets the end value, which
     # `outside` then keeps or blanks.
-    frac = np.clip((tgt - src[lower_idx]) / (src[upper_idx] - src[lower_idx]), 0.0, 1.0)
+    frac = np.clip(
+        np.where(
+            flat,
+            0.0,
+            (tgt - src[lower_idx]) / np.where(flat, np.ones((), span.dtype), span),
+        ),
+        0.0,
+        1.0,
+    )
     beyond = np.maximum(src[0] - tgt, tgt - src[-1])
     outside = beyond > (np.zeros((), beyond.dtype) if hold is None else hold)
 

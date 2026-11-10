@@ -617,8 +617,18 @@ def blend_surface_forcing(
     p_fields = _data_fields(ds_p)
     f_fields = _data_fields(ds_f)
 
-    ds_f = _align_radiation_time(ds_p, ds_f, f_fields)
-    f_fields = _data_fields(ds_f)  # rebuilt: radiation may have been re-timed
+    # Re-timed radiation is already on the primary's time axis. It replaces the
+    # entries of this dict and is not put back into `ds_f`, whose time index is
+    # the fallback's: that assignment would reindex it, and every stamp the two
+    # products do not share exactly would become NaN.
+    f_fields.update(
+        _align_radiation_time(
+            ds_p,
+            ds_f,
+            f_fields,
+            time_tolerance=time_tolerance if time_align == "nearest" else None,
+        )
+    )
 
     weights = None
     if blend_width_km:
@@ -813,9 +823,19 @@ def _rad_offset(ds: xr.Dataset) -> np.timedelta64 | None:
 
 
 def _align_radiation_time(
-    ds_p: xr.Dataset, ds_f: xr.Dataset, f_fields: dict[str, xr.DataArray]
-) -> xr.Dataset:
+    ds_p: xr.Dataset,
+    ds_f: xr.Dataset,
+    f_fields: dict[str, xr.DataArray],
+    *,
+    time_tolerance: np.timedelta64 | float | None = None,
+) -> dict[str, xr.DataArray]:
     """Put the fallback's radiation on the primary's ``rad_time`` convention.
+
+    Returns the re-timed radiation fields, on the primary's ``time`` axis; an
+    empty dict when the two products label radiation the same way.
+    ``time_tolerance`` is how far the fallback's stamps may sit from the
+    primary's (``time_align="nearest"``).
+
 
     An hourly-mean product labels its flux at the end of the averaging interval and
     carries ``rad_time = time + offset``; an instantaneous one has no offset. The
@@ -828,12 +848,12 @@ def _align_radiation_time(
     off_p = _rad_offset(ds_p)
     off_f = _rad_offset(ds_f)
     if off_p is None and off_f is None:
-        return ds_f
+        return {}
     zero = np.timedelta64(0, "s")
     off_p = zero if off_p is None else off_p
     off_f = zero if off_f is None else off_f
     if off_p == off_f:
-        return ds_f
+        return {}
 
     shift = off_f - off_p
     logging.info(
@@ -843,7 +863,6 @@ def _align_radiation_time(
         off_f,
         shift,
     )
-    ds_f = ds_f.copy()
     # The flux a product labels at ``time`` is valid at its ``rad_time``. Re-sample
     # the fallback's flux, as a function of the instant it is valid at, onto the
     # primary's ``rad_time`` stamps, then label it with the primary's ``time``.
@@ -853,11 +872,13 @@ def _align_radiation_time(
     # The shift moves the primary's first or last stamp up to ``|shift|`` past the
     # fallback's record, where interpolation has nothing on one side. Hold the
     # fallback's end value there (it is the flux for the adjacent interval) rather
-    # than leave a NaN record that the ocean-NaN check would reject.
-    tolerance: np.timedelta64 | float = abs(shift)
-    if not np.issubdtype(f_t.dtype, np.datetime64):
-        tolerance = float(tolerance / np.timedelta64(1, "D"))
+    # than leave a NaN record that the ocean-NaN check would reject. Stamps that
+    # differ within ``time_tolerance`` move it that much further.
+    tolerance: Any = _axis_tolerance(abs(shift), f_t.dtype)
+    if time_tolerance is not None:
+        tolerance = tolerance + _axis_tolerance(time_tolerance, f_t.dtype)
     past_end = xr.DataArray((p_t < f_t.min()) | (p_t > f_t.max()), dims="time")
+    retimed: dict[str, xr.DataArray] = {}
     for name in RADIATION_VARS:
         if name in f_fields and "time" in f_fields[name].dims:
             shifted = f_fields[name].assign_coords(time=f_t)
@@ -865,8 +886,8 @@ def _align_radiation_time(
             if bool(past_end.any()):
                 held = shifted.reindex(time=p_t, method="nearest", tolerance=tolerance)
                 resampled = held.where(past_end, resampled)
-            ds_f[name] = resampled.assign_coords(time=ds_p["time"].values)
-    return ds_f
+            retimed[name] = resampled.assign_coords(time=ds_p["time"].values)
+    return retimed
 
 
 def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:

@@ -456,6 +456,37 @@ def test_differing_rad_time_offsets_shift_the_fallback_radiation():
     assert not bool(out["swrad"].isnull().any())
 
 
+def test_retimed_radiation_survives_stamps_that_differ():
+    """Re-timed radiation must not be reindexed onto the fallback's own stamps.
+
+    With a second of jitter no fallback stamp equals a primary one, so radiation
+    that was re-timed and then aligned on the fallback's index came out all NaN.
+    """
+    primary = _sf_dataset(1.0, hole_slice=slice(3, None), rad_offset_h=-0.5)
+    fallback = _sf_dataset(2.0, rad_offset_h=0.0)
+    fallback["swrad"] = fallback["swrad"] + xr.DataArray(
+        np.arange(NT) * 10.0, dims="time"
+    )
+    jitter = 1.0 / 86400.0
+    fallback = fallback.assign_coords(
+        time=fallback["time"] + jitter, rad_time=fallback["rad_time"] + jitter
+    )
+    out = blend_surface_forcing(
+        primary,
+        fallback,
+        grid=_grid_ds(),
+        time_align="nearest",
+        time_tolerance=np.timedelta64(1, "m"),
+        fill_value=None,
+    )
+    got = out["swrad"].isel(xi_rho=-1, eta_rho=0).values
+    # Half an hour (less the jitter) before each fallback sample.
+    np.testing.assert_allclose(got[1:], 2.0 + np.arange(1, NT) * 10.0 - 5.0, atol=0.01)
+    # The first stamp precedes the fallback's record by the shift plus the jitter.
+    assert got[0] == 2.0
+    assert not bool(out["swrad"].isnull().any())
+
+
 def test_paths_are_accepted(tmp_path):
     p, f = tmp_path / "p.nc", tmp_path / "f.nc"
     _sf_dataset(1.0, hole_slice=slice(3, None)).to_netcdf(p)

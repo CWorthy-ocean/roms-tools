@@ -21,6 +21,13 @@ its land mask decides where leftover NaNs may be filled. Write the result with
 :func:`save_blended_surface_forcing`, which splits it into monthly files and applies
 the encodings ROMS needs, as ``SurfaceForcing.save`` does.
 
+The result carries a ``roms_tools_yaml`` attribute that records both products'
+settings and the blend arguments. :func:`save_blended_surface_forcing` writes it
+into the files, :func:`blend_to_yaml` writes it to a YAML file, and
+:func:`blend_surface_forcing_from_yaml` rebuilds the blend from that file. An input
+with no such attribute (a hand-made ``xarray.Dataset``) is recorded as having no
+recipe, and a blend that uses one cannot be rebuilt.
+
 The layering model is "primary over fallback": wherever the primary has a value it
 wins, and wherever it does not -- because the target point lies outside a
 limited-extent source's footprint -- the fallback fills in. A NaN in the primary is
@@ -50,19 +57,28 @@ mean (a rotation error) are not ordinary reanalysis disagreement.
 
 from __future__ import annotations
 
+import copy
 import logging
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import xarray as xr
+import yaml
 
-from roms_tools.setup.utils import fill_nans_over_land, group_dataset
+from roms_tools.setup.grid import Grid
+from roms_tools.setup.surface_forcing import SurfaceForcing
+from roms_tools.setup.utils import (
+    RECIPE_ATTR,
+    NoAliasDumper,
+    deserialize_forcing_data,
+    fill_nans_over_land,
+    group_dataset,
+    serialize_grid,
+    yaml_text,
+)
 from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat, save_datasets
-
-if TYPE_CHECKING:
-    from roms_tools import Grid, SurfaceForcing
 
 # What to do when the primary lacks a variable the fallback provides.
 ON_MISSING_PRIMARY_VAR = ("error", "fallback")
@@ -653,10 +669,12 @@ def blend_surface_forcing(
     -------
     xarray.Dataset
         On the primary's coordinates (``time`` and ``rad_time`` included), with the
-        primary's attributes plus ``layered``, ``fallback_source``,
-        ``fallback_correct_radiation``, ``blend_method``, ``blend_width_km``,
-        ``blend_profile`` (feathered only) and ``primary_coverage_fraction``.
-        Lazy if the inputs are. Write it with :func:`save_blended_surface_forcing`.
+        primary's attributes, except that ``roms_tools_yaml`` is the recipe of the
+        blend, plus ``fallback_source``, ``blend_method``, ``blend_width_km``,
+        ``blend_profile`` (feathered only), ``primary_coverage_fraction`` and
+        ``fallback_radiation_shift_s`` (only if the fallback's radiation was
+        re-timed). Lazy if the inputs are. Write it with
+        :func:`save_blended_surface_forcing`.
 
     Raises
     ------
@@ -664,7 +682,8 @@ def blend_surface_forcing(
         If ``primary`` or ``fallback`` is not a SurfaceForcing, Dataset or path(s).
     ValueError
         If ``blend_width_km`` is negative, or no grid is given or available from
-        the inputs (both raised before any data are read); if the grid lacks the
+        the inputs, or the two products (or ``grid``) record different grids (all
+        raised before any data are read); if the grid lacks the
         land mask the products need, or does not match their shape; if the
         products disagree on grid shape, units, ``model_reference_date`` or
         ``use_coarse_grid``; if a primary variable is missing
@@ -696,6 +715,7 @@ def blend_surface_forcing(
     ds_f = _as_dataset(fallback, "fallback")
 
     _check_dataset_compatibility(ds_p, ds_f)
+    layers, grid_spec = _layer_recipes(primary, fallback, ds_p, ds_f, grid)
 
     p_fields = _data_fields(ds_p)
     f_fields = _data_fields(ds_f)
@@ -704,14 +724,13 @@ def blend_surface_forcing(
     # entries of this dict and is not put back into `ds_f`, whose time index is
     # the fallback's: that assignment would reindex it, and every stamp the two
     # products do not share exactly would become NaN.
-    f_fields.update(
-        _align_radiation_time(
-            ds_p,
-            ds_f,
-            f_fields,
-            time_tolerance=time_tolerance if time_align == "nearest" else None,
-        )
+    retimed, shift = _align_radiation_time(
+        ds_p,
+        ds_f,
+        f_fields,
+        time_tolerance=time_tolerance if time_align == "nearest" else None,
     )
+    f_fields.update(retimed)
 
     weights = None
     if blend_width_km:
@@ -764,10 +783,22 @@ def blend_surface_forcing(
     out.attrs = dict(ds_p.attrs)
     # Describes the primary alone; the blended result has no such NaNs.
     out.attrs.pop("nan_outside_source_footprint", None)
-    out.attrs["layered"] = "True"
+    payload: dict[str, Any] = {}
+    if grid_spec is not None:
+        payload["Grid"] = grid_spec
+    payload["SurfaceForcingBlend"] = {
+        "layers": layers,
+        "blend_width_km": float(blend_width_km),
+        "blend_profile": blend_profile,
+        "time_align": time_align,
+        "time_tolerance_days": _tolerance_days(time_tolerance),
+        "on_missing_primary_var": on_missing_primary_var,
+        "fill_value": None if fill_value is None else float(fill_value),
+    }
+    out.attrs[RECIPE_ATTR] = yaml_text(payload)
     out.attrs["fallback_source"] = str(ds_f.attrs.get("source", "unknown"))
-    if "correct_radiation" in ds_f.attrs:
-        out.attrs["fallback_correct_radiation"] = str(ds_f.attrs["correct_radiation"])
+    if shift is not None:
+        out.attrs["fallback_radiation_shift_s"] = str(shift)
     out.attrs["blend_method"] = "feathered" if blend_width_km else "hard_edge"
     out.attrs["blend_width_km"] = str(float(blend_width_km))
     if blend_width_km:
@@ -906,14 +937,13 @@ def _align_radiation_time(
     f_fields: dict[str, xr.DataArray],
     *,
     time_tolerance: np.timedelta64 | float | None = None,
-) -> dict[str, xr.DataArray]:
+) -> tuple[dict[str, xr.DataArray], float | None]:
     """Put the fallback's radiation on the primary's ``rad_time`` convention.
 
-    Returns the re-timed radiation fields, on the primary's ``time`` axis; an
-    empty dict when the two products label radiation the same way.
-    ``time_tolerance`` is how far the fallback's stamps may sit from the
-    primary's (``time_align="nearest"``).
-
+    Returns the re-timed radiation fields, on the primary's ``time`` axis, and the
+    shift applied in seconds; an empty dict and ``None`` when the two products
+    label radiation the same way. ``time_tolerance`` is how far the fallback's
+    stamps may sit from the primary's (``time_align="nearest"``).
 
     An hourly-mean product labels its flux at the end of the averaging interval and
     carries ``rad_time = time + offset``; an instantaneous one has no offset. The
@@ -926,12 +956,12 @@ def _align_radiation_time(
     off_p = _rad_offset(ds_p)
     off_f = _rad_offset(ds_f)
     if off_p is None and off_f is None:
-        return {}
+        return {}, None
     zero = np.timedelta64(0, "s")
     off_p = zero if off_p is None else off_p
     off_f = zero if off_f is None else off_f
     if off_p == off_f:
-        return {}
+        return {}, None
 
     shift = off_f - off_p
     logging.info(
@@ -961,7 +991,7 @@ def _align_radiation_time(
             shifted = f_fields[name].assign_coords(time=f_t)
             resampled = _interp_time_linear(shifted, p_t, hold=tolerance)
             retimed[name] = resampled.assign_coords(time=ds_p["time"].values)
-    return retimed
+    return retimed, float(shift / np.timedelta64(1, "s"))
 
 
 def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:
@@ -1036,3 +1066,175 @@ def _cell_size_m(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> tuple[float, floa
     dy = factor * float((1 / gds["pn"]).mean())
     dx = factor * float((1 / gds["pm"]).mean())
     return dy, dx
+
+
+_LAYER_LABELS = ("primary", "fallback")
+
+
+def _tolerance_days(tolerance: np.timedelta64 | float | None) -> float | None:
+    """A ``time_tolerance`` in days, as recorded in the recipe."""
+    if tolerance is None:
+        return None
+    if isinstance(tolerance, np.timedelta64):
+        return float(tolerance / np.timedelta64(1, "D"))
+    return float(tolerance)
+
+
+def _describe_input(obj: Any) -> str:
+    """Say what an input without a recipe was, for the ``no_recipe`` entry."""
+    if isinstance(obj, str | Path | list | tuple):
+        paths = [obj] if isinstance(obj, str | Path) else list(obj)
+        return "files " + ", ".join(str(p) for p in paths)
+    return f"xarray.Dataset without a {RECIPE_ATTR} attribute"
+
+
+def _layer_recipe(obj: Any, ds: xr.Dataset) -> tuple[dict | None, dict]:
+    """Split an input's recipe into its ``Grid`` spec and the layer entry."""
+    text = ds.attrs.get(RECIPE_ATTR)
+    if text is None:
+        return None, {"no_recipe": _describe_input(obj)}
+    documents = [doc for doc in yaml.safe_load_all(text) if doc is not None]
+    payload = documents[-1]
+    entry = {key: value for key, value in payload.items() if key != "Grid"}
+    return payload.get("Grid"), entry
+
+
+def _layer_recipes(
+    primary: Any,
+    fallback: Any,
+    ds_p: xr.Dataset,
+    ds_f: xr.Dataset,
+    grid: Grid | xr.Dataset,
+) -> tuple[list[dict], dict | None]:
+    """The two layer entries and the one ``Grid`` spec they share, if known.
+
+    Raises if the products, or ``grid``, were built on different grids. Reads
+    attributes only.
+    """
+    grid_p, entry_p = _layer_recipe(primary, ds_p)
+    grid_f, entry_f = _layer_recipe(fallback, ds_f)
+    if grid_p is not None and grid_f is not None and grid_p != grid_f:
+        raise ValueError(
+            "The primary and fallback products were built on different grids "
+            "(their recorded `Grid` settings differ). Build both on the same "
+            "grid."
+        )
+    spec = grid_p if grid_p is not None else grid_f
+    if isinstance(grid, Grid):
+        # Dump and load, so tuples and numeric types come out as in the layers.
+        grid_spec = yaml.safe_load(
+            yaml.dump(serialize_grid(grid), Dumper=NoAliasDumper, sort_keys=False)
+        )
+        if spec is not None and spec != grid_spec:
+            raise ValueError(
+                "`grid` differs from the grid the products were built on (their "
+                "recorded `Grid` settings). Pass the grid they were built on."
+            )
+        spec = grid_spec
+    return [entry_p, entry_f], spec
+
+
+def blend_to_yaml(ds: xr.Dataset, filepath: str | Path) -> None:
+    """Write the recipe of a blended dataset to a YAML file.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The output of :func:`blend_surface_forcing`.
+    filepath : str or Path
+        The YAML file to write. Rebuild the blend from it with
+        :func:`blend_surface_forcing_from_yaml`.
+
+    Raises
+    ------
+    ValueError
+        If ``ds`` has no recipe, i.e. is not the output of
+        :func:`blend_surface_forcing`.
+    """
+    if RECIPE_ATTR not in ds.attrs:
+        raise ValueError(
+            f"The dataset has no `{RECIPE_ATTR}` attribute, so it is not the "
+            "output of `blend_surface_forcing`."
+        )
+    Path(filepath).write_text(ds.attrs[RECIPE_ATTR])
+
+
+def blend_surface_forcing_from_yaml(
+    filepath: str | Path, use_dask: bool = False
+) -> xr.Dataset:
+    """Rebuild a blend from the YAML written by :func:`blend_to_yaml`.
+
+    Builds the grid and both products from their recorded settings, then calls
+    :func:`blend_surface_forcing` with the recorded arguments.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        A YAML file with a ``Grid`` and a ``SurfaceForcingBlend`` section.
+    use_dask : bool, optional
+        Whether to build the ``SurfaceForcing`` layers with dask. Defaults to False.
+
+    Returns
+    -------
+    xarray.Dataset
+        The blended dataset, as :func:`blend_surface_forcing` returns it.
+
+    Raises
+    ------
+    ValueError
+        If the file has no ``SurfaceForcingBlend`` section, or a layer was
+        recorded as having no recipe and so cannot be rebuilt.
+    """
+    filepath = Path(filepath)
+    with filepath.open() as f:
+        documents = [doc for doc in yaml.safe_load_all(f) if doc is not None]
+    sections = [
+        doc["SurfaceForcingBlend"] for doc in documents if "SurfaceForcingBlend" in doc
+    ]
+    section = sections[0] if sections else None
+    if section is None:
+        raise ValueError(f"No SurfaceForcingBlend section found in {filepath}.")
+    _check_replayable(section, suffix="")
+    grid = Grid.from_yaml(filepath)
+    return _rebuild_blend(section, grid, use_dask)
+
+
+def _check_replayable(section: dict[str, Any], suffix: str) -> None:
+    """Raise if a layer was recorded without a recipe, before anything is built."""
+    for entry, label in zip(section["layers"], _LAYER_LABELS, strict=True):
+        if "SurfaceForcingBlend" in entry:
+            inner = entry["SurfaceForcingBlend"]
+            _check_replayable(inner, f" of the {label}{suffix}")
+        elif "SurfaceForcing" not in entry:
+            raise ValueError(
+                f"The {label}{suffix} was recorded as "
+                f"{entry.get('no_recipe', entry)!r}, so the blend cannot be "
+                "rebuilt from this file."
+            )
+
+
+def _rebuild_blend(section: dict[str, Any], grid: Grid, use_dask: bool) -> xr.Dataset:
+    """Build the layers of one ``SurfaceForcingBlend`` section and blend them."""
+    primary, fallback = (
+        _rebuild_layer(entry, grid, use_dask) for entry in section["layers"]
+    )
+    return blend_surface_forcing(
+        primary,
+        fallback,
+        grid=grid,
+        blend_width_km=section["blend_width_km"],
+        blend_profile=section["blend_profile"],
+        time_align=section["time_align"],
+        time_tolerance=section["time_tolerance_days"],
+        on_missing_primary_var=section["on_missing_primary_var"],
+        fill_value=section["fill_value"],
+    )
+
+
+def _rebuild_layer(
+    entry: dict[str, Any], grid: Grid, use_dask: bool
+) -> SurfaceForcing | xr.Dataset:
+    if "SurfaceForcingBlend" in entry:
+        return _rebuild_blend(entry["SurfaceForcingBlend"], grid, use_dask)
+    spec = deserialize_forcing_data(copy.deepcopy(entry["SurfaceForcing"]))
+    return SurfaceForcing(grid=grid, **spec, use_dask=use_dask)

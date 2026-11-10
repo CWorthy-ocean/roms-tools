@@ -29,6 +29,8 @@ from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
 from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
 from roms_tools.setup.surface_forcing_blend import (  # noqa: F401
     blend_surface_forcing,
+    blend_surface_forcing_from_yaml,
+    blend_to_yaml,
     save_blended_surface_forcing,
 )
 from roms_tools.setup.tides import TidalForcing  # noqa: F401

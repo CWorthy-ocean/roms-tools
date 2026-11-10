@@ -28,6 +28,8 @@ Surface Forcing
    roms_tools.datasets.curvilinear_datasets.CONUS404Dataset
    roms_tools.blend_surface_forcing
    roms_tools.save_blended_surface_forcing
+   roms_tools.blend_to_yaml
+   roms_tools.blend_surface_forcing_from_yaml
    roms_tools.setup.surface_forcing_blend.compute_blend_weights
 
 Initial Conditions

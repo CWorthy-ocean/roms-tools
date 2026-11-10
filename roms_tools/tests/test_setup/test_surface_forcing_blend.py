@@ -10,17 +10,21 @@ diagnose once it is buried in a full SurfaceForcing run.
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
 
 from roms_tools.setup.surface_forcing_blend import (
     _interp_time_linear,
     align_fallback_time,
     blend_surface_forcing,
+    blend_surface_forcing_from_yaml,
+    blend_to_yaml,
     compute_blend_weights,
     coverage_fraction,
     layer_field,
     layer_fields,
     save_blended_surface_forcing,
 )
+from roms_tools.setup.utils import RECIPE_ATTR, yaml_text
 
 NT, NY, NX = 4, 5, 6
 
@@ -765,5 +769,224 @@ def test_blend_attrs_describe_the_result():
     f.attrs["correct_radiation"] = "True"
     out = blend_surface_forcing(p, f, grid=_grid_ds(), blend_width_km=2)
     assert "nan_outside_source_footprint" not in out.attrs
-    assert out.attrs["fallback_correct_radiation"] == "True"
+    assert "layered" not in out.attrs
+    assert "fallback_correct_radiation" not in out.attrs
+    assert out.attrs["fallback_source"] == "Y"
+    assert out.attrs["blend_method"] == "feathered"
     assert out.attrs["blend_width_km"] == "2.0"
+    assert out.attrs["blend_profile"] == "smoothstep"
+    assert "primary_coverage_fraction" in out.attrs
+    assert RECIPE_ATTR in out.attrs
+
+
+# --- recipe ------------------------------------------------------------------
+
+
+GRID_SPEC = {"nx": 5, "ny": 4, "size_x": 100.0, "size_y": 80.0, "rot": 0.0}
+
+
+def _with_recipe(ds, *, grid=GRID_SPEC, **spec):
+    payload = {"SurfaceForcing": {"start_time": "2020-06-15T00:00:00", **spec}}
+    if grid is not None:
+        payload = {"Grid": grid, **payload}
+    ds.attrs[RECIPE_ATTR] = yaml_text(payload)
+    return ds
+
+
+def _payload(ds):
+    return list(yaml.safe_load_all(ds.attrs[RECIPE_ATTR]))[-1]
+
+
+def test_recipe_records_both_layers_and_every_argument():
+    p = _with_recipe(_sf_dataset(1.0, hole_slice=slice(3, None)), type="physics")
+    f = _with_recipe(_sf_dataset(2.0, source="Y"), type="physics", extra=1)
+    out = blend_surface_forcing(
+        p,
+        f,
+        grid=_grid_ds(),
+        blend_width_km=2,
+        blend_profile="linear",
+        time_align="nearest",
+        time_tolerance=np.timedelta64(12, "h"),
+        on_missing_primary_var="fallback",
+        fill_value=None,
+    )
+    payload = _payload(out)
+    assert payload["Grid"] == GRID_SPEC
+    blend = payload["SurfaceForcingBlend"]
+    assert blend["layers"] == [
+        {"SurfaceForcing": {"start_time": "2020-06-15T00:00:00", "type": "physics"}},
+        {
+            "SurfaceForcing": {
+                "start_time": "2020-06-15T00:00:00",
+                "type": "physics",
+                "extra": 1,
+            }
+        },
+    ]
+    assert {k: v for k, v in blend.items() if k != "layers"} == {
+        "blend_width_km": 2.0,
+        "blend_profile": "linear",
+        "time_align": "nearest",
+        "time_tolerance_days": 0.5,
+        "on_missing_primary_var": "fallback",
+        "fill_value": None,
+    }
+
+
+def test_recipe_records_the_defaults():
+    out = blend_surface_forcing(
+        _with_recipe(_sf_dataset(1.0, hole_slice=slice(3, None))),
+        _with_recipe(_sf_dataset(2.0, source="Y")),
+        grid=_grid_ds(),
+    )
+    assert _payload(out)["SurfaceForcingBlend"] | {"layers": None} == {
+        "layers": None,
+        "blend_width_km": 0.0,
+        "blend_profile": "smoothstep",
+        "time_align": "exact",
+        "time_tolerance_days": None,
+        "on_missing_primary_var": "error",
+        "fill_value": 0.0,
+    }
+
+
+def test_input_without_a_recipe_is_recorded_as_such():
+    p = _sf_dataset(1.0, hole_slice=slice(3, None))
+    f = _with_recipe(_sf_dataset(2.0, source="Y"))
+    out = blend_surface_forcing(p, f, grid=_grid_ds())
+    payload = _payload(out)
+    assert "Grid" in payload
+    primary, fallback = payload["SurfaceForcingBlend"]["layers"]
+    assert primary == {
+        "no_recipe": "xarray.Dataset without a roms_tools_yaml attribute"
+    }
+    assert "SurfaceForcing" in fallback
+
+
+def test_path_input_without_a_recipe_names_the_path(tmp_path):
+    path = tmp_path / "no_recipe.nc"
+    _sf_dataset(1.0, hole_slice=slice(3, None)).to_netcdf(path)
+    out = blend_surface_forcing(
+        path,
+        _sf_dataset(2.0, source="Y"),
+        grid=_grid_ds(),
+        time_align="nearest",
+        time_tolerance=1.0,
+    )
+    layers = _payload(out)["SurfaceForcingBlend"]["layers"]
+    assert str(path) in layers[0]["no_recipe"]
+    assert "Grid" not in _payload(out)
+
+
+def test_recipe_attribute_round_trips_through_a_path_input(tmp_path):
+    path = tmp_path / "with_recipe.nc"
+    _with_recipe(_sf_dataset(1.0, hole_slice=slice(3, None))).to_netcdf(path)
+    out = blend_surface_forcing(
+        path, _with_recipe(_sf_dataset(2.0, source="Y")), grid=_grid_ds()
+    )
+    layers = _payload(out)["SurfaceForcingBlend"]["layers"]
+    assert "SurfaceForcing" in layers[0]
+
+
+def test_differing_grids_raise():
+    p = _with_recipe(_sf_dataset(1.0, hole_slice=slice(3, None)))
+    f = _with_recipe(_sf_dataset(2.0, source="Y"), grid={**GRID_SPEC, "nx": 6})
+    with pytest.raises(ValueError, match="different grids"):
+        blend_surface_forcing(p, f, grid=_grid_ds())
+
+
+def test_grid_object_is_checked_against_the_layers_and_hoisted():
+    from roms_tools import Grid
+    from roms_tools.setup.utils import serialize_grid
+
+    grid = Grid(nx=4, ny=3, size_x=100, size_y=100, center_lon=0, center_lat=0, rot=0)
+    spec = yaml.safe_load(yaml.dump(serialize_grid(grid)))
+    # Two products that carry no recipe: the grid object supplies the spec.
+    p = _sf_dataset(1.0, hole_slice=slice(3, None))
+    f = _sf_dataset(2.0, source="Y")
+    out = blend_surface_forcing(p, f, grid=grid)
+    assert _payload(out)["Grid"] == spec
+    # A recipe on a different grid conflicts with it.
+    with pytest.raises(ValueError, match="`grid` differs"):
+        blend_surface_forcing(_with_recipe(p.copy()), _with_recipe(f.copy()), grid=grid)
+
+
+def test_blend_used_as_a_layer_nests_and_hoists_the_grid():
+    inner = blend_surface_forcing(
+        _with_recipe(_sf_dataset(1.0, hole_slice=slice(3, None))),
+        _with_recipe(_sf_dataset(2.0, source="Y", nt=NT)),
+        grid=_grid_ds(),
+        blend_width_km=3,
+    )
+    outer = blend_surface_forcing(
+        _sf_dataset(0.0, hole_slice=slice(4, None)), inner, grid=_grid_ds()
+    )
+    payload = _payload(outer)
+    assert payload["Grid"] == GRID_SPEC
+    primary, fallback = payload["SurfaceForcingBlend"]["layers"]
+    assert "no_recipe" in primary
+    assert list(fallback) == ["SurfaceForcingBlend"]
+    assert "Grid" not in fallback["SurfaceForcingBlend"]
+    assert fallback["SurfaceForcingBlend"]["blend_width_km"] == 3.0
+
+
+def test_blend_to_yaml_writes_the_attribute(tmp_path):
+    out = blend_surface_forcing(
+        _with_recipe(_sf_dataset(1.0, hole_slice=slice(3, None))),
+        _with_recipe(_sf_dataset(2.0, source="Y")),
+        grid=_grid_ds(),
+    )
+    blend_to_yaml(out, tmp_path / "blend.yaml")
+    assert (tmp_path / "blend.yaml").read_text() == out.attrs[RECIPE_ATTR]
+
+
+def test_blend_to_yaml_needs_a_blend(tmp_path):
+    with pytest.raises(ValueError, match="not the output of `blend_surface_forcing`"):
+        blend_to_yaml(_sf_dataset(1.0), tmp_path / "blend.yaml")
+    assert not (tmp_path / "blend.yaml").exists()
+
+
+def test_from_yaml_refuses_a_layer_without_a_recipe(tmp_path):
+    out = blend_surface_forcing(
+        _sf_dataset(1.0, hole_slice=slice(3, None)),
+        _with_recipe(_sf_dataset(2.0, source="Y")),
+        grid=_grid_ds(),
+    )
+    blend_to_yaml(out, tmp_path / "blend.yaml")
+    with pytest.raises(ValueError, match="primary.*without a roms_tools_yaml"):
+        blend_surface_forcing_from_yaml(tmp_path / "blend.yaml")
+
+
+def test_from_yaml_refuses_a_file_without_a_blend(tmp_path):
+    path = tmp_path / "plain.yaml"
+    path.write_text(yaml_text({"Grid": GRID_SPEC}))
+    with pytest.raises(ValueError, match="No SurfaceForcingBlend section"):
+        blend_surface_forcing_from_yaml(path)
+
+
+def test_recipe_survives_saving_into_the_files(tmp_path):
+    out = blend_surface_forcing(
+        _with_recipe(_sf_dataset(1.0, hole_slice=slice(3, None))),
+        _with_recipe(_sf_dataset(2.0, source="Y")),
+        grid=_grid_ds(),
+    )
+    (path,) = save_blended_surface_forcing(out, tmp_path / "blended", group=False)
+    with xr.open_dataset(path, decode_times=False) as ds:
+        assert ds.attrs[RECIPE_ATTR] == out.attrs[RECIPE_ATTR]
+
+
+def test_radiation_shift_is_recorded_only_when_the_offsets_differ():
+    grid = _grid_ds()
+    same = blend_surface_forcing(
+        _sf_dataset(1.0, hole_slice=slice(3, None), rad_offset_h=-0.5),
+        _sf_dataset(2.0, rad_offset_h=-0.5),
+        grid=grid,
+    )
+    assert "fallback_radiation_shift_s" not in same.attrs
+    shifted = blend_surface_forcing(
+        _sf_dataset(1.0, hole_slice=slice(3, None), rad_offset_h=-0.5),
+        _sf_dataset(2.0, rad_offset_h=0.0),
+        grid=grid,
+    )
+    assert shifted.attrs["fallback_radiation_shift_s"] == "1800.0"

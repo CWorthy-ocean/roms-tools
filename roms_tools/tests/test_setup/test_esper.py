@@ -582,6 +582,44 @@ def test_estimate_bgc_fields_units_and_laziness(method):
 
 
 @needs_pyesper
+def test_estimate_bgc_fields_drops_the_salinity_inputs_attrs():
+    import xarray as xr
+
+    ny, nz = 4, 3
+    rng = np.random.default_rng(0)
+    temp = xr.DataArray(rng.uniform(2, 20, (nz, ny)), dims=("s", "y"))
+    salt = xr.DataArray(
+        rng.uniform(34, 36, (nz, ny)),
+        dims=("s", "y"),
+        attrs={
+            "standard_name": "sea_water_salinity",
+            "unit_long": "Practical Salinity Unit",
+            "valid_min": np.int16(1),
+            "valid_max": np.int16(28249),
+        },
+    )
+    lon = xr.DataArray(rng.uniform(-40, 0, ny), dims=("y",))
+    lat = xr.DataArray(rng.uniform(40, 60, ny), dims=("y",))
+    depth = xr.DataArray(np.linspace(0, 1000, nz), dims=("s",))
+    out = estimate_bgc_fields(
+        temp,
+        salt,
+        lon,
+        lat,
+        depth,
+        source={"name": "ESPER", "path": _PYESPER_PATH, "method": "lir"},
+        roms_variables=["NO3", "ALK", "O2"],
+        est_dates=2020.0,
+    )
+    for name, da in out.items():
+        assert not {"standard_name", "unit_long", "valid_min", "valid_max"} & set(
+            da.attrs
+        ), (name, da.attrs)
+        assert da.attrs["units"] == "mmol/m^3" or name == "ALK"
+    assert out["O2"].attrs["esper_floor"].startswith("PyESPER estimate clamped at 5")
+
+
+@needs_pyesper
 def test_estimate_bgc_fields_call_count_independent_of_variable_count(monkeypatch):
     """Regression test: `est`'s per-variable DataArrays all share ONE underlying
     per-chunk `nn()` call (`apply_ufunc` is called once, with N output_core_dims).
@@ -687,6 +725,10 @@ def test_initial_conditions_esper(use_dask):
         # units/magnitudes
         assert 1500.0 < float(ic.ds["ALK"].mean()) < 3000.0
         assert float(ic.ds["NO3"].min()) >= 0.0
+        # ESPER estimates do not inherit the salinity input's identity (GLORYS
+        # 'so' is standard_name sea_water_salinity); physics keeps its own
+        for var in ESPER_SUPPORTED_VARS:
+            assert "standard_name" not in ic.ds[var].attrs, var
 
         # process_bgc_fields completes the MARBL set
         ic2 = copy.copy(ic)

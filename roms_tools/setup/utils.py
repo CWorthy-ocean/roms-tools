@@ -998,6 +998,33 @@ def interpolate_dynamic_bgc_by_calendar_year(
     return interpolated
 
 
+#: Attributes that describe how a *source* file stored a variable -- its packed range,
+#: packing and fill -- rather than the variable itself. Once roms-tools has decoded,
+#: regridded and cast the field they are wrong (GLORYS's ``valid_min``/``valid_max``
+#: are short-integer packed counts, e.g. 1..28249 for salinity), and readers that honour
+#: them, such as netCDF4-python, mask real values outside that range.
+SOURCE_ENCODING_ATTRS = (
+    "valid_min",
+    "valid_max",
+    "valid_range",
+    "actual_range",
+    "scale_factor",
+    "add_offset",
+    "missing_value",
+)
+
+
+def drop_source_encoding_attrs(da: xr.DataArray) -> xr.DataArray:
+    """Return ``da`` without the :data:`SOURCE_ENCODING_ATTRS` it inherited from its
+    source; every other attribute is kept.
+    """
+    if not any(k in da.attrs for k in SOURCE_ENCODING_ATTRS):
+        return da
+    da = da.copy(deep=False)
+    da.attrs = {k: v for k, v in da.attrs.items() if k not in SOURCE_ENCODING_ATTRS}
+    return da
+
+
 def get_variable_metadata():
     """Retrieves metadata for commonly used variables in the dataset.
 

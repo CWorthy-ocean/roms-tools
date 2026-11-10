@@ -578,6 +578,10 @@ def estimate_bgc_fields(
         da = est[ROMS_TO_ESPER[roms_name]] * factor
         floor = ESPER_FLOORS[roms_name]
         da = da.clip(min=floor)
+        # PyESPER hands back its salinity input's attributes (standard_name
+        # sea_water_salinity, unit_long PSU, the source's packed valid_min/valid_max):
+        # none of them describe this estimate, so start from none.
+        da.attrs = {}
         meta = d_meta.get(roms_name, {})
         if "long_name" in meta:
             da.attrs["long_name"] = meta["long_name"]

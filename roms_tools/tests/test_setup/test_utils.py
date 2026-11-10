@@ -20,6 +20,7 @@ from roms_tools.setup.utils import (
     compute_mld,
     compute_potential_density,
     cycle_to_times,
+    drop_source_encoding_attrs,
     expand_monthly_climatology_time_axis,
     fill_nans_over_land,
     gc_dist,
@@ -1881,3 +1882,32 @@ class TestCycleToTimes:
         )
         with pytest.raises(ValueError, match="timedelta64"):
             cycle_to_times(src, "time", targets, climatology=True)
+
+
+def test_drop_source_encoding_attrs_removes_packing_keeps_identity():
+    # GLORYS salinity as decoded by xarray: the packed short-integer range survives in
+    # attrs although the data are now floats
+    da = xr.DataArray(
+        np.array([0.2, 34.5], dtype=np.float32),
+        dims="x",
+        attrs={
+            "valid_min": np.int16(1),
+            "valid_max": np.int16(28249),
+            "scale_factor": 0.0015,
+            "add_offset": -0.0015,
+            "missing_value": np.int16(-32767),
+            "standard_name": "sea_water_salinity",
+            "unit_long": "Practical Salinity Unit",
+            "long_name": "salinity",
+        },
+    )
+    out = drop_source_encoding_attrs(da)
+    assert out.attrs == {
+        "standard_name": "sea_water_salinity",
+        "unit_long": "Practical Salinity Unit",
+        "long_name": "salinity",
+    }
+    assert "valid_min" in da.attrs  # the input is not modified
+    np.testing.assert_array_equal(out.values, da.values)
+    clean = xr.DataArray([1.0], dims="x", attrs={"units": "m"})
+    assert drop_source_encoding_attrs(clean) is clean

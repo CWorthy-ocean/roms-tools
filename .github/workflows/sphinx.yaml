@@ -17,8 +17,9 @@ jobs:
           cache-environment: true
           micromamba-version: 'latest'
           environment-file: docs/environment.yml
-      - name: Conda info
-        run: conda info
+      - name: Micromamba info
+        shell: micromamba-shell {0}
+        run: micromamba info
       - name: Install roms-tools
         shell: micromamba-shell {0}
         run: |

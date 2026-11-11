@@ -47,8 +47,9 @@ jobs:
           # are silently ignored whenever a cached environment is restored.
           cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
-      - name: Conda info
-        run: conda info
+      - name: Micromamba info
+        shell: micromamba-shell {0}
+        run: micromamba info
 
       # All conda jobs build from ci/environment.yml, so verifying here is
       # enough to prove the serial-ESMF pin took effect. Expect a `nompi_*`
@@ -131,8 +132,9 @@ jobs:
           # are silently ignored whenever a cached environment is restored.
           cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
-      - name: Conda info
-        run: conda info
+      - name: Micromamba info
+        shell: micromamba-shell {0}
+        run: micromamba info
 
       - name: Install roms-tools
         shell: micromamba-shell {0}
@@ -205,8 +207,9 @@ jobs:
           # are silently ignored whenever a cached environment is restored.
           cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
-      - name: Conda info
-        run: conda info
+      - name: Micromamba info
+        shell: micromamba-shell {0}
+        run: micromamba info
 
 
       - name: Install roms-tools
@@ -272,8 +275,9 @@ jobs:
           # are silently ignored whenever a cached environment is restored.
           cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
-      - name: Conda info
-        run: conda info
+      - name: Micromamba info
+        shell: micromamba-shell {0}
+        run: micromamba info
 
 
       - name: Install roms-tools
@@ -340,8 +344,9 @@ jobs:
           # are silently ignored whenever a cached environment is restored.
           cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('ci/environment.yml') }}
 
-      - name: Conda info
-        run: conda info
+      - name: Micromamba info
+        shell: micromamba-shell {0}
+        run: micromamba info
 
       - name: Install roms-tools
         shell: micromamba-shell {0}

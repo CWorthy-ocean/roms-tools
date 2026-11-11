@@ -66,6 +66,13 @@ jobs:
           fi
           git checkout -b next_release_notes origin/main
 
+      - name: Name each fragment after its pull request
+        # Fragments named +<name>.<type>.md get the number of the PR that
+        # added them, so their notes link to it. Fails if a PR can't be found.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python ci/number_fragments.py
+
       - name: Build the release notes from changes/
         # Writes the "## <tag>" section into docs/releases.md and stages it, and
         # git-removes the fragments it used.

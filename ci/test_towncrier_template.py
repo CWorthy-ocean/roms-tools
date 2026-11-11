@@ -79,8 +79,11 @@ def test_build_matches_release_notes_style(scratch, monkeypatch):
         scratch,
         {
             "12.breaking.md": "Lead text.\n* First detail.\n* Second detail.\n",
+            "16.output.md": "Different numbers.\n",
             "14.deprecation.md": "Deprecated: `a`, removed in 6.0.0; use `b`.\n",
             "12.feature.md": "A feature.\n",
+            # Not yet numbered: renders without a link until the release.
+            "+later.feature.md": "An unnumbered feature.\n",
             "13.bugfix.md": "A later fix.\n",
             "11.bugfix.md": "An earlier fix.\n",
             "15.misc.1.md": "One note.\n",
@@ -95,10 +98,13 @@ def test_build_matches_release_notes_style(scratch, monkeypatch):
         f"* Lead text. ([#12]({URL}/12))\n"
         "  * First detail.\n"
         "  * Second detail.\n\n"
+        "### Changes to Output\n\n"
+        f"* Different numbers. ([#16]({URL}/16))\n\n"
         "### Deprecations\n\n"
         f"* Deprecated: `a`, removed in 6.0.0; use `b`. ([#14]({URL}/14))\n\n"
         "### New Features\n\n"
-        f"* A feature. ([#12]({URL}/12))\n\n"
+        f"* A feature. ([#12]({URL}/12))\n"
+        "* An unnumbered feature.\n\n"
         "### Bug Fixes\n\n"
         f"* An earlier fix. ([#11]({URL}/11))\n"
         f"* A later fix. ([#13]({URL}/13))\n\n"

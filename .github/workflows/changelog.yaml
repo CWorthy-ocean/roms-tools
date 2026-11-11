@@ -40,6 +40,6 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           if ! towncrier check --compare-with "origin/$BASE_REF"; then
-            echo "::error::Add a release note as changes/<PR number>.<type>.md (see changes/README.md), or label the PR no-changelog if users have nothing to learn from it."
+            echo "::error::Add a release note as changes/+<name>.<type>.md (see changes/README.md), or label the PR no-changelog if users have nothing to learn from it."
             exit 1
           fi

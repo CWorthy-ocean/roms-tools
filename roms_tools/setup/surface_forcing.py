@@ -36,6 +36,7 @@ from roms_tools.regrid import (
     select_source_mask,
 )
 from roms_tools.setup.utils import (
+    RECIPE_ATTR,
     RawDataSource,
     add_time_info_to_ds,
     apply_scipy_fallback_fill,
@@ -52,6 +53,7 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
+    yaml_text,
 )
 from roms_tools.utils import (
     DEFAULT_NETCDF_FORMAT,
@@ -178,7 +180,7 @@ class SurfaceForcing:
       data are computed, at ``save()`` with ``use_dask=True``. ROMS cannot run on
       NaN forcing, so either use a grid that lies entirely inside the footprint or
       fill the NaN points from a global product with
-      :func:`~roms_tools.scripts.blend_surface_forcing.blend_surface_forcing`
+      :func:`~roms_tools.blend_surface_forcing`
       (see **Combining sources** below). It requires xESMF; the scipy engine
       cannot interpolate a 2D source grid.
     - ``correct_radiation`` must be ``False``: the ERA5 correction climatology is
@@ -195,9 +197,9 @@ class SurfaceForcing:
     those points from a global source, optionally with a smooth transition, build a
     second ``SurfaceForcing`` (e.g. ERA5) on the same grid, for the same times and
     with the same explicit ``coarse_grid_mode``, and combine the two with
-    :func:`~roms_tools.scripts.blend_surface_forcing.blend_surface_forcing`; write
+    :func:`~roms_tools.blend_surface_forcing`; write
     the result with
-    :func:`~roms_tools.scripts.blend_surface_forcing.save_blended_surface_forcing`.
+    :func:`~roms_tools.save_blended_surface_forcing`.
 
     Examples
     --------
@@ -1258,6 +1260,7 @@ class SurfaceForcing:
         ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs[RECIPE_ATTR] = yaml_text(self._yaml_data())
         if getattr(self, "_source_is_curvilinear", False):
             # A curvilinear source bypasses RegridConfig entirely, so recording
             # the resolved config here would misreport what actually ran: the
@@ -1425,8 +1428,10 @@ class SurfaceForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        forcing_dict = to_dict(self, exclude=["use_dask", "use_coarse_grid"])
-        write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(self._yaml_data(), filepath)
+
+    def _yaml_data(self) -> dict:
+        return to_dict(self, exclude=["use_dask", "use_coarse_grid"])
 
     @classmethod
     def from_yaml(

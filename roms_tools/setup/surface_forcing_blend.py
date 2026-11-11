@@ -4,10 +4,7 @@ Typical use: a regional product (e.g. CONUS404) leaves ``NaN`` outside its footp
 on the ROMS grid, and a global product (e.g. ERA5) covers the whole grid. Build one
 :class:`~roms_tools.SurfaceForcing` for each and blend them::
 
-    from roms_tools.scripts.blend_surface_forcing import (
-        blend_surface_forcing,
-        save_blended_surface_forcing,
-    )
+    from roms_tools import blend_surface_forcing, save_blended_surface_forcing
 
     blended = blend_surface_forcing(
         conus404_sf,  # primary: NaN outside its footprint
@@ -23,6 +20,15 @@ them is a ``SurfaceForcing``, also pass ``grid``, the ROMS grid both were built 
 its land mask decides where leftover NaNs may be filled. Write the result with
 :func:`save_blended_surface_forcing`, which splits it into monthly files and applies
 the encodings ROMS needs, as ``SurfaceForcing.save`` does.
+
+The result carries a ``roms_tools_yaml`` attribute that records both products'
+settings and the blend arguments. :func:`save_blended_surface_forcing` writes it
+into the files, :func:`blend_to_yaml` writes it to a YAML file, and
+:func:`blend_surface_forcing_from_yaml` rebuilds the blend from that file. An input
+with no such attribute (a hand-made ``xarray.Dataset``) is recorded as having no
+recipe, and a blend that uses one cannot be rebuilt. The recipe says how each
+product was built, not what was done to it afterwards: if you edit a product's
+dataset before blending, the rebuilt blend will not have those edits.
 
 The layering model is "primary over fallback": wherever the primary has a value it
 wins, and wherever it does not -- because the target point lies outside a
@@ -40,8 +46,7 @@ extrapolate it into territory it never simulated. Feathering removes the
 discontinuity caused by switching source mid-field; it does not make the boundary
 invisible -- what remains is the two products' genuine disagreement.
 
-The layering helpers below are deliberately free of any dependency on
-``roms_tools.setup``: they operate on already-regridded ``xarray.DataArray``
+The layering helpers below operate on already-regridded ``xarray.DataArray``
 objects on the target grid, so they can be tested with synthetic arrays and no I/O.
 The weighted form reduces *exactly* to the hard edge when the weights are zero or
 one, which keeps the two behaviours on one code path.
@@ -54,18 +59,28 @@ mean (a rotation error) are not ordinary reanalysis disagreement.
 
 from __future__ import annotations
 
+import copy
 import logging
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import xarray as xr
+import yaml
 
-from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat
-
-if TYPE_CHECKING:
-    from roms_tools import Grid, SurfaceForcing
+from roms_tools.setup.grid import Grid
+from roms_tools.setup.surface_forcing import SurfaceForcing
+from roms_tools.setup.utils import (
+    RECIPE_ATTR,
+    NoAliasDumper,
+    deserialize_forcing_data,
+    fill_nans_over_land,
+    group_dataset,
+    serialize_grid,
+    yaml_text,
+)
+from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat, save_datasets
 
 # What to do when the primary lacks a variable the fallback provides.
 ON_MISSING_PRIMARY_VAR = ("error", "fallback")
@@ -149,12 +164,15 @@ def align_fallback_time(
         ``"exact"`` (default) requires every target stamp to be present in
         ``fallback`` and selects them, which is correct and free for two sources
         on the same hourly grid. ``"nearest"`` tolerates stamp jitter within
-        ``tolerance``. ``"linear"`` interpolates.
+        ``tolerance``, which it requires. ``"linear"`` interpolates between the
+        two fallback records around each target stamp; stamps outside the
+        fallback's record become NaN.
     tolerance : np.timedelta64 or float, optional
-        Maximum distance for ``method="nearest"``. A ``np.timedelta64`` is converted
-        to days when the time axis is numeric, as in a ``SurfaceForcing`` dataset
-        (days since the model reference date); a float is used as is, in the
-        units of the time axis.
+        Maximum distance for ``method="nearest"``, which has no default: without
+        a limit, the nearest record of a fallback from another period would be
+        accepted. A ``np.timedelta64`` is converted to days when the time axis is
+        numeric, as in a ``SurfaceForcing`` dataset (days since the model
+        reference date); a float is used as is, in the units of the time axis.
     var_name : str, optional
         Used in error messages.
 
@@ -166,13 +184,21 @@ def align_fallback_time(
     Raises
     ------
     ValueError
-        If ``method="exact"`` and some target stamps are missing, or if ``method``
-        is unknown.
+        If ``method="exact"`` and some target stamps are missing; if
+        ``method="nearest"`` and ``tolerance`` is not given, or some target stamp
+        has no fallback record within it; or if ``method`` is unknown.
     """
     if method not in TIME_ALIGN_METHODS:
         raise ValueError(
             f"Unknown time alignment method {method!r}; expected one of "
             f"{list(TIME_ALIGN_METHODS)}."
+        )
+    if method == "nearest" and tolerance is None:
+        raise ValueError(
+            'time_align="nearest" needs a `time_tolerance`: the largest distance '
+            "between a primary time stamp and the fallback record used for it "
+            '(e.g. np.timedelta64(1, "m") for stamp jitter). Without one, a '
+            "fallback from another period would be accepted."
         )
 
     if "time" not in fallback.dims:
@@ -187,23 +213,142 @@ def align_fallback_time(
                 f"The fallback source is missing {missing.size} time step(s) that "
                 f"the primary source provides for {var_name!r}, so the two cannot "
                 f"be layered on an exact time match. First missing: {missing[0]}; "
-                f"last: {missing[-1]}. Widen the fallback's time range, or use "
-                f'time_align="nearest".'
+                f"last: {missing[-1]}. Widen the fallback's time range. If the two "
+                f"cover the same period and their stamps differ only slightly, "
+                f'use time_align="nearest" with a `time_tolerance`.'
             )
         return fallback.sel(time=target_time)
 
     if method == "nearest":
-        if isinstance(tolerance, np.timedelta64) and not np.issubdtype(
-            fallback["time"].dtype, np.datetime64
-        ):
-            tolerance = float(tolerance / np.timedelta64(1, "D"))
-        aligned = fallback.sel(time=target_time, method="nearest", tolerance=tolerance)
+        try:
+            aligned = fallback.sel(
+                time=target_time,
+                method="nearest",
+                tolerance=_axis_tolerance(tolerance, fallback["time"].dtype),
+            )
+        except KeyError as err:
+            raise ValueError(
+                f"The fallback source has no record within the time tolerance "
+                f"({tolerance}) of some of the primary's time stamps for "
+                f"{var_name!r}, so the two cannot be layered with "
+                f'time_align="nearest". The primary runs from '
+                f"{target_time.values.min()} to {target_time.values.max()} and the "
+                f"fallback from {fallback['time'].values.min()} to "
+                f"{fallback['time'].values.max()}. Check that both cover the same "
+                f"period."
+            ) from err
         # `sel(method="nearest")` keeps the *source's* time labels. Left as-is, the
         # combine would then align on a time index that does not match the
         # primary's and silently produce an empty intersection.
         return aligned.assign_coords(time=target_time)
 
-    return fallback.interp(time=target_time)
+    return _interp_time_linear(fallback, target_time)
+
+
+def _interp_time_linear(
+    field: xr.DataArray,
+    target_time: xr.DataArray | np.ndarray,
+    *,
+    hold: Any = None,
+) -> xr.DataArray:
+    """Interpolate ``field`` linearly in time from the two bracketing records.
+
+    Gives what ``field.interp(time=target_time)`` gives where the bracketing
+    records are valid, but stays chunk-local.
+    ``interp`` along a chunked dimension builds every output block from *all* the
+    input blocks, so one day of output would read the field's whole record: tens
+    of GB per variable for a year of hourly forcing on a large grid. Here each
+    output record is ``field[i] + a * (field[i + 1] - field[i])`` for the two
+    records around it, selected by position, so it reads only the blocks that
+    hold them.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The field to interpolate. Its ``time`` must be strictly increasing.
+    target_time : xr.DataArray or np.ndarray
+        The stamps to interpolate to.
+    hold : np.timedelta64 or float, optional
+        Target stamps up to this far outside the record take its end value.
+        Beyond it (anywhere outside, by default) they are NaN, as with
+        ``interp``. In the units of the time axis.
+
+    Returns
+    -------
+    xr.DataArray
+        ``field`` on ``target_time``, with its dtype, attributes and dimension
+        order. Lazy if ``field`` is.
+    """
+    src = np.asarray(field["time"].values)
+    tgt = np.asarray(getattr(target_time, "values", target_time))
+    if not bool(np.all(src[1:] > src[:-1])):
+        raise ValueError(
+            f"The time axis of {field.name!r} is not strictly increasing, so it "
+            "cannot be interpolated in time."
+        )
+
+    last = src.size - 1
+    lower_idx = np.clip(np.searchsorted(src, tgt, side="right") - 1, 0, last)
+    # A stamp that is one of the samples, or lies past the last one, uses that
+    # sample alone: a neighbour that happens to be NaN must not reach it through
+    # `0 * NaN`, and no second block is read for it.
+    upper_idx = np.where(
+        src[lower_idx] == tgt, lower_idx, np.minimum(lower_idx + 1, last)
+    )
+    span = src[upper_idx] - src[lower_idx]
+    flat = span == np.zeros((), span.dtype)
+    # Clipped to [0, 1]: a stamp outside the record gets the end value, which
+    # `outside` then keeps or blanks.
+    frac = np.clip(
+        np.where(
+            flat,
+            0.0,
+            (tgt - src[lower_idx]) / np.where(flat, np.ones((), span.dtype), span),
+        ),
+        0.0,
+        1.0,
+    )
+    beyond = np.maximum(src[0] - tgt, tgt - src[-1])
+    outside = beyond > (np.zeros((), beyond.dtype) if hold is None else hold)
+
+    # Other coordinates along time (``rad_time``, ``abs_time``) would be carried
+    # over with the source's values; the caller's dataset holds the right ones.
+    field = field.drop_vars(
+        [n for n, c in field.coords.items() if n != "time" and "time" in c.dims]
+    )
+    lower = field.isel(time=lower_idx).assign_coords(time=tgt)
+    upper = field.isel(time=upper_idx).assign_coords(time=tgt)
+    weight = xr.DataArray(frac, dims="time", coords={"time": tgt})
+    inside = xr.DataArray(~outside, dims="time", coords={"time": tgt})
+    out = (lower + (upper - lower) * weight).where(inside)
+    if np.issubdtype(field.dtype, np.floating):
+        out = out.astype(field.dtype)
+    out = out.transpose(*field.dims)
+    out.attrs = dict(field.attrs)
+    return out
+
+
+def _axis_tolerance(
+    tolerance: np.timedelta64 | float | None, time_dtype: np.dtype
+) -> np.timedelta64 | float | None:
+    """A time tolerance in the units of a time axis of ``time_dtype``.
+
+    A ``np.timedelta64`` becomes float days on a numeric axis (a ``SurfaceForcing``
+    dataset counts days since the model reference date). A plain number is in
+    days and has no meaning on a datetime axis, where pandas would read it as
+    nanoseconds, so it is rejected there.
+    """
+    on_datetime_axis = np.issubdtype(time_dtype, np.datetime64)
+    if isinstance(tolerance, np.timedelta64):
+        if on_datetime_axis:
+            return tolerance
+        return float(tolerance / np.timedelta64(1, "D"))
+    if tolerance is not None and on_datetime_axis:
+        raise TypeError(
+            "On a datetime time axis, `time_tolerance` must be a np.timedelta64 "
+            f'(e.g. np.timedelta64(1, "m")), got {tolerance!r}.'
+        )
+    return tolerance
 
 
 def layer_fields(
@@ -516,8 +661,9 @@ def blend_surface_forcing(
         ``lwrad`` are re-timed onto the primary's convention by linear
         interpolation.
     time_tolerance : np.timedelta64 or float, optional
-        Tolerance for ``time_align="nearest"``. A ``np.timedelta64`` is converted
-        to the days of a ``SurfaceForcing`` time axis; a float is in days.
+        Tolerance for ``time_align="nearest"``, which requires it. A
+        ``np.timedelta64`` is converted to the days of a ``SurfaceForcing`` time
+        axis; a float is in days.
     on_missing_primary_var : {"error", "fallback"}, optional
         What to do about a variable only the fallback has: raise (default), or
         take it from the fallback everywhere.
@@ -532,10 +678,12 @@ def blend_surface_forcing(
     -------
     xarray.Dataset
         On the primary's coordinates (``time`` and ``rad_time`` included), with the
-        primary's attributes plus ``layered``, ``fallback_source``,
-        ``fallback_correct_radiation``, ``blend_method``, ``blend_width_km``,
-        ``blend_profile`` (feathered only) and ``primary_coverage_fraction``.
-        Lazy if the inputs are. Write it with :func:`save_blended_surface_forcing`.
+        primary's attributes, except that ``roms_tools_yaml`` is the recipe of the
+        blend, plus ``fallback_source``, ``blend_method``, ``blend_width_km``,
+        ``blend_profile`` (feathered only), ``primary_coverage_fraction`` and
+        ``fallback_radiation_shift_s`` (only if the fallback's radiation was
+        re-timed). Lazy if the inputs are. Write it with
+        :func:`save_blended_surface_forcing`.
 
     Raises
     ------
@@ -543,12 +691,16 @@ def blend_surface_forcing(
         If ``primary`` or ``fallback`` is not a SurfaceForcing, Dataset or path(s).
     ValueError
         If ``blend_width_km`` is negative, or no grid is given or available from
-        the inputs (both raised before any data are read); if the grid lacks the
+        the inputs, or the two products (or ``grid``) record different grids (all
+        raised before any data are read); if the grid lacks the
         land mask the products need, or does not match their shape; if the
-        products disagree on grid shape, units or ``use_coarse_grid``; if a primary variable is missing
+        products disagree on grid shape, units, ``model_reference_date`` or
+        ``use_coarse_grid``; if a primary variable is missing
         from the fallback, or a fallback-only variable is present and
         ``on_missing_primary_var="error"``; if ``time_align="exact"`` and the
-        fallback lacks some of the primary's time stamps; if ``time_align``,
+        fallback lacks some of the primary's time stamps; if
+        ``time_align="nearest"`` and ``time_tolerance`` is not given, or the
+        fallback has no record within it of some primary time stamp; if ``time_align``,
         ``on_missing_primary_var`` or ``blend_profile`` is not a known value; or
         if a NaN is left at an ocean point (unless ``fill_value`` is ``None``).
     """
@@ -572,25 +724,49 @@ def blend_surface_forcing(
     ds_f = _as_dataset(fallback, "fallback")
 
     _check_dataset_compatibility(ds_p, ds_f)
+    layers, grid_spec = _layer_recipes(primary, fallback, ds_p, ds_f, grid)
 
     p_fields = _data_fields(ds_p)
     f_fields = _data_fields(ds_f)
 
-    ds_f = _align_radiation_time(ds_p, ds_f, f_fields)
-    f_fields = _data_fields(ds_f)  # rebuilt: radiation may have been re-timed
+    # Re-timed radiation is already on the primary's time axis. It replaces the
+    # entries of this dict and is not put back into `ds_f`, whose time index is
+    # the fallback's: that assignment would reindex it, and every stamp the two
+    # products do not share exactly would become NaN.
+    retimed, shift = _align_radiation_time(
+        ds_p,
+        ds_f,
+        f_fields,
+        time_tolerance=time_tolerance if time_align == "nearest" else None,
+    )
+    f_fields.update(retimed)
 
+    valid = _first_record_validity(p_fields)
     weights = None
     if blend_width_km:
-        footprint = _footprint(p_fields)
         weights = compute_blend_weights(
-            footprint,
+            _footprint(valid),
             cell_size_m=_cell_size_m(grid, ds_p),
             width_km=blend_width_km,
             profile=blend_profile,
         )
 
     mask = _wet_mask(grid, ds_p)
-    coverage = coverage_fraction(next(iter(p_fields.values())), mask)
+    empty = [name for name, v in valid.items() if not bool(v.any())]
+    if empty and len(empty) < len(valid):
+        # Only a hard edge gets here: a feathered blend has no footprint to
+        # feather and was rejected above.
+        logging.warning(
+            "The primary product has no data at the first time step for %s; where "
+            "a variable is missing it comes from the fallback. The coverage "
+            "reported below is for the primary's other variables.",
+            empty,
+        )
+    covered = _common_footprint(
+        [v for name, v in valid.items() if name not in empty] or list(valid.values())
+    )
+    # `coverage_fraction` takes a field and counts its non-NaN points.
+    coverage = coverage_fraction(covered.where(covered), mask)
     logging.info(
         "Primary covers %.1f%% of the target ocean points; the remainder comes from "
         "the fallback.",
@@ -615,8 +791,6 @@ def blend_surface_forcing(
         {name: da for name, da in combined.items()}
     )
     if fill_value is not None:
-        from roms_tools.setup.utils import fill_nans_over_land
-
         for name in combined:
             out[name] = fill_nans_over_land(
                 out[name],
@@ -632,10 +806,22 @@ def blend_surface_forcing(
     out.attrs = dict(ds_p.attrs)
     # Describes the primary alone; the blended result has no such NaNs.
     out.attrs.pop("nan_outside_source_footprint", None)
-    out.attrs["layered"] = "True"
+    payload: dict[str, Any] = {}
+    if grid_spec is not None:
+        payload["Grid"] = grid_spec
+    payload["SurfaceForcingBlend"] = {
+        "layers": layers,
+        "blend_width_km": float(blend_width_km),
+        "blend_profile": blend_profile,
+        "time_align": time_align,
+        "time_tolerance_days": _tolerance_days(time_tolerance),
+        "on_missing_primary_var": on_missing_primary_var,
+        "fill_value": None if fill_value is None else float(fill_value),
+    }
+    out.attrs[RECIPE_ATTR] = yaml_text(payload)
     out.attrs["fallback_source"] = str(ds_f.attrs.get("source", "unknown"))
-    if "correct_radiation" in ds_f.attrs:
-        out.attrs["fallback_correct_radiation"] = str(ds_f.attrs["correct_radiation"])
+    if shift is not None:
+        out.attrs["fallback_radiation_shift_s"] = str(shift)
     out.attrs["blend_method"] = "feathered" if blend_width_km else "hard_edge"
     out.attrs["blend_width_km"] = str(float(blend_width_km))
     if blend_width_km:
@@ -678,13 +864,26 @@ def save_blended_surface_forcing(
     -------
     list[Path]
         The files written.
-    """
-    from roms_tools.setup.utils import group_dataset
-    from roms_tools.utils import save_datasets
 
+    Raises
+    ------
+    ValueError
+        If ``group=True`` and ``ds`` has no ``abs_time`` coordinate.
+    """
     filepath = Path(filepath)
     if filepath.suffix == ".nc":
         filepath = filepath.with_suffix("")
+
+    if group and "abs_time" not in ds.variables:
+        raise ValueError(
+            "The dataset has no `abs_time` coordinate, which splitting it into "
+            "monthly or yearly files needs. Pass `group=False` to write one file."
+        )
+    if "time" in ds.dims:
+        # `SurfaceForcing` marks `time` unlimited through the dataset's encoding,
+        # which a product opened from files does not carry.
+        ds = ds.copy(deep=False)
+        ds.encoding = {**ds.encoding, "unlimited_dims": "time"}
 
     if group:
         dataset_list, output_filenames = group_dataset(ds, str(filepath))
@@ -742,6 +941,15 @@ def _check_dataset_compatibility(ds_p: xr.Dataset, ds_f: xr.Dataset) -> None:
                 f"reports {p_units!r} and the fallback {f_units!r}. Both must "
                 f"carry the ROMS surface-forcing conventions."
             )
+    p_ref = ds_p.attrs.get("model_reference_date")
+    f_ref = ds_f.attrs.get("model_reference_date")
+    if p_ref is not None and f_ref is not None and str(p_ref) != str(f_ref):
+        raise ValueError(
+            f"The products count time from different reference dates (the primary "
+            f"from {p_ref}, the fallback from {f_ref}), so the same value of "
+            f"`time` is a different date in each. Build both with the same "
+            f"`model_reference_date`."
+        )
     p_coarse = ds_p.attrs.get("use_coarse_grid")
     f_coarse = ds_f.attrs.get("use_coarse_grid")
     if p_coarse is not None and f_coarse is not None and p_coarse != f_coarse:
@@ -763,9 +971,18 @@ def _rad_offset(ds: xr.Dataset) -> np.timedelta64 | None:
 
 
 def _align_radiation_time(
-    ds_p: xr.Dataset, ds_f: xr.Dataset, f_fields: dict[str, xr.DataArray]
-) -> xr.Dataset:
+    ds_p: xr.Dataset,
+    ds_f: xr.Dataset,
+    f_fields: dict[str, xr.DataArray],
+    *,
+    time_tolerance: np.timedelta64 | float | None = None,
+) -> tuple[dict[str, xr.DataArray], float | None]:
     """Put the fallback's radiation on the primary's ``rad_time`` convention.
+
+    Returns the re-timed radiation fields, on the primary's ``time`` axis, and the
+    shift applied in seconds; an empty dict and ``None`` when the two products
+    label radiation the same way. ``time_tolerance`` is how far the fallback's
+    stamps may sit from the primary's (``time_align="nearest"``).
 
     An hourly-mean product labels its flux at the end of the averaging interval and
     carries ``rad_time = time + offset``; an instantaneous one has no offset. The
@@ -778,12 +995,12 @@ def _align_radiation_time(
     off_p = _rad_offset(ds_p)
     off_f = _rad_offset(ds_f)
     if off_p is None and off_f is None:
-        return ds_f
+        return {}, None
     zero = np.timedelta64(0, "s")
     off_p = zero if off_p is None else off_p
     off_f = zero if off_f is None else off_f
     if off_p == off_f:
-        return ds_f
+        return {}, None
 
     shift = off_f - off_p
     logging.info(
@@ -793,7 +1010,6 @@ def _align_radiation_time(
         off_f,
         shift,
     )
-    ds_f = ds_f.copy()
     # The flux a product labels at ``time`` is valid at its ``rad_time``. Re-sample
     # the fallback's flux, as a function of the instant it is valid at, onto the
     # primary's ``rad_time`` stamps, then label it with the primary's ``time``.
@@ -803,41 +1019,92 @@ def _align_radiation_time(
     # The shift moves the primary's first or last stamp up to ``|shift|`` past the
     # fallback's record, where interpolation has nothing on one side. Hold the
     # fallback's end value there (it is the flux for the adjacent interval) rather
-    # than leave a NaN record that the ocean-NaN check would reject.
-    tolerance: np.timedelta64 | float = abs(shift)
-    if not np.issubdtype(f_t.dtype, np.datetime64):
-        tolerance = float(tolerance / np.timedelta64(1, "D"))
-    past_end = xr.DataArray((p_t < f_t.min()) | (p_t > f_t.max()), dims="time")
+    # than leave a NaN record that the ocean-NaN check would reject. Stamps that
+    # differ within ``time_tolerance`` move it that much further.
+    tolerance: Any = _axis_tolerance(abs(shift), f_t.dtype)
+    if time_tolerance is not None:
+        tolerance = tolerance + _axis_tolerance(time_tolerance, f_t.dtype)
+    retimed: dict[str, xr.DataArray] = {}
     for name in RADIATION_VARS:
         if name in f_fields and "time" in f_fields[name].dims:
             shifted = f_fields[name].assign_coords(time=f_t)
-            resampled = shifted.interp(time=p_t)
-            if bool(past_end.any()):
-                held = shifted.reindex(time=p_t, method="nearest", tolerance=tolerance)
-                resampled = held.where(past_end, resampled)
-            ds_f[name] = resampled.assign_coords(time=ds_p["time"].values)
-    return ds_f
+            resampled = _interp_time_linear(shifted, p_t, hold=tolerance)
+            retimed[name] = resampled.assign_coords(time=ds_p["time"].values)
+    return retimed, float(shift / np.timedelta64(1, "s"))
 
 
-def _footprint(p_fields: dict[str, xr.DataArray]) -> xr.DataArray:
+def _first_record_validity(
+    p_fields: dict[str, xr.DataArray],
+) -> dict[str, xr.DataArray]:
+    """Where each primary field has a value at its first time step, computed.
+
+    Reads one record per variable, all in one compute so that lazy products
+    share the work of opening and regridding their source. It is the only data
+    the blend reads before the result is computed.
+    """
+    masks = xr.Dataset(
+        {
+            name: (da.isel(time=0) if "time" in da.dims else da)
+            .notnull()
+            .reset_coords(drop=True)
+            for name, da in p_fields.items()
+        }
+    ).compute()
+    return {str(name): masks[name] for name in masks.data_vars}
+
+
+def _common_footprint(valid: list[xr.DataArray]) -> xr.DataArray:
+    """True where every one of the validity masks is."""
+    common = valid[0]
+    for v in valid[1:]:
+        common = common & v
+    return common
+
+
+def _footprint(valid: dict[str, xr.DataArray]) -> xr.DataArray:
     """True where *every* primary field has a value, at the first time step.
+
+    ``valid`` is the output of :func:`_first_record_validity`.
 
     The intersection is the conservative reading: a variable missing at a point
     would fall back anyway, so including the point in the feather band would only
     smooth toward a value the merge does not use.
+
+    Raises
+    ------
+    ValueError
+        If the fields have data at the first time step but no point where all of
+        them do (one of them is all NaN there, say). Every blend weight would be
+        zero, and the feathered result would be the fallback alone, at all times.
     """
-    footprint = None
-    for da in p_fields.values():
-        valid = (da.isel(time=0) if "time" in da.dims else da).notnull()
-        footprint = valid if footprint is None else (footprint & valid)
-    assert footprint is not None
-    return footprint.compute()
+    footprint = _common_footprint(list(valid.values()))
+    if not bool(footprint.any()):
+        empty = [name for name, v in valid.items() if not bool(v.any())]
+        if len(empty) < len(valid):
+            detail = (
+                f"All NaN there: {empty}. "
+                if empty
+                else "Each has data there, but at different points. "
+            )
+            raise ValueError(
+                "The primary's variables share no footprint at the first time "
+                "step, so a feathered blend would take every variable from the "
+                f"fallback at all times. {detail}Check the primary's first "
+                "record, or use `blend_width_km=0` for a hard edge, which needs "
+                "no footprint."
+            )
+    return footprint
+
+
+def _is_coarse(ds: xr.Dataset) -> bool:
+    """Whether a product is on the coarse grid. No attribute means the fine grid."""
+    return str(ds.attrs.get("use_coarse_grid")) == "True"
 
 
 def _wet_mask(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> xr.DataArray:
     """The grid's wet mask on the product's (fine or coarse) rho points."""
     gds = cast("xr.Dataset", grid.ds if hasattr(grid, "ds") else grid)
-    coarse = str(ds_p.attrs.get("use_coarse_grid")) == "True"
+    coarse = _is_coarse(ds_p)
     name = "mask_coarse" if coarse else "mask_rho"
     if name not in gds:
         raise ValueError(
@@ -861,7 +1128,183 @@ def _cell_size_m(grid: Grid | xr.Dataset, ds_p: xr.Dataset) -> tuple[float, floa
     """Mean ``(dy, dx)`` in metres of the grid the product was written on."""
     gds = cast("xr.Dataset", grid.ds if hasattr(grid, "ds") else grid)
     # The coarse grid doubles the spacing.
-    factor = 2.0 if str(ds_p.attrs.get("use_coarse_grid")) == "True" else 1.0
+    factor = 2.0 if _is_coarse(ds_p) else 1.0
     dy = factor * float((1 / gds["pn"]).mean())
     dx = factor * float((1 / gds["pm"]).mean())
     return dy, dx
+
+
+_LAYER_LABELS = ("primary", "fallback")
+
+
+def _tolerance_days(tolerance: np.timedelta64 | float | None) -> float | None:
+    """A ``time_tolerance`` in days, as recorded in the recipe."""
+    if tolerance is None:
+        return None
+    if isinstance(tolerance, np.timedelta64):
+        return float(tolerance / np.timedelta64(1, "D"))
+    return float(tolerance)
+
+
+def _describe_input(obj: Any) -> str:
+    """Say what an input without a recipe was, for the ``no_recipe`` entry."""
+    if isinstance(obj, str | Path | list | tuple):
+        paths = [obj] if isinstance(obj, str | Path) else list(obj)
+        return "files " + ", ".join(str(p) for p in paths)
+    return f"xarray.Dataset without a {RECIPE_ATTR} attribute"
+
+
+def _layer_recipe(obj: Any, ds: xr.Dataset) -> tuple[dict | None, dict]:
+    """Split an input's recipe into its ``Grid`` spec and the layer entry."""
+    text = ds.attrs.get(RECIPE_ATTR)
+    if text is None:
+        return None, {"no_recipe": _describe_input(obj)}
+    documents = [doc for doc in yaml.safe_load_all(text) if doc is not None]
+    payload = documents[-1]
+    entry = {key: value for key, value in payload.items() if key != "Grid"}
+    return payload.get("Grid"), entry
+
+
+def _layer_recipes(
+    primary: Any,
+    fallback: Any,
+    ds_p: xr.Dataset,
+    ds_f: xr.Dataset,
+    grid: Grid | xr.Dataset,
+) -> tuple[list[dict], dict | None]:
+    """The two layer entries and the one ``Grid`` spec they share, if known.
+
+    Raises if the products, or ``grid``, were built on different grids. Reads
+    attributes only.
+    """
+    grid_p, entry_p = _layer_recipe(primary, ds_p)
+    grid_f, entry_f = _layer_recipe(fallback, ds_f)
+    if grid_p is not None and grid_f is not None and grid_p != grid_f:
+        raise ValueError(
+            "The primary and fallback products were built on different grids "
+            "(their recorded `Grid` settings differ). Build both on the same "
+            "grid."
+        )
+    spec = grid_p if grid_p is not None else grid_f
+    if isinstance(grid, Grid):
+        # Dump and load, so tuples and numeric types come out as in the layers.
+        grid_spec = yaml.safe_load(
+            yaml.dump(serialize_grid(grid), Dumper=NoAliasDumper, sort_keys=False)
+        )
+        if spec is not None and spec != grid_spec:
+            raise ValueError(
+                "`grid` differs from the grid the products were built on (their "
+                "recorded `Grid` settings). Pass the grid they were built on."
+            )
+        spec = grid_spec
+    return [entry_p, entry_f], spec
+
+
+def blend_to_yaml(ds: xr.Dataset, filepath: str | Path) -> None:
+    """Write the recipe of a blended dataset to a YAML file.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The output of :func:`blend_surface_forcing`.
+    filepath : str or Path
+        The YAML file to write. Rebuild the blend from it with
+        :func:`blend_surface_forcing_from_yaml`.
+
+    Raises
+    ------
+    ValueError
+        If ``ds`` has no recipe, i.e. is not the output of
+        :func:`blend_surface_forcing`.
+    """
+    if RECIPE_ATTR not in ds.attrs:
+        raise ValueError(
+            f"The dataset has no `{RECIPE_ATTR}` attribute, so it is not the "
+            "output of `blend_surface_forcing`."
+        )
+    Path(filepath).write_text(ds.attrs[RECIPE_ATTR])
+
+
+def blend_surface_forcing_from_yaml(
+    filepath: str | Path, use_dask: bool = False
+) -> xr.Dataset:
+    """Rebuild a blend from the YAML written by :func:`blend_to_yaml`.
+
+    Builds the grid and both products from their recorded settings, then calls
+    :func:`blend_surface_forcing` with the recorded arguments.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        A YAML file with a ``Grid`` and a ``SurfaceForcingBlend`` section.
+    use_dask : bool, optional
+        Whether to build the ``SurfaceForcing`` layers with dask. Defaults to False.
+
+    Returns
+    -------
+    xarray.Dataset
+        The blended dataset, as :func:`blend_surface_forcing` returns it.
+
+    Raises
+    ------
+    ValueError
+        If the file has no ``SurfaceForcingBlend`` section, or a layer was
+        recorded as having no recipe and so cannot be rebuilt.
+    """
+    filepath = Path(filepath)
+    with filepath.open() as f:
+        documents = [doc for doc in yaml.safe_load_all(f) if doc is not None]
+    section = next(
+        (
+            doc["SurfaceForcingBlend"]
+            for doc in documents
+            if "SurfaceForcingBlend" in doc
+        ),
+        None,
+    )
+    if section is None:
+        raise ValueError(f"No SurfaceForcingBlend section found in {filepath}.")
+    _check_replayable(section, suffix="")
+    grid = Grid.from_yaml(filepath)
+    return _rebuild_blend(section, grid, use_dask)
+
+
+def _check_replayable(section: dict[str, Any], suffix: str) -> None:
+    """Raise if a layer was recorded without a recipe, before anything is built."""
+    for entry, label in zip(section["layers"], _LAYER_LABELS, strict=True):
+        if "SurfaceForcingBlend" in entry:
+            inner = entry["SurfaceForcingBlend"]
+            _check_replayable(inner, f" of the {label}{suffix}")
+        elif "SurfaceForcing" not in entry:
+            raise ValueError(
+                f"The {label}{suffix} was recorded as "
+                f"{entry.get('no_recipe', entry)!r}, so the blend cannot be "
+                "rebuilt from this file."
+            )
+
+
+def _rebuild_blend(section: dict[str, Any], grid: Grid, use_dask: bool) -> xr.Dataset:
+    """Build the layers of one ``SurfaceForcingBlend`` section and blend them."""
+    primary, fallback = (
+        _rebuild_layer(entry, grid, use_dask) for entry in section["layers"]
+    )
+    return blend_surface_forcing(
+        primary,
+        fallback,
+        grid=grid,
+        blend_width_km=section["blend_width_km"],
+        blend_profile=section["blend_profile"],
+        time_align=section["time_align"],
+        time_tolerance=section["time_tolerance_days"],
+        on_missing_primary_var=section["on_missing_primary_var"],
+        fill_value=section["fill_value"],
+    )
+
+
+def _rebuild_layer(
+    entry: dict[str, Any], grid: Grid, use_dask: bool
+) -> SurfaceForcing | xr.Dataset:
+    if "SurfaceForcingBlend" in entry:
+        return _rebuild_blend(entry["SurfaceForcingBlend"], grid, use_dask)
+    spec = deserialize_forcing_data(copy.deepcopy(entry["SurfaceForcing"]))
+    return SurfaceForcing(grid=grid, **spec, use_dask=use_dask)

@@ -6,11 +6,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
 
 from conftest import calculate_data_hash
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.datasets.download import download_test_data
-from roms_tools.setup.utils import RawDataSource
+from roms_tools.setup.utils import RECIPE_ATTR, RawDataSource
 
 
 @pytest.fixture
@@ -1191,6 +1192,50 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
         filepath.unlink()
 
 
+def test_dataset_carries_the_yaml_that_to_yaml_writes(surface_forcing, tmp_path):
+    surface_forcing.to_yaml(tmp_path / "sf.yaml")
+    assert surface_forcing.ds.attrs[RECIPE_ATTR] == (tmp_path / "sf.yaml").read_text()
+
+
+@pytest.mark.parametrize("fmt", ["NETCDF4", "NETCDF3_64BIT_DATA"])
+@pytest.mark.parametrize("group", [True, False])
+def test_saved_file_carries_the_yaml(surface_forcing, tmp_path, fmt, group):
+    (path,) = surface_forcing.save(tmp_path / "sf", group=group, format=fmt)
+    with xr.open_dataset(path) as ds:
+        assert ds.attrs[RECIPE_ATTR] == surface_forcing.ds.attrs[RECIPE_ATTR]
+
+
+def test_yaml_attribute_rebuilds_the_dataset(surface_forcing, tmp_path, use_dask):
+    path = tmp_path / "from_attr.yaml"
+    path.write_text(surface_forcing.ds.attrs[RECIPE_ATTR])
+    rebuilt = SurfaceForcing.from_yaml(path, use_dask=use_dask)
+    xr.testing.assert_allclose(rebuilt.ds, surface_forcing.ds)
+
+
+def test_blend_round_trips_through_its_yaml(
+    surface_forcing, corrected_surface_forcing, tmp_path, use_dask
+):
+    from roms_tools import (
+        blend_surface_forcing,
+        blend_surface_forcing_from_yaml,
+        blend_to_yaml,
+    )
+
+    blended = blend_surface_forcing(
+        surface_forcing,
+        corrected_surface_forcing,
+        on_missing_primary_var="fallback",
+        fill_value=1.0,
+    )
+    blend_to_yaml(blended, tmp_path / "blend.yaml")
+    rebuilt = blend_surface_forcing_from_yaml(tmp_path / "blend.yaml", use_dask)
+    xr.testing.assert_allclose(rebuilt, blended)
+    assert (
+        list(yaml.safe_load_all(rebuilt.attrs[RECIPE_ATTR]))[-1]
+        == list(yaml.safe_load_all(blended.attrs[RECIPE_ATTR]))[-1]
+    )
+
+
 def assert_roundtrip_hash_equal(
     sfc_forcing,
     tmp_path,
@@ -1530,7 +1575,7 @@ def test_conus404_outside_footprint_is_nan(synthetic_conus404_store):
     """A grid outrunning the source is partially NaN, not extrapolated or zeroed.
 
     The NaNs are the coverage signal that
-    ``roms_tools.scripts.blend_surface_forcing`` uses to know where a second source
+    ``roms_tools.setup.surface_forcing_blend`` uses to know where a second source
     must fill in, so they must survive to ``ds`` (no NaN-to-zero substitution, no
     wet-point NaN validation error).
     """
@@ -1604,7 +1649,7 @@ def test_conus404_surface_forcing_blends_with_a_global_product(
     synthetic_conus404_store,
 ):
     """End to end: a straddling CONUS404 SurfaceForcing filled from a second product."""
-    from roms_tools.scripts.blend_surface_forcing import blend_surface_forcing
+    from roms_tools import blend_surface_forcing
 
     primary = SurfaceForcing(
         grid=_conus404_grid(300, center=(-125.6, 37.6)),

@@ -28,7 +28,14 @@ into the files, :func:`blend_to_yaml` writes it to a YAML file, and
 with no such attribute (a hand-made ``xarray.Dataset``) is recorded as having no
 recipe, and a blend that uses one cannot be rebuilt. The recipe says how each
 product was built, not what was done to it afterwards: if you edit a product's
-dataset before blending, the rebuilt blend will not have those edits.
+dataset before blending, the rebuilt blend will not have those edits. Likewise
+it records each product's whole time range: every monthly file written by
+``SurfaceForcing.save`` carries the recipe of the full product, so a blend of one
+month's files rebuilds the full period, not that month.
+
+Every :class:`~roms_tools.SurfaceForcing` dataset carries its own recipe in the
+same attribute (the YAML that ``to_yaml`` writes, including any local source
+paths), which is how a blend of saved files knows how they were made.
 
 The layering model is "primary over fallback": wherever the primary has a value it
 wins, and wherever it does not -- because the target point lies outside a
@@ -289,11 +296,13 @@ def _interp_time_linear(
 
     last = src.size - 1
     lower_idx = np.clip(np.searchsorted(src, tgt, side="right") - 1, 0, last)
-    # A stamp that is one of the samples, or lies past the last one, uses that
-    # sample alone: a neighbour that happens to be NaN must not reach it through
-    # `0 * NaN`, and no second block is read for it.
+    # A stamp that is one of the samples, or lies before the first or past the
+    # last one, uses that sample alone: a neighbour that happens to be NaN must not
+    # reach it through `0 * NaN`, and no second block is read for it.
     upper_idx = np.where(
-        src[lower_idx] == tgt, lower_idx, np.minimum(lower_idx + 1, last)
+        (src[lower_idx] == tgt) | (tgt < src[0]),
+        lower_idx,
+        np.minimum(lower_idx + 1, last),
     )
     span = src[upper_idx] - src[lower_idx]
     flat = span == np.zeros((), span.dtype)
@@ -1238,7 +1247,10 @@ def blend_surface_forcing_from_yaml(
     filepath : str or Path
         A YAML file with a ``Grid`` and a ``SurfaceForcingBlend`` section.
     use_dask : bool, optional
-        Whether to build the ``SurfaceForcing`` layers with dask. Defaults to False.
+        Whether to build the ``SurfaceForcing`` layers with dask. Defaults to False,
+        as for :meth:`~roms_tools.SurfaceForcing.from_yaml`. A streamed source
+        needs ``True``: rebuilding a blend with a CONUS404 layer read from its
+        default cloud store raises otherwise.
 
     Returns
     -------

@@ -1645,6 +1645,7 @@ def test_conus404_scipy_engine_raises(synthetic_conus404_store):
         )
 
 
+@requires_xesmf
 def test_conus404_default_path_requires_dask():
     """The default (cloud) store cannot be read eagerly."""
     with pytest.raises(ValueError, match="requires `use_dask=True`"):

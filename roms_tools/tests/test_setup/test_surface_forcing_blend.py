@@ -316,6 +316,18 @@ def test_time_interpolation_holds_the_end_value_only_within_the_hold():
     assert bool(out.isel(time=[0, 3]).isnull().all())
 
 
+def test_time_interpolation_before_the_record_ignores_a_nan_second_record():
+    """A stamp held at the first record must not read the second one."""
+    times = np.arange(3) / 24.0
+    field = _ramp(times)
+    field[1] = np.nan
+    hour = 1.0 / 24.0
+
+    out = _interp_time_linear(field, np.array([-0.5 * hour]), hold=hour)
+
+    np.testing.assert_array_equal(out.values[0], field.values[0])
+
+
 def _counting_blocks(field, counter):
     """Chunk `field` by day and record which time block each read touches."""
     import dask.array as dsa

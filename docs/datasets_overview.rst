@@ -413,6 +413,17 @@ Grooming compares each cell with its neighbours, so errors shared by a whole reg
 as wrong temperature and salinity along a stretch of boundary, are best fixed upstream in
 the physics.
 
+Where an oxygen profile reaches the 5.0 floor it meets it at a sharp corner, and the
+model's advection can push oxygen below 5.0 there within weeks, which MARBL cannot undo.
+To round off that corner, give oxygen a soft-floor band:
+
+.. code-block:: python
+
+    groom_settings = {"checks": {"O2": {"soft_floor_band": 10.0}}}
+
+Values between 5.0 and 15.0 are then lowered so the profile meets the floor smoothly,
+by at most about 1.5 mmol m⁻³ and never below 5.0; everything else is unchanged.
+
 :Required for: BGC Initial Conditions, BGC Boundary Forcing
 
 

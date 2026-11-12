@@ -780,10 +780,13 @@ def _run(
         if (band := checks[n].soft_floor) is not None
     )
     if soft:
+        # map_overlap merges a tile smaller than the overlap depth (e.g. a short last
+        # tile) into its neighbour, so the passes' output can be chunked differently
+        # from aux. Match aux to it (a no-op when they already agree).
         stack = dsa.map_blocks(
             partial(_soft_floor_kernel, soft=soft),
             stack,
-            aux,
+            aux.rechunk((-1, *stack.chunks[1:])),
             dtype=np.float64,
             meta=np.array((), dtype=np.float64),
         )

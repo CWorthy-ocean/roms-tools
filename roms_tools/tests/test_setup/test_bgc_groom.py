@@ -300,11 +300,29 @@ def test_groom_removes_every_flag_and_keeps_good_water(grid, clean):
     assert "bgc_groom" in out.attrs and "bgc_groom" in out["ALK"].attrs
 
 
+_SOFT_FLOOR = {"checks": {"O2": {"soft_floor": 10.0}, "NO3": {"soft_floor": 2.0}}}
+
+
+def _floored_core(f: dict[str, np.ndarray]) -> None:
+    """Floor O2 at 5 and NO3 at 0 over a core, so both have cells in their soft band."""
+    wet = f["salt"] > 0
+    f["O2"] = np.where(wet, np.clip(f["O2"] - 80.0, 5.0, None), 0.0)
+    f["NO3"] = np.where(wet, np.clip(f["NO3"] - 3.0, 0.0, None), 0.0)
+
+
+@pytest.mark.parametrize("soft", [False, True], ids=["plain", "soft_floor"])
 @pytest.mark.parametrize("tile", [3, 7, 16])
-def test_result_is_identical_for_any_tiling(grid, clean, tile):
+def test_result_is_identical_for_any_tiling(grid, clean, tile, soft):
+    """Tiles smaller than the overlap reach (or a short trailing tile) are merged by
+    the groom passes; the soft-floor step after them must follow those chunks.
+    """
     _plant(clean)
-    ref = bgc_groom(_ic(clean), grid, tile=1000).compute()
-    got = bgc_groom(_ic(clean), grid, tile=tile).compute()
+    checks = None
+    if soft:
+        _floored_core(clean)
+        checks = resolve_groom_settings(_SOFT_FLOOR)[0]
+    ref = bgc_groom(_ic(clean), grid, checks=checks, tile=1000).compute()
+    got = bgc_groom(_ic(clean), grid, checks=checks, tile=tile).compute()
     for var in TRACERS:
         assert np.array_equal(ref[var].values, got[var].values), var
 

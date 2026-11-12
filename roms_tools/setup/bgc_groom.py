@@ -1200,6 +1200,8 @@ def bgc_groom(
     (each pass re-checks). ``passes``, ``relax_sweeps``, ``column_reach`` and ``dz_max``
     define the result and are recorded in the attrs; ``tile`` and ``time_chunk`` only set
     task size and do not change it. Run :func:`bgc_check` on the result for what remains.
+    A ``soft_floor_band`` lowers its band again each time it runs, so leave it off when
+    grooming a file already groomed with one (its ``bgc_groom`` attrs record it).
     Boundary data needs ``physics`` (the matching physics boundary data, for salt/temp).
 
     Peak memory grows with the domain, not only the tile.

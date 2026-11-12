@@ -226,8 +226,9 @@ def test_nan_o2_is_not_turned_into_the_ceiling(grid, clean):
         {"checks": {"ALK": {"bounds": (400.0, 3100.0)}}},
         {"checks": {"ALK": {"bounds": [3100.0, 400.0]}}},
         {"checks": {"O2": {"ceiling": "x"}}},
-        {"checks": {"O2": {"soft_floor": 0.0}}},
-        {"checks": {"O2": {"soft_floor": True}}},
+        {"checks": {"O2": {"soft_floor_band": 0.0}}},
+        {"checks": {"O2": {"soft_floor_band": True}}},
+        {"checks": {"O2": {"soft_floor": 10.0}}},  # the band width has its own name
         {"unknown": 1},
         [("passes", 2)],
     ],
@@ -300,7 +301,9 @@ def test_groom_removes_every_flag_and_keeps_good_water(grid, clean):
     assert "bgc_groom" in out.attrs and "bgc_groom" in out["ALK"].attrs
 
 
-_SOFT_FLOOR = {"checks": {"O2": {"soft_floor": 10.0}, "NO3": {"soft_floor": 2.0}}}
+_SOFT_FLOOR = {
+    "checks": {"O2": {"soft_floor_band": 10.0}, "NO3": {"soft_floor_band": 2.0}}
+}
 
 
 def _floored_core(f: dict[str, np.ndarray]) -> None:
@@ -310,7 +313,7 @@ def _floored_core(f: dict[str, np.ndarray]) -> None:
     f["NO3"] = np.where(wet, np.clip(f["NO3"] - 3.0, 0.0, None), 0.0)
 
 
-@pytest.mark.parametrize("soft", [False, True], ids=["plain", "soft_floor"])
+@pytest.mark.parametrize("soft", [False, True], ids=["plain", "soft_floor_band"])
 @pytest.mark.parametrize("tile", [3, 7, 16])
 def test_result_is_identical_for_any_tiling(grid, clean, tile, soft):
     """Tiles smaller than the overlap reach (or a short trailing tile) are merged by
@@ -504,7 +507,7 @@ def test_soft_floor_smooths_an_omz_edge_once_and_only_when_asked(grid, clean):
     o2 = np.where(wet, np.clip(clean["O2"] - 80.0, 5.0, None), 0.0)  # floored core
     clean["O2"] = o2
     plain = bgc_groom(_ic(clean), grid, variables=["O2"]).compute()["O2"].values
-    settings = {"checks": {"O2": {"soft_floor": 10.0}}}
+    settings = {"checks": {"O2": {"soft_floor_band": 10.0}}}
     checks, _ = resolve_groom_settings(settings)
     outs = [
         bgc_groom(_ic(clean), grid, variables=["O2"], checks=checks, passes=p)
@@ -524,5 +527,5 @@ def test_soft_floor_smooths_an_omz_edge_once_and_only_when_asked(grid, clean):
     keep = wet & ~band
     np.testing.assert_array_equal(soft[keep], plain[keep])
     assert soft[wet].min() >= 5.0 - 1e-5
-    assert checks["O2"].describe()["soft_floor"] == 10.0
-    assert "soft_floor" not in resolve_groom_settings(None)[0]["O2"].describe()
+    assert checks["O2"].describe()["soft_floor_band"] == 10.0
+    assert "soft_floor_band" not in resolve_groom_settings(None)[0]["O2"].describe()

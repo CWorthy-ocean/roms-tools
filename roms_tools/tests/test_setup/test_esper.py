@@ -2164,6 +2164,26 @@ def test_in_situ_temperature_matches_teos10_and_stays_lazy():
     assert 0.25 < float(t.isel(y=1, s=1)) - 1.5 < 0.45
 
 
+def test_in_situ_temperature_declares_the_dtype_it_returns():
+    """The result is float64 (what gsw returns) even for a float32 ``temp`` (the
+    boundary path's physics T), and the lazy result must declare that dtype.
+    """
+    import xarray as xr
+
+    from roms_tools.setup.esper import in_situ_temperature
+
+    theta = xr.DataArray(np.array([[1.5, 1.5]], dtype=np.float32), dims=("y", "s"))
+    args = (
+        xr.DataArray([[34.7, 34.7]], dims=("y", "s")),
+        xr.DataArray([0.0, 4000.0], dims=("s",)),
+        xr.DataArray([210.0], dims=("y",)),
+        xr.DataArray([40.0], dims=("y",)),
+    )
+    lazy = in_situ_temperature(theta.chunk(), *args)
+    assert lazy.dtype == lazy.compute().dtype == np.float64
+    assert in_situ_temperature(theta, *args).dtype == np.float64
+
+
 def test_estimate_bgc_fields_feeds_pyesper_in_situ_temperature(monkeypatch):
     """ROMS temp is potential temperature; ESPER's predictor is in-situ temperature."""
     import xarray as xr

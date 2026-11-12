@@ -507,7 +507,7 @@ def in_situ_temperature(
         lon,
         lat,
         dask="parallelized",
-        output_dtypes=[temp.dtype],
+        output_dtypes=[np.float64],  # gsw computes in float64 whatever the input
     )
     return t.transpose(*temp.dims, ...)
 

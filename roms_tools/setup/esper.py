@@ -479,9 +479,10 @@ def in_situ_temperature(
     """Convert potential temperature to in-situ temperature (TEOS-10).
 
     ROMS (and GLORYS ``thetao``) carry potential temperature, but ESPER's predictors
-    are in-situ temperature, as in its GLODAP training data. The two differ by about
-    0.1 °C at 2 km and 0.4 °C at 5 km. Fed potential temperature, ESPER sees deep water
-    as colder than it is and predicts it too high in O2 and too low in Si, ALK and DIC.
+    are in-situ temperature, as in its GLODAP training data. In deep water the two
+    differ by about 0.15 °C at 2 km and 0.45 °C at 5 km. Fed potential temperature,
+    ESPER sees deep water as colder than it is and predicts it too high in O2 and too
+    low in Si, ALK and DIC.
 
     Parameters
     ----------

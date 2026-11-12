@@ -1349,15 +1349,18 @@ def compute_in_situ_density(
     Pressure is derived from depth via ``gsw.p_from_z`` and density is then
     computed with ``gsw.rho``, both wrapped in ``apply_ufunc`` for dask
     compatibility. Like :func:`compute_potential_density`, this treats
-    practical salinity as Absolute Salinity and in-situ temperature as
-    Conservative Temperature -- an approximation carried over from that
-    function for consistency, sufficient for the µmol/kg -> mmol/m³ unit
-    conversions that call this.
+    practical salinity as Absolute Salinity and ``temp`` as Conservative
+    Temperature -- an approximation carried over from that function for
+    consistency, sufficient for the µmol/kg -> mmol/m³ unit conversions that
+    call this. Potential temperature (ROMS ``temp``, as the ESPER path passes)
+    is the closer stand-in for Conservative Temperature; the in-situ
+    temperature of the WOA/GLODAP climatologies differs from it by under
+    0.5 °C, about 0.01% in density.
 
     Parameters
     ----------
     temp : xr.DataArray
-        In-situ temperature (°C).
+        Temperature (°C), potential or in-situ; used as Conservative Temperature.
     salt : xr.DataArray
         Practical salinity (PSU).
     depth : xr.DataArray

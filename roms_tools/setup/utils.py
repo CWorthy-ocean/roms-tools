@@ -1406,6 +1406,55 @@ def compute_in_situ_density(
     return density
 
 
+def _in_situ_from_potential(theta, salt, depth, lon, lat):
+    """In-situ temperature (°C) from potential temperature (TEOS-10, numpy kernel)."""
+    p = gsw.p_from_z(-depth, lat)
+    sa = gsw.SA_from_SP(salt, p, lon, lat)
+    return gsw.t_from_CT(sa, gsw.CT_from_pt(sa, theta), p)
+
+
+def in_situ_temperature(
+    temp: xr.DataArray,
+    salt: xr.DataArray,
+    depth: xr.DataArray,
+    lon: xr.DataArray,
+    lat: xr.DataArray,
+) -> xr.DataArray:
+    """Convert potential temperature to in-situ temperature (TEOS-10).
+
+    ROMS (and GLORYS ``thetao``) carry potential temperature; predictors trained on
+    bottle data, such as ESPER's, are in-situ temperature. In deep water the two
+    differ by about 0.15 °C at 2 km and 0.45 °C at 5 km.
+
+    Parameters
+    ----------
+    temp : xarray.DataArray
+        Potential temperature (°C).
+    salt : xarray.DataArray
+        Practical salinity.
+    depth : xarray.DataArray
+        Depth (m), positive down.
+    lon, lat : xarray.DataArray
+        Longitude (°E) and latitude (°N), broadcastable to ``temp``.
+
+    Returns
+    -------
+    xarray.DataArray
+        In-situ temperature (°C), lazy when the inputs are.
+    """
+    t = xr.apply_ufunc(
+        _in_situ_from_potential,
+        temp,
+        salt,
+        depth,
+        lon,
+        lat,
+        dask="parallelized",
+        output_dtypes=[np.float64],  # gsw computes in float64 whatever the input
+    )
+    return t.transpose(*temp.dims, ...)
+
+
 # Internal variable-name keys for the single source temperature/salinity pair used to
 # build the BGC density coordinate. A BGC dataset declares these keys in its
 # ``opt_var_names`` (mapping them to whatever the file calls the fields, e.g.

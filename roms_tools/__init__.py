@@ -35,6 +35,7 @@ from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat  # noqa: F401
 from roms_tools.setup.utils import (  # noqa: F401
     compute_in_situ_density,
     compute_potential_density,
+    in_situ_temperature,
 )
 from roms_tools.setup.bgc_groom import bgc_check, bgc_groom  # noqa: F401
 

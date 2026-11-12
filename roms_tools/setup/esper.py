@@ -53,6 +53,7 @@ import sys
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
+import gsw
 import numpy as np
 import xarray as xr
 
@@ -461,6 +462,56 @@ def _salinity_conditioning(source: dict) -> SalinityConditioning | None:
     return SalinityConditioning(spec["woa_salinity_path"], **band)
 
 
+def _in_situ_from_potential(theta, salt, depth, lon, lat):
+    """In-situ temperature (°C) from potential temperature (TEOS-10, numpy kernel)."""
+    p = gsw.p_from_z(-depth, lat)
+    sa = gsw.SA_from_SP(salt, p, lon, lat)
+    return gsw.t_from_CT(sa, gsw.CT_from_pt(sa, theta), p)
+
+
+def in_situ_temperature(
+    temp: xr.DataArray,
+    salt: xr.DataArray,
+    depth: xr.DataArray,
+    lon: xr.DataArray,
+    lat: xr.DataArray,
+) -> xr.DataArray:
+    """Convert potential temperature to in-situ temperature (TEOS-10).
+
+    ROMS (and GLORYS ``thetao``) carry potential temperature, but ESPER's predictors
+    are in-situ temperature, as in its GLODAP training data. The two differ by about
+    0.1 °C at 2 km and 0.4 °C at 5 km. Fed potential temperature, ESPER sees deep water
+    as colder than it is and predicts it too high in O2 and too low in Si, ALK and DIC.
+
+    Parameters
+    ----------
+    temp : xarray.DataArray
+        Potential temperature (°C).
+    salt : xarray.DataArray
+        Practical salinity.
+    depth : xarray.DataArray
+        Depth (m), positive down.
+    lon, lat : xarray.DataArray
+        Longitude (°E) and latitude (°N), broadcastable to ``temp``.
+
+    Returns
+    -------
+    xarray.DataArray
+        In-situ temperature (°C), lazy when the inputs are.
+    """
+    t = xr.apply_ufunc(
+        _in_situ_from_potential,
+        temp,
+        salt,
+        depth,
+        lon,
+        lat,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+    return t.transpose(*temp.dims, ...)
+
+
 def estimate_bgc_fields(
     temp: xr.DataArray,
     salt: xr.DataArray,
@@ -477,8 +528,10 @@ def estimate_bgc_fields(
     Parameters
     ----------
     temp, salt : xarray.DataArray
-        In-situ temperature (°C) and practical salinity on the ROMS grid (may be
-        dask-backed; results are then lazy -- see Returns).
+        Potential temperature (°C), as ROMS carries it, and practical salinity on the
+        ROMS grid (may be dask-backed; results are then lazy -- see Returns). The
+        temperature is converted to in-situ (:func:`in_situ_temperature`) before it
+        reaches PyESPER, whose predictors are in-situ temperature.
     lon, lat : xarray.DataArray
         Longitude (°E) and latitude (°N) of the same points (broadcastable to ``temp``).
     depth : xarray.DataArray
@@ -543,9 +596,12 @@ def estimate_bgc_fields(
             else depth_pos
         )
 
+    # ESPER's temperature predictor is in-situ; ROMS temp is potential temperature.
+    temp_in_situ = in_situ_temperature(temp, salt, depth_pos, lon, lat)
+
     est = estimate(
         salt,
-        temp,
+        temp_in_situ,
         lon,
         lat,
         depth_pos,
@@ -569,6 +625,8 @@ def estimate_bgc_fields(
     # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
     # depth), matching the GLODAP/WOA adapters' convention; then clamp each tracer
     # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 5.0 for O2).
+    # gsw.rho takes Conservative Temperature; potential temperature is the closer
+    # stand-in for it, so the density uses ``temp``, not ``temp_in_situ``.
     density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()

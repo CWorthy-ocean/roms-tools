@@ -21,11 +21,11 @@ NS, NY, NX = 10, 20, 24
 TRACERS = ["ALK", "DIC", "O2", "NO3", "PO4", "SiO3"]
 
 
-def _grid() -> xr.Dataset:
+def _grid(ny: int = NY, nx: int = NX) -> xr.Dataset:
     """Flat 1000 m basin with an abrupt 100 m shelf at x >= 18 and a land corner."""
-    h = np.full((NY, NX), 1000.0)
+    h = np.full((ny, nx), 1000.0)
     h[:, 18:] = 100.0
-    mask = np.ones((NY, NX))
+    mask = np.ones((ny, nx))
     mask[:3, :3] = 0
     sigma = (np.arange(1, NS + 1) - NS - 0.5) / NS
     return xr.Dataset(
@@ -323,6 +323,22 @@ def test_result_is_identical_for_any_tiling(grid, clean, tile, soft):
         checks = resolve_groom_settings(_SOFT_FLOOR)[0]
     ref = bgc_groom(_ic(clean), grid, checks=checks, tile=1000).compute()
     got = bgc_groom(_ic(clean), grid, checks=checks, tile=tile).compute()
+    for var in TRACERS:
+        assert np.array_equal(ref[var].values, got[var].values), var
+
+
+@pytest.mark.parametrize("tile", [24, 25, 30])
+def test_soft_floor_result_is_identical_when_a_short_last_tile_is_merged(tile):
+    """On 60 x 72 these tiles leave a last tile shorter than the passes' overlap (20),
+    which dask merges into its neighbour; the soft-floored result must not change.
+    """
+    grid = _grid(60, 72)
+    f = _fields(grid)
+    _plant(f)
+    _floored_core(f)
+    checks = resolve_groom_settings(_SOFT_FLOOR)[0]
+    ref = bgc_groom(_ic(f), grid, checks=checks, tile=1000).compute()
+    got = bgc_groom(_ic(f), grid, checks=checks, tile=tile).compute()
     for var in TRACERS:
         assert np.array_equal(ref[var].values, got[var].values), var
 

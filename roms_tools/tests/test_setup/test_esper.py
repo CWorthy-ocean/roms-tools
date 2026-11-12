@@ -2200,3 +2200,41 @@ def test_estimate_bgc_fields_feeds_pyesper_in_situ_temperature(monkeypatch):
     assert 0.25 < float(t.isel(y=0, s=1)) - 1.5 < 0.45
     # the mmol/m^3 conversion still uses in-situ density at depth
     assert float(out["ALK"].isel(y=0, s=1)) > float(out["ALK"].isel(y=0, s=0))
+
+
+def test_estimate_bgc_fields_drops_salinity_attrs_without_pyesper(monkeypatch):
+    """PyESPER's estimates carry its salinity input's attrs; none may reach the output.
+
+    The PyESPER-gated tests cover this too, but CI never installs PyESPER; this fake
+    reproduces the leak (``xr.full_like`` copies salt's attrs) so CI guards it.
+    """
+    import xarray as xr
+
+    import roms_tools.setup.esper as esper_module
+
+    def fake_nn(salt, temp, lon, lat, depth, *, variables, **kwargs):
+        return {v: xr.full_like(salt, 100.0) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module, "_ensure_pyesper", lambda path=None: {"nn": fake_nn}
+    )
+
+    salt_attrs = {
+        "standard_name": "sea_water_salinity",
+        "unit_long": "Practical Salinity Unit",
+        "valid_min": np.int16(1),
+        "valid_max": np.int16(28249),
+    }
+    out = estimate_bgc_fields(
+        xr.DataArray([[1.5, 1.5]], dims=("y", "s")),
+        xr.DataArray([[34.7, 34.7]], dims=("y", "s"), attrs=salt_attrs),
+        xr.DataArray([210.0], dims=("y",)),
+        xr.DataArray([40.0], dims=("y",)),
+        xr.DataArray([-10.0, -4000.0], dims=("s",)),
+        source={"name": "ESPER", "method": "nn"},
+        roms_variables=["ALK", "O2"],
+        est_dates=2000.0,
+    )
+    for name, da in out.items():
+        assert not set(salt_attrs) & set(da.attrs), (name, da.attrs)
+        assert "long_name" in da.attrs and "units" in da.attrs, (name, da.attrs)

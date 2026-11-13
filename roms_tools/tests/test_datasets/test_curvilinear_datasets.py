@@ -314,6 +314,19 @@ def test_extra_leading_record_is_consumed_by_the_diff(
     assert data.ds.time.values[0] == np.datetime64(expected_first)
 
 
+def test_zarr_store_requires_dask(synthetic_store):
+    """A local zarr copy read without dask gets CONUS404's own error message.
+
+    The zarr loader is dask-only; without this check the user saw the loader's
+    internal "read_zarr must be used with use_dask".
+    """
+    path, _ = synthetic_store
+    with pytest.raises(ValueError, match=r"requires `use_dask=True`"):
+        CONUS404Dataset(
+            filename=str(path), start_time=START, end_time=END, use_dask=False
+        )
+
+
 @pytest.mark.parametrize(
     ("start", "pad"),
     [

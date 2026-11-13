@@ -715,17 +715,30 @@ class CONUS404Dataset(CurvilinearDataset):
     def __post_init__(self) -> None:
         """Resolve the store backend, then run the base initialization."""
         filename = str(self.filename)
+        is_s3 = filename.startswith("s3://")
 
-        if filename.startswith("s3://"):
+        if (
+            is_s3
+            or filename.startswith(("http://", "https://"))
+            or filename.endswith(".zarr")
+        ):
             self.read_zarr = True
+        # The zarr path is dask-only (see `load_data`); say so in CONUS404's terms
+        # rather than letting the loader's internal message surface.
+        if self.read_zarr and not self.use_dask:
+            raise ValueError(
+                "Reading CONUS404 from a zarr store (the default cloud store, or a "
+                "local copy) requires `use_dask=True`. Please enable Dask by setting "
+                "`use_dask=True`."
+            )
+
+        if is_s3:
             if not has_s3fs():
                 raise RuntimeError(
                     get_pkg_error_msg("cloud-based CONUS404 data", "s3fs", "stream")
                 )
             if self.storage_options is None:
                 self.storage_options = dict(CONUS404_STORAGE_OPTIONS)
-        elif filename.startswith(("http://", "https://")) or filename.endswith(".zarr"):
-            self.read_zarr = True
 
         if self.qair_method == "fixed_pressure":
             # PSFC is unused in this mode; don't pay to read it.

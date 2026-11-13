@@ -839,12 +839,8 @@ class SurfaceForcing:
                     )
                     source["path"] = DEFAULT_CONUS404_PATH
                     data_dict["filename"] = DEFAULT_CONUS404_PATH
-                if str(data_dict["filename"]).startswith("s3://") and not self.use_dask:
-                    raise ValueError(
-                        "Cloud-based CONUS404 access requires `use_dask=True`. "
-                        "Please enable Dask by setting `use_dask=True`."
-                    )
-                # `initial_slice_bounds` names lat/lon dimensions and is a no-op on
+                # `CONUS404Dataset` raises if its store needs dask and
+                # `use_dask=False`. `initial_slice_bounds` names lat/lon dimensions and is a no-op on
                 # the zarr path; CurvilinearDataset logs and ignores it, so don't
                 # pass it at all.
                 data_dict.pop("initial_slice_bounds", None)

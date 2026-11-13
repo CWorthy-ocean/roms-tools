@@ -181,6 +181,21 @@ class CurvilinearDataset:
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     _default_lateral_dask_chunk: ClassVar[int | None] = None
 
+    rad_time_offset: ClassVar[timedelta | None] = None
+    """Offset from the radiation time stamp to the middle of its averaging period.
+
+    ``None`` for a source without time-averaged radiation; ``SurfaceForcing``
+    builds a ``rad_time`` coordinate only when this is set.
+    """
+
+    nan_outside_footprint: ClassVar[bool] = True
+    """Whether regridded fields are NaN outside the source footprint by design.
+
+    ``True`` here: a curvilinear source is regional and its regrid does not
+    extrapolate. ``SurfaceForcing`` keeps those NaNs, which mark where the source
+    has no data, instead of filling them and validating ocean points.
+    """
+
     is_global: bool = field(init=False, repr=False, default=False)
     resolution: float = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)

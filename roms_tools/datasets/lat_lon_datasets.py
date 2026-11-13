@@ -199,6 +199,21 @@ class LatLonDataset:
     apply_post_processing: bool = True
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
     _default_lateral_dask_chunk: ClassVar[int | None] = None
+
+    rad_time_offset: ClassVar[timedelta | None] = None
+    """Offset from the radiation time stamp to the middle of its averaging period.
+
+    ``None`` for a source without time-averaged radiation; ``SurfaceForcing``
+    builds a ``rad_time`` coordinate only when this is set.
+    """
+
+    nan_outside_footprint: ClassVar[bool] = False
+    """Whether regridded fields are NaN outside the source footprint by design.
+
+    ``False`` for lat/lon sources: they are filled and extrapolated, and
+    ``SurfaceForcing`` treats any NaN at an ocean point as an error.
+    """
+
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 

@@ -998,6 +998,33 @@ def interpolate_dynamic_bgc_by_calendar_year(
     return interpolated
 
 
+#: Attributes that describe how a *source* file stored a variable -- its packed range,
+#: packing and fill -- rather than the variable itself. Once roms-tools has decoded,
+#: regridded and cast the field they are wrong (GLORYS's ``valid_min``/``valid_max``
+#: are short-integer packed counts, e.g. 1..28249 for salinity), and readers that honour
+#: them, such as netCDF4-python, mask real values outside that range.
+SOURCE_ENCODING_ATTRS = (
+    "valid_min",
+    "valid_max",
+    "valid_range",
+    "actual_range",
+    "scale_factor",
+    "add_offset",
+    "missing_value",
+)
+
+
+def drop_source_encoding_attrs(da: xr.DataArray) -> xr.DataArray:
+    """Return ``da`` without the :data:`SOURCE_ENCODING_ATTRS` it inherited from its
+    source; every other attribute is kept.
+    """
+    if not any(k in da.attrs for k in SOURCE_ENCODING_ATTRS):
+        return da
+    da = da.copy(deep=False)
+    da.attrs = {k: v for k, v in da.attrs.items() if k not in SOURCE_ENCODING_ATTRS}
+    return da
+
+
 def get_variable_metadata():
     """Retrieves metadata for commonly used variables in the dataset.
 
@@ -1322,15 +1349,18 @@ def compute_in_situ_density(
     Pressure is derived from depth via ``gsw.p_from_z`` and density is then
     computed with ``gsw.rho``, both wrapped in ``apply_ufunc`` for dask
     compatibility. Like :func:`compute_potential_density`, this treats
-    practical salinity as Absolute Salinity and in-situ temperature as
-    Conservative Temperature -- an approximation carried over from that
-    function for consistency, sufficient for the µmol/kg -> mmol/m³ unit
-    conversions that call this.
+    practical salinity as Absolute Salinity and ``temp`` as Conservative
+    Temperature -- an approximation carried over from that function for
+    consistency, sufficient for the µmol/kg -> mmol/m³ unit conversions that
+    call this. Potential temperature (ROMS ``temp``, as the ESPER path passes)
+    is the closer stand-in for Conservative Temperature; the in-situ
+    temperature of the WOA/GLODAP climatologies differs from it by under
+    0.5 °C, about 0.01% in density.
 
     Parameters
     ----------
     temp : xr.DataArray
-        In-situ temperature (°C).
+        Temperature (°C), potential or in-situ; used as Conservative Temperature.
     salt : xr.DataArray
         Practical salinity (PSU).
     depth : xr.DataArray
@@ -1374,6 +1404,55 @@ def compute_in_situ_density(
     density.attrs["long_name"] = "in-situ density"
     density.attrs["units"] = "kg/m^3"
     return density
+
+
+def _in_situ_from_potential(theta, salt, depth, lon, lat):
+    """In-situ temperature (°C) from potential temperature (TEOS-10, numpy kernel)."""
+    p = gsw.p_from_z(-depth, lat)
+    sa = gsw.SA_from_SP(salt, p, lon, lat)
+    return gsw.t_from_CT(sa, gsw.CT_from_pt(sa, theta), p)
+
+
+def in_situ_temperature(
+    temp: xr.DataArray,
+    salt: xr.DataArray,
+    depth: xr.DataArray,
+    lon: xr.DataArray,
+    lat: xr.DataArray,
+) -> xr.DataArray:
+    """Convert potential temperature to in-situ temperature (TEOS-10).
+
+    ROMS (and GLORYS ``thetao``) carry potential temperature; predictors trained on
+    bottle data, such as ESPER's, are in-situ temperature. In deep water the two
+    differ by about 0.15 °C at 2 km and 0.45 °C at 5 km.
+
+    Parameters
+    ----------
+    temp : xarray.DataArray
+        Potential temperature (°C).
+    salt : xarray.DataArray
+        Practical salinity.
+    depth : xarray.DataArray
+        Depth (m), positive down.
+    lon, lat : xarray.DataArray
+        Longitude (°E) and latitude (°N), broadcastable to ``temp``.
+
+    Returns
+    -------
+    xarray.DataArray
+        In-situ temperature (°C), lazy when the inputs are.
+    """
+    t = xr.apply_ufunc(
+        _in_situ_from_potential,
+        temp,
+        salt,
+        depth,
+        lon,
+        lat,
+        dask="parallelized",
+        output_dtypes=[np.float64],  # gsw computes in float64 whatever the input
+    )
+    return t.transpose(*temp.dims, ...)
 
 
 # Internal variable-name keys for the single source temperature/salinity pair used to

@@ -173,6 +173,43 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
     )
 
 
+def test_initial_conditions_drop_source_packed_valid_range(tmp_path, use_dask):
+    """A source's packed ``valid_min``/``valid_max`` must not reach written variables.
+
+    Copernicus GLORYS stores fields as packed shorts, and xarray leaves the packed
+    range in ``attrs`` after decoding (e.g. 1..28249 for salinity). Copied onto the
+    float output, netCDF4-python masks every value outside it, such as temp < 1 °C.
+    The stored test files are unpacked, so add the attrs to a copy.
+    """
+    src = xr.open_dataset(download_test_data("GLORYS_coarse_test_data.nc")).load()
+    for var in src.data_vars:
+        src[var].attrs.update(valid_min=np.int16(1), valid_max=np.int16(28249))
+    fname = tmp_path / "glorys_with_packed_range.nc"
+    src.to_netcdf(fname)
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+    )
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+    for var in ("temp", "salt", "u", "v", "zeta"):
+        assert not {"valid_min", "valid_max"} & set(ic.ds[var].attrs), (
+            var,
+            ic.ds[var].attrs,
+        )
+
+
 @pytest.mark.parametrize(
     "ic_fixture",
     [

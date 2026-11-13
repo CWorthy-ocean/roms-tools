@@ -27,6 +27,12 @@ from roms_tools.setup.nesting import align_grids, make_nesting_info  # noqa: F40
 from roms_tools.plot import plot_nesting  # noqa: F401
 from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
 from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
+from roms_tools.setup.surface_forcing_blend import (  # noqa: F401
+    blend_surface_forcing,
+    blend_surface_forcing_from_yaml,
+    blend_to_yaml,
+    save_blended_surface_forcing,
+)
 from roms_tools.setup.tides import TidalForcing  # noqa: F401
 from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
 from roms_tools.datasets.lat_lon_datasets import get_glorys_bounds  # noqa: F401
@@ -35,6 +41,7 @@ from roms_tools.utils import DEFAULT_NETCDF_FORMAT, NetCDFFormat  # noqa: F401
 from roms_tools.setup.utils import (  # noqa: F401
     compute_in_situ_density,
     compute_potential_density,
+    in_situ_temperature,
 )
 from roms_tools.setup.bgc_groom import bgc_check, bgc_groom  # noqa: F401
 

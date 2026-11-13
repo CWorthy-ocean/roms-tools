@@ -312,6 +312,7 @@ def fill_nans_over_land(
     var_name: str,
     fill_value: float = 0.0,
     hint: str = WET_NAN_HINT_REGRID,
+    override_hint: str | None = None,
 ) -> xr.DataArray:
     """Replace NaN by ``fill_value`` over land, raising if any NaN sits at a wet point.
 
@@ -332,6 +333,9 @@ def fill_nans_over_land(
     hint : str, optional
         Likely cause and remedy, appended to the error message. Defaults to advice for
         regridded lat/lon sources.
+    override_hint : str, optional
+        How the caller can skip this check, appended last. Defaults to the advice
+        for the setup classes, whose ``bypass_validation=True`` fills every NaN.
 
     Returns
     -------
@@ -355,14 +359,20 @@ def fill_nans_over_land(
         else ""
     )
 
+    override = (
+        override_hint
+        if override_hint is not None
+        else f"With `bypass_validation=True` they are written as {fill_value}."
+    )
+
     def _fill(values, wet):
         is_nan = np.isnan(values)
         n_wet_nan = np.count_nonzero(is_nan & (wet == 1))
         if n_wet_nan:
             raise ValueError(
                 f"{var_name} has {n_wet_nan} NaN value(s) at ocean points "
-                f"(mask == 1){in_chunks}, so no value reached them. {hint} With "
-                f"`bypass_validation=True` they are written as {fill_value}."
+                f"(mask == 1){in_chunks}, so no value reached them. {hint} "
+                f"{override}"
             )
         return np.where(is_nan, values.dtype.type(fill_value), values)
 
@@ -998,6 +1008,33 @@ def interpolate_dynamic_bgc_by_calendar_year(
     return interpolated
 
 
+#: Attributes that describe how a *source* file stored a variable -- its packed range,
+#: packing and fill -- rather than the variable itself. Once roms-tools has decoded,
+#: regridded and cast the field they are wrong (GLORYS's ``valid_min``/``valid_max``
+#: are short-integer packed counts, e.g. 1..28249 for salinity), and readers that honour
+#: them, such as netCDF4-python, mask real values outside that range.
+SOURCE_ENCODING_ATTRS = (
+    "valid_min",
+    "valid_max",
+    "valid_range",
+    "actual_range",
+    "scale_factor",
+    "add_offset",
+    "missing_value",
+)
+
+
+def drop_source_encoding_attrs(da: xr.DataArray) -> xr.DataArray:
+    """Return ``da`` without the :data:`SOURCE_ENCODING_ATTRS` it inherited from its
+    source; every other attribute is kept.
+    """
+    if not any(k in da.attrs for k in SOURCE_ENCODING_ATTRS):
+        return da
+    da = da.copy(deep=False)
+    da.attrs = {k: v for k, v in da.attrs.items() if k not in SOURCE_ENCODING_ATTRS}
+    return da
+
+
 def get_variable_metadata():
     """Retrieves metadata for commonly used variables in the dataset.
 
@@ -1322,15 +1359,18 @@ def compute_in_situ_density(
     Pressure is derived from depth via ``gsw.p_from_z`` and density is then
     computed with ``gsw.rho``, both wrapped in ``apply_ufunc`` for dask
     compatibility. Like :func:`compute_potential_density`, this treats
-    practical salinity as Absolute Salinity and in-situ temperature as
-    Conservative Temperature -- an approximation carried over from that
-    function for consistency, sufficient for the µmol/kg -> mmol/m³ unit
-    conversions that call this.
+    practical salinity as Absolute Salinity and ``temp`` as Conservative
+    Temperature -- an approximation carried over from that function for
+    consistency, sufficient for the µmol/kg -> mmol/m³ unit conversions that
+    call this. Potential temperature (ROMS ``temp``, as the ESPER path passes)
+    is the closer stand-in for Conservative Temperature; the in-situ
+    temperature of the WOA/GLODAP climatologies differs from it by under
+    0.5 °C, about 0.01% in density.
 
     Parameters
     ----------
     temp : xr.DataArray
-        In-situ temperature (°C).
+        Temperature (°C), potential or in-situ; used as Conservative Temperature.
     salt : xr.DataArray
         Practical salinity (PSU).
     depth : xr.DataArray
@@ -1374,6 +1414,55 @@ def compute_in_situ_density(
     density.attrs["long_name"] = "in-situ density"
     density.attrs["units"] = "kg/m^3"
     return density
+
+
+def _in_situ_from_potential(theta, salt, depth, lon, lat):
+    """In-situ temperature (°C) from potential temperature (TEOS-10, numpy kernel)."""
+    p = gsw.p_from_z(-depth, lat)
+    sa = gsw.SA_from_SP(salt, p, lon, lat)
+    return gsw.t_from_CT(sa, gsw.CT_from_pt(sa, theta), p)
+
+
+def in_situ_temperature(
+    temp: xr.DataArray,
+    salt: xr.DataArray,
+    depth: xr.DataArray,
+    lon: xr.DataArray,
+    lat: xr.DataArray,
+) -> xr.DataArray:
+    """Convert potential temperature to in-situ temperature (TEOS-10).
+
+    ROMS (and GLORYS ``thetao``) carry potential temperature; predictors trained on
+    bottle data, such as ESPER's, are in-situ temperature. In deep water the two
+    differ by about 0.15 °C at 2 km and 0.45 °C at 5 km.
+
+    Parameters
+    ----------
+    temp : xarray.DataArray
+        Potential temperature (°C).
+    salt : xarray.DataArray
+        Practical salinity.
+    depth : xarray.DataArray
+        Depth (m), positive down.
+    lon, lat : xarray.DataArray
+        Longitude (°E) and latitude (°N), broadcastable to ``temp``.
+
+    Returns
+    -------
+    xarray.DataArray
+        In-situ temperature (°C), lazy when the inputs are.
+    """
+    t = xr.apply_ufunc(
+        _in_situ_from_potential,
+        temp,
+        salt,
+        depth,
+        lon,
+        lat,
+        dask="parallelized",
+        output_dtypes=[np.float64],  # gsw computes in float64 whatever the input
+    )
+    return t.transpose(*temp.dims, ...)
 
 
 # Internal variable-name keys for the single source temperature/salinity pair used to
@@ -2697,6 +2786,42 @@ def get_roms_tools_version_info() -> dict[str, str | None]:
     return dict(_version_info_cache)
 
 
+# Global attribute holding the YAML that rebuilds a dataset.
+RECIPE_ATTR = "roms_tools_yaml"
+
+
+def yaml_text(yaml_data) -> str:
+    """Return the YAML header and the dumped payload, as `write_to_yaml` writes them.
+
+    Parameters
+    ----------
+    yaml_data : dict or str
+        The pre-serialized YAML data. This data may include the forcing object and grid.
+
+    Returns
+    -------
+    str
+        A header document with the version of `roms-tools`, then the payload.
+    """
+    # `roms_tools_git_commit` may be `None` (see get_roms_tools_version_info); emit
+    # the actual YAML `null` literal for that case rather than the string "None",
+    # so it round-trips as `None` (Python), not the misleading string `"None"`.
+    version_info = get_roms_tools_version_info()
+    git_commit = version_info["roms_tools_git_commit"]
+    git_commit_repr = "null" if git_commit is None else git_commit
+    header = (
+        f"---\nroms_tools_version: {version_info['roms_tools_version']}\n"
+        f"roms_tools_git_commit: {git_commit_repr}\n---\n"
+    )
+    payload = yaml.dump(
+        yaml_data,
+        Dumper=NoAliasDumper,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return header + payload
+
+
 def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
@@ -2716,33 +2841,7 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     None
         This function does not return anything. It writes the provided YAML data directly to the specified file.
     """
-    # Convert the filepath to a Path object
-    filepath = Path(filepath)
-
-    # Create YAML header with version information. `roms_tools_git_commit` may be
-    # `None` (see get_roms_tools_version_info); emit the actual YAML `null`
-    # literal for that case rather than the string "None", so it round-trips as
-    # `None` (Python), not the misleading string `"None"`.
-    version_info = get_roms_tools_version_info()
-    git_commit = version_info["roms_tools_git_commit"]
-    git_commit_repr = "null" if git_commit is None else git_commit
-    header = (
-        f"---\nroms_tools_version: {version_info['roms_tools_version']}\n"
-        f"roms_tools_git_commit: {git_commit_repr}\n---\n"
-    )
-
-    # Write to YAML file
-    with filepath.open("w") as file:
-        # Write the header first
-        file.write(header)
-        # Write the serialized YAML data
-        yaml.dump(
-            yaml_data,
-            file,
-            Dumper=NoAliasDumper,
-            default_flow_style=False,
-            sort_keys=False,
-        )
+    Path(filepath).write_text(yaml_text(yaml_data))
 
 
 def serialize_paths(value: Any) -> Any:

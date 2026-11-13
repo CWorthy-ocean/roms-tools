@@ -25,6 +25,12 @@ Surface Forcing
    :toctree: generated/
 
    roms_tools.SurfaceForcing
+   roms_tools.datasets.curvilinear_datasets.CONUS404Dataset
+   roms_tools.blend_surface_forcing
+   roms_tools.save_blended_surface_forcing
+   roms_tools.blend_to_yaml
+   roms_tools.blend_surface_forcing_from_yaml
+   roms_tools.setup.surface_forcing_blend.compute_blend_weights
 
 Initial Conditions
 --------------------
@@ -106,6 +112,7 @@ Utilities
    roms_tools.datasets.download.download_woa23_bgc
    roms_tools.setup.utils.compute_potential_density
    roms_tools.setup.utils.compute_in_situ_density
+   roms_tools.setup.utils.in_situ_temperature
    roms_tools.setup.utils.compute_mld
    roms_tools.setup.bgc_groom.bgc_check
    roms_tools.setup.bgc_groom.bgc_groom

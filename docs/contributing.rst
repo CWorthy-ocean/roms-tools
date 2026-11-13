@@ -19,6 +19,9 @@ You can check the functionality of the ROMS-Tools code by running the test suite
 Contributing code
 =================
 
+Before you open an issue or a pull request, read the `[C]Worthy AI policy <https://github.com/CWorthy-ocean/.github/blob/main/AI_POLICY.md>`_. Every pull request description carries one ``AI disclosure:`` line, which the pull request template provides.
+Keep each pull request focused on one thing, and open an issue first for anything larger than a fix.
+
 If you have written new code, you can run the tests as described in the previous step. You will likely have to iterate here several times until all tests pass.
 The next step is to make sure that the code is formatted properly. Activate the environment::
 

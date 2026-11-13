@@ -289,17 +289,24 @@ def test_staggered_coords_dropped(dataset):
 
 
 @pytest.mark.parametrize(
-    ("pad", "expected_first"),
-    [(True, START - timedelta(hours=1)), (False, START)],
+    ("start", "pad", "expected_first"),
+    [
+        (START, True, START - timedelta(hours=1)),
+        (START, False, START),
+        # A start between two records: the series is what an undifferenced source
+        # would select, the last record before 03:30 (pad) or the first after.
+        (START + timedelta(minutes=30), True, START),
+        (START + timedelta(minutes=30), False, START + timedelta(hours=1)),
+    ],
 )
 def test_extra_leading_record_is_consumed_by_the_diff(
-    synthetic_store, pad, expected_first
+    synthetic_store, start, pad, expected_first
 ):
     """The 1 h widening leaves exactly the series an undifferenced source would."""
     path, _ = synthetic_store
     data = CONUS404Dataset(
         filename=str(path),
-        start_time=START,
+        start_time=start,
         end_time=END,
         use_dask=True,
         start_time_pad=pad,
@@ -307,16 +314,28 @@ def test_extra_leading_record_is_consumed_by_the_diff(
     assert data.ds.time.values[0] == np.datetime64(expected_first)
 
 
-def test_start_before_store_beginning_raises(tmp_path):
+@pytest.mark.parametrize(
+    ("start", "pad"),
+    [
+        # The store begins at 00:00.
+        (datetime(2020, 6, 15, 0), True),
+        (datetime(2020, 6, 15, 0), False),
+        # With the pad, one record before the start is not enough: the diff
+        # consumes it.
+        (datetime(2020, 6, 15, 1), True),
+    ],
+)
+def test_start_before_store_beginning_raises(tmp_path, start, pad):
     """A missing lead record is an error, not a silently shortened series."""
     ds, _ = synthetic_conus404(start=datetime(2020, 6, 15, 0), ntime=12)
     path = write_conus404_store(tmp_path / "late_start", ds, fmt="zarr")
     with pytest.raises(ValueError, match="accumulated since the model start"):
         CONUS404Dataset(
             filename=str(path),
-            start_time=datetime(2020, 6, 15, 0),
+            start_time=start,
             end_time=datetime(2020, 6, 15, 6),
             use_dask=True,
+            start_time_pad=pad,
         )
 
 

@@ -940,6 +940,12 @@ class CONUS404Dataset(CurvilinearDataset):
         when no record exists before the requested start, falling back to the
         first record in the store. For a differenced accumulation that would
         silently shorten the series by an hour, so it is an error here.
+
+        The diff consumes the first selected record. With ``start_time_pad`` the
+        pad record, the last one before ``start_time``, must survive it; without
+        it, the consumed record must lie before ``start_time``, so that nothing in
+        the window is lost. Neither condition assumes ``start_time`` is on the
+        hour.
         """
         if self.start_time is None:
             return
@@ -950,14 +956,18 @@ class CONUS404Dataset(CurvilinearDataset):
                 f"{ds.sizes.get(time_dim, 0)}."
             )
 
-        required = self.start_time - (
-            timedelta(hours=1) if self.start_time_pad else timedelta(0)
-        )
-        first_after_diff = ds[time_dim].values[1]
-        if first_after_diff > np.datetime64(required):
+        start = np.datetime64(self.start_time)
+        consumed, first_after_diff = ds[time_dim].values[:2]
+        if self.start_time_pad:
+            lead_record_ok = first_after_diff < start
+            needed = "two hourly records"
+        else:
+            lead_record_ok = consumed < start
+            needed = "one hourly record"
+        if not lead_record_ok:
             raise ValueError(
-                f"CONUS404 radiation is accumulated since the model start and needs "
-                f"one hourly record before {required}, but the earliest available "
-                f"record is {ds[time_dim].values[0]}. Move `start_time` later by at "
-                f"least two hours."
+                f"CONUS404 radiation is accumulated since the model start, and "
+                f"differencing it consumes the first record, so it needs {needed} "
+                f"before `start_time` ({self.start_time}); the selection starts at "
+                f"{consumed}. Use a later `start_time`."
             )

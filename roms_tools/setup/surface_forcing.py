@@ -94,18 +94,30 @@ class SurfaceForcing:
     source : RawDataSource
         Dictionary specifying the source of the surface forcing data. Keys include:
 
-          - "name" (str): Name of the data source. For ``type="physics"``:
-            "ERA5" (global, ~28 km) or "CONUS404" (North America only, 4 km).
-            See the CONUS404 notes below.
+          - "name" (str): Name of the data source. The valid names depend on
+            ``type``:
+
+            - ``"physics"``: "ERA5" (global, ~28 km) or "CONUS404" (North America
+              only, 4 km; see Notes).
+            - ``"bgc"``: "CESM_REGRIDDED", "UNIFIED" or "MBL_co2".
+            - ``"restoring"``: "WOA" or "UNIFIED" for ``restoring_forces=["sss"]``,
+              and "SODA" for ``restoring_forces=["sDIC", "sALK"]``.
+
           - "path" (optional; Union[str, Path, List[Union[str, Path]]]): Path(s) to the raw data file(s). Accepted formats:
 
             - A single string (supports wildcards),
             - A single Path object,
             - A list of strings or Path objects.
 
-            If omitted or set to the ARCO URL, ERA5 is streamed from the cloud. For
-            "CONUS404", omitting it streams from the USGS/OSN zarr store
-            (``s3://hytest/conus404/conus404_hourly.zarr``).
+            Required, except for these sources, which use a default when it is
+            omitted:
+
+            - "ERA5": streamed from the ARCO ERA5 archive on Google Cloud.
+            - "CONUS404": streamed from the USGS/OSN zarr store.
+            - "MBL_co2": the NOAA GML Marine Boundary Layer reference, read from
+              its URL.
+            - "SODA": the OceanSODA-ETHZ v2025 file, read from NCEI.
+
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str

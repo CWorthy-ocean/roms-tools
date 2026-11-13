@@ -1,6 +1,8 @@
 # Summary
 <!-- Feel free to remove sections irrelevant to this PR or leave the default `N/A` content -->
 
+AI disclosure: <!-- Required. "none", or "<tool>; <what it did>", e.g. "Claude Code; drafted the code and this description". Policy: https://github.com/CWorthy-ocean/.github/blob/main/AI_POLICY.md -->
+
 ## Breaking Changes
 <!-- List any breaking changes to interfaces, changes to inputs or outputs, or procedural changes -->
 - N/A

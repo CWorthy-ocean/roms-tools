@@ -587,7 +587,7 @@ CONUS404
 
 .. warning::
 
-   CONUS404 is regional, and its coverage is smaller than its lat/lon bounding box (17.65–57.34° N, 138.73–57.07° W) suggests: a California Current domain is fully covered, while a Gulf of Alaska domain is almost entirely outside. ROMS grid points outside the footprint are written as ``NaN``, and ``SurfaceForcing`` logs a warning saying how many. ROMS cannot run on ``NaN`` forcing, so use a grid inside the footprint, or fill those points from a global product such as ERA5 before running ROMS. The exact footprint, and the precision of CONUS404's hourly radiation, are described in :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`.
+   CONUS404 is regional, and its coverage is smaller than its lat/lon bounding box (17.65–57.34° N, 138.73–57.07° W) suggests: a California Current domain is fully covered, while a Gulf of Alaska domain is almost entirely outside. ROMS grid points outside the footprint are written as ``NaN``, and ``SurfaceForcing`` logs a warning saying how many. ROMS cannot run on ``NaN`` forcing, so use a grid inside the footprint, or fill those points from a global product such as ERA5 with ``roms_tools.blend_surface_forcing`` (see :doc:`blend_surface_forcing`) before running ROMS. The exact footprint, and the precision of CONUS404's hourly radiation, are described in :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`.
 
 .. dropdown:: Required fields
 

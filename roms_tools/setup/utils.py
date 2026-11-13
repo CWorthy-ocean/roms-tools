@@ -312,6 +312,7 @@ def fill_nans_over_land(
     var_name: str,
     fill_value: float = 0.0,
     hint: str = WET_NAN_HINT_REGRID,
+    override_hint: str | None = None,
 ) -> xr.DataArray:
     """Replace NaN by ``fill_value`` over land, raising if any NaN sits at a wet point.
 
@@ -332,6 +333,9 @@ def fill_nans_over_land(
     hint : str, optional
         Likely cause and remedy, appended to the error message. Defaults to advice for
         regridded lat/lon sources.
+    override_hint : str, optional
+        How the caller can skip this check, appended last. Defaults to the advice
+        for the setup classes, whose ``bypass_validation=True`` fills every NaN.
 
     Returns
     -------
@@ -355,14 +359,20 @@ def fill_nans_over_land(
         else ""
     )
 
+    override = (
+        override_hint
+        if override_hint is not None
+        else f"With `bypass_validation=True` they are written as {fill_value}."
+    )
+
     def _fill(values, wet):
         is_nan = np.isnan(values)
         n_wet_nan = np.count_nonzero(is_nan & (wet == 1))
         if n_wet_nan:
             raise ValueError(
                 f"{var_name} has {n_wet_nan} NaN value(s) at ocean points "
-                f"(mask == 1){in_chunks}, so no value reached them. {hint} With "
-                f"`bypass_validation=True` they are written as {fill_value}."
+                f"(mask == 1){in_chunks}, so no value reached them. {hint} "
+                f"{override}"
             )
         return np.where(is_nan, values.dtype.type(fill_value), values)
 
@@ -2776,6 +2786,42 @@ def get_roms_tools_version_info() -> dict[str, str | None]:
     return dict(_version_info_cache)
 
 
+# Global attribute holding the YAML that rebuilds a dataset.
+RECIPE_ATTR = "roms_tools_yaml"
+
+
+def yaml_text(yaml_data) -> str:
+    """Return the YAML header and the dumped payload, as `write_to_yaml` writes them.
+
+    Parameters
+    ----------
+    yaml_data : dict or str
+        The pre-serialized YAML data. This data may include the forcing object and grid.
+
+    Returns
+    -------
+    str
+        A header document with the version of `roms-tools`, then the payload.
+    """
+    # `roms_tools_git_commit` may be `None` (see get_roms_tools_version_info); emit
+    # the actual YAML `null` literal for that case rather than the string "None",
+    # so it round-trips as `None` (Python), not the misleading string `"None"`.
+    version_info = get_roms_tools_version_info()
+    git_commit = version_info["roms_tools_git_commit"]
+    git_commit_repr = "null" if git_commit is None else git_commit
+    header = (
+        f"---\nroms_tools_version: {version_info['roms_tools_version']}\n"
+        f"roms_tools_git_commit: {git_commit_repr}\n---\n"
+    )
+    payload = yaml.dump(
+        yaml_data,
+        Dumper=NoAliasDumper,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return header + payload
+
+
 def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
@@ -2795,33 +2841,7 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     None
         This function does not return anything. It writes the provided YAML data directly to the specified file.
     """
-    # Convert the filepath to a Path object
-    filepath = Path(filepath)
-
-    # Create YAML header with version information. `roms_tools_git_commit` may be
-    # `None` (see get_roms_tools_version_info); emit the actual YAML `null`
-    # literal for that case rather than the string "None", so it round-trips as
-    # `None` (Python), not the misleading string `"None"`.
-    version_info = get_roms_tools_version_info()
-    git_commit = version_info["roms_tools_git_commit"]
-    git_commit_repr = "null" if git_commit is None else git_commit
-    header = (
-        f"---\nroms_tools_version: {version_info['roms_tools_version']}\n"
-        f"roms_tools_git_commit: {git_commit_repr}\n---\n"
-    )
-
-    # Write to YAML file
-    with filepath.open("w") as file:
-        # Write the header first
-        file.write(header)
-        # Write the serialized YAML data
-        yaml.dump(
-            yaml_data,
-            file,
-            Dumper=NoAliasDumper,
-            default_flow_style=False,
-            sort_keys=False,
-        )
+    Path(filepath).write_text(yaml_text(yaml_data))
 
 
 def serialize_paths(value: Any) -> Any:

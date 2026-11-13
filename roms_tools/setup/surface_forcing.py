@@ -36,6 +36,7 @@ from roms_tools.regrid import (
     select_source_mask,
 )
 from roms_tools.setup.utils import (
+    RECIPE_ATTR,
     RawDataSource,
     add_time_info_to_ds,
     apply_scipy_fallback_fill,
@@ -53,6 +54,7 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
+    yaml_text,
 )
 from roms_tools.utils import (
     DEFAULT_NETCDF_FORMAT,
@@ -174,10 +176,20 @@ class SurfaceForcing:
     as NaN, and the output carries ``nan_outside_source_footprint="True"``; a
     warning says how many points are affected, and a grid entirely outside the
     footprint is an error. ROMS cannot run on NaN forcing, so use a grid inside
-    the footprint, or fill those points from a global product such as ERA5 before
-    running. CONUS404 needs xESMF and ``correct_radiation=False``. Its footprint,
-    radiation precision and fields are described in
+    the footprint, or fill those points from a global product such as ERA5 with
+    :func:`~roms_tools.blend_surface_forcing` (see **Combining sources** below)
+    before running. CONUS404 needs xESMF and ``correct_radiation=False``. Its
+    footprint, radiation precision and fields are described in
     :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`.
+
+    **Combining sources.** A regional source such as CONUS404 leaves ``NaN`` in the
+    output wherever the target grid lies outside its footprint (see above). To fill
+    those points from a global source, optionally with a smooth transition, build a
+    second ``SurfaceForcing`` (e.g. ERA5) on the same grid, for the same times and
+    with the same explicit ``coarse_grid_mode``, and combine the two with
+    :func:`~roms_tools.blend_surface_forcing`; write
+    the result with
+    :func:`~roms_tools.save_blended_surface_forcing`.
 
     Examples
     --------
@@ -1255,6 +1267,7 @@ class SurfaceForcing:
         ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs[RECIPE_ATTR] = yaml_text(self._yaml_data())
         # prefill / regrid_method / extrap_method, as returned by the regrid step.
         ds.attrs.update(applied_regrid)
         ds.attrs["type"] = self.type
@@ -1409,8 +1422,10 @@ class SurfaceForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        forcing_dict = to_dict(self, exclude=["use_dask", "use_coarse_grid"])
-        write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(self._yaml_data(), filepath)
+
+    def _yaml_data(self) -> dict:
+        return to_dict(self, exclude=["use_dask", "use_coarse_grid"])
 
     @classmethod
     def from_yaml(

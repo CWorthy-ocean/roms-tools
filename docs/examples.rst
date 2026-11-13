@@ -22,6 +22,8 @@ The following examples cover task-specific workflows for the Perlmutter and Anvi
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>
    Creating surface forcing <surface_forcing>
+   Blending a regional and a global surface-forcing product <blend_surface_forcing>
+   Blending saved surface-forcing files <blend_surface_forcing_files>
    Preprocessing GloFAS river discharge <process_GloFAS>
    Creating river forcing <river_forcing>
    Creating tidal forcing <tides>

@@ -42,6 +42,7 @@ The following examples cover task-specific workflows for the Perlmutter and Anvi
    Visualizing ROMS Output <plotting_roms_output>
    Regridding ROMS Output <regridding_roms_output>
    Analyzing Carbon Dioxide Removal (CDR) Metrics <cdr_analysis>
+   Making carbonate sensitivities for CDR-LiTE <carbonate_sensitivities>
 
 
 Advanced Topics

@@ -12,6 +12,7 @@ from roms_tools.setup.grid import Grid  # noqa: I001, F401
 from roms_tools.analysis.roms_output import ROMSOutput  # noqa: F401
 from roms_tools.analysis.cdr_ensemble import Ensemble  # noqa: F401
 from roms_tools.analysis.cdr_upscaled import UpscaledCDR  # noqa: F401
+from roms_tools.analysis.eta_beta import calculate_eta_beta  # noqa: F401
 from roms_tools.setup.bgc_model import BGCModel, BGCMarbl  # noqa: F401
 from roms_tools.setup.boundary_forcing import (  # noqa: F401
     BoundaryForcing,

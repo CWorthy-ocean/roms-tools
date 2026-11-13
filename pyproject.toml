@@ -46,6 +46,7 @@ dependencies = [
     "dask[diagnostics]",
     "h5netcdf",
     "threadpoolctl",
+    "PyCO2SYS>=1.8,<2",  # 2.0 replaces the sys() API used in analysis/eta_beta.py
 ]
 dynamic = ["version"]
 

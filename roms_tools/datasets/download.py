@@ -170,6 +170,9 @@ pup_test_data = pooch.create(
         "rivr2o_riverinputs_2000.nc": "sha256:1ff94f4b732bb5fd91276120979a6af38d9a6f257570bb7fcc676c651f36dac0",
         "rivr2o_riverinputs_2001.nc": "sha256:3ca4ca6d12103ef8bdd67592c9eeaaf0e7a2a765f1d18ad4c978dee52ebbec04",
         "rivr2o_riverinputs_2002.nc": "sha256:0f760d85962ad025c88d39158e2a80ee33bb2d039877ef7dcb650ef32f56f660",
+        "Iceland_grid.nc": "sha256:cf9b0a3d019b6e0390afabe47a6dc1cc5fe2b80a368033ba537a5231630e646e",
+        "Iceland_his.20240710120000.nc": "sha256:e093bed6fbfcf7d055d28ed771b84af836c4bf66a8009990fae973083876bd51",
+        "Iceland_bgc.20240710120000.nc": "sha256:7626319b99e71edafe9518a920784b798181ee008925ddcc82417eeb3ff81ced",
     },
 )
 

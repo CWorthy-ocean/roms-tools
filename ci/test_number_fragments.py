@@ -12,6 +12,7 @@ Each test commits fragments to a scratch git repository with the real
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,9 @@ _SPEC = importlib.util.spec_from_file_location(
 assert _SPEC is not None and _SPEC.loader is not None
 nf = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(nf)
+
+# The fragment folder, from the same [tool.towncrier] setting the script reads.
+FRAGMENTS = nf.fragment_dir(REPO / "pyproject.toml")
 
 # Keep the developer's git config (hooks, signing, identity) out of the tests.
 _GIT = [
@@ -51,7 +55,7 @@ def _git(repo: Path, *args: str) -> str:
 
 def _commit(repo: Path, files: dict[str, str], subject: str) -> None:
     for name, text in files.items():
-        (repo / "changes" / name).write_text(text)
+        (repo / FRAGMENTS / name).write_text(text)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", subject)
 
@@ -70,8 +74,8 @@ def repo(tmp_path: Path) -> Path:
     (tmp_path / "docs" / "releases.md").write_text(
         "# Release notes\n\n<!-- towncrier release notes start -->\n\n## 5.3.0\n"
     )
-    (tmp_path / "changes").mkdir()
-    shutil.copy(REPO / "changes" / "README.md", tmp_path / "changes")
+    (tmp_path / FRAGMENTS).mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO / FRAGMENTS / "README.md", tmp_path / FRAGMENTS)
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-q", "-m", "Start")
@@ -79,7 +83,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _names(repo: Path) -> list[str]:
-    return sorted(p.name for p in (repo / "changes").iterdir())
+    return sorted(p.name for p in (repo / FRAGMENTS).iterdir())
 
 
 @pytest.mark.parametrize(
@@ -137,7 +141,7 @@ def test_github_lookup_when_subject_has_no_number(repo):
 def test_unresolved_fragment_stops_before_any_rename(repo):
     _commit(repo, {"+ok.misc.md": "Fine.\n"}, "Fine (#42)")
     _commit(repo, {"+lost.misc.md": "Lost.\n"}, "No number here")
-    (repo / "changes" / "+uncommitted.misc.md").write_text("New.\n")
+    (repo / FRAGMENTS / "+uncommitted.misc.md").write_text("New.\n")
     with pytest.raises(SystemExit, match=r"\+lost\.misc\.md.*\+uncommitted\.misc"):
         nf.number_fragments(repo, lookup=_no_lookup)
     assert "+ok.misc.md" in _names(repo)
@@ -145,7 +149,7 @@ def test_unresolved_fragment_stops_before_any_rename(repo):
 
 def test_renamed_fragment_keeps_the_pr_that_wrote_it(repo):
     _commit(repo, {"+note.misc.md": "A longer note about something.\n"}, "Add (#43)")
-    _git(repo, "mv", "changes/+note.misc.md", "changes/+note.bugfix.md")
+    _git(repo, "mv", f"{FRAGMENTS}/+note.misc.md", f"{FRAGMENTS}/+note.bugfix.md")
     _git(repo, "commit", "-q", "-m", "Fix the note's type (#44)")
     assert nf.number_fragments(repo, lookup=_no_lookup) == {
         "+note.bugfix.md": "43.bugfix.md"
@@ -156,7 +160,9 @@ def test_any_extension_and_untyped_files(repo):
     _commit(repo, {"+plain.misc": "No extension.\n"}, "Add (#45)")
     assert nf.number_fragments(repo, lookup=_no_lookup) == {"+plain.misc": "45.misc.md"}
     _commit(repo, {"+typo.bugfixes.md": "Misnamed.\n"}, "Add (#46)")
-    with pytest.raises(SystemExit, match=r"No fragment type in changes/\+typo"):
+    with pytest.raises(
+        SystemExit, match="No fragment type in " + re.escape(f"{FRAGMENTS}/+typo")
+    ):
         nf.number_fragments(repo, lookup=_no_lookup)
 
 
@@ -181,6 +187,23 @@ def test_release_commit_holds_only_notes_and_deletions(repo):
     )
     assert f"* A fix. ([#40]({URL}/40))" in (repo / "docs" / "releases.md").read_text()
     assert sorted(_git(repo, "status", "--porcelain").splitlines()) == [
-        "D  changes/+fill.bugfix.md",
+        f"D  {FRAGMENTS}/+fill.bugfix.md",
         "M  docs/releases.md",
     ]
+
+
+def test_folder_comes_from_the_towncrier_config(repo):
+    pyproject = repo / "pyproject.toml"
+    text = pyproject.read_text()
+    assert f'directory = "{FRAGMENTS}"' in text
+    pyproject.write_text(
+        text.replace(f'directory = "{FRAGMENTS}"', 'directory = "news"')
+    )
+    (repo / "news").mkdir()
+    (repo / "news" / "+moved.misc.md").write_text("Note.\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Elsewhere (#47)")
+    assert nf.number_fragments(repo, lookup=_no_lookup) == {
+        "+moved.misc.md": "47.misc.md"
+    }
+    assert (repo / "news" / "47.misc.md").exists()

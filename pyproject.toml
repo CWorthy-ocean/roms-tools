@@ -70,7 +70,7 @@ dev = [
     "pytest-xdist",
     "coverage",
     "pre-commit>=3.8",
-    # release notes: `towncrier build --draft` previews changes/ fragments
+    # release notes: `towncrier build --draft` previews docs/changes/ fragments
     "towncrier>=26.9",
     # test-data/fixture dependencies (not lint/test tooling per se, but required
     # for the base test suite to collect and pass without conda):
@@ -140,13 +140,14 @@ ignore = ["E501", "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104"
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
 
-# Release notes: fragments in changes/, named +<name>.<type>.md (or
+# Release notes: fragments in docs/changes/, named +<name>.<type>.md (or
 # <PR number>.<type>.md), assembled into docs/releases.md by
 # finalize_release_notes.yaml: ci/number_fragments.py renames each +<name> to
 # the PR that added it, then `towncrier build --version <tag>`.
 # See docs/contributing.rst.
 [tool.towncrier]
-directory = "changes"
+# The one place the fragment folder is named; ci/number_fragments.py reads it.
+directory = "docs/changes"
 filename = "docs/releases.md"
 # Must end in .md: towncrier picks Markdown or RST output by this extension.
 template = "ci/towncrier_template.md"
@@ -154,7 +155,7 @@ title_format = "## {version}"
 # Numbered fragments must use a PR number; +<name> fragments are exempt.
 issue_pattern = "\\d+"
 # Any ignore list, even an empty one, makes `towncrier build` fail on a
-# misnamed file in changes/ instead of silently leaving it out of the release.
+# misnamed file in docs/changes/ instead of silently leaving it out of the release.
 # (README.md is always ignored.)
 ignore = []
 issue_format = "[#{issue}](https://github.com/CWorthy-ocean/roms-tools/pull/{issue})"

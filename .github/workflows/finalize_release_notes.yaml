@@ -1,10 +1,10 @@
 name: Finalize Release Notes
 
-# Builds the release notes for <tag> from the fragments in changes/ and opens the
-# "Finalize release notes for <tag>" PR from next_release_notes. Edit the notes
-# on that PR if needed; merging it makes publish_release.yaml create the GitHub
-# release and delete next_release_notes. The branch name and PR title are what
-# publish_release.yaml matches on, so keep them in step.
+# Builds the release notes for <tag> from the fragments in docs/changes/ and
+# opens the "Finalize release notes for <tag>" PR from next_release_notes. Edit
+# the notes on that PR if needed; merging it makes publish_release.yaml create
+# the GitHub release and delete next_release_notes. The branch name and PR
+# title are what publish_release.yaml matches on, so keep them in step.
 
 on:
   workflow_dispatch:
@@ -73,7 +73,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python ci/number_fragments.py
 
-      - name: Build the release notes from changes/
+      - name: Build the release notes from docs/changes/
         # Writes the "## <tag>" section into docs/releases.md and stages it, and
         # git-removes the fragments it used.
         env:
@@ -98,4 +98,4 @@ jobs:
             --base main \
             --head next_release_notes \
             --title "Finalize release notes for $TAG" \
-            --body "Release notes for \`$TAG\`, built by towncrier from the fragments in \`changes/\`. Edit them here before merging; merging creates the GitHub release."
+            --body "Release notes for \`$TAG\`, built by towncrier from the fragments in \`docs/changes/\`. Edit them here before merging; merging creates the GitHub release."

@@ -6,7 +6,7 @@ release note, named `+<name>.<type>.md` (any short `<name>`, for example
 the release reader, optionally followed by `* ` sub-bullets. At release time
 each `+<name>` file is renamed after the pull request that added it, then
 `towncrier build` turns the fragments into a section of
-[`docs/releases.md`](../docs/releases.md) and deletes them.
+[`docs/releases.md`](../releases.md) and deletes them.
 
 | Type          | Section in the release notes |
 |---------------|------------------------------|
@@ -18,4 +18,4 @@ each `+<name>` file is renamed after the pull request that added it, then
 | `improvement` | Improvements                 |
 | `misc`        | Miscellaneous                |
 
-The [contributor guide](../docs/contributing.rst) has the details and examples.
+The [contributor guide](../contributing.rst) has the details and examples.

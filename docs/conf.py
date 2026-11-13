@@ -37,7 +37,9 @@ napolean_google_docstring = False
 napolean_numpy_docstring = True
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# changes/ holds release-note fragments, which towncrier collects into
+# releases.md; they are not pages of their own.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "changes"]
 
 napoleon_custom_sections = [
     ("Returns", "params_style"),

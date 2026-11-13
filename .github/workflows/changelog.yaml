@@ -1,6 +1,6 @@
 name: Changelog
 
-# Every pull request carries a release-note fragment in changes/ (see
+# Every pull request carries a release-note fragment in docs/changes/ (see
 # docs/contributing.rst). The `no-changelog` label skips the check for PRs with
 # nothing to tell users; a skipped job counts as passing for required checks.
 
@@ -40,6 +40,6 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           if ! towncrier check --compare-with "origin/$BASE_REF"; then
-            echo "::error::Add a release note as changes/+<name>.<type>.md (see changes/README.md), or label the PR no-changelog if users have nothing to learn from it."
+            echo "::error::Add a release note as docs/changes/+<name>.<type>.md (see docs/changes/README.md), or label the PR no-changelog if users have nothing to learn from it."
             exit 1
           fi

@@ -38,7 +38,7 @@ Once you got everything to pass, you can stage and commit your changes and push 
 Writing a release note
 ======================
 
-A pull request that changes something users could notice adds a release note: a file in the ``changes/`` directory named ``+<name>.<type>.md``, where ``<name>`` is any short label, such as ``+bottom-fill.bugfix.md``. Commit it with your code. The ``+`` means the pull request number is filled in at release time, from the merge commit, so the note links to your pull request. If you already know the number you can use it instead: ``<PR number>.<type>.md``. At release time the notes are collected into ``docs/releases.md`` and the files are deleted, so don't edit ``docs/releases.md`` yourself.
+A pull request that changes something users could notice adds a release note: a file in the ``docs/changes/`` directory named ``+<name>.<type>.md``, where ``<name>`` is any short label, such as ``+bottom-fill.bugfix.md``. Commit it with your code. The ``+`` means the pull request number is filled in at release time, from the merge commit, so the note links to your pull request. If you already know the number you can use it instead: ``<PR number>.<type>.md``. At release time the notes are collected into ``docs/releases.md`` and the files are deleted, so don't edit ``docs/releases.md`` yourself.
 
 The type decides the section the note appears under:
 
@@ -70,7 +70,7 @@ The type decides the section the note appears under:
      - Miscellaneous
      - documentation, CI, packaging and test changes worth mentioning
 
-Write the note for someone reading the release notes, not for the reviewer: what changed for them and anything they need to do, in one line. Details for the reviewer go in the pull request description. If the reader needs more, add ``* `` sub-bullets on the following lines. For example, ``changes/+restart-fill.bugfix.md``, added by pull request 709:
+Write the note for someone reading the release notes, not for the reviewer: what changed for them and anything they need to do, in one line. Details for the reviewer go in the pull request description. If the reader needs more, add ``* `` sub-bullets on the following lines. For example, ``docs/changes/+restart-fill.bugfix.md``, added by pull request 709:
 
 .. code-block:: markdown
 
@@ -102,7 +102,7 @@ Making a release
 
 For maintainers:
 
-1. Run the *Finalize Release Notes* workflow from the repository's Actions tab with the new version, for example ``5.4.0``. It renames each ``+<name>`` file after the pull request that added it, stopping with an error if it can't find one. It then turns the files in ``changes/`` into a ``## 5.4.0`` section of ``docs/releases.md``, deletes them, and opens a *Finalize release notes for 5.4.0* pull request from the ``next_release_notes`` branch.
+1. Run the *Finalize Release Notes* workflow from the repository's Actions tab with the new version, for example ``5.4.0``. It renames each ``+<name>`` file after the pull request that added it, stopping with an error if it can't find one. It then turns the files in ``docs/changes/`` into a ``## 5.4.0`` section of ``docs/releases.md``, deletes them, and opens a *Finalize release notes for 5.4.0* pull request from the ``next_release_notes`` branch.
 2. Edit the notes on that pull request if they need it: merge overlapping notes, reorder, fix wording.
 3. Merge it. This creates the tagged GitHub release with those notes, which publishes the package to PyPI.
 

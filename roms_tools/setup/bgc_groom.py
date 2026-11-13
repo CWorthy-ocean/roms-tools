@@ -26,12 +26,13 @@ Each tracer gets a :class:`BgcCheck`:
   ALK against the salinity mixing line, DIC against ALK.
 - ``ceiling``: an optional upper limit that grooming clips every wet cell to after
   filling, e.g. O2 at 1.25 times saturation, which filling alone cannot always reach.
-- ``soft_floor``: an optional band width above ``floor``. After the last pass, values in
-  ``[floor, floor + soft_floor)`` are reshaped by :func:`soft_floor_blend` so a profile
-  meets its floored plateau with zero slope instead of a corner -- a corner the model's
-  (non-monotone) advection undershoots, e.g. O2 below MARBL's ``parm_o2_min`` at the
-  edges of a floored OMZ core. Values only move down toward ``floor`` (by at most
-  ~0.15 * ``soft_floor``), never below it; values outside the band are untouched.
+- ``soft_floor_band``: an optional band width above ``floor``. After the last pass,
+  values in ``[floor, floor + soft_floor_band)`` are reshaped by :func:`soft_floor_blend`
+  so a profile meets its floored plateau with zero slope instead of a corner -- a corner
+  the model's (non-monotone) advection undershoots, e.g. O2 below MARBL's
+  ``parm_o2_min`` at the edges of a floored OMZ core. Values only move down toward
+  ``floor`` (by at most ~0.15 * ``soft_floor_band``), never below it; values outside the
+  band are untouched.
 
 Horizontal neighbours only count when their layer depths differ by less than ``dz_max``:
 over steep topography one s-level spans very different depths, and the vertical profile
@@ -201,11 +202,15 @@ class BgcCheck:
     physical_reality: Callable[[Block], np.ndarray] | None = None
     ceiling: Callable[[Block], np.ndarray] | None = None
     requires: tuple[str, ...] = ()
-    soft_floor: float | None = None
+    soft_floor_band: float | None = None
 
     def describe(self) -> dict[str, Any]:
         """JSON-able description, recorded in output attrs."""
-        extra = {} if self.soft_floor is None else {"soft_floor": self.soft_floor}
+        extra = (
+            {}
+            if self.soft_floor_band is None
+            else {"soft_floor_band": self.soft_floor_band}
+        )
         return {
             "bounds": list(self.bounds) if self.bounds else None,
             "floor": self.floor,
@@ -777,13 +782,16 @@ def _run(
     soft = tuple(
         (names.index(n), checks[n].floor, band)
         for n in targets
-        if (band := checks[n].soft_floor) is not None
+        if (band := checks[n].soft_floor_band) is not None
     )
     if soft:
+        # map_overlap merges a tile smaller than the overlap depth (e.g. a short last
+        # tile) into its neighbour, so the passes' output can be chunked differently
+        # from aux. Match aux to it (a no-op when they already agree).
         stack = dsa.map_blocks(
             partial(_soft_floor_kernel, soft=soft),
             stack,
-            aux,
+            aux.rechunk((-1, *stack.chunks[1:])),
             dtype=np.float64,
             meta=np.array((), dtype=np.float64),
         )
@@ -995,7 +1003,7 @@ _CHECK_OVERRIDES = (
     "normalize_by_salinity",
     "physical_reality",
     "ceiling",
-    "soft_floor",
+    "soft_floor_band",
 )
 
 
@@ -1028,8 +1036,8 @@ def resolve_groom_settings(
     ints), ``dz_max`` (a positive number) and ``checks``: ``{tracer: {field: value}}``,
     partial overrides of :data:`DEFAULT_CHECKS` for ``bounds`` (``[low, high]`` or
     ``None``), ``floor``, ``floor_jump``, ``max_jump`` (a number or ``None``),
-    ``normalize_by_salinity`` (bool), ``soft_floor`` (a positive band width above
-    ``floor``, or ``None``: off, the default), and ``physical_reality``/``ceiling``
+    ``normalize_by_salinity`` (bool), ``soft_floor_band`` (a positive band width
+    above ``floor``, or ``None``: off, the default), and ``physical_reality``/``ceiling``
     (``None`` only, to switch them off). ``None`` returns the defaults. Anything else
     raises.
     """
@@ -1090,7 +1098,7 @@ def resolve_groom_settings(
                 upd[f] = (lo, hi)
             elif f == "floor":
                 upd[f] = _number(v, f"{label}.floor")
-            elif f in ("floor_jump", "max_jump", "soft_floor"):
+            elif f in ("floor_jump", "max_jump", "soft_floor_band"):
                 upd[f] = (
                     None if v is None else _number(v, f"{label}.{f}", positive=True)
                 )
@@ -1192,6 +1200,8 @@ def bgc_groom(
     (each pass re-checks). ``passes``, ``relax_sweeps``, ``column_reach`` and ``dz_max``
     define the result and are recorded in the attrs; ``tile`` and ``time_chunk`` only set
     task size and do not change it. Run :func:`bgc_check` on the result for what remains.
+    A ``soft_floor_band`` lowers its band again each time it runs, so leave it off when
+    grooming a file already groomed with one (its ``bgc_groom`` attrs record it).
     Boundary data needs ``physics`` (the matching physics boundary data, for salt/temp).
 
     Peak memory grows with the domain, not only the tile.

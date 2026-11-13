@@ -2,6 +2,138 @@
 
 <!-- towncrier release notes start -->
 
+## 5.4.0
+
+### Breaking Changes
+
+* `InitialConditions`, `BoundaryForcing`, `TidalForcing` and `SurfaceForcing` now raise a `ValueError` where regridding left NaN at ocean points, instead of silently writing 0 there; setups that built before may now fail. ([#719](https://github.com/CWorthy-ocean/roms-tools/pull/719))
+  * The error names the variable and the number of such points, and suggests a likely cause.
+  * Without dask it is raised at construction; with dask it is raised at `.save()`, possibly after a long compute, and the files that save started are removed, including any earlier file at an output path, which the save has already truncated.
+  * `bypass_validation=True` restores the old behavior and writes 0 there.
+  * A ROMS-restart (nesting) initial condition whose child grid reaches the parent's edge now raises: velocities there have no parent value.
+
+### Changes to Output
+
+* ESPER-derived tracers are now groomed by default, so ESPER initial conditions and boundary forcing change wherever cells are flagged; pass `groom=False` to `InitialConditions`/`BoundaryForcing` for the raw estimates. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+  * A YAML written by roms-tools 5.0–5.3 has no `groom` key and loads with grooming on; add `groom: false` to its section to skip grooming.
+* ESPER oxygen below 5.0 mmol/m³ now reads 5.0 (previously 2.0), matching MARBL's default `parm_o2_min`; there is no setting to restore 2.0. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+* Initial conditions and boundary forcing change wherever the ROMS grid is deeper than its lat/lon source or ROMS parent: tracers below the source's bottom differ, velocities do not. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * YAML files saved by earlier versions load with the new 25 m default; setting `bottom_fill_blend_m=float("inf")` restores the old output for GLORYS and CESM sources.
+  * Nested initial conditions change too: #709's fixed 100 m blend and child-grid donors are replaced by the 25 m default and the parent's own columns; no setting reproduces 5.3.0's nested output, and `inf` gives the copy-down from before 5.3.0.
+  * BGC fields from the WOA and GLODAP climatologies change below the source's seafloor in the same way; no setting reproduces WOA's earlier `deep_fill="annual_blend"` values below the seafloor.
+* **ERA5 `qair` values change.** Specific humidity now uses ERA5's surface pressure (`sp`, or `msl` if `sp` is absent) instead of a fixed 1010 hPa, which biased `qair` by about 1% over the open ocean (usually high) and by more over land. ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+  * Streamed ARCO ERA5 picks up `surface_pressure` automatically.
+  * A local ERA5 extract with neither `sp` nor `msl` keeps the 1010 hPa value and now logs a warning.
+  * The three ERA5 physics zarr reference fixtures are regenerated (`qair` only).
+
+### New Features
+
+* New `bgc_check` and `bgc_groom` check or groom BGC tracers in a Dataset or NetCDF file, for analysis or one-off repair; `bgc_check` also accepts `InitialConditions`/`BoundaryForcing`. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+  * Checks cover plausible bounds, nutrients and oxygen at their floor beside ordinary water, salinity-normalized spikes, ALK/DIC consistency, and oxygen above 1.25 times saturation, which is clipped.
+  * Results are identical for any chunking or tiling.
+* `InitialConditions` and `BoundaryForcing` take `groom` (default `True`) and `groom_settings`, optional overrides of the grooming thresholds and fill parameters; both are recorded in the YAML. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+  * `groom_settings` is validated before any regridding; unknown keys or invalid values raise.
+* `InitialConditions` and `BoundaryForcing` take `bottom_fill_blend_m`, the depth (m) below the source bottom over which tracers go from the column's own bottom value to the nearest same-depth source column's value. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * `0` takes the neighbouring column's value right below the bottom, `inf` copies the bottom value down, and negative or NaN values raise.
+  * The value is forwarded to BGC sources, written to the output file's attributes and kept in YAML.
+* `SurfaceForcing(source={"name": "CONUS404"}, type="physics", correct_radiation=False, use_dask=True)`. ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+  * Streams from `s3://hytest/conus404/conus404_hourly.zarr`. This needs `s3fs`, which is added to the `stream` extra and `ci/environment.yml`.
+  * Regridded with xESMF bilinear without extrapolation.
+  * Winds are rotated from the WRF grid to east/north.
+  * Net shortwave and downward longwave are differenced from the accumulations, matching ERA5's `ssr`/`strd`.
+  * `qair` is computed from dewpoint and `PSFC`.
+  * `rad_time` uses the same 30-minute offset as ERA5.
+* New `roms_tools.datasets.curvilinear_datasets` module, with a `CurvilinearDataset` base and `CONUS404Dataset`, listed in the API docs. ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+* Points outside a curvilinear source's footprint are kept as `NaN`, not replaced by 0, so that they show where the source has no data. The output carries `nan_outside_source_footprint="True"`. `SurfaceForcing` skips its NaN-to-zero fill and its ocean-NaN validation for such sources. ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+  * `SurfaceForcing` logs a warning with the number of grid points outside the footprint, and raises when the grid lies entirely outside it.
+  * Instead, a time step at which a variable is `NaN` at every grid point raises, for example a gap or `NaN` record in the source. The check is lazy, like the ocean-NaN check of #719, so with `use_dask=True` it is raised at `save()`, and partly written files are removed.
+* `blend_surface_forcing(primary, fallback, *, grid, blend_width_km=0.0, blend_profile="smoothstep", time_align="exact", time_tolerance=None, on_missing_primary_var="error", fill_value=0.0)`. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+  * **Inputs:** `SurfaceForcing` objects, `xarray.Dataset`s, or paths, globs or lists of NetCDF files written by `SurfaceForcing.save`. Files are read lazily in blocks of one day.
+  * **Edge:** a hard edge by default. `blend_width_km` gives a one-sided feathered band inside the primary's footprint, with a smoothstep or linear profile. A feathered blend raises if the primary's variables have no point in common at the first time step.
+  * **Checks:** the products must agree on grid shape, units, `model_reference_date` and `use_coarse_grid`. When their recorded grids are known, those must agree too, and must match `grid`.
+  * **`grid` is required**, but can be left out when either input is a `SurfaceForcing`, whose grid is then used.
+  * Its land mask means only land points are filled. A `NaN` left at an ocean point raises, as `SurfaceForcing` does since #719.
+  * A missing grid is reported before any file is opened.
+  * **Time alignment:**
+  * The fallback's time axis is aligned with `exact` (the default), `nearest` or `linear`.
+  * `nearest` requires a `time_tolerance`.
+  * `linear` reads only the two records on either side of each target time.
+  * **Radiation timing:** if the two products label radiation differently, the fallback's `swrad`/`lwrad` are re-timed by linear interpolation. The end value is held for the half step past either end of its record.
+  * **Output attributes:** `fallback_source`, `blend_method`, `blend_width_km`, `blend_profile` (feathered only), `primary_coverage_fraction`, and `fallback_radiation_shift_s` (only when radiation was re-timed).
+* `compute_blend_weights`, `layer_field(s)`, `align_fallback_time` and `coverage_fraction` are available for custom use. The first is in the API docs. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+* **Rebuilding a blend.** A blend records how it was made in a `roms_tools_yaml` attribute: the grid, both products' settings and the blend arguments. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+  * `blend_to_yaml` writes that record to a YAML file, and `blend_surface_forcing_from_yaml` rebuilds the blend from it. A product streamed from the cloud, such as CONUS404, needs `use_dask=True`.
+  * The record holds each product's whole time range, so a blend of one month's files rebuilds the full period.
+* `save_blended_surface_forcing(ds, filepath, *, group=True, format=...)` writes monthly (or yearly) files like `SurfaceForcing.save`, with the same encodings. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+  * `abs_time` is written as float64 rather than int64, which ParallelIO cannot read.
+  * CDF5 is available via `format="NETCDF3_64BIT_DATA"`.
+  * `time` is written as an unlimited dimension, including for blends of saved files.
+* Grooming checks accept a `soft_floor` band width, set through `groom_settings` (for example `{"checks": {"O2": {"soft_floor": 10.0}}}`); it is off by default. ([#729](https://github.com/CWorthy-ocean/roms-tools/pull/729))
+  * Values between the floor and floor + band move down toward the floor, by at most 4/27 of the band, and never below it.
+  * The floor value and values above the band are unchanged.
+  * The setting is recorded in the file's `bgc_groom` attribute only when used, so files groomed without it are unchanged.
+
+### Bug Fixes
+
+* GLODAP BGC tracers are no longer dropped where GLODAP has no temperature or salinity (1.7–3.4 % of each tracer's values, mostly in the Arctic); the unit conversion uses that depth's mean density there. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * GLODAP columns where one variable has no data at any depth are now treated as land and filled from neighbouring columns, instead of that variable being written as 0.
+* Nested initial conditions no longer take below-bottom water from distant child columns because of #709's 50 m depth bins; each cell's donor is the nearest parent column deep enough for it. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+* Initial conditions and boundary forcing from lat/lon sources (GLORYS, CESM, WOA, GLODAP) no longer copy a shallow source column's deepest water down to the ROMS bottom; tracers there now come from the nearest source column with water at that depth. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+  * On the Pacific 12 km initial state this removes about 70 % of the temperature spikes found by the #715 spike test, and most columns with warm water at the bottom.
+  * WOA BGC no longer fills every cell below the seafloor with the monthly 800 m or 1500 m value.
+* GLODAP BGC initial conditions and boundary forcing no longer get 0 (or a NaN error from the lateral fill) where a variable has no data in a column that the others have, such as silicate in the Black Sea and DIC in Hudson Bay. Each variable is filled from its own data. ([#718](https://github.com/CWorthy-ocean/roms-tools/pull/718))
+* GLODAP variables that have data in columns where NO3 has none (up to about 70 columns each for ALK, O2, T and S) keep those values instead of having them overwritten by the land fill. ([#718](https://github.com/CWorthy-ocean/roms-tools/pull/718))
+* A dask `.save()` that fails during its compute no longer leaves partly written NetCDF files behind. ([#719](https://github.com/CWorthy-ocean/roms-tools/pull/719))
+* N/A (new code). Issues fixed during review, before this PR: ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+  * a `NaN` in the fallback could remove a full-weight primary value;
+  * variables only the fallback has skipped time alignment;
+  * a `np.timedelta64` `time_tolerance` failed on a time axis in days;
+  * float32 fields were promoted to float64 by the feathering weights;
+  * every remaining `NaN`, including at ocean points, was zero-filled;
+  * re-timing radiation left a `NaN` record at one end;
+  * re-timed radiation was lined up on the fallback's time stamps, so any stamp the products did not share exactly became `NaN`;
+  * `time_align="nearest"` without a tolerance accepted a fallback from any period.
+* ESPER BGC fields are now estimated from in-situ temperature; feeding potential temperature made deep water too high in O2 and too low in silicate, ALK and DIC. ([#728](https://github.com/CWorthy-ocean/roms-tools/pull/728))
+  * The bias grew with depth, reaching about +25 O2, −21 silicate and −28 ALK (µmol/kg) at 5 km against GLODAP bottle data.
+  * Above ~2 km the change is within a few µmol/kg.
+* Initial conditions, boundary, surface and tidal forcing no longer copy a source file's packed `valid_min`/`valid_max` onto written variables, which made netCDF4 readers mask valid values (for example NO3 below 1). ([#728](https://github.com/CWorthy-ocean/roms-tools/pull/728))
+* ESPER-derived variables no longer carry salinity's attributes (`standard_name: sea_water_salinity`, PSU units, packed `valid_min`/`valid_max`). ([#728](https://github.com/CWorthy-ocean/roms-tools/pull/728))
+
+### Improvements
+
+* `SurfaceForcing` is split into per-source steps: normalise the source dict, build the dataset, regrid, then apply that source's radiation correction. The radiation-time shift and the NaN-outside-the-footprint handling now come from the dataset class (`rad_time_offset`, `nan_outside_footprint`) instead of the source name or type. ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+* The shared helpers `specific_humidity_from_dewpoint` and `bbox_indices_from_2d_latlon` move to `roms_tools/datasets/utils.py`, and `load_data` accepts `storage_options` for remote zarr stores. ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+* **Every `SurfaceForcing` dataset, and so every saved surface-forcing file, now carries its own recipe in a `roms_tools_yaml` global attribute.** It is the YAML that `to_yaml` writes, including any local source paths. This is what lets a blend of saved files record how they were made. Writing that YAML goes through a new `yaml_text` helper, and `write_to_yaml` now uses it too. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+* `fill_nans_over_land` (`roms_tools/setup/utils.py`) takes an optional `override_hint`, so a caller other than the setup classes can name its own way to skip the check. The blend names `fill_value=None` instead of `bypass_validation`. The default message is unchanged. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+* New public helper `roms_tools.setup.esper.in_situ_temperature` converts potential to in-situ temperature (TEOS-10), lazily for dask-backed inputs. ([#728](https://github.com/CWorthy-ocean/roms-tools/pull/728))
+
+### Miscellaneous
+
+* The datasets overview documents ESPER grooming, `groom`/`groom_settings` and the oxygen floor; `bgc_check`, `bgc_groom`, `summarize_flags` and `resolve_groom_settings` are in the API reference. ([#715](https://github.com/CWorthy-ocean/roms-tools/pull/715))
+* The methods page describes the fill and has a new section on choosing `bottom_fill_blend_m` for different kinds of domain; the nesting, initial conditions and boundary forcing notebooks drop the old 100 m wording. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+* Six reference fixtures are regenerated; only tracers in cells below the source bottom change, and velocities and zeta do not. ([#717](https://github.com/CWorthy-ocean/roms-tools/pull/717))
+* Docs: ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+  * `datasets_overview.rst` gets a CONUS404 entry with how to select and stream it, its required fields and a short coverage warning, and an `sp`/`msl` row for ERA5.
+  * `features.rst` mentions CONUS404.
+  * `surface_forcing.ipynb` gets an executed CONUS404 section.
+  * `api.rst` lists `CONUS404Dataset`, whose docstring holds the full footprint, radiation-precision and requirements notes.
+* Known CONUS404 limitations, documented in `CONUS404Dataset`: ([#722](https://github.com/CWorthy-ocean/roms-tools/pull/722))
+  * The bounding box overstates coverage. The northern limit is about 55° N at 125° W, with nothing west of about 139° W.
+  * `correct_radiation` must be `False`.
+  * xESMF is required.
+  * Radiation is quantized by the float32 accumulations. The step grows over the record: about 1 W/m² in the 1980s; by 2020 4.6–9.1 W/m² for `swrad` and 9.1 W/m² for `lwrad`; up to 18 W/m² for `lwrad` in 2024 (measured on the store).
+* New notebooks, executed with stored outputs: ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+  * `docs/blend_surface_forcing.ipynb`: the method on a small grid straddling the CONUS404 edge. It includes a product comparison, hard vs feathered blends, the weight map and a transect.
+  * `docs/blend_surface_forcing_files.ipynb`: save both products, blend from files, write CDF5, check the files, and blend month by month.
+* Includes #724 (review fixes, the move to `roms_tools.setup`, and the blend record). ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+* Both notebooks are in `examples.rst`, and the functions are in `api.rst`. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+* The surface-forcing notebook, `datasets_overview.rst`, `features.rst` and the `SurfaceForcing` docstring point to the blend. ([#723](https://github.com/CWorthy-ocean/roms-tools/pull/723))
+* Release notes are now assembled by towncrier from one fragment file per pull request in `changes/`, instead of being collected from pull request descriptions; the contributor guide explains how to write one. ([#725](https://github.com/CWorthy-ocean/roms-tools/pull/725))
+* Fix the CI test and docs jobs, which failed on Ubuntu 26.04 runners because the image no longer includes conda. ([#726](https://github.com/CWorthy-ocean/roms-tools/pull/726))
+* Pull request descriptions now carry an `AI disclosure:` line, and the contributing guide links the organization's AI policy. ([#733](https://github.com/CWorthy-ocean/roms-tools/pull/733))
+* `AGENTS.md` gives AI coding agents this project's setup, test, lint, and contribution rules. ([#734](https://github.com/CWorthy-ocean/roms-tools/pull/734))
+* The `RiverForcing` docstring explains when to spread a river over several grid cells with `indices`. ([#734](https://github.com/CWorthy-ocean/roms-tools/pull/734))
+
 ## 5.3.0
 
 ### Breaking Changes

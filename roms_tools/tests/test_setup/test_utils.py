@@ -20,10 +20,12 @@ from roms_tools.setup.utils import (
     compute_mld,
     compute_potential_density,
     cycle_to_times,
+    drop_source_encoding_attrs,
     expand_monthly_climatology_time_axis,
     fill_nans_over_land,
     gc_dist,
     get_target_coords,
+    in_situ_temperature,
     interpolate_dynamic_bgc_by_calendar_year,
     materialize_before_check,
     month_to_time_index,
@@ -1881,3 +1883,70 @@ class TestCycleToTimes:
         )
         with pytest.raises(ValueError, match="timedelta64"):
             cycle_to_times(src, "time", targets, climatology=True)
+
+
+def test_drop_source_encoding_attrs_removes_packing_keeps_identity():
+    # GLORYS salinity as decoded by xarray: the packed short-integer range survives in
+    # attrs although the data are now floats
+    da = xr.DataArray(
+        np.array([0.2, 34.5], dtype=np.float32),
+        dims="x",
+        attrs={
+            "valid_min": np.int16(1),
+            "valid_max": np.int16(28249),
+            "scale_factor": 0.0015,
+            "add_offset": -0.0015,
+            "missing_value": np.int16(-32767),
+            "standard_name": "sea_water_salinity",
+            "unit_long": "Practical Salinity Unit",
+            "long_name": "salinity",
+        },
+    )
+    out = drop_source_encoding_attrs(da)
+    assert out.attrs == {
+        "standard_name": "sea_water_salinity",
+        "unit_long": "Practical Salinity Unit",
+        "long_name": "salinity",
+    }
+    assert "valid_min" in da.attrs  # the input is not modified
+    np.testing.assert_array_equal(out.values, da.values)
+    clean = xr.DataArray([1.0], dims="x", attrs={"units": "m"})
+    assert drop_source_encoding_attrs(clean) is clean
+
+
+def test_in_situ_temperature_matches_teos10_and_stays_lazy():
+    import gsw
+
+    theta = xr.DataArray([[10.0, 1.5], [10.0, 1.5]], dims=("y", "s"))
+    salt = xr.DataArray([[35.0, 34.7], [35.0, 34.7]], dims=("y", "s"))
+    depth = xr.DataArray([0.0, 4000.0], dims=("s",))
+    lon = xr.DataArray([200.0, 210.0], dims=("y",))
+    lat = xr.DataArray([30.0, 40.0], dims=("y",))
+
+    t = in_situ_temperature(theta.chunk({"y": 1}), salt, depth, lon, lat)
+    assert hasattr(t.data, "dask")
+    t = t.compute()
+    assert t.dims == theta.dims
+    # surface: in-situ == potential; 4000 m: warmer by adiabatic heating
+    np.testing.assert_allclose(t.isel(s=0), theta.isel(s=0), atol=1e-6)
+    p = gsw.p_from_z(-4000.0, 40.0)
+    sa = gsw.SA_from_SP(34.7, p, 210.0, 40.0)
+    expected = gsw.t_from_CT(sa, gsw.CT_from_pt(sa, 1.5), p)
+    np.testing.assert_allclose(float(t.isel(y=1, s=1)), expected, atol=1e-6)
+    assert 0.25 < float(t.isel(y=1, s=1)) - 1.5 < 0.45
+
+
+def test_in_situ_temperature_declares_the_dtype_it_returns():
+    """The result is float64 (what gsw returns) even for a float32 ``temp`` (the
+    boundary path's physics T), and the lazy result must declare that dtype.
+    """
+    theta = xr.DataArray(np.array([[1.5, 1.5]], dtype=np.float32), dims=("y", "s"))
+    args = (
+        xr.DataArray([[34.7, 34.7]], dims=("y", "s")),
+        xr.DataArray([0.0, 4000.0], dims=("s",)),
+        xr.DataArray([210.0], dims=("y",)),
+        xr.DataArray([40.0], dims=("y",)),
+    )
+    lazy = in_situ_temperature(theta.chunk(), *args)
+    assert lazy.dtype == lazy.compute().dtype == np.float64
+    assert in_situ_temperature(theta, *args).dtype == np.float64

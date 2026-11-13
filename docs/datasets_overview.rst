@@ -417,6 +417,19 @@ Grooming compares each cell with its neighbours, so errors shared by a whole reg
 as wrong temperature and salinity along a stretch of boundary, are best fixed upstream in
 the physics.
 
+Where an oxygen profile reaches the 5.0 floor it meets it at a sharp corner, which the
+model's advection can overshoot, for example to oxygen below 5.0 at the edge of an
+oxygen minimum zone. To give the profile a smooth approach to the floor instead, add a
+soft-floor band to the ``groom_settings`` you pass to ``InitialConditions`` or
+``BoundaryForcing``:
+
+.. code-block:: python
+
+    groom_settings = {"checks": {"O2": {"soft_floor_band": 10.0}}}
+
+Values between 5.0 and 15.0 are then lowered, by at most about 1.5 mmol m⁻³ and never
+below 5.0; everything else is unchanged.
+
 :Required for: BGC Initial Conditions, BGC Boundary Forcing
 
 
@@ -566,7 +579,7 @@ Global 1/4° atmospheric reanalysis from ECMWF providing meteorological surface 
 CONUS404
 ~~~~~~~~
 
-4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. For a domain that extends past its footprint the output is ``NaN`` outside the footprint, and those points must be filled from a global product such as ERA5 before running ROMS: build an ERA5 ``SurfaceForcing`` on the same grid and combine the two with ``roms_tools.blend_surface_forcing`` (see :doc:`blend_surface_forcing`). Streamed by default from the zarr store on the USGS Open Storage Network pod, so no download is needed; streaming needs ``use_dask=True`` and the ``s3fs`` package (``pip install "roms-tools[stream]"``), and CONUS404 also needs xESMF, which is only available through conda (see below). A local copy of the zarr store can be given as ``path``. Select it with ``source={"name": "CONUS404"}``; the store path defaults to ``s3://hytest/conus404/conus404_hourly.zarr``.
+4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. Select it with ``source={"name": "CONUS404"}`` and ``correct_radiation=False``. By default it is streamed from the zarr store on the USGS Open Storage Network pod (``s3://hytest/conus404/conus404_hourly.zarr``), so no download is needed; this needs ``use_dask=True`` and the ``s3fs`` package, part of the streaming installation (see :doc:`installation`). A local copy of the zarr store can be given as ``path``. CONUS404 is regridded with xESMF, which comes with the conda-forge installation of ROMS-Tools.
 
 :Version: CONUS404 hourly, 1979-10-01 to 2024-10-01
 :Required for: Surface Forcing (optional alternative to ERA5)
@@ -574,13 +587,7 @@ CONUS404
 
 .. warning::
 
-   CONUS404 is a **regional** dataset on a **curvilinear** (Lambert Conformal Conic) grid, which has three consequences:
-
-   * Its lat/lon bounding box (17.65–57.34° N, 138.73–57.07° W) substantially overstates coverage, because the domain is a rectangle in projected space rather than in lat/lon. Its corners are 17.65° N at 122.57° W / 73.23° W and 51.69° N at 138.73° W / 57.07° W, so the 57.34° N maximum occurs only near the top centre. Along the US west coast the northern limit falls from ~55° N at 125° W to ~53° N at 135° W, and there is no data at all west of ~139° W. A Gulf of Alaska domain is therefore almost entirely outside CONUS404; a California Current domain is fully inside.
-   * Any part of the ROMS grid outside the footprint is **not** extrapolated — it comes back as NaN and is written to the output as NaN. Use a grid that lies entirely inside the footprint, or fill those points from a global product with ``roms_tools.blend_surface_forcing`` (see :doc:`blend_surface_forcing`).
-   * It requires xESMF (install ROMS-Tools via conda), and ``correct_radiation`` must be ``False``: the ERA5 correction climatology is matched by exact lat/lon coordinate value, which a curvilinear grid cannot satisfy.
-
-   Note also that CONUS404 carries no instantaneous radiation fields, only accumulations since the 1979 model start. ROMS-Tools differences them, and because the accumulations are float32, each hourly ``swrad`` and ``lwrad`` value is quantized to one float32 step of the running total. That step grows over the record and is larger for longwave, whose accumulation is bigger: about 1 W/m² in the 1980s; by 2020 about 4.6–9.1 W/m² for ``swrad`` and 9.1 W/m² for ``lwrad``; up to 18 W/m² for ``lwrad`` in 2024. Negative one-step artifacts are clipped to zero.
+   CONUS404 is regional, and its coverage is smaller than its lat/lon bounding box (17.65–57.34° N, 138.73–57.07° W) suggests: a California Current domain is fully covered, while a Gulf of Alaska domain is almost entirely outside. ROMS grid points outside the footprint are written as ``NaN``, and ``SurfaceForcing`` logs a warning saying how many. ROMS cannot run on ``NaN`` forcing, so use a grid inside the footprint, or fill those points from a global product such as ERA5 with ``roms_tools.blend_surface_forcing`` (see :doc:`blend_surface_forcing`) before running ROMS. The exact footprint, and the precision of CONUS404's hourly radiation, are described in :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`.
 
 .. dropdown:: Required fields
 

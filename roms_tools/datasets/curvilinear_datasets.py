@@ -181,6 +181,23 @@ class CurvilinearDataset:
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     _default_lateral_dask_chunk: ClassVar[int | None] = None
 
+    rad_time_offset: ClassVar[timedelta | None] = None
+    """Offset from the radiation time stamp to the middle of its averaging period.
+
+    ``None`` for a source without time-averaged radiation; ``SurfaceForcing``
+    builds a ``rad_time`` coordinate only when this is set.
+    """
+
+    nan_outside_footprint: ClassVar[bool] = True
+    """Whether regridded fields are NaN outside the source footprint by design.
+
+    A property of the source, not of its grid type: it says the source is
+    regional and is regridded without extrapolation, which holds for every
+    curvilinear source so far. ``SurfaceForcing`` keeps those NaNs, which mark
+    where the source has no data, instead of filling them and validating ocean
+    points. Which regridder runs is decided separately, by the grid type.
+    """
+
     is_global: bool = field(init=False, repr=False, default=False)
     resolution: float = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
@@ -558,12 +575,17 @@ class CONUS404Dataset(CurvilinearDataset):
     A 4 km Lambert Conformal Conic reanalysis over the conterminous United States
     and surrounding waters, hourly from 1979-10-01 to 2024-10-01, distributed as a
     zarr store on the USGS Open Storage Network pod
-    (``s3://hytest/conus404/conus404_hourly.zarr``).
+    (``s3://hytest/conus404/conus404_hourly.zarr``). Reading a zarr store, the
+    default one or a local copy, needs ``use_dask=True``; streaming the default
+    store also needs the ``s3fs`` package, part of the streaming installation.
 
     Users normally do not construct this class directly: select it with
-    ``SurfaceForcing(source={"name": "CONUS404"}, ...)``. Its other parameters
-    (``filename``, ``start_time``, ``end_time``, ``use_dask``, ...) have the same
-    meaning as for the ERA5 dataset class.
+    ``SurfaceForcing(source={"name": "CONUS404"}, correct_radiation=False, ...)``.
+    ``correct_radiation`` must be ``False`` because the ERA5 radiation correction
+    climatology is matched by exact lat/lon coordinate value, which a curvilinear
+    grid cannot satisfy. Its other parameters (``filename``, ``start_time``,
+    ``end_time``, ``use_dask``, ...) have the same meaning as for the ERA5 dataset
+    class.
 
     **Footprint.** The lat/lon bounding box (17.65-57.34 N, 138.73-57.07 W)
     substantially overstates coverage, because the domain is a rectangle in
@@ -651,9 +673,11 @@ class CONUS404Dataset(CurvilinearDataset):
     interpolates on 1D coordinate axes and cannot handle it. Because that
     regridder does not extrapolate, target points outside the CONUS404 footprint
     come back as NaN and are written to the output as NaN: ``SurfaceForcing``
-    skips its NaN-to-zero fill and its wet-point NaN validation for curvilinear
-    sources. Use a grid that lies inside the footprint, or fill those points from
-    a global product before running ROMS.
+    skips its NaN-to-zero fill and its wet-point NaN validation for this source
+    (``nan_outside_footprint``). It logs a warning with the number of points
+    outside the footprint, and raises if the whole grid is outside. Use a grid
+    that lies inside the footprint, or fill those points from a global product
+    before running ROMS.
     """
 
     # The on-disk zarr chunk is (time=144, y=175, x=175). Only relevant on a
@@ -700,17 +724,30 @@ class CONUS404Dataset(CurvilinearDataset):
     def __post_init__(self) -> None:
         """Resolve the store backend, then run the base initialization."""
         filename = str(self.filename)
+        is_s3 = filename.startswith("s3://")
 
-        if filename.startswith("s3://"):
+        if (
+            is_s3
+            or filename.startswith(("http://", "https://"))
+            or filename.rstrip("/").endswith(".zarr")
+        ):
             self.read_zarr = True
+        # The zarr path is dask-only (see `load_data`); say so in CONUS404's terms
+        # rather than letting the loader's internal message surface.
+        if self.read_zarr and not self.use_dask:
+            raise ValueError(
+                "Reading CONUS404 from a zarr store (the default cloud store, or a "
+                "local copy) requires `use_dask=True`. Please enable Dask by setting "
+                "`use_dask=True`."
+            )
+
+        if is_s3:
             if not has_s3fs():
                 raise RuntimeError(
                     get_pkg_error_msg("cloud-based CONUS404 data", "s3fs", "stream")
                 )
             if self.storage_options is None:
                 self.storage_options = dict(CONUS404_STORAGE_OPTIONS)
-        elif filename.startswith(("http://", "https://")) or filename.endswith(".zarr"):
-            self.read_zarr = True
 
         if self.qair_method == "fixed_pressure":
             # PSFC is unused in this mode; don't pay to read it.
@@ -925,6 +962,12 @@ class CONUS404Dataset(CurvilinearDataset):
         when no record exists before the requested start, falling back to the
         first record in the store. For a differenced accumulation that would
         silently shorten the series by an hour, so it is an error here.
+
+        The diff consumes the first selected record. With ``start_time_pad`` the
+        pad record, the last one before ``start_time``, must survive it; without
+        it, the consumed record must lie before ``start_time``, so that nothing in
+        the window is lost. Neither condition assumes ``start_time`` is on the
+        hour.
         """
         if self.start_time is None:
             return
@@ -935,14 +978,18 @@ class CONUS404Dataset(CurvilinearDataset):
                 f"{ds.sizes.get(time_dim, 0)}."
             )
 
-        required = self.start_time - (
-            timedelta(hours=1) if self.start_time_pad else timedelta(0)
-        )
-        first_after_diff = ds[time_dim].values[1]
-        if first_after_diff > np.datetime64(required):
+        start = np.datetime64(self.start_time)
+        consumed, first_after_diff = ds[time_dim].values[:2]
+        if self.start_time_pad:
+            lead_record_ok = first_after_diff < start
+            needed = "two records"
+        else:
+            lead_record_ok = consumed < start
+            needed = "one record"
+        if not lead_record_ok:
             raise ValueError(
-                f"CONUS404 radiation is accumulated since the model start and needs "
-                f"one hourly record before {required}, but the earliest available "
-                f"record is {ds[time_dim].values[0]}. Move `start_time` later by at "
-                f"least two hours."
+                f"CONUS404 radiation is accumulated since the model start, and "
+                f"differencing it consumes the first record, so it needs {needed} "
+                f"before `start_time` ({self.start_time}); the selection starts at "
+                f"{consumed}. Use a later `start_time`."
             )

@@ -57,6 +57,7 @@ from roms_tools.setup.utils import (
     compute_barotropic_velocity,
     cycle_to_times,
     deserialize_forcing_data,
+    drop_source_encoding_attrs,
     fill_nans_over_land,
     forwardable_fields,
     from_yaml,
@@ -1327,8 +1328,8 @@ class BoundaryForcingSource:
         d_meta = get_variable_metadata()
 
         for var_name in processed_fields.keys():
-            ds[f"{var_name}_{direction}"] = processed_fields[var_name].astype(
-                np.float32
+            ds[f"{var_name}_{direction}"] = drop_source_encoding_attrs(
+                processed_fields[var_name].astype(np.float32)
             )
 
             ds[f"{var_name}_{direction}"].attrs["long_name"] = (

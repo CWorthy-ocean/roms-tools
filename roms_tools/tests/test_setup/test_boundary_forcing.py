@@ -98,6 +98,37 @@ def test_boundary_forcing_creation_with_duplicates(
     )
 
 
+def test_boundary_forcing_drops_source_packed_valid_range(
+    tmp_path, small_grid, use_dask
+):
+    """A source's packed ``valid_min``/``valid_max`` must not reach written variables
+    (netCDF4-python would mask real values outside the packed range). The stored test
+    files are unpacked, so add the attrs to copies.
+    """
+    paths = []
+    for name in ("GLORYS_NA_20120101.nc", "GLORYS_NA_20121231.nc"):
+        src = xr.open_dataset(download_test_data(name)).load()
+        for var in src.data_vars:
+            src[var].attrs.update(valid_min=np.int16(1), valid_max=np.int16(28249))
+        paths.append(tmp_path / name)
+        src.to_netcdf(paths[-1])
+
+    bf = BoundaryForcingSource(
+        grid=small_grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"name": "GLORYS", "path": paths},
+        prefill=None,
+        regrid_method="scipy",
+        use_dask=use_dask,
+    )
+    for var in bf.ds.data_vars:
+        assert not {"valid_min", "valid_max"} & set(bf.ds[var].attrs), (
+            var,
+            bf.ds[var].attrs,
+        )
+
+
 @pytest.mark.parametrize(
     "boundary_forcing_fixture",
     [

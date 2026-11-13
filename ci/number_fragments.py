@@ -2,10 +2,12 @@
 """
 Name each unnumbered release-note fragment after the pull request that added it.
 
-Contributors name a fragment ``changes/+<name>.<type>.md`` because the PR number
-does not exist until the PR is opened. Before ``towncrier build``,
+Contributors name a fragment ``+<name>.<type>.md`` because the PR number does
+not exist until the PR is opened. Before ``towncrier build``,
 ``finalize_release_notes.yaml`` runs this script, which ``git mv``s every such
-file to ``changes/<PR>.<type>.md`` so the note links to its PR.
+file to ``<PR>.<type>.md`` so the note links to its PR. The fragment folder is
+towncrier's own setting, ``directory`` under ``[tool.towncrier]`` in
+``pyproject.toml``.
 
 The PR is the one that added the file, looking through later renames: the
 trailing ``(#N)`` of the squash-merge commit's subject, or, when the subject has
@@ -36,6 +38,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ORPHAN_PREFIX = "+"
 _SUBJECT_PR_RE = re.compile(r"\(#(\d+)\)\s*$")
+
+
+def fragment_dir(pyproject: Path) -> str:
+    """Return the fragment folder, relative to the repository, from *pyproject*."""
+    return tomllib.loads(pyproject.read_text())["tool"]["towncrier"]["directory"]
 
 
 def fragment_types(pyproject: Path) -> list[str]:
@@ -123,11 +130,11 @@ def adding_commit(repo: Path, path: str) -> tuple[str, str] | None:
     return sha, subject
 
 
-def target_name(changes: Path, pr: int, ftype: str, taken: set[str]) -> str:
-    """Return a free ``<pr>.<type>[.<n>].md`` name in *changes*."""
+def target_name(folder: Path, pr: int, ftype: str, taken: set[str]) -> str:
+    """Return a free ``<pr>.<type>[.<n>].md`` name in *folder*."""
     name = f"{pr}.{ftype}.md"
     n = 0
-    while name in taken or (changes / name).exists():
+    while name in taken or (folder / name).exists():
         n += 1
         name = f"{pr}.{ftype}.{n}.md"
     return name
@@ -140,30 +147,30 @@ def number_fragments(
     lookup: Callable[[str], int | None] = pr_from_github,
 ) -> dict[str, str]:
     """
-    Rename every ``+<label>.<type>.md`` in ``changes/`` after its PR.
+    Rename every ``+<label>.<type>.md`` in the fragment folder after its PR.
 
     Returns ``{old name: new name}``. Exits with an error, before renaming
     anything, listing every ``+`` file whose type or PR could not be found.
 
     Args:
-        repo: Repository root holding ``pyproject.toml`` and ``changes/``.
+        repo: Repository root holding ``pyproject.toml`` and the fragments.
         dry_run: Report the renames without making them.
         lookup: Commit sha -> PR number, used when the subject has no ``(#N)``.
     """
     types = fragment_types(repo / "pyproject.toml")
-    changes = repo / "changes"
+    folder = fragment_dir(repo / "pyproject.toml")
     plan: dict[str, str] = {}
     taken: set[str] = set()
     unresolved: list[str] = []
     untyped: list[str] = []
-    for path in sorted(changes.iterdir()):
+    for path in sorted((repo / folder).iterdir()):
         if not path.name.startswith(ORPHAN_PREFIX):
             continue
         ftype = fragment_type(path.name, types)
         if ftype is None:
             untyped.append(path.name)
             continue
-        commit = adding_commit(repo, f"changes/{path.name}")
+        commit = adding_commit(repo, f"{folder}/{path.name}")
         pr = None
         if commit is not None:
             sha, subject = commit
@@ -171,7 +178,7 @@ def number_fragments(
         if pr is None:
             unresolved.append(path.name)
             continue
-        new = target_name(changes, pr, ftype, taken)
+        new = target_name(repo / folder, pr, ftype, taken)
         taken.add(new)
         plan[path.name] = new
 
@@ -179,25 +186,25 @@ def number_fragments(
     if untyped:
         problems.append(
             "No fragment type in "
-            + ", ".join(f"changes/{n}" for n in untyped)
+            + ", ".join(f"{folder}/{n}" for n in untyped)
             + f"; the types are {', '.join(types)}."
         )
     if unresolved:
         problems.append(
             "Could not find the pull request that added "
-            + ", ".join(f"changes/{n}" for n in unresolved)
+            + ", ".join(f"{folder}/{n}" for n in unresolved)
             + "."
         )
     if problems:
         sys.exit(
             " ".join(problems)
-            + " Rename each to changes/<PR number>.<type>.md by hand."
+            + f" Rename each to {folder}/<PR number>.<type>.md by hand."
         )
     for old, new in plan.items():
-        print(f"changes/{old} -> changes/{new}")
+        print(f"{folder}/{old} -> {folder}/{new}")
         if not dry_run:
             subprocess.run(
-                ["git", "mv", f"changes/{old}", f"changes/{new}"],
+                ["git", "mv", f"{folder}/{old}", f"{folder}/{new}"],
                 cwd=repo,
                 check=True,
             )

@@ -147,7 +147,7 @@ give the user the exact command.
 ## Release notes
 
 A pull request with a user-visible change adds its release note as a file,
-`changes/+<name>.<type>.md`, committed with the code (`<name>` is any short
+`docs/changes/+<name>.<type>.md`, committed with the code (`<name>` is any short
 label). The types are the `[[tool.towncrier.type]]` entries in
 `pyproject.toml`. `breaking` (a setup that worked now fails or needs an edit)
 and `output` (the same setup still runs but writes different files) are

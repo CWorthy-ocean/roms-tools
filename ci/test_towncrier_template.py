@@ -1,5 +1,5 @@
 """
-Tests for the towncrier setup that turns ``changes/`` into ``docs/releases.md``.
+Tests for the towncrier setup that turns fragments into ``docs/releases.md``.
 
 Run with ``pytest ci/test_towncrier_template.py``. Needs ``towncrier`` (in the
 ``dev`` extra) and is skipped without it; like the other ``ci/`` tests, CI does
@@ -18,6 +18,7 @@ import importlib.util
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,10 @@ import pytest
 pytest.importorskip("towncrier")
 
 REPO = Path(__file__).resolve().parent.parent
+# The fragment folder, as configured under [tool.towncrier].
+FRAGMENTS = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["towncrier"][
+    "directory"
+]
 START = "<!-- towncrier release notes start -->\n"
 URL = "https://github.com/CWorthy-ocean/roms-tools/pull"
 OLD_RELEASE = f"## 5.3.0\n\n### Bug Fixes\n\n* An old fix. ([#1]({URL}/1))\n"
@@ -51,8 +56,8 @@ def scratch(tmp_path: Path) -> Path:
     (tmp_path / "docs" / "releases.md").write_text(
         f"# Release notes\n\n{START}\n{OLD_RELEASE}"
     )
-    (tmp_path / "changes").mkdir()
-    shutil.copy(REPO / "changes" / "README.md", tmp_path / "changes")
+    (tmp_path / FRAGMENTS).mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO / FRAGMENTS / "README.md", tmp_path / FRAGMENTS)
     _run(tmp_path, "git", "init", "-q")
     _run(tmp_path, "git", "add", "-A")
     return tmp_path
@@ -60,7 +65,7 @@ def scratch(tmp_path: Path) -> Path:
 
 def _add_fragments(repo: Path, fragments: dict[str, str]) -> None:
     for name, text in fragments.items():
-        (repo / "changes" / name).write_text(text)
+        (repo / FRAGMENTS / name).write_text(text)
     _run(repo, "git", "add", "-A")
 
 
@@ -122,7 +127,7 @@ def test_build_matches_release_notes_style(scratch, monkeypatch):
         f"* One note. ([#15]({URL}/15))",
     ]
     assert rest == OLD_RELEASE
-    assert [p.name for p in (scratch / "changes").iterdir()] == ["README.md"]
+    assert [p.name for p in (scratch / FRAGMENTS).iterdir()] == ["README.md"]
 
     monkeypatch.setattr(release_body, "RELEASES_MD", scratch / "docs" / "releases.md")
     release_body.check_newest("5.4.0")

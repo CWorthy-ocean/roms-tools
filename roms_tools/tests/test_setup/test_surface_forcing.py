@@ -1526,43 +1526,77 @@ def test_conus404_metadata_reports_no_extrapolation(synthetic_conus404_store):
 
 
 @requires_xesmf
-def test_conus404_outside_footprint_is_nan(synthetic_conus404_store):
+def test_conus404_outside_footprint_is_nan(synthetic_conus404_store, caplog):
     """A grid outrunning the source is partially NaN, not extrapolated or zeroed.
 
     The NaNs are the coverage signal that tells a second source where to fill in,
     so they must survive to ``ds`` (no NaN-to-zero substitution, no wet-point NaN
-    validation error).
+    validation error). The partial coverage is logged as a warning, since ROMS
+    cannot run on the result as it stands.
     """
-    inside = SurfaceForcing(
-        grid=_conus404_grid(150),
-        start_time=CONUS404_START,
-        end_time=CONUS404_END,
-        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
-        type="physics",
-        correct_radiation=False,
-        use_dask=True,
-    )
+    footprint_warning = "outside the CONUS404 footprint"
+    with caplog.at_level(logging.WARNING):
+        inside = SurfaceForcing(
+            grid=_conus404_grid(150),
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+            type="physics",
+            correct_radiation=False,
+            use_dask=True,
+        )
     assert not bool(inside.ds["qair"].isnull().any())
+    assert footprint_warning not in caplog.text
 
+    caplog.clear()
     # Shift the grid north-west so roughly half of it leaves the patch.
-    straddling = SurfaceForcing(
-        grid=_conus404_grid(300, center=(-125.6, 37.6)),
-        start_time=CONUS404_START,
-        end_time=CONUS404_END,
-        source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
-        type="physics",
-        correct_radiation=False,
-        use_dask=True,
-    )
+    with caplog.at_level(logging.WARNING):
+        straddling = SurfaceForcing(
+            grid=_conus404_grid(300, center=(-125.6, 37.6)),
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+            type="physics",
+            correct_radiation=False,
+            use_dask=True,
+        )
     covered = straddling.ds["qair"].isel(time=0).notnull().values
     assert 0.0 < covered.mean() < 1.0, (
         f"expected partial coverage, got {covered.mean():.3f}"
     )
+    n_outside = int((~covered).sum())
+    assert f"{n_outside} of {covered.size} ROMS grid points" in caplog.text
+    assert footprint_warning in caplog.text
     assert straddling.ds.attrs["nan_outside_source_footprint"] == "True"
     # Every variable shares the footprint.
     for var_name in straddling.ds.data_vars:
         np.testing.assert_array_equal(
             straddling.ds[var_name].isel(time=0).notnull().values, covered
+        )
+
+
+@requires_xesmf
+def test_conus404_grid_outside_footprint_raises(synthetic_conus404_store):
+    """A grid with no coverage at all is rejected when the object is built.
+
+    The grid sits ~50 km north of the patch: outside the footprint, but within the
+    margin used to subset the source, so the bounding-box check does not catch it.
+    Without the coverage check this built fine and only failed at ``save()``, with
+    an error that blamed gaps in the source record.
+    """
+    grid = Grid(
+        nx=8, ny=8, size_x=40, size_y=40, center_lon=-124.0, center_lat=38.3, rot=0
+    )
+    with pytest.raises(ValueError, match="entirely outside the CONUS404 footprint"):
+        SurfaceForcing(
+            grid=grid,
+            start_time=CONUS404_START,
+            end_time=CONUS404_END,
+            source={"name": "CONUS404", "path": str(synthetic_conus404_store)},
+            type="physics",
+            correct_radiation=False,
+            coarse_grid_mode="never",
+            use_dask=True,
         )
 
 

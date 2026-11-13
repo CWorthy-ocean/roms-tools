@@ -629,7 +629,7 @@ class SurfaceForcing:
         if isinstance(data, CurvilinearDataset):
             self._warn_if_regrid_options_set_for_curvilinear()
             processed_fields = self._regrid_curvilinear(
-                data, target_coords, _source_var_names(data)
+                data, target_coords, _source_var_names(data), source_name
             )
             # Recorded in the output attrs: what actually ran, not the resolved
             # RegridConfig, which this path bypasses.
@@ -703,13 +703,16 @@ class SurfaceForcing:
         data: CurvilinearDataset,
         target_coords: dict[str, xr.DataArray],
         var_names: dict[str, dict[str, str]],
+        source_name: str,
     ) -> dict[str, xr.DataArray]:
         """Regrid every variable of a curvilinear source onto the ROMS grid.
 
         Goes through :class:`~roms_tools.regrid.LateralRegridFromROMS` (xESMF,
         ``unmapped_to_nan=True``, no extrapolation), mirroring the ROMS-source
         branch in ``InitialConditions._regrid_laterally``, so a target point
-        outside the source footprint comes back as NaN.
+        outside the source footprint comes back as NaN. The footprint coverage is
+        checked here, once, from the 2D coordinates alone: no coverage raises,
+        partial coverage logs a warning.
 
         Wind components are regridded as scalars here and rotated onto the ROMS
         grid angle by the caller.
@@ -730,6 +733,11 @@ class SurfaceForcing:
 
         regridder = LateralRegridFromROMS(ds_in, target_coords)
         try:
+            # A field of ones regrids to 1 where the source covers a target point
+            # and to NaN where it does not: the footprint on the ROMS grid, with
+            # no data read.
+            coverage = regridder.apply(xr.ones_like(ds_in["lat"])).notnull()
+            _check_footprint_coverage(coverage, source_name)
             regridded = regridder.apply(ds_in)
         finally:
             regridder.destroy()
@@ -1453,14 +1461,50 @@ def _source_var_names(
     }
 
 
+def _check_footprint_coverage(covered: xr.DataArray, source_name: str) -> None:
+    """Raise if no ROMS grid point is covered by the source; warn if some are not.
+
+    Parameters
+    ----------
+    covered : xr.DataArray
+        Boolean, on the ROMS grid: True where the source's regrid maps a value.
+    source_name : str
+        Used in the messages.
+
+    Raises
+    ------
+    ValueError
+        If no grid point is covered.
+    """
+    n_total = covered.size
+    n_outside = int((~covered).sum())
+    if n_outside == n_total:
+        raise ValueError(
+            f"The ROMS grid lies entirely outside the {source_name} footprint, so "
+            f"every grid point would be NaN. Use a grid inside the footprint, or a "
+            f"global source such as ERA5."
+        )
+    if n_outside:
+        logging.warning(
+            "%d of %d ROMS grid points (%.1f%%) lie outside the %s footprint and are "
+            "written as NaN. ROMS cannot run on NaN forcing: use a grid inside the "
+            "footprint, or fill those points from a global product such as ERA5 "
+            "before running ROMS.",
+            n_outside,
+            n_total,
+            100.0 * n_outside / n_total,
+            source_name,
+        )
+
+
 def _raise_on_all_nan_time_steps(field: xr.DataArray) -> xr.DataArray:
     """Raise if ``field`` is NaN at every horizontal point at some time step.
 
     Used for a regional (curvilinear) source, whose NaN outside its footprint is
     kept. A time step with no value anywhere means the source has nothing for the
     grid at that time (e.g. a gap or NaN record in the source), which ROMS cannot
-    run on. A grid with no overlap at all is rejected earlier, when the source is
-    subset to the grid.
+    run on. A grid with no overlap at all is rejected earlier, by
+    :func:`_check_footprint_coverage`.
 
     For numpy-backed data the check runs immediately. For dask-backed data it is
     part of the lazy graph and is raised when the data are computed (e.g. at

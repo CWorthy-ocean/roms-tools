@@ -112,7 +112,8 @@ class SurfaceForcing:
             Required, except for these sources, which use a default when it is
             omitted:
 
-            - "ERA5": streamed from the ARCO ERA5 archive on Google Cloud.
+            - "ERA5": streamed from the ARCO ERA5 archive on Google Cloud (as it
+              is when ``path`` is the ARCO URL).
             - "CONUS404": streamed from the USGS/OSN zarr store.
             - "MBL_co2": the NOAA GML Marine Boundary Layer reference, read from
               its URL.
@@ -329,7 +330,7 @@ class SurfaceForcing:
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords
 
-        processed_fields = self._build_processed_fields(
+        processed_fields, applied_regrid = self._build_processed_fields(
             data, target_coords, self.source["name"]
         )
 
@@ -361,7 +362,7 @@ class SurfaceForcing:
 
         d_meta = get_variable_metadata()
 
-        ds = self._write_into_dataset(processed_fields, data, d_meta)
+        ds = self._write_into_dataset(processed_fields, data, d_meta, applied_regrid)
 
         # Shift radiation time for sources whose radiation is a backward-hourly
         # mean. Driven by the dataset class's `rad_time_offset` rather than the
@@ -577,7 +578,7 @@ class SurfaceForcing:
         data,
         target_coords: dict[str, xr.DataArray],
         source_name: str,
-    ) -> dict[str, xr.DataArray]:
+    ) -> tuple[dict[str, xr.DataArray], dict[str, str]]:
         """Take one source dataset from raw to ROMS-grid fields.
 
         Everything from here is per-source: subdomain selection, the coverage
@@ -598,8 +599,11 @@ class SurfaceForcing:
 
         Returns
         -------
-        dict[str, xr.DataArray]
+        processed_fields : dict[str, xr.DataArray]
             Regridded fields on the ROMS grid, keyed by ROMS variable name.
+        applied_regrid : dict[str, str]
+            The ``prefill``, ``regrid_method`` and ``extrap_method`` that actually
+            ran, for the output attributes.
         """
         # Unifies chunking on the *source* grid (data.ds). Output self.ds is built
         # later from the regridded fields, so its chunks follow the regrid ops.
@@ -620,9 +624,9 @@ class SurfaceForcing:
             processed_fields = self._regrid_curvilinear(
                 data, target_coords, _source_var_names(data), source_name
             )
-            # Recorded in the output attrs: what actually ran, not the resolved
-            # RegridConfig, which this path bypasses.
-            self._applied_regrid = {
+            # What actually ran, not the resolved RegridConfig, which this path
+            # bypasses.
+            applied_regrid = {
                 "prefill": "None",
                 "regrid_method": "xesmf",
                 "extrap_method": "None",
@@ -643,7 +647,7 @@ class SurfaceForcing:
             processed_fields = self._regrid_lat_lon(
                 data, target_coords, _source_var_names(data)
             )
-            self._applied_regrid = {
+            applied_regrid = {
                 "prefill": str(self.prefill),
                 "regrid_method": "xesmf" if regrid.use_xesmf else "scipy",
                 "extrap_method": str(regrid.effective_extrap),
@@ -660,7 +664,7 @@ class SurfaceForcing:
                 processed_fields["swrad"], processed_fields["lwrad"], data, source_name
             )
 
-        return processed_fields
+        return processed_fields, applied_regrid
 
     def _warn_if_regrid_options_set_for_curvilinear(self) -> None:
         """Log a note when prefill/regrid options are set but the source is curvilinear.
@@ -828,8 +832,9 @@ class SurfaceForcing:
                     )
                     source["path"] = DEFAULT_CONUS404_PATH
                     data_dict["filename"] = DEFAULT_CONUS404_PATH
-                # `CONUS404Dataset` raises if its store needs dask and
-                # `use_dask=False`. `initial_slice_bounds` names lat/lon dimensions and is a no-op on
+                # (`CONUS404Dataset` itself raises if its store needs dask and
+                # `use_dask=False`.)
+                # `initial_slice_bounds` names lat/lon dimensions and is a no-op on
                 # the zarr path; CurvilinearDataset logs and ignores it, so don't
                 # pass it at all.
                 data_dict.pop("initial_slice_bounds", None)
@@ -1117,7 +1122,7 @@ class SurfaceForcing:
 
         return uwnd_corrected, vwnd_corrected
 
-    def _write_into_dataset(self, processed_fields, data, d_meta):
+    def _write_into_dataset(self, processed_fields, data, d_meta, applied_regrid):
         # save in new dataset
         ds = xr.Dataset()
 
@@ -1127,7 +1132,7 @@ class SurfaceForcing:
             ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
             ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
-        ds = self._add_global_metadata(ds)
+        ds = self._add_global_metadata(ds, applied_regrid)
 
         # Convert the time coordinate to the format expected by ROMS
         ds, sfc_time = add_time_info_to_ds(
@@ -1232,9 +1237,7 @@ class SurfaceForcing:
 
         return ds
 
-    def _add_global_metadata(self, ds=None):
-        if ds is None:
-            ds = xr.Dataset()
+    def _add_global_metadata(self, ds, applied_regrid: dict[str, str]):
         ds.attrs["title"] = "ROMS surface forcing file created by ROMS-Tools"
         # Include the version of roms-tools
         try:
@@ -1249,8 +1252,8 @@ class SurfaceForcing:
         ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        # prefill / regrid_method / extrap_method, as recorded by the regrid step.
-        ds.attrs.update(self._applied_regrid)
+        # prefill / regrid_method / extrap_method, as returned by the regrid step.
+        ds.attrs.update(applied_regrid)
         ds.attrs["type"] = self.type
 
         return ds
@@ -1452,7 +1455,8 @@ def _check_footprint_coverage(covered: xr.DataArray, source_name: str) -> None:
     Parameters
     ----------
     covered : xr.DataArray
-        Boolean, on the ROMS grid: True where the source's regrid maps a value.
+        Boolean, on the surface forcing grid (the coarsened grid in coarse-grid
+        mode): True where the source's regrid maps a value.
     source_name : str
         Used in the messages.
 
@@ -1471,7 +1475,8 @@ def _check_footprint_coverage(covered: xr.DataArray, source_name: str) -> None:
         )
     if n_outside:
         logging.warning(
-            "%d of %d ROMS grid points (%.1f%%) lie outside the %s footprint and are "
+            "%d of %d surface forcing grid points (%.1f%%) lie outside the %s "
+            "footprint and are "
             "written as NaN. ROMS cannot run on NaN forcing: use a grid inside the "
             "footprint, or fill those points from a global product such as ERA5 "
             "before running ROMS.",

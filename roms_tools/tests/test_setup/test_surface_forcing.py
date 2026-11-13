@@ -1565,7 +1565,7 @@ def test_conus404_outside_footprint_is_nan(synthetic_conus404_store, caplog):
         f"expected partial coverage, got {covered.mean():.3f}"
     )
     n_outside = int((~covered).sum())
-    assert f"{n_outside} of {covered.size} ROMS grid points" in caplog.text
+    assert f"{n_outside} of {covered.size} surface forcing grid points" in caplog.text
     assert footprint_warning in caplog.text
     assert straddling.ds.attrs["nan_outside_source_footprint"] == "True"
     # Every variable shares the footprint.

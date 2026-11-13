@@ -191,9 +191,11 @@ class CurvilinearDataset:
     nan_outside_footprint: ClassVar[bool] = True
     """Whether regridded fields are NaN outside the source footprint by design.
 
-    ``True`` here: a curvilinear source is regional and its regrid does not
-    extrapolate. ``SurfaceForcing`` keeps those NaNs, which mark where the source
-    has no data, instead of filling them and validating ocean points.
+    A property of the source, not of its grid type: it says the source is
+    regional and is regridded without extrapolation, which holds for every
+    curvilinear source so far. ``SurfaceForcing`` keeps those NaNs, which mark
+    where the source has no data, instead of filling them and validating ocean
+    points. Which regridder runs is decided separately, by the grid type.
     """
 
     is_global: bool = field(init=False, repr=False, default=False)
@@ -727,7 +729,7 @@ class CONUS404Dataset(CurvilinearDataset):
         if (
             is_s3
             or filename.startswith(("http://", "https://"))
-            or filename.endswith(".zarr")
+            or filename.rstrip("/").endswith(".zarr")
         ):
             self.read_zarr = True
         # The zarr path is dask-only (see `load_data`); say so in CONUS404's terms
@@ -980,10 +982,10 @@ class CONUS404Dataset(CurvilinearDataset):
         consumed, first_after_diff = ds[time_dim].values[:2]
         if self.start_time_pad:
             lead_record_ok = first_after_diff < start
-            needed = "two hourly records"
+            needed = "two records"
         else:
             lead_record_ok = consumed < start
-            needed = "one hourly record"
+            needed = "one record"
         if not lead_record_ok:
             raise ValueError(
                 f"CONUS404 radiation is accumulated since the model start, and "

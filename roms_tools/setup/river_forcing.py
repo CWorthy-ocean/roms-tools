@@ -560,6 +560,27 @@ class RiverForcing:
 
         In the example, the dictionary provides the river names as keys, and the values are lists of tuples, where each tuple represents the
         `(eta_rho, xi_rho)` indices for a river location.
+
+        Only the rivers named in ``indices`` are included: it replaces the
+        automatic discovery. To change one river, read the automatic result
+        from the ``indices`` attribute of a ``RiverForcing`` created without
+        this argument, edit that dictionary, and pass it back.
+
+        Each river's discharge is split evenly over its listed cells
+        (``river_fraction = 1 / len(cells)``), and each cell must be a coastal
+        land cell: a land cell with at least one wet neighbor, as UCLA-ROMS
+        requires. Rivers that share a cell are merged into one ``overlap_*``
+        river.
+
+        Without ``indices``, each river's whole discharge enters the single
+        coastline cell nearest its mouth. At high resolution this can be too
+        much water for one cell. For example, a discharge of 3,850 m3/s into
+        one cell of a 2 km grid is about 83 m/day through that cell, which can
+        drive salinity negative in a shallow cell and make the run fail days
+        later, so a short test run does not reveal it. On an 8 km grid the
+        same discharge is about 5 m/day. Before a long run, divide each
+        river's discharge by the area of its river cell, and spread large
+        rivers over several coastline cells with ``indices``.
     coast_snap_buffer_km : float, optional
         Maximum distance (in km) between a river mouth and the nearest
         coastal grid cell. River stations farther than this threshold are

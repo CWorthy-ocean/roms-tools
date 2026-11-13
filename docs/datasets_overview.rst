@@ -51,6 +51,10 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - Surface Forcing
      - Optional (streaming supported)
      - `Climate Data Store <https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels>`_
+   * - CONUS404
+     - Surface Forcing (North America, high-resolution)
+     - Optional (streaming supported)
+     - `USGS/OSN <https://hytest-org.github.io/hytest/dataset_access/CONUS404_ACCESS.html>`_
    * - Dai & Trenberth
      - River Forcing (discharge)
      - No (auto-downloaded)
@@ -568,6 +572,53 @@ Global 1/4° atmospheric reanalysis from ECMWF providing meteorological surface 
         - Total precipitation (m)
       * - ``sst``
         - Sea surface temperature (K) — used for land masking
+      * - ``sp`` *(recommended)*
+        - Surface pressure (Pa) — used to convert vapour pressure into specific humidity. ``msl`` (mean sea level pressure) is accepted instead; the two are equal at sea level, so either is accurate over the ocean. If a download carries neither, ROMS-Tools warns and falls back to a fixed 1010 hPa, which biases ``qair`` by ~1% over the open ocean (usually high; low under low pressure) and by more over land — and roughly three times that in the ``q_sat(SST) - qair`` deficit that drives evaporation. Include one of them.
+
+
+CONUS404
+~~~~~~~~
+
+4 km hourly WRF reanalysis over North America, providing higher-resolution meteorological surface forcing than ERA5 where it is available. Select it with ``source={"name": "CONUS404"}`` and ``correct_radiation=False``. By default it is streamed from the zarr store on the USGS Open Storage Network pod (``s3://hytest/conus404/conus404_hourly.zarr``), so no download is needed; this needs ``use_dask=True`` and the ``s3fs`` package, part of the streaming installation (see :doc:`installation`). A local copy of the zarr store can be given as ``path``. CONUS404 is regridded with xESMF, which comes with the conda-forge installation of ROMS-Tools.
+
+:Version: CONUS404 hourly, 1979-10-01 to 2024-10-01
+:Required for: Surface Forcing (optional alternative to ERA5)
+:Available at: `HyTEST / USGS <https://hytest-org.github.io/hytest/dataset_access/CONUS404_ACCESS.html>`_ (see also the `data release <https://doi.org/10.5066/P9PHPK4F>`_)
+
+.. warning::
+
+   CONUS404 is regional, and its coverage is smaller than its lat/lon bounding box (17.65–57.34° N, 138.73–57.07° W) suggests: a California Current domain is fully covered, while a Gulf of Alaska domain is almost entirely outside. ROMS grid points outside the footprint are written as ``NaN``, and ``SurfaceForcing`` logs a warning saying how many. ROMS cannot run on ``NaN`` forcing, so use a grid inside the footprint, or fill those points from a global product such as ERA5 before running ROMS. The exact footprint, and the precision of CONUS404's hourly radiation, are described in :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`.
+
+.. dropdown:: Required fields
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Field
+        - Description
+      * - ``time``
+        - Time
+      * - ``lat``, ``lon``
+        - 2D latitude/longitude of the mass points (degrees north/east)
+      * - ``U10``, ``V10``
+        - 10 m wind components (m/s), relative to the **model grid**
+      * - ``COSALPHA``, ``SINALPHA``
+        - Local cosine/sine of the map rotation — used to rotate the winds to east/north
+      * - ``ACSWDNB``, ``ACSWUPB``
+        - Accumulated down/upwelling short-wave radiation at the surface (J/m²); differenced and subtracted to give net short-wave
+      * - ``ACLWDNB``
+        - Accumulated downwelling long-wave radiation at the surface (J/m²)
+      * - ``T2``
+        - 2 m temperature (K)
+      * - ``TD2``
+        - 2 m dewpoint temperature (K)
+      * - ``PSFC``
+        - Surface pressure (Pa) — used for specific humidity, the same way as for ERA5, so the two products agree where they meet
+      * - ``PREC_ACC_NC``
+        - Precipitation accumulated over the prior hour (mm)
+      * - ``LANDMASK``
+        - Land mask (1 land, 0 water) — retained for diagnostics only
 
 
 Dai & Trenberth

@@ -18,7 +18,7 @@ Preprocessing and Model Inputs
 
 5. **BGC Ocean Conditions**: Initial and open boundary conditions for dissolved inorganic carbon, alkalinity, and other biogeochemical tracers from **hybrid observational-model sources** :cite:`garcia2019woa,lauvset_new_2016,huang_data-driven_2022,yang_global_2020,yeager_2022` or Community Earth System Model (**CESM**) output :cite:`yeager_2022`.
 
-6. **Meteorological forcing**: Wind, radiation, precipitation, and air temperature/humidity processed from the global 1/4° ECMWF Reanalysis v5 (**ERA5**) :cite:`hersbach_era5_2020` with optional corrections for radiation bias and coastal wind.
+6. **Meteorological forcing**: Wind, radiation, precipitation, and air temperature/humidity processed from the global 1/4° ECMWF Reanalysis v5 (**ERA5**) :cite:`hersbach_era5_2020` with optional corrections for radiation bias and coastal wind. Over North America, the 4 km hourly **CONUS404** WRF reanalysis can be used instead for substantially higher resolution, at the cost of regional coverage.
 
 7. **BGC surface forcing**: Partial pressure of carbon dioxide, as well as iron, dust, and nitrogen deposition from **hybrid observational-model sources** :cite:`landschutzer_decadal_2016,kok_improved_2021,hamilton_earth_2022,yeager_2022` or **CESM** output :cite:`yeager_2022`.
 
@@ -48,7 +48,7 @@ To generate the model inputs, ``ROMS-Tools`` automates several intermediate proc
 
 * **River locations**: Rivers that fall within the model domain are automatically identified and relocated to the nearest coastal grid cell, with dataset-specific coastal snap buffers (50 km for GloFAS, 200 km for Dai & Trenberth). Overlapping coastal assignments are resolved by synthetic ``overlap_*`` rivers that conserve total freshwater. Rivers that need to be shifted manually or span multiple cells can be configured by the user via ``indices`` or YAML.
 
-* **Data streaming**: ERA5 atmospheric data can be accessed directly from the cloud, removing the need for users to pre-download large datasets locally. Similar streaming capabilities may be implemented for other datasets in the future.
+* **Data streaming**: ERA5 and CONUS404 atmospheric data can be accessed directly from the cloud, removing the need for users to pre-download large datasets locally. Similar streaming capabilities may be implemented for other datasets in the future.
 
 Postprocessing and Analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

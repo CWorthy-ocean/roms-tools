@@ -25,6 +25,7 @@ Surface Forcing
    :toctree: generated/
 
    roms_tools.SurfaceForcing
+   roms_tools.datasets.curvilinear_datasets.CONUS404Dataset
 
 Initial Conditions
 --------------------

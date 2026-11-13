@@ -162,43 +162,20 @@ class SurfaceForcing:
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
-        in the processed dataset is bypassed. Defaults to False. Has no effect for a
-        curvilinear source (CONUS404), whose NaN outside the footprint is always
-        written as-is, and which is always checked for time steps with no data.
+        in the processed dataset is bypassed. Defaults to False. Has no effect for
+        CONUS404, whose output keeps NaN outside its footprint (see Notes).
 
 
     Notes
     -----
-    **CONUS404.** A 4 km WRF reanalysis over North America, hourly from
-    1979-10-01 to 2024-10-01, streamed by default from the USGS/OSN zarr store
-    (which needs ``use_dask=True`` and the ``s3fs`` package; install the
-    ``stream`` extra). Note that its lat/lon bounding box overstates coverage --
-    the domain is a rectangle in Lambert Conformal space, so along the US west
-    coast its northern limit drops from ~55 N at 125 W to nothing west of ~139 W.
-    See :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset` for the
-    exact corners. Points of note:
-
-    - Being a **regional** source on a **curvilinear** grid, it is regridded with
-      non-extrapolating xESMF bilinear, so any part of the ROMS grid outside its
-      footprint comes back as **NaN by design**. Those NaNs are written to the
-      output as-is: the usual NaN-to-zero substitution and the wet-point NaN
-      validation are skipped for curvilinear sources, so that the NaNs mark where
-      the source has no coverage; the output carries the global attribute
-      ``nan_outside_source_footprint="True"``. A time step at which a variable is
-      NaN at *every* grid point is still an error (the source has no data for
-      the grid at that time, e.g. a gap in the record); it is raised when the
-      data are computed, at ``save()`` with ``use_dask=True``. ROMS cannot run on
-      NaN forcing, so either use a grid that lies entirely inside the footprint or
-      fill the NaN points from a global product before running. It requires
-      xESMF; the scipy engine cannot interpolate a 2D source grid.
-    - ``correct_radiation`` must be ``False``: the ERA5 correction climatology is
-      matched by exact lat/lon coordinate value, which a curvilinear grid cannot
-      satisfy.
-    - Its radiation is derived by differencing float32 accumulations since the
-      1979 model start, which quantizes hourly ``swrad`` and ``lwrad``. The step
-      grows with time and flux: about 1 W/m^2 in the 1980s, and by 2020 about
-      4.6-9.1 W/m^2 for ``swrad`` and 9.1 W/m^2 for ``lwrad`` (see
-      :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`).
+    **CONUS404** is regional. ROMS grid points outside its footprint are written
+    as NaN, and the output carries ``nan_outside_source_footprint="True"``; a
+    warning says how many points are affected, and a grid entirely outside the
+    footprint is an error. ROMS cannot run on NaN forcing, so use a grid inside
+    the footprint, or fill those points from a global product such as ERA5 before
+    running. CONUS404 needs xESMF and ``correct_radiation=False``. Its footprint,
+    radiation precision and fields are described in
+    :class:`~roms_tools.datasets.curvilinear_datasets.CONUS404Dataset`.
 
     Examples
     --------

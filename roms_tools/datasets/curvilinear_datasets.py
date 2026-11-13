@@ -573,12 +573,17 @@ class CONUS404Dataset(CurvilinearDataset):
     A 4 km Lambert Conformal Conic reanalysis over the conterminous United States
     and surrounding waters, hourly from 1979-10-01 to 2024-10-01, distributed as a
     zarr store on the USGS Open Storage Network pod
-    (``s3://hytest/conus404/conus404_hourly.zarr``).
+    (``s3://hytest/conus404/conus404_hourly.zarr``). Reading a zarr store, the
+    default one or a local copy, needs ``use_dask=True``; streaming the default
+    store also needs the ``s3fs`` package, part of the streaming installation.
 
     Users normally do not construct this class directly: select it with
-    ``SurfaceForcing(source={"name": "CONUS404"}, ...)``. Its other parameters
-    (``filename``, ``start_time``, ``end_time``, ``use_dask``, ...) have the same
-    meaning as for the ERA5 dataset class.
+    ``SurfaceForcing(source={"name": "CONUS404"}, correct_radiation=False, ...)``.
+    ``correct_radiation`` must be ``False`` because the ERA5 radiation correction
+    climatology is matched by exact lat/lon coordinate value, which a curvilinear
+    grid cannot satisfy. Its other parameters (``filename``, ``start_time``,
+    ``end_time``, ``use_dask``, ...) have the same meaning as for the ERA5 dataset
+    class.
 
     **Footprint.** The lat/lon bounding box (17.65-57.34 N, 138.73-57.07 W)
     substantially overstates coverage, because the domain is a rectangle in
@@ -666,9 +671,11 @@ class CONUS404Dataset(CurvilinearDataset):
     interpolates on 1D coordinate axes and cannot handle it. Because that
     regridder does not extrapolate, target points outside the CONUS404 footprint
     come back as NaN and are written to the output as NaN: ``SurfaceForcing``
-    skips its NaN-to-zero fill and its wet-point NaN validation for curvilinear
-    sources. Use a grid that lies inside the footprint, or fill those points from
-    a global product before running ROMS.
+    skips its NaN-to-zero fill and its wet-point NaN validation for this source
+    (``nan_outside_footprint``). It logs a warning with the number of points
+    outside the footprint, and raises if the whole grid is outside. Use a grid
+    that lies inside the footprint, or fill those points from a global product
+    before running ROMS.
     """
 
     # The on-disk zarr chunk is (time=144, y=175, x=175). Only relevant on a

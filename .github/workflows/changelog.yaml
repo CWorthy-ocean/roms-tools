@@ -1,0 +1,45 @@
+name: Changelog
+
+# Every pull request carries a release-note fragment in changes/ (see
+# docs/contributing.rst). The `no-changelog` label skips the check for PRs with
+# nothing to tell users; a skipped job counts as passing for required checks.
+
+on:
+  pull_request:
+    # labeled/unlabeled re-run the check when `no-changelog` is added or removed.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # Only PRs into main: a PR into another PR's branch shares that PR's note.
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  towncrier-check:
+    name: towncrier check
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # towncrier diffs against the base branch, which needs its history.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install towncrier
+        # Same pin as finalize_release_notes.yaml.
+        run: pip install "towncrier==26.9.0"
+
+      - name: Check for a release-note fragment
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! towncrier check --compare-with "origin/$BASE_REF"; then
+            echo "::error::Add a release note as changes/+<name>.<type>.md (see changes/README.md), or label the PR no-changelog if users have nothing to learn from it."
+            exit 1
+          fi

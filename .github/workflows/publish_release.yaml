@@ -63,14 +63,12 @@ jobs:
           token: ${{ secrets.RELEASE_PAT }}
 
       - name: Delete the next_release_notes branch
-        # Its notes are on main now; the next merged PR recreates the branch
-        # from main.  A squash merge never makes the branch part of main's
-        # history, so a surviving branch would drag this release's notes into
-        # the next finalize PR's diff, conflicting with main's copy.  The repo's
+        # Its notes are on main now; the next finalize run recreates the branch
+        # from main, and refuses to run while it still exists.  The repo's
         # "Automatically delete head branches" setting does the same, but this
         # workflow cannot see that setting, so it does not rely on it.  Done
-        # first, before anything that can fail, to keep the window in which an
-        # update run could still push to the old branch short.
+        # first, before anything that can fail, so a later failure here does not
+        # also block the next finalize run.
         run: |
           if ! git push origin --delete next_release_notes; then
             # Fine if the repo setting deleted it first; fail on anything else.

@@ -146,12 +146,16 @@ give the user the exact command.
 
 ## Release notes
 
-Release notes are collected from pull request descriptions. When a pull request
-merges, `ci/update_release_notes.py` reads its description and adds the notes to
-the "Unreleased" section of `docs/releases.md`. Write the sections of the PR
-description (Breaking Changes, New Features, Bug Fixes, Improvements,
-Miscellaneous) for users. Do not edit `docs/releases.md` on a branch: the entry
-would be duplicated.
+A pull request with a user-visible change adds its release note as a file,
+`changes/+<name>.<type>.md`, committed with the code (`<name>` is any short
+label). The types are the `[[tool.towncrier.type]]` entries in
+`pyproject.toml`. `breaking` (a setup that worked now fails or needs an edit)
+and `output` (the same setup still runs but writes different files) are
+separate types. Write each note for users in one line, optionally followed by
+`* ` sub-bullets, one file per note. At release time the pull request number is
+filled in and towncrier builds `docs/releases.md` from the files, so do not
+edit `docs/releases.md` on a branch. The pull request description is for the
+reviewer. `docs/contributing.rst` has the details.
 
 ## Posting on GitHub
 

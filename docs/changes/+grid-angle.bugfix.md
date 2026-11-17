@@ -1,0 +1,5 @@
+Grids rotated by more than about 90 degrees now store the correct `angle`; since 2.6.0.1 it was 180 degrees off wherever the grid's xi axis pointed westward, which reversed surface winds and initial, boundary and tidal currents in those cells.
+* Grids rotated by less than about 80 degrees (somewhat less on very large grids) are unchanged.
+* For an affected domain, regenerate the grid from its parameters (`Grid(nx=..., ...)` or `Grid.from_yaml`), then regenerate its initial conditions and its boundary, surface, tidal and nesting forcing. `Grid(filename=...)` keeps the angle stored in the file, and now logs a warning when that angle points against the grid's own xi axis.
+* `ROMSOutput` rotates model velocities back to east and north with the grid's angle, so velocities from runs on an affected grid also need the regenerated grid.
+* On grids whose xi axis points close to due west, the angle is now averaged correctly across ±180 degrees for coarse-grid surface forcing and nesting child boundaries.

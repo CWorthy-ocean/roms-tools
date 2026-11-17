@@ -108,6 +108,29 @@ def test_check_child_inside_parent(request, parent_name, child_name, context):
         _check_child_outside_parent(parent_grid_ds, child_grid_ds, boundaries)
 
 
+def test_child_boundary_angle_where_angle_wraps_at_180_degrees(
+    big_grid_that_straddles0,
+):
+    """Child boundary angles at u- and v-points stay near 180° where the child's
+    angle field crosses ±180°.
+    """
+    child = Grid(
+        nx=10, ny=10, center_lon=0, center_lat=61, rot=179, size_x=200, size_y=200
+    )
+    assert child.ds.angle.max() - child.ds.angle.min() > np.pi  # the field wraps
+    parent_grid_ds, child_grid_ds = _prepare_grid_datasets(
+        big_grid_that_straddles0, child
+    )
+
+    ds = map_child_boundaries_onto_parent_grid_indices(parent_grid_ds, child_grid_ds)
+
+    for direction in ["south", "east", "north", "west"]:
+        for location in ["u", "v"]:
+            angle = ds[f"child_{direction}_{location}"].isel(three=2)
+            error = angle - np.deg2rad(179)
+            assert np.cos(error).min() > np.cos(np.deg2rad(5))
+
+
 @pytest.mark.parametrize(
     "grid",
     [

@@ -17,6 +17,7 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import (
     DEFAULT_NETCDF_FORMAT,
     NetCDFFormat,
+    average_angle,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     save_datasets,
@@ -869,8 +870,12 @@ def map_child_boundaries_onto_parent_grid_indices(
 
     # add angles at u- and v-points
 
-    child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
-    child_grid_ds["angle_v"] = interpolate_from_rho_to_v(child_grid_ds["angle"])
+    child_grid_ds["angle_u"] = average_angle(
+        child_grid_ds["angle"], interpolate_from_rho_to_u
+    )
+    child_grid_ds["angle_v"] = average_angle(
+        child_grid_ds["angle"], interpolate_from_rho_to_v
+    )
 
     ds = xr.Dataset()
 

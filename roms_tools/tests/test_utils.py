@@ -23,6 +23,7 @@ from roms_tools.utils import (
     NetCDFFormat,
     _interpolate_generic,
     _path_list_from_input,
+    average_angle,
     generate_focused_coordinate_range,
     get_dask_chunks,
     has_copernicus,
@@ -944,6 +945,27 @@ def test_rotate_velocities_roundtrip(sample_velocities_centered):
 
     np.testing.assert_allclose(u.values, u_back.values)
     np.testing.assert_allclose(v.values, v_back.values)
+
+
+def test_average_angle_across_180_degrees():
+    """Averaging angles on both sides of ±180° gives an angle near 180°, not 0°."""
+    angle = xr.DataArray(
+        np.deg2rad([[179.0, -179.0, -177.0]]), dims=("eta_rho", "xi_rho")
+    )
+
+    averaged = average_angle(angle, interpolate_from_rho_to_u)
+
+    error = averaged.values - np.deg2rad([[180.0, -178.0]])
+    np.testing.assert_allclose(np.cos(error), 1.0)
+
+
+def test_average_angle_without_wrap_is_plain_average():
+    angle = xr.DataArray(np.deg2rad([[10.0, 20.0, 40.0]]), dims=("eta_rho", "xi_rho"))
+
+    xr.testing.assert_identical(
+        average_angle(angle, interpolate_from_rho_to_u),
+        interpolate_from_rho_to_u(angle),
+    )
 
 
 def _assert_single_full_chunk(da: xr.DataArray, dim: str) -> None:

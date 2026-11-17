@@ -215,6 +215,73 @@ def test_coords_relation(grid_fixture, request):
     assert_smaller_equal_than_with_tolerance(grid.ds.lon_v.max(), grid.ds.lon_rho.max())
 
 
+def _xi_bearing(ds: xr.Dataset) -> np.ndarray:
+    """Direction of +xi at interior rho-points, in radians counterclockwise from east.
+
+    Computed as the spherical initial bearing from the rho-point on the low-xi side
+    to the one on the high-xi side, independently of the formula the grid uses.
+    """
+    lon = np.deg2rad(ds.lon_rho.values)
+    lat = np.deg2rad(ds.lat_rho.values)
+    lat1, lat2 = lat[:, :-2], lat[:, 2:]
+    dlon = lon[:, 2:] - lon[:, :-2]
+    y = np.sin(dlon) * np.cos(lat2)
+    x = np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(dlon)
+    return np.pi / 2 - np.arctan2(y, x)
+
+
+def _rotated_grid(rot: float) -> Grid:
+    return Grid(
+        nx=8, ny=8, size_x=400, size_y=400, center_lon=0, center_lat=40, rot=rot
+    )
+
+
+@pytest.mark.parametrize("rot", [-170, -105, -90, 0, 90, 135, 170, 180])
+def test_angle_matches_grid_geometry(rot):
+    """The stored angle points along the grid's own xi axis at any rotation."""
+    grid = _rotated_grid(rot)
+
+    error = grid.ds.angle.values[:, 1:-1] - _xi_bearing(grid.ds)
+
+    assert np.cos(error).min() > np.cos(np.deg2rad(1))
+
+
+def test_angle_points_west_on_grid_rotated_170_degrees():
+    grid = _rotated_grid(170)
+
+    assert (np.cos(grid.ds.angle) < 0).all()
+
+
+def test_coarse_angle_where_angle_wraps_at_180_degrees():
+    """Coarsening an angle field that crosses ±180° keeps it near 180°."""
+    grid = _rotated_grid(179)
+    assert grid.ds.angle.max() - grid.ds.angle.min() > np.pi  # the field wraps
+
+    error = grid.ds.angle_coarse - np.deg2rad(179)
+
+    assert np.cos(error).min() > np.cos(np.deg2rad(5))
+
+
+def test_from_file_warns_on_reversed_angle(tmp_path, caplog):
+    """A grid file whose angle points against its own xi axis is flagged on load."""
+    path = tmp_path / "grid.nc"
+    _rotated_grid(135).save(path)
+
+    with caplog.at_level(logging.WARNING):
+        Grid(filename=path)
+    assert "points against the grid's own xi axis" not in caplog.text
+
+    # Store the angle older roms-tools wrote for this grid: off by 180 degrees.
+    with xr.open_dataset(path) as f:
+        ds = f.load()
+    ds["angle"] = ds["angle"] - np.pi
+    ds.to_netcdf(path)
+
+    with caplog.at_level(logging.WARNING):
+        Grid(filename=path)
+    assert "points against the grid's own xi axis in 100%" in caplog.text
+
+
 @pytest.mark.parametrize(
     "grid_fixture",
     [

@@ -582,6 +582,44 @@ def test_estimate_bgc_fields_units_and_laziness(method):
 
 
 @needs_pyesper
+def test_estimate_bgc_fields_drops_the_salinity_inputs_attrs():
+    import xarray as xr
+
+    ny, nz = 4, 3
+    rng = np.random.default_rng(0)
+    temp = xr.DataArray(rng.uniform(2, 20, (nz, ny)), dims=("s", "y"))
+    salt = xr.DataArray(
+        rng.uniform(34, 36, (nz, ny)),
+        dims=("s", "y"),
+        attrs={
+            "standard_name": "sea_water_salinity",
+            "unit_long": "Practical Salinity Unit",
+            "valid_min": np.int16(1),
+            "valid_max": np.int16(28249),
+        },
+    )
+    lon = xr.DataArray(rng.uniform(-40, 0, ny), dims=("y",))
+    lat = xr.DataArray(rng.uniform(40, 60, ny), dims=("y",))
+    depth = xr.DataArray(np.linspace(0, 1000, nz), dims=("s",))
+    out = estimate_bgc_fields(
+        temp,
+        salt,
+        lon,
+        lat,
+        depth,
+        source={"name": "ESPER", "path": _PYESPER_PATH, "method": "lir"},
+        roms_variables=["NO3", "ALK", "O2"],
+        est_dates=2020.0,
+    )
+    for name, da in out.items():
+        assert not {"standard_name", "unit_long", "valid_min", "valid_max"} & set(
+            da.attrs
+        ), (name, da.attrs)
+        assert da.attrs["units"] == "mmol/m^3" or name == "ALK"
+    assert out["O2"].attrs["esper_floor"].startswith("PyESPER estimate clamped at 5")
+
+
+@needs_pyesper
 def test_estimate_bgc_fields_call_count_independent_of_variable_count(monkeypatch):
     """Regression test: `est`'s per-variable DataArrays all share ONE underlying
     per-chunk `nn()` call (`apply_ufunc` is called once, with N output_core_dims).
@@ -687,6 +725,10 @@ def test_initial_conditions_esper(use_dask):
         # units/magnitudes
         assert 1500.0 < float(ic.ds["ALK"].mean()) < 3000.0
         assert float(ic.ds["NO3"].min()) >= 0.0
+        # ESPER estimates do not inherit the salinity input's identity (GLORYS
+        # 'so' is standard_name sea_water_salinity); physics keeps its own
+        for var in ESPER_SUPPORTED_VARS:
+            assert "standard_name" not in ic.ds[var].attrs, var
 
         # process_bgc_fields completes the MARBL set
         ic2 = copy.copy(ic)
@@ -2092,3 +2134,82 @@ def test_bgc_groom_refuses_objects_and_bgc_check_accepts_them(monkeypatch):
     assert isinstance(bgc_check(ic, variables=["ALK", "DIC"]), xr.Dataset)
     out = bgc_groom(ic.ds, ic.grid, variables=["ALK", "DIC"])
     assert isinstance(out, xr.Dataset)
+
+
+# --------------------------------------------------------------------------------------
+# ESPER's predictors get in-situ temperature (no PyESPER needed)
+# --------------------------------------------------------------------------------------
+def test_estimate_bgc_fields_feeds_pyesper_in_situ_temperature(monkeypatch):
+    """ROMS temp is potential temperature; ESPER's predictor is in-situ temperature."""
+    import xarray as xr
+
+    import roms_tools.setup.esper as esper_module
+
+    seen = {}
+
+    def fake_nn(salt, temp, lon, lat, depth, *, variables, **kwargs):
+        seen["temp"] = temp.compute()
+        return {v: xr.full_like(salt, 100.0) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module, "_ensure_pyesper", lambda path=None: {"nn": fake_nn}
+    )
+
+    theta = xr.DataArray([[1.5, 1.5]], dims=("y", "s"))
+    salt = xr.DataArray([[34.7, 34.7]], dims=("y", "s"))
+    depth = xr.DataArray([-10.0, -4000.0], dims=("s",))  # ROMS sign convention
+    lon = xr.DataArray([210.0], dims=("y",))
+    lat = xr.DataArray([40.0], dims=("y",))
+    out = estimate_bgc_fields(
+        theta,
+        salt,
+        lon,
+        lat,
+        depth,
+        source={"name": "ESPER", "method": "nn"},
+        roms_variables=["ALK", "O2"],
+        est_dates=2000.0,
+    )
+    t = seen["temp"]
+    assert abs(float(t.isel(y=0, s=0)) - 1.5) < 0.01
+    assert 0.25 < float(t.isel(y=0, s=1)) - 1.5 < 0.45
+    # the mmol/m^3 conversion still uses in-situ density at depth
+    assert float(out["ALK"].isel(y=0, s=1)) > float(out["ALK"].isel(y=0, s=0))
+
+
+def test_estimate_bgc_fields_drops_salinity_attrs_without_pyesper(monkeypatch):
+    """PyESPER's estimates carry its salinity input's attrs; none may reach the output.
+
+    The PyESPER-gated tests cover this too, but CI never installs PyESPER; this fake
+    reproduces the leak (``xr.full_like`` copies salt's attrs) so CI guards it.
+    """
+    import xarray as xr
+
+    import roms_tools.setup.esper as esper_module
+
+    def fake_nn(salt, temp, lon, lat, depth, *, variables, **kwargs):
+        return {v: xr.full_like(salt, 100.0) for v in variables}
+
+    monkeypatch.setattr(
+        esper_module, "_ensure_pyesper", lambda path=None: {"nn": fake_nn}
+    )
+
+    salt_attrs = {
+        "standard_name": "sea_water_salinity",
+        "unit_long": "Practical Salinity Unit",
+        "valid_min": np.int16(1),
+        "valid_max": np.int16(28249),
+    }
+    out = estimate_bgc_fields(
+        xr.DataArray([[1.5, 1.5]], dims=("y", "s")),
+        xr.DataArray([[34.7, 34.7]], dims=("y", "s"), attrs=salt_attrs),
+        xr.DataArray([210.0], dims=("y",)),
+        xr.DataArray([40.0], dims=("y",)),
+        xr.DataArray([-10.0, -4000.0], dims=("s",)),
+        source={"name": "ESPER", "method": "nn"},
+        roms_variables=["ALK", "O2"],
+        est_dates=2000.0,
+    )
+    for name, da in out.items():
+        assert not set(salt_attrs) & set(da.attrs), (name, da.attrs)
+        assert "long_name" in da.attrs and "units" in da.attrs, (name, da.attrs)

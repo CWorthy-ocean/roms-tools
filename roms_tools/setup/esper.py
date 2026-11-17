@@ -61,6 +61,7 @@ from roms_tools.setup.utils import (
     apply_chunk_plan,
     compute_in_situ_density,
     get_variable_metadata,
+    in_situ_temperature,
     month_aligned_time_chunks,
     time_dim_of,
 )
@@ -477,8 +478,11 @@ def estimate_bgc_fields(
     Parameters
     ----------
     temp, salt : xarray.DataArray
-        In-situ temperature (°C) and practical salinity on the ROMS grid (may be
-        dask-backed; results are then lazy -- see Returns).
+        Potential temperature (°C), as ROMS carries it, and practical salinity on the
+        ROMS grid (may be dask-backed; results are then lazy -- see Returns). The
+        temperature is converted to in-situ
+        (:func:`roms_tools.setup.utils.in_situ_temperature`) before it reaches
+        PyESPER, whose predictors are in-situ temperature.
     lon, lat : xarray.DataArray
         Longitude (°E) and latitude (°N) of the same points (broadcastable to ``temp``).
     depth : xarray.DataArray
@@ -543,9 +547,15 @@ def estimate_bgc_fields(
             else depth_pos
         )
 
+    # ESPER's temperature predictor is in-situ (PyESPER converts it to potential
+    # temperature itself); ROMS temp is potential temperature. Fed potential
+    # temperature, ESPER sees deep water as colder than it is and predicts it too high
+    # in O2 and too low in Si, ALK and DIC.
+    temp_in_situ = in_situ_temperature(temp, salt, depth_pos, lon, lat)
+
     est = estimate(
         salt,
-        temp,
+        temp_in_situ,
         lon,
         lat,
         depth_pos,
@@ -569,6 +579,8 @@ def estimate_bgc_fields(
     # µmol/kg -> mmol/m³ via in-situ density (TEOS-10 gsw.rho with pressure from
     # depth), matching the GLODAP/WOA adapters' convention; then clamp each tracer
     # at its floor (ESPER_FLOORS: 0 for the nutrients/ALK/DIC, 5.0 for O2).
+    # gsw.rho takes Conservative Temperature; potential temperature is the closer
+    # stand-in for it, so the density uses ``temp``, not ``temp_in_situ``.
     density = compute_in_situ_density(temp, salt, depth_pos, lat)
     factor = density / 1000.0
     d_meta = get_variable_metadata()
@@ -578,6 +590,10 @@ def estimate_bgc_fields(
         da = est[ROMS_TO_ESPER[roms_name]] * factor
         floor = ESPER_FLOORS[roms_name]
         da = da.clip(min=floor)
+        # PyESPER hands back its salinity input's attributes (standard_name
+        # sea_water_salinity, unit_long PSU, the source's packed valid_min/valid_max):
+        # none of them describe this estimate, so start from none.
+        da.attrs = {}
         meta = d_meta.get(roms_name, {})
         if "long_name" in meta:
             da.attrs["long_name"] = meta["long_name"]

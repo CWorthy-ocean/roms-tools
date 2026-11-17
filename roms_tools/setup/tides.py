@@ -18,6 +18,7 @@ from roms_tools.setup.utils import (
     apply_scipy_fallback_fill,
     apply_source_prefill,
     check_source_coverage,
+    drop_source_encoding_attrs,
     fill_nans_over_land,
     from_yaml,
     get_target_coords,
@@ -411,7 +412,9 @@ class TidalForcing:
         ds = xr.Dataset()
 
         for var_name in processed_fields.keys():
-            ds[var_name] = processed_fields[var_name].astype(np.float32)
+            ds[var_name] = drop_source_encoding_attrs(
+                processed_fields[var_name].astype(np.float32)
+            )
             ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
             ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 

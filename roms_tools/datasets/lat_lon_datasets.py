@@ -5,7 +5,7 @@ import logging
 import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, ClassVar, Literal, cast
@@ -30,6 +30,7 @@ from roms_tools.datasets.utils import (
     convert_to_float64,
     select_relevant_fields,
     select_relevant_times,
+    specific_humidity_from_dewpoint,
     validate_start_end_time,
 )
 from roms_tools.fill import (
@@ -191,12 +192,28 @@ class LatLonDataset:
     chunks: dict[str, int] | None = None
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     read_zarr: bool = False
+    storage_options: dict[str, object] | None = None
     allow_flex_time: bool = False
     start_time_pad: bool = True
     end_time_pad: bool = True
     apply_post_processing: bool = True
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
     _default_lateral_dask_chunk: ClassVar[int | None] = None
+
+    rad_time_offset: ClassVar[timedelta | None] = None
+    """Offset from the radiation time stamp to the middle of its averaging period.
+
+    ``None`` for a source without time-averaged radiation; ``SurfaceForcing``
+    builds a ``rad_time`` coordinate only when this is set.
+    """
+
+    nan_outside_footprint: ClassVar[bool] = False
+    """Whether regridded fields are NaN outside the source footprint by design.
+
+    ``False`` for lat/lon sources: they are filled and extrapolated, and
+    ``SurfaceForcing`` treats any NaN at an ocean point as an error.
+    """
+
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -271,6 +288,7 @@ class LatLonDataset:
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
             initial_slice_bounds=self.initial_slice_bounds,
+            storage_options=self.storage_options,
         )
 
         return ds
@@ -3023,9 +3041,23 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
 @dataclass(kw_only=True)
 class ERA5Dataset(LatLonDataset):
-    """Represents ERA5 data on original grid."""
+    """Represents ERA5 data on original grid.
+
+    Specific humidity is derived from 2 m dewpoint and the source's own surface
+    pressure: ``sp`` if present, else ``msl``, else a fixed 1010 hPa with a warning
+    (see ``_resolve_surface_pressure``).
+    """
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
+    rad_time_offset: ClassVar[timedelta] = timedelta(minutes=-30)
+    """Offset from the radiation time stamp to the middle of its averaging period.
+
+    ERA5's hourly ``ssr``/``strd`` are accumulations over the *preceding* hour, so
+    the flux labelled at ``t`` represents the interval centred on ``t - 30 min``.
+    ``SurfaceForcing`` reads this to build the ``rad_time`` coordinate; a source
+    with instantaneous radiation should leave it unset.
+    """
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {
@@ -3040,6 +3072,18 @@ class ERA5Dataset(LatLonDataset):
         }
     )
 
+    # Surface pressure, used to convert vapour pressure into specific humidity.
+    # Optional because an ERA5 extract downloaded for surface forcing may carry
+    # neither field; `post_process` then falls back to a fixed value and says so.
+    # `sp` is preferred, with `msl` accepted as a stand-in: the two are equal at
+    # sea level by construction, and ROMS only consumes the ocean points.
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sp": "sp",
+            "msl": "msl",
+        }
+    )
+
     dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
@@ -3050,13 +3094,61 @@ class ERA5Dataset(LatLonDataset):
 
     climatology: bool = False
 
+    # Fallback pressure, in hPa, when the source carries no pressure field. This
+    # was the value hardcoded for every point and every time step before ERA5's
+    # own surface pressure was used; it is a fair global mean but a poor ocean
+    # value (the sea surface averages ~1013 hPa, and 1018-1023 under a summer
+    # subtropical high), which biased `qair` by ~1% over the open ocean (usually
+    # high; low under low pressure) and by more over land.
+    _FALLBACK_PATM_HPA: ClassVar[float] = 1010.0
+
+    def _resolve_surface_pressure(self, ds: xr.Dataset) -> xr.DataArray | float:
+        """Return surface pressure in hPa for the humidity conversion.
+
+        Specific humidity is a mass ratio, so converting a vapour pressure into
+        one requires dividing by the total air pressure: assuming a pressure
+        11 hPa below the truth inflates ``qair`` by ~1%, which in turn shifts the
+        ``q_sat(SST) - qair`` deficit that drives evaporation by ~3%.
+
+        Prefers ``sp`` (true surface pressure). Falls back to ``msl`` (mean sea
+        level pressure), which is equal to ``sp`` at sea level by construction and
+        so is a good stand-in over the ocean, where ROMS consumes these fields;
+        over land the two diverge, but those points are masked and refilled from
+        ocean neighbours anyway. Falls back last to a fixed value, with a warning,
+        so an extract carrying neither field still works.
+        """
+        for key in ("sp", "msl"):
+            name = self.opt_var_names.get(key)
+            if name and name in ds.data_vars:
+                if key == "msl":
+                    logging.info(
+                        "Using mean sea level pressure (%s) for the humidity "
+                        "conversion; %r is absent. The two agree at sea level, so "
+                        "this is accurate over the ocean.",
+                        name,
+                        self.opt_var_names.get("sp"),
+                    )
+                return ds[name] / 100.0  # Pa -> hPa
+
+        logging.warning(
+            "No surface pressure field found in the ERA5 source, so specific "
+            "humidity falls back to a fixed %.1f hPa. Over the ocean this "
+            "typically overestimates `qair` by ~1%%, and the evaporation-driving "
+            "humidity deficit by ~3%%. Include `sp` (or `msl`) in your ERA5 "
+            "download to avoid this.",
+            self._FALLBACK_PATM_HPA,
+        )
+        return self._FALLBACK_PATM_HPA
+
     def post_process(self) -> None:
         """
         Processes and converts ERA5 data values as follows:
         - Convert radiation values from J/m^2 to W/m^2.
         - Convert rainfall from meters to cm/day.
         - Convert temperature from Kelvin to Celsius.
-        - Compute relative humidity if not present, convert to absolute humidity.
+        - Compute specific humidity ``qair`` from 2 m dewpoint if not present, using
+          the surface pressure ``sp`` (or ``msl``); falls back to a fixed 1010 hPa,
+          with a warning, if neither is present.
         - Use SST to create mask.
 
         revised to be dask-lazy
@@ -3093,26 +3185,27 @@ class ERA5Dataset(LatLonDataset):
             tair = ds[vn["Tair"]]
             d2m = ds[vn["d2m"]]
 
-            # Relative humidity (Magnus formula)
-            qair = np.exp((17.625 * d2m) / (243.04 + d2m)) / np.exp(
-                (17.625 * tair) / (243.04 + tair)
-            )
-
-            # Convert relative to absolute humidity
-            patm = 1010.0
-            cff = (
-                (1.0007 + 3.46e-6 * patm)
-                * 6.1121
-                * np.exp(17.502 * tair / (240.97 + tair))
-            )
-            cff = cff * qair
-            qair_abs = 0.62197 * (cff / (patm - 0.378 * cff))
+            # Magnus relative humidity -> specific humidity, using ERA5's own
+            # surface pressure. Shared with every other surface-forcing source
+            # (see `specific_humidity_from_dewpoint`) so that `qair` is computed
+            # identically across products.
+            patm = self._resolve_surface_pressure(ds)
+            qair_abs = specific_humidity_from_dewpoint(tair, d2m, patm=patm)
 
             # Assign qair and drop d2m in one lazy operation
             ds = ds.assign({"qair": qair_abs})
             ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
             ds["qair"].attrs["units"] = "kg/kg"
             ds = ds.drop_vars([vn["d2m"]])
+
+            # The pressure fields have served their purpose; drop them so nothing
+            # downstream tries to regrid or write them.
+            pressure_vars = [
+                name for name in self.opt_var_names.values() if name in ds.data_vars
+            ]
+            if pressure_vars:
+                ds = ds.drop_vars(pressure_vars)
+            self.opt_var_names = {}
 
             # Update var_names
             self.var_names = {
@@ -3150,8 +3243,22 @@ class ERA5ARCODataset(ERA5Dataset):
         }
     )
 
+    # The ARCO archive always carries surface pressure, so there is no need to
+    # also read mean sea level pressure as a stand-in.
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sp": "surface_pressure",
+        }
+    )
+
     def __post_init__(self) -> None:
         self.read_zarr = True
+        # Anonymous GCS access. This used to be hardcoded inside
+        # `_load_data_dask`, but credential options are backend-specific, so each
+        # zarr-backed class now supplies its own. (`GLORYSDefaultDataset` also sets
+        # `read_zarr`, but it reads through `ds_loader_fn`, so it never needs these.)
+        if self.storage_options is None:
+            self.storage_options = {"token": "anon"}
         if not has_gcsfs():
             msg = get_pkg_error_msg("cloud-based ERA5 data", "gcsfs", "stream")
             raise RuntimeError(msg)

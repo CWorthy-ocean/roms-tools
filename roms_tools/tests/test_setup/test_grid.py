@@ -276,10 +276,14 @@ def test_from_file_warns_on_reversed_angle(tmp_path, caplog):
         ds = f.load()
     ds["angle"] = ds["angle"] - np.pi
     ds.to_netcdf(path)
+    n_interior = ds["angle"].isel(xi_rho=slice(1, -1)).size
 
     with caplog.at_level(logging.WARNING):
         Grid(filename=path)
-    assert "points against the grid's own xi axis in 100%" in caplog.text
+    assert (
+        f"points against the grid's own xi axis in {n_interior} of {n_interior} "
+        in caplog.text
+    )
 
 
 @pytest.mark.parametrize(

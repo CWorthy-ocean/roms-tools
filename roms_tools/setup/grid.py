@@ -1656,12 +1656,12 @@ def _warn_if_angle_reversed(ds: xr.Dataset, filename: str | Path) -> None:
     if reversed_cells.any():
         logging.warning(
             f"The grid angle stored in {filename} points against the grid's own "
-            f"xi axis in {100 * reversed_cells.mean():.0f}% of interior rho-points. "
-            "roms-tools 2.6.0.1 through 5.4.0 stored this wrong angle on grids "
-            "rotated by more than about 90 degrees, and forcing made with it has "
-            "winds and currents reversed in those cells. Regenerate the grid from "
-            "its parameters (Grid(nx=..., ...) or Grid.from_yaml), then regenerate "
-            "its forcing."
+            f"xi axis in {reversed_cells.sum()} of {reversed_cells.size} interior "
+            "rho-points. roms-tools 2.6.0.1 through 5.4.0 stored this wrong angle "
+            "on grids rotated by more than about 90 degrees. Forcing made with it "
+            "has winds and currents reversed in those cells, and ROMSOutput rotates "
+            "velocities with it. Regenerate the grid from its parameters "
+            "(Grid(nx=..., ...) or Grid.from_yaml), then regenerate its forcing."
         )
 
 
@@ -1689,7 +1689,9 @@ def _compute_angle(coords):
         coords["latu"][:, 1:],
         coords["lonu"][:, 1:],
     )
-    ang_s = np.mod(ang_s + np.pi, 2 * np.pi) - np.pi  # Ensure angles are in [-π, π]
+    # arctan2 already returns [-π, π]; this wrap also keeps the stored angles of
+    # grids that never point westward bit-identical, so keep it.
+    ang_s = np.mod(ang_s + np.pi, 2 * np.pi) - np.pi
 
     # Create output array and set angles
     ang = np.zeros_like(coords["lon"])

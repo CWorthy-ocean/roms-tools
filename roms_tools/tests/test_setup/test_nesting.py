@@ -587,6 +587,21 @@ class TestNesting:
         ):
             align_grids(big_grid, small_grid)
 
+    def test_error_if_child_grid_does_not_overlap_parent_grid(self):
+        # Open ocean, ~3800 km apart, so no parent points survive the crop around
+        # the child; the error must still name the offending boundary.
+        parent_grid = Grid(
+            nx=10, ny=10, size_x=1000, size_y=1000, center_lon=-30, center_lat=45
+        )
+        child_grid = Grid(
+            nx=10, ny=10, size_x=400, size_y=400, center_lon=-30, center_lat=10
+        )
+
+        with pytest.raises(
+            ValueError, match="boundary of the child grid lie outside the parent grid"
+        ):
+            align_grids(parent_grid, child_grid)
+
     def test_no_error_if_land_child_points_beyond_parent_grid(self, caplog):
         # coarse resolution Pacific domain
         parent_grid = Grid(

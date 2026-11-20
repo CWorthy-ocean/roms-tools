@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from scipy.interpolate import LinearNDInterpolator, griddata, interp1d
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, QhullError
 
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.topography import clip_depth
@@ -238,6 +238,7 @@ def _interpolate_parent(
     -------
     xr.DataArray
         The interpolated data on the child grid, with dimensions ("eta_rho", "xi_rho").
+        NaN where a child point lies outside the parent grid.
     """
     lon_parent = parent_da.lon_rho.values
     lat_parent = parent_da.lat_rho.values
@@ -255,7 +256,16 @@ def _interpolate_parent(
     values = parent_da.values[keep]
     xi = (lon_child, lat_child)
 
-    parent_interpolated = griddata(points, values, xi, method="linear")
+    # If too few parent points lie near the child to span an area, the child lies
+    # outside the parent grid: every child point gets NaN, as outside the hull.
+    outside_parent = np.full(lon_child.shape, np.nan)
+    if len(points) < 3:
+        parent_interpolated = outside_parent
+    else:
+        try:
+            parent_interpolated = griddata(points, values, xi, method="linear")
+        except QhullError:  # e.g. the kept parent points are collinear
+            parent_interpolated = outside_parent
 
     return xr.DataArray(parent_interpolated, dims=("eta_rho", "xi_rho"))
 

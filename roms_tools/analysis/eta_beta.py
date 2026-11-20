@@ -20,7 +20,9 @@ class calculate_eta_beta:
     On initialization, the class:
 
     1. Loads the surface fields from the history and BGC files
-       (`_get_surface_vals_control`), stored in ``ds_surface_control``.
+       (`_get_surface_vals_control`), stored in ``ds_surface_control``. If the
+       output is averaged, the initial conditions from ``ic_path`` are added as
+       the first record.
     2. Computes eta and beta from those fields with PyCO2SYS
        (`_compute_eta_beta`), stored in ``ds``.
 
@@ -40,6 +42,12 @@ class calculate_eta_beta:
     grid : Grid
         Object representing the grid information. Land points are masked with
         ``mask_rho`` before eta and beta are computed.
+    ic_path : str | Path, optional
+        Initial conditions file of the run, with the physical and BGC variables.
+        Required when the history and BGC files hold averaged output, which
+        has no record at the start time. Not used with instantaneous output.
+        If the file has two records, as an exact restart file does, the second
+        is used.
     model_reference_date : datetime, optional
         Reference date of ROMS simulation.
     dim_names : dict[str, str], optional
@@ -54,6 +62,8 @@ class calculate_eta_beta:
     """Filename, wildcard pattern, or list of filenames with MARBL BGC output."""
     grid: Grid
     """Object representing the grid information, used for land masking."""
+    ic_path: str | Path | None = None
+    """Initial conditions file, used only when the his and BGC output is averaged."""
     model_reference_date: datetime | None = None
     """Reference date of ROMS simulation."""
     dim_names: dict[str, str] = field(
@@ -112,7 +122,8 @@ class calculate_eta_beta:
         Load his and bgc variables, only retain the variables needed for eta beta
         calculations, and reduce to the surface layer. ``ocean_time`` values are
         checked to be matching between his and bgc variables, and all variables are
-        merged into a single dataset.
+        merged into a single dataset. If the output is averaged, the initial
+        conditions from ``ic_path`` are added as the first record.
 
         Returns
         -------
@@ -123,14 +134,43 @@ class calculate_eta_beta:
         Raises
         ------
         ValueError
-            If the history and BGC times do not match, or if any needed variable
-            is not found in either file group.
+            If the history and BGC times do not match, if the output is averaged
+            and ``ic_path`` is not given, or if the initial conditions file has
+            more than two time records.
+        KeyError
+            If any needed variable is not found in a file group.
         """
         ds_his = self._load_surface(self.his_path, source="his")
         ds_bgc = self._load_surface(self.bgc_path, source="bgc")
 
         self._check_time_consistency(ds_his, ds_bgc)
         ds = self._merge(ds_his, ds_bgc)
+
+        if self._is_averaged(ds):
+            if self.ic_path is None:
+                raise ValueError(
+                    "The history and BGC files hold averaged output, which has no "
+                    "record at the start time. Pass the initial conditions file of "
+                    "the run as `ic_path`."
+                )
+            ds_ic = self._load_surface(self.ic_path, source="ic")
+            n_ic = ds_ic.sizes[self.dim_names["time"]]
+            if n_ic > 2:
+                raise ValueError(
+                    f"The initial conditions file must have one time record, or "
+                    f"two for an exact restart file, but it has {n_ic}."
+                )
+            # An exact restart file has two records; the second is the start time
+            ds_ic = ds_ic.isel({self.dim_names["time"]: [-1]})
+            self._check_ic_time_step(ds_ic, ds)
+            # Keep the his `ocean_time` attributes, which hold the model reference date
+            ds_ic["ocean_time"].attrs = ds["ocean_time"].attrs
+            ds = xr.concat([ds_ic, ds], dim=self.dim_names["time"])
+        elif self.ic_path is not None:
+            logging.warning(
+                "`ic_path` was not used: the history and BGC output is "
+                "instantaneous, so it already has a record at the start time."
+            )
 
         return ds
 
@@ -352,37 +392,51 @@ class calculate_eta_beta:
         path : str | Path | list[str | Path]
             Filename, wildcard pattern, or list of filenames.
         source : str
-            Label for the file group (``"his"`` or ``"bgc"``), used in log messages.
+            Label for the file group (``"his"``, ``"bgc"``, or ``"ic"``), used in
+            log messages.
 
         Returns
         -------
         xr.Dataset
             Dataset reduced to the variables in ds_vars and only at the surface layer.
         """
-        ds = load_data(
-            filename=path,
-            dim_names=self.dim_names,
-            use_dask=self.use_dask,
-            decode_times=False,
-            decode_timedelta=False,
-            force_combine_nested=True,
-        )
+        time = self.dim_names["time"]
+
+        if source == "ic":
+            # A roms-tools initial conditions file uses `ocean_time` as its time
+            # dimension, so don't let load_data add a `time` dimension.
+            ds = load_data(
+                filename=path,
+                dim_names={k: v for k, v in self.dim_names.items() if k != "time"},
+                use_dask=self.use_dask,
+                decode_times=False,
+                decode_timedelta=False,
+            )
+            if "ocean_time" in ds.dims:
+                ds = (
+                    ds.drop_indexes("ocean_time")
+                    .rename_dims({"ocean_time": time})
+                    .reset_coords()
+                )
+        else:
+            ds = load_data(
+                filename=path,
+                dim_names=self.dim_names,
+                use_dask=self.use_dask,
+                decode_times=False,
+                decode_timedelta=False,
+                force_combine_nested=True,
+            )
 
         # Define required variables
+        his_vars = ["temp", "salt"]
+        bgc_vars = ["ALK_ALT_CO2", "DIC_ALT_CO2", "PO4", "SiO3"]
         if source == "bgc":
-            ds_vars = [
-                "ALK_ALT_CO2",
-                "DIC_ALT_CO2",
-                "PO4",
-                "SiO3",
-                "ocean_time",
-            ]
+            ds_vars = [*bgc_vars, "ocean_time"]
         elif source == "his":
-            ds_vars = [
-                "temp",
-                "salt",
-                "ocean_time",
-            ]
+            ds_vars = [*his_vars, "ocean_time"]
+        elif source == "ic":
+            ds_vars = [*his_vars, *bgc_vars, "ocean_time"]
 
         missing_ds = [var for var in ds_vars if var not in ds]
         if missing_ds:
@@ -439,6 +493,58 @@ class calculate_eta_beta:
             raise ValueError(
                 f"History and BGC `{time_var}` values do not match. Check that both "
                 f"groups were written at the same output frequency."
+            )
+
+    def _is_averaged(self, ds: xr.Dataset) -> bool:
+        """Whether the history and BGC files hold averaged output.
+
+        ROMS marks averaged output in the ``long_name`` of each variable, for
+        example ``"averaged potential temperature"`` or
+        ``"avg_Alkalinity, Alternative CO2"``. Averaged files have no record at
+        the start time, which ROMS needs in the eta and beta forcing file.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Merged surface dataset from the history and BGC files.
+
+        Returns
+        -------
+        bool
+            True if any variable's ``long_name`` contains ``avg`` or ``averaged``.
+        """
+        return any(
+            re.search(r"avg|averaged", ds[var].attrs.get("long_name", ""), re.I)
+            for var in ds.data_vars
+        )
+
+    def _check_ic_time_step(self, ds_ic: xr.Dataset, ds: xr.Dataset) -> None:
+        """Check the time step from the initial conditions to the first record.
+
+        Logs a warning if the time from the initial conditions to the first
+        history and BGC record differs from the time between the first two
+        records.
+
+        Parameters
+        ----------
+        ds_ic : xr.Dataset
+            Surface dataset from the initial conditions file.
+        ds : xr.Dataset
+            Merged surface dataset from the history and BGC files.
+        """
+        t_ic = ds_ic["ocean_time"].values
+        t = ds["ocean_time"].values
+
+        if t.size < 2:
+            return
+
+        ic_step = t[0] - t_ic[0]
+        record_step = t[1] - t[0]
+        if not np.isclose(ic_step, record_step):
+            logging.warning(
+                f"The time from the initial conditions to the first history and "
+                f"BGC record ({ic_step / 86400:g} days) differs from the time "
+                f"between records ({record_step / 86400:g} days)."
             )
 
     def _merge(self, ds_his: xr.Dataset, ds_bgc: xr.Dataset) -> xr.Dataset:

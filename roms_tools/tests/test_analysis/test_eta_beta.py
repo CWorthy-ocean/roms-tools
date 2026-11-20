@@ -1,3 +1,4 @@
+import logging
 import shutil
 from contextlib import nullcontext
 from pathlib import Path
@@ -45,6 +46,21 @@ def bgc_ds(grid):
             ),
         }
     )
+
+
+@pytest.fixture
+def avg_his_ds(his_ds):
+    """History output labelled as averaged, as ROMS writes it."""
+    his_ds["temp"].attrs["long_name"] = "averaged potential temperature"
+    return his_ds
+
+
+@pytest.fixture
+def ic_ds(his_ds, bgc_ds):
+    """Initial conditions one day before the first his and bgc record."""
+    ds = xr.merge([his_ds, bgc_ds]).isel(time=[0])
+    ds["ocean_time"] = ds.ocean_time - 86400.0
+    return ds
 
 
 @pytest.fixture
@@ -110,6 +126,137 @@ def test_missing_variables(his_ds, bgc_ds, grid, tmp_path, var, source):
         calculate_eta_beta(
             his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
         )
+
+
+@pytest.mark.parametrize(
+    "source, var, long_name",
+    [
+        ("his", "temp", "averaged potential temperature"),
+        ("bgc", "ALK_ALT_CO2", "avg_Alkalinity, Alternative CO2"),
+    ],
+)
+def test_averaged_output_requires_initial_conditions(
+    his_ds, bgc_ds, ic_ds, grid, tmp_path, source, var, long_name
+):
+    ds = his_ds if source == "his" else bgc_ds
+    ds[var].attrs["long_name"] = long_name
+    his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    ic_ds.to_netcdf(tmp_path / "ic.nc")
+
+    with pytest.raises(ValueError, match="averaged output"):
+        calculate_eta_beta(
+            his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
+        )
+
+    calculate_eta_beta(
+        his_path=tmp_path / "his.nc",
+        bgc_path=tmp_path / "bgc.nc",
+        ic_path=tmp_path / "ic.nc",
+        grid=grid,
+    )
+
+
+@pytest.mark.parametrize("roms_tools_layout", [True, False])
+def test_initial_conditions_are_first_record(
+    avg_his_ds, bgc_ds, ic_ds, grid, tmp_path, roms_tools_layout
+):
+    """The initial conditions record comes first, from a roms-tools initial
+    conditions file (``ocean_time`` dimension) or a ROMS restart file (``time``
+    dimension).
+    """
+    if roms_tools_layout:
+        ic_ds = ic_ds.set_coords("ocean_time").swap_dims({"time": "ocean_time"})
+    avg_his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    ic_ds.to_netcdf(tmp_path / "ic.nc")
+
+    eta_beta = calculate_eta_beta(
+        his_path=tmp_path / "his.nc",
+        bgc_path=tmp_path / "bgc.nc",
+        ic_path=tmp_path / "ic.nc",
+        grid=grid,
+    )
+
+    np.testing.assert_allclose(
+        eta_beta.ds["ocean_time"].values, [-86400.0, 0.0, 86400.0]
+    )
+    np.testing.assert_allclose(eta_beta.ds["ddic_dco2_time"].values, [-1.0, 0.0, 1.0])
+
+
+@pytest.mark.parametrize("ic_time, warns", [(-86400.0, False), (-43200.0, True)])
+def test_initial_conditions_time_step_warning(
+    avg_his_ds, bgc_ds, ic_ds, grid, tmp_path, caplog, ic_time, warns
+):
+    ic_ds["ocean_time"] = xr.full_like(ic_ds.ocean_time, ic_time)
+    avg_his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    ic_ds.to_netcdf(tmp_path / "ic.nc")
+
+    with caplog.at_level(logging.WARNING):
+        calculate_eta_beta(
+            his_path=tmp_path / "his.nc",
+            bgc_path=tmp_path / "bgc.nc",
+            ic_path=tmp_path / "ic.nc",
+            grid=grid,
+        )
+
+    assert ("differs from the time between records" in caplog.text) == warns
+
+
+def test_exact_restart_uses_second_record(avg_his_ds, bgc_ds, ic_ds, grid, tmp_path):
+    earlier = ic_ds.assign(ocean_time=ic_ds.ocean_time - 86400.0, temp=ic_ds.temp + 5)
+    avg_his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    xr.concat([earlier, ic_ds], dim="time").to_netcdf(tmp_path / "ic.nc")
+
+    eta_beta = calculate_eta_beta(
+        his_path=tmp_path / "his.nc",
+        bgc_path=tmp_path / "bgc.nc",
+        ic_path=tmp_path / "ic.nc",
+        grid=grid,
+    )
+
+    np.testing.assert_allclose(
+        eta_beta.ds["ocean_time"].values, [-86400.0, 0.0, 86400.0]
+    )
+    surface = eta_beta.ds_surface_control.isel(time=0)
+    assert (surface.temp == ic_ds.temp.isel(time=0, s_rho=-1)).all()
+
+
+def test_initial_conditions_more_than_two_records(
+    avg_his_ds, bgc_ds, ic_ds, grid, tmp_path
+):
+    avg_his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    xr.concat([ic_ds, ic_ds, ic_ds], dim="time").to_netcdf(tmp_path / "ic.nc")
+
+    with pytest.raises(ValueError, match="exact restart file, but it has 3"):
+        calculate_eta_beta(
+            his_path=tmp_path / "his.nc",
+            bgc_path=tmp_path / "bgc.nc",
+            ic_path=tmp_path / "ic.nc",
+            grid=grid,
+        )
+
+
+def test_initial_conditions_unused_for_instantaneous_output(
+    his_ds, bgc_ds, ic_ds, grid, tmp_path, caplog
+):
+    his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    ic_ds.to_netcdf(tmp_path / "ic.nc")
+
+    with caplog.at_level(logging.WARNING):
+        eta_beta = calculate_eta_beta(
+            his_path=tmp_path / "his.nc",
+            bgc_path=tmp_path / "bgc.nc",
+            ic_path=tmp_path / "ic.nc",
+            grid=grid,
+        )
+
+    assert "`ic_path` was not used" in caplog.text
+    np.testing.assert_allclose(eta_beta.ds["ocean_time"].values, [0.0, 86400.0])
 
 
 def test_zero_on_land_positive_on_water(eta_beta_iceland):

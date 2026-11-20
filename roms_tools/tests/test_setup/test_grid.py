@@ -215,19 +215,31 @@ def test_coords_relation(grid_fixture, request):
     assert_smaller_equal_than_with_tolerance(grid.ds.lon_v.max(), grid.ds.lon_rho.max())
 
 
-def _xi_bearing(ds: xr.Dataset) -> np.ndarray:
-    """Direction of +xi at interior rho-points, in radians counterclockwise from east.
-
-    Computed as the spherical initial bearing from the rho-point on the low-xi side
-    to the one on the high-xi side, independently of the formula the grid uses.
+def _bearing(lat1, lon1, lat2, lon2):
+    """Initial great-circle bearing from point 1 to point 2, counterclockwise from
+    east, in radians. Inputs are in radians.
     """
-    lon = np.deg2rad(ds.lon_rho.values)
-    lat = np.deg2rad(ds.lat_rho.values)
-    lat1, lat2 = lat[:, :-2], lat[:, 2:]
-    dlon = lon[:, 2:] - lon[:, :-2]
+    dlon = lon2 - lon1
     y = np.sin(dlon) * np.cos(lat2)
     x = np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(dlon)
     return np.pi / 2 - np.arctan2(y, x)
+
+
+def _xi_bearing(ds: xr.Dataset) -> np.ndarray:
+    """Direction of +xi at interior rho-points, in radians counterclockwise from east.
+
+    Averages the spherical bearing from each rho-point toward its high-xi neighbor
+    with the reversed bearing toward its low-xi neighbor, independently of the
+    planar formula the grid uses.
+    """
+    lon = np.deg2rad(ds.lon_rho.values)
+    lat = np.deg2rad(ds.lat_rho.values)
+    here = (lat[:, 1:-1], lon[:, 1:-1])
+    forward = _bearing(*here, lat[:, 2:], lon[:, 2:])
+    backward = _bearing(*here, lat[:, :-2], lon[:, :-2]) + np.pi
+    return np.arctan2(
+        np.sin(forward) + np.sin(backward), np.cos(forward) + np.cos(backward)
+    )
 
 
 def _rotated_grid(rot: float) -> Grid:
@@ -250,6 +262,20 @@ def test_angle_points_west_on_grid_rotated_170_degrees():
     grid = _rotated_grid(170)
 
     assert (np.cos(grid.ds.angle) < 0).all()
+
+
+def test_angle_matches_geometry_on_large_high_latitude_grid():
+    """A large high-latitude grid rotated well below 90° has cells whose xi axis
+    points westward, and the stored angle follows the grid there too.
+    """
+    grid = Grid(
+        nx=20, ny=20, size_x=3000, size_y=3000, center_lon=0, center_lat=65, rot=60
+    )
+    assert (np.cos(grid.ds.angle) < 0).any()
+
+    error = grid.ds.angle.values[:, 1:-1] - _xi_bearing(grid.ds)
+
+    assert np.cos(error).min() > np.cos(np.deg2rad(1))
 
 
 def test_coarse_angle_where_angle_wraps_at_180_degrees():

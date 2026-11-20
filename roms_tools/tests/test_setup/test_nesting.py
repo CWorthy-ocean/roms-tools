@@ -587,7 +587,7 @@ class TestNesting:
         ):
             align_grids(big_grid, small_grid)
 
-    def test_no_error_if_land_child_points_beyond_parent_grid(self):
+    def test_no_error_if_land_child_points_beyond_parent_grid(self, caplog):
         # coarse resolution Pacific domain
         parent_grid = Grid(
             nx=50,
@@ -609,13 +609,65 @@ class TestNesting:
             center_lon=-134.5,
             rot=33.3,
         )
+        h_child = child_grid.ds["h"].copy()
 
-        child_grid = align_grids(
-            parent_grid,
-            child_grid,
-            boundaries={"north": True, "west": True, "south": True, "east": False},
+        parent_grid_ds, child_grid_ds = _prepare_grid_datasets(parent_grid, child_grid)
+        outside = (
+            _interpolate_parent(parent_grid_ds["h"], child_grid_ds["h"]).isnull().values
         )
-        assert isinstance(child_grid.ds, xr.Dataset)
+        assert outside.any(), "test domain must reach beyond the parent grid"
+        assert (child_grid.ds["mask_rho"].values[outside] == 0).all()
+
+        with caplog.at_level(logging.WARNING):
+            child_grid = align_grids(
+                parent_grid,
+                child_grid,
+                boundaries={"north": True, "west": True, "south": True, "east": False},
+            )
+        assert (
+            f"{outside.sum()} land points of the child grid lie outside the parent grid"
+            in caplog.text
+        )
+
+        # Regression: points outside the parent used to get NaN depths, which
+        # ucla-roms turns into a blowup at the first diagnostics step.
+        for name, var in child_grid.ds.data_vars.items():
+            if np.issubdtype(var.dtype, np.floating):
+                assert not var.isnull().any(), f"{name} has NaNs"
+
+        # Points outside the parent keep the child's own depth and stay land.
+        np.testing.assert_allclose(
+            child_grid.ds["h"].values[outside], h_child.values[outside]
+        )
+        assert (child_grid.ds["mask_rho"].values[outside] == 0).all()
+
+    def test_error_if_ocean_child_points_beyond_parent_grid_behind_closed_boundary(
+        self,
+    ):
+        # Open-ocean parent; the child reaches ~90 km past the parent's east edge.
+        parent_grid = Grid(
+            nx=10, ny=10, size_x=1000, size_y=1000, center_lon=-30, center_lat=45
+        )
+        child_grid = Grid(
+            nx=10, ny=10, size_x=400, size_y=400, center_lon=-25, center_lat=45
+        )
+
+        # Only the west boundary (inside the parent) is open, so the per-boundary
+        # check passes and the whole-grid check must catch the ocean points.
+        with pytest.raises(
+            ValueError,
+            match="ocean points of the child grid lie outside the parent grid",
+        ):
+            align_grids(
+                parent_grid,
+                child_grid,
+                boundaries={
+                    "west": True,
+                    "south": False,
+                    "east": False,
+                    "north": False,
+                },
+            )
 
     def test_no_error_if_child_boundary_entirely_on_land(self):
         parent_grid = Grid(

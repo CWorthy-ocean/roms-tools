@@ -46,7 +46,7 @@ class calculate_eta_beta:
         Initial conditions file of the run, with the physical and BGC variables.
         Required when the history and BGC files hold averaged output, which
         has no record at the start time. Not used with instantaneous output.
-        If the file has two records, as an exact restart file does, the second
+        If the file is an exact restart (has two records), the second record
         is used.
     model_reference_date : datetime, optional
         Reference date of ROMS simulation.
@@ -149,9 +149,9 @@ class calculate_eta_beta:
         if self._is_averaged(ds):
             if self.ic_path is None:
                 raise ValueError(
-                    "The history and BGC files hold averaged output, which has no "
-                    "record at the start time. Pass the initial conditions file of "
-                    "the run as `ic_path`."
+                    "The history and BGC files hold averaged output, which have no "
+                    "records at the start time. The initial conditions file is "
+                    "needed to complete the timeseries. Please pass in `ic_path`."
                 )
             ds_ic = self._load_surface(self.ic_path, source="ic")
             n_ic = ds_ic.sizes[self.dim_names["time"]]

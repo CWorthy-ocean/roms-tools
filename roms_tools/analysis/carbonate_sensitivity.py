@@ -14,7 +14,7 @@ from roms_tools.utils import load_data, save_datasets
 
 
 @dataclass(kw_only=True)
-class calculate_eta_beta:
+class CarbonateSensitivity:
     """Computes the eta and beta carbonate sensitivities from ROMS-MARBL control-run output.
 
     On initialization, the class:
@@ -32,6 +32,11 @@ class calculate_eta_beta:
     - ``eta  = dDIC / dALK``, stored as ``ddic_dalk``
 
     Call `save` to write ``ds`` to monthly files.
+
+    With averaged output, eta and beta are computed from the window-mean state.
+    The result approximates the averaged ``_cdrgas`` records that ucla-roms
+    writes (``do_cdr_gas_exch_output``), which it builds from per-step averages
+    of ``1/beta`` and ``eta/beta`` over the window, rather than reproducing them.
 
     Parameters
     ----------
@@ -178,8 +183,7 @@ class calculate_eta_beta:
         """Compute the eta and beta carbonate sensitivities with PyCO2SYS.
 
         Land points are masked with the grid's ``mask_rho``, the inputs are
-        loaded into memory, and `_compute_sensitivities` is called with the
-        control run to calculate the sensitivies.
+        loaded into memory, and ``pyco2.sys`` computes the sensitivities.
         ``beta = dDIC / dCO2`` and ``eta = dDIC / dALK``, computed from the
         surface ALK, DIC, salinity, temperature, silicate, and phosphate.
 
@@ -522,7 +526,7 @@ class calculate_eta_beta:
         """Check the time step from the initial conditions to the first record.
 
         Logs a warning if the time from the initial conditions to the first
-        history and BGC record differs from the time between the first two
+        history and BGC record is longer than the time between the first two
         records.
 
         Parameters
@@ -540,10 +544,10 @@ class calculate_eta_beta:
 
         ic_step = t[0] - t_ic[0]
         record_step = t[1] - t[0]
-        if not np.isclose(ic_step, record_step):
+        if ic_step > record_step and not np.isclose(ic_step, record_step):
             logging.warning(
                 f"The time from the initial conditions to the first history and "
-                f"BGC record ({ic_step / 86400:g} days) differs from the time "
+                f"BGC record ({ic_step / 86400:g} days) is longer than the time "
                 f"between records ({record_step / 86400:g} days)."
             )
 

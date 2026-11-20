@@ -8,7 +8,7 @@ import pytest
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.analysis.eta_beta import calculate_eta_beta
+from roms_tools.analysis.carbonate_sensitivity import CarbonateSensitivity
 from roms_tools.datasets.download import download_test_data
 
 
@@ -67,7 +67,7 @@ def ic_ds(his_ds, bgc_ds):
 def eta_beta_iceland(use_dask):
     grid = Grid(filename=Path(download_test_data("Iceland_grid.nc")))
 
-    return calculate_eta_beta(
+    return CarbonateSensitivity(
         his_path=Path(download_test_data("Iceland_his.20240710120000.nc")),
         bgc_path=Path(download_test_data("Iceland_bgc.20240710120000.nc")),
         grid=grid,
@@ -88,7 +88,7 @@ def test_his_and_bgc_times_match(his_ds, bgc_ds, grid, tmp_path, time_shift, con
     bgc_ds.to_netcdf(tmp_path / "bgc.nc")
 
     with context:
-        calculate_eta_beta(
+        CarbonateSensitivity(
             his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
         )
 
@@ -98,7 +98,7 @@ def test_his_and_bgc_number_of_times_match(his_ds, bgc_ds, grid, tmp_path):
     bgc_ds.isel(time=[0]).to_netcdf(tmp_path / "bgc.nc")
 
     with pytest.raises(ValueError, match="different number of time records"):
-        calculate_eta_beta(
+        CarbonateSensitivity(
             his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
         )
 
@@ -123,7 +123,7 @@ def test_missing_variables(his_ds, bgc_ds, grid, tmp_path, var, source):
     bgc_ds.to_netcdf(tmp_path / "bgc.nc")
 
     with pytest.raises(KeyError, match=f"Missing required variables in {source}"):
-        calculate_eta_beta(
+        CarbonateSensitivity(
             his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
         )
 
@@ -145,11 +145,11 @@ def test_averaged_output_requires_initial_conditions(
     ic_ds.to_netcdf(tmp_path / "ic.nc")
 
     with pytest.raises(ValueError, match="averaged output"):
-        calculate_eta_beta(
+        CarbonateSensitivity(
             his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
         )
 
-    calculate_eta_beta(
+    CarbonateSensitivity(
         his_path=tmp_path / "his.nc",
         bgc_path=tmp_path / "bgc.nc",
         ic_path=tmp_path / "ic.nc",
@@ -171,7 +171,7 @@ def test_initial_conditions_are_first_record(
     bgc_ds.to_netcdf(tmp_path / "bgc.nc")
     ic_ds.to_netcdf(tmp_path / "ic.nc")
 
-    eta_beta = calculate_eta_beta(
+    eta_beta = CarbonateSensitivity(
         his_path=tmp_path / "his.nc",
         bgc_path=tmp_path / "bgc.nc",
         ic_path=tmp_path / "ic.nc",
@@ -184,7 +184,10 @@ def test_initial_conditions_are_first_record(
     np.testing.assert_allclose(eta_beta.ds["ddic_dco2_time"].values, [-1.0, 0.0, 1.0])
 
 
-@pytest.mark.parametrize("ic_time, warns", [(-86400.0, False), (-43200.0, True)])
+@pytest.mark.parametrize(
+    "ic_time, warns",
+    [(-86400.0, False), (-43200.0, False), (-172800.0, True)],
+)
 def test_initial_conditions_time_step_warning(
     avg_his_ds, bgc_ds, ic_ds, grid, tmp_path, caplog, ic_time, warns
 ):
@@ -194,14 +197,14 @@ def test_initial_conditions_time_step_warning(
     ic_ds.to_netcdf(tmp_path / "ic.nc")
 
     with caplog.at_level(logging.WARNING):
-        calculate_eta_beta(
+        CarbonateSensitivity(
             his_path=tmp_path / "his.nc",
             bgc_path=tmp_path / "bgc.nc",
             ic_path=tmp_path / "ic.nc",
             grid=grid,
         )
 
-    assert ("differs from the time between records" in caplog.text) == warns
+    assert ("is longer than the time between records" in caplog.text) == warns
 
 
 def test_exact_restart_uses_second_record(avg_his_ds, bgc_ds, ic_ds, grid, tmp_path):
@@ -210,7 +213,7 @@ def test_exact_restart_uses_second_record(avg_his_ds, bgc_ds, ic_ds, grid, tmp_p
     bgc_ds.to_netcdf(tmp_path / "bgc.nc")
     xr.concat([earlier, ic_ds], dim="time").to_netcdf(tmp_path / "ic.nc")
 
-    eta_beta = calculate_eta_beta(
+    eta_beta = CarbonateSensitivity(
         his_path=tmp_path / "his.nc",
         bgc_path=tmp_path / "bgc.nc",
         ic_path=tmp_path / "ic.nc",
@@ -232,7 +235,7 @@ def test_initial_conditions_more_than_two_records(
     xr.concat([ic_ds, ic_ds, ic_ds], dim="time").to_netcdf(tmp_path / "ic.nc")
 
     with pytest.raises(ValueError, match="exact restart file, but it has 3"):
-        calculate_eta_beta(
+        CarbonateSensitivity(
             his_path=tmp_path / "his.nc",
             bgc_path=tmp_path / "bgc.nc",
             ic_path=tmp_path / "ic.nc",
@@ -248,7 +251,7 @@ def test_initial_conditions_unused_for_instantaneous_output(
     ic_ds.to_netcdf(tmp_path / "ic.nc")
 
     with caplog.at_level(logging.WARNING):
-        eta_beta = calculate_eta_beta(
+        eta_beta = CarbonateSensitivity(
             his_path=tmp_path / "his.nc",
             bgc_path=tmp_path / "bgc.nc",
             ic_path=tmp_path / "ic.nc",
@@ -283,7 +286,7 @@ def test_saved_file_matches_roms_forcing_names(his_ds, bgc_ds, grid, tmp_path):
     """
     his_ds.to_netcdf(tmp_path / "his.nc")
     bgc_ds.to_netcdf(tmp_path / "bgc.nc")
-    eta_beta = calculate_eta_beta(
+    eta_beta = CarbonateSensitivity(
         his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
     )
 

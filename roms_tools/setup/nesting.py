@@ -393,19 +393,16 @@ def _check_child_outside_parent(
 ) -> None:
     """Check that only land points of the child grid lie outside the parent grid.
 
-    Child grid points may extend beyond the parent grid only over land. The check
-    runs in two passes:
+    Child grid points may extend beyond the parent grid only over land. A child rho
+    point lies outside the parent grid where ``_interpolate_parent`` returns NaN.
+    This is the same interpolation that ``align_grids`` uses to blend the parent
+    into the child, so the check and the blend agree on which points are outside.
 
-    1. On each open boundary, the parent grid ``lon_rho``/``lat_rho`` coordinates
-       are used to compute fractional parent indices at the child-boundary rho, u,
-       and v points. A wet boundary point without an index lies outside the parent
-       grid, and the error names that boundary.
-    2. Over the whole child grid, a wet rho point that ``_interpolate_parent`` cannot
-       reach lies outside the parent grid. This is the same interpolation that
-       ``align_grids`` uses to blend the parent into the child, so the two agree on
-       which points are outside. Land points outside the parent grid are allowed:
-       they keep the child grid's own topography and mask, and a warning reports
-       how many there are.
+    Wet u and v points need both neighboring rho points wet, and a point between two
+    rho points inside the parent is inside it too, so checking rho points covers them.
+
+    Land points outside the parent grid are allowed: they keep the child grid's own
+    topography and mask, and a warning reports how many there are.
 
     Parameters
     ----------
@@ -422,56 +419,29 @@ def _check_child_outside_parent(
     ValueError
         If any wet point of the child grid lies outside the parent grid.
     """
-    bdry_coords_dict = get_boundary_coords()
-
-    # Build the parent (lon, lat) -> index interpolator once. The Delaunay
-    # triangulation of the parent grid is identical for every boundary and grid
-    # location, so there is no need to rebuild it inside the loop.
-    interp_i_eta, _ = _build_parent_index_interpolators(parent_grid_ds)
-
-    # Check if child wet points lie outside parent boundaries
-    for direction in ["south", "east", "north", "west"]:
-        if boundaries[direction]:
-            for grid_location in ["rho", "u", "v"]:
-                names = {
-                    "latitude": f"lat_{grid_location}",
-                    "longitude": f"lon_{grid_location}",
-                    "mask": f"mask_{grid_location}",
-                    "angle": f"angle_{grid_location}",
-                }
-                bdry_coords = bdry_coords_dict[grid_location]
-
-                lon_child = child_grid_ds[names["longitude"]].isel(
-                    **bdry_coords[direction]
-                )
-                lat_child = child_grid_ds[names["latitude"]].isel(
-                    **bdry_coords[direction]
-                )
-
-                mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
-
-                # Interpolate the i indices (both i,j should return the same)
-                i = interp_i_eta(lon_child.values, lat_child.values)
-
-                i = xr.DataArray(i, dims=lon_child.dims)
-
-                # Check whether ocean child points fall outside the parent grid
-                if i.where(mask_child, other=0.0).isnull().any():
-                    raise ValueError(
-                        f"Some wet points on the {direction}ern boundary of the child grid lie "
-                        "outside the parent grid. Please use a larger parent grid or a smaller child grid."
-                    )
-
-    # Check the whole child grid, including points behind closed boundaries.
     outside = _interpolate_parent(
         parent_grid_ds["mask_rho"], child_grid_ds["mask_rho"]
     ).isnull()
-    wet = child_grid_ds["mask_rho"].values > 0
+    wet_outside = outside & (child_grid_ds["mask_rho"] > 0)
 
-    n_wet_outside = int((outside.values & wet).sum())
-    if n_wet_outside > 0:
+    # Name the boundary when wet points on an open boundary lie outside the parent
+    rho_bdry_coords = get_boundary_coords()["rho"]
+    for direction in ["south", "east", "north", "west"]:
+        if (
+            boundaries[direction]
+            and wet_outside.isel(**rho_bdry_coords[direction]).any()
+        ):
+            raise ValueError(
+                f"Some wet points on the {direction}ern boundary of the child grid lie "
+                "outside the parent grid. Please use a larger parent grid or a smaller child grid."
+            )
+
+    # Wet points elsewhere, e.g. behind a closed boundary
+    if wet_outside.any():
+        eta, xi = np.nonzero(wet_outside.values)
         raise ValueError(
-            f"{n_wet_outside} ocean points of the child grid lie outside the parent grid. "
+            f"{eta.size} wet points of the child grid lie outside the parent grid, at "
+            f"eta_rho {eta.min()}-{eta.max()} and xi_rho {xi.min()}-{xi.max()}. "
             "Child grid points may extend beyond the parent grid only over land. "
             "Please use a larger parent grid or a smaller child grid."
         )
@@ -479,8 +449,8 @@ def _check_child_outside_parent(
     n_land_outside = int(outside.sum())
     if n_land_outside > 0:
         logging.warning(
-            f"{n_land_outside} land points of the child grid lie outside the parent grid. "
-            "This is allowed: they keep the child grid's own topography and mask."
+            f"{n_land_outside} land points of the child grid lie outside the parent grid "
+            "and keep the child grid's own topography and mask."
         )
 
 

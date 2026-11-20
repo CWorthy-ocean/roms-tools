@@ -652,11 +652,11 @@ class TestNesting:
             nx=10, ny=10, size_x=400, size_y=400, center_lon=-25, center_lat=45
         )
 
-        # Only the west boundary (inside the parent) is open, so the per-boundary
-        # check passes and the whole-grid check must catch the ocean points.
+        # Only the west boundary (inside the parent) is open, so no open boundary
+        # is to blame and the error must locate the wet points behind the east one.
         with pytest.raises(
             ValueError,
-            match="ocean points of the child grid lie outside the parent grid",
+            match="wet points of the child grid lie outside the parent grid, at eta_rho",
         ):
             align_grids(
                 parent_grid,

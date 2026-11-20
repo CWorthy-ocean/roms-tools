@@ -1658,7 +1658,7 @@ def _warn_if_angle_reversed(ds: xr.Dataset, filename: str | Path) -> None:
             f"The grid angle stored in {filename} points against the grid's own "
             f"xi axis in {reversed_cells.sum()} of {reversed_cells.size} interior "
             "rho-points. roms-tools 2.1.0 through 5.4.0 stored this wrong angle "
-            "on grids rotated by more than about 90 degrees. Forcing made with it "
+            "wherever a grid's xi axis points westward. Forcing made with it "
             "has winds and currents reversed in those cells, and ROMSOutput rotates "
             "velocities with it. Regenerate the grid from its parameters "
             "(Grid(nx=..., ...) or Grid.from_yaml), then regenerate its forcing."

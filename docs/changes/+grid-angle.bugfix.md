@@ -1,4 +1,4 @@
-Regenerate any grid rotated by more than about 90 degrees that you made with roms-tools 2.1.0 through 5.4.0, together with its forcing: the grid's `angle` was 180 degrees off in some or all cells, which reversed surface winds and the currents in initial-condition, boundary, tidal and nesting files there.
-* Regenerate the grid from its parameters (`Grid(nx=..., ...)` or `Grid.from_yaml`), not with `Grid(filename=...)`, which keeps the angle stored in the file and now logs a warning when that angle is reversed.
+Regenerate any grid you made with roms-tools 2.1.0 through 5.4.0 whose xi axis points westward anywhere, together with its forcing: the grid's `angle` was 180 degrees off in those cells, which reversed surface winds and the currents in initial-condition, boundary, tidal and nesting files there.
+* This includes grids rotated by more than about 90 degrees, and also large or high-latitude grids rotated by less: a 3000 km grid centered at 80°N and rotated by 20 degrees has about a sixth of its cells reversed, and a grid that contains a pole is affected at any rotation.
+* To check a grid file, load it with `Grid(filename=...)`, which keeps the angle stored in the file and now logs a warning naming how many cells are reversed. Regenerate an affected grid from its parameters (`Grid(nx=..., ...)` or `Grid.from_yaml`), not from the file.
 * `ROMSOutput` rotates velocities to east and north with the grid's angle, so analyze output with the regenerated grid.
-* Grids rotated by less than about 80 degrees (somewhat less on very large grids) are unchanged.

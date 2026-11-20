@@ -1,0 +1,3 @@
+Regenerate any child grid that extends beyond its parent grid over land and was aligned with roms-tools 3.3.0 through 5.4.0, along with its forcing: its depth `h` was NaN outside the parent, so ucla-roms stopped with a BLOWUP at the first step.
+* Those points now keep the child grid's own depth and mask, and `align_grids` logs a warning with their count.
+* `align_grids` now raises an error if any ocean point of the child grid lies outside the parent grid, including points behind a closed boundary; the error gives their index range. Such grids already had NaN depths at those points, so no working setup is affected.

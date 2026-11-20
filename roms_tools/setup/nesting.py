@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from scipy.interpolate import LinearNDInterpolator, griddata, interp1d
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, QhullError
 
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.topography import clip_depth
@@ -47,6 +47,9 @@ def align_grids(
           parent grid.
        3. Updates the internal dataset (``child_grid.ds``) with the processed bathymetry.
 
+    The child grid may extend beyond the parent grid only over land. Child points
+    outside the parent grid keep their own mask and topography.
+
     Parameters
     ----------
     parent_grid : Grid
@@ -67,6 +70,11 @@ def align_grids(
     child_grid : Grid
         Updates the internal dataset (``child_grid.ds``) in place, modifying the mask
          and topography, and ensuring consistent parent-child boundary mapping.
+
+    Raises
+    ------
+    ValueError
+        If any ocean point of the child grid lies outside the parent grid.
     """
     boundaries = check_and_set_boundaries(boundaries, child_grid.ds.mask_rho)
 
@@ -230,6 +238,7 @@ def _interpolate_parent(
     -------
     xr.DataArray
         The interpolated data on the child grid, with dimensions ("eta_rho", "xi_rho").
+        NaN where a child point lies outside the parent grid.
     """
     lon_parent = parent_da.lon_rho.values
     lat_parent = parent_da.lat_rho.values
@@ -247,9 +256,48 @@ def _interpolate_parent(
     values = parent_da.values[keep]
     xi = (lon_child, lat_child)
 
-    parent_interpolated = griddata(points, values, xi, method="linear")
+    # If too few parent points lie near the child to span an area, the child lies
+    # outside the parent grid: every child point gets NaN, as outside the hull.
+    outside_parent = np.full(lon_child.shape, np.nan)
+    if len(points) < 3:
+        parent_interpolated = outside_parent
+    else:
+        try:
+            parent_interpolated = griddata(points, values, xi, method="linear")
+        except QhullError:  # e.g. the kept parent points are collinear
+            parent_interpolated = outside_parent
 
     return xr.DataArray(parent_interpolated, dims=("eta_rho", "xi_rho"))
+
+
+def _blend_parent_into_child(
+    parent_da: xr.DataArray, child_da: xr.DataArray, alpha: xr.DataArray
+) -> xr.DataArray:
+    """Blend a parent field into a child field with boundary weights ``alpha``.
+
+    Returns ``alpha * child + (1 - alpha) * parent``, with the parent field linearly
+    interpolated onto the child grid. Child points outside the parent grid have no
+    parent value, so the child's own value stands in for it there. Otherwise those
+    points would be NaN even where ``alpha`` is 1, because ``0 * NaN`` is NaN.
+
+    Parameters
+    ----------
+    parent_da : xr.DataArray
+        The field on the parent grid. Must have coordinates `lon_rho` and `lat_rho`.
+    child_da : xr.DataArray
+        The same field on the child grid. Must have coordinates `lon_rho` and `lat_rho`.
+    alpha : xr.DataArray
+        Blending weights on the child grid, from 0 (parent) to 1 (child), as returned
+        by `compute_boundary_distance`.
+
+    Returns
+    -------
+    xr.DataArray
+        The blended field on the child grid, with dimensions ("eta_rho", "xi_rho").
+    """
+    parent_interpolated = _interpolate_parent(parent_da, child_da).fillna(child_da)
+
+    return alpha * child_da + (1 - alpha) * parent_interpolated
 
 
 def _parent_crop_mask(
@@ -351,15 +399,20 @@ def _build_parent_index_interpolators(
 def _check_child_outside_parent(
     parent_grid_ds: xr.Dataset,
     child_grid_ds: xr.Dataset,
-    boundaries=dict[str, bool],
-):
-    """Interpolate the parent indices to the child grid boundary.
+    boundaries: dict[str, bool],
+) -> None:
+    """Check that only land points of the child grid lie outside the parent grid.
 
-    Uses the parent grid ``lon_rho``/``lat_rho`` coordinates to compute
-    fractional i/j indices at child-boundary longitude/latitude points using
-    linear interpolation. The function verifies that all ocean child points
-    (based on ``mask``) lie within the parent grid and gives ValueError if
-    child wet points exist outside of the parent domain.
+    Child grid points may extend beyond the parent grid only over land. A child rho
+    point lies outside the parent grid where ``_interpolate_parent`` returns NaN.
+    This is the same interpolation that ``align_grids`` uses to blend the parent
+    into the child, so the check and the blend agree on which points are outside.
+
+    Wet u and v points need both neighboring rho points wet, and a point between two
+    rho points inside the parent is inside it too, so checking rho points covers them.
+
+    Land points outside the parent grid are allowed: they keep the child grid's own
+    topography and mask, and a warning reports how many there are.
 
     Parameters
     ----------
@@ -370,46 +423,45 @@ def _check_child_outside_parent(
     boundaries : dict[str, bool]
         Indicator for whether each boundaries is open (True) or closed (False)
         Used for generating informative warnings or errors.
+
+    Raises
+    ------
+    ValueError
+        If any wet point of the child grid lies outside the parent grid.
     """
-    bdry_coords_dict = get_boundary_coords()
+    outside = _interpolate_parent(
+        parent_grid_ds["mask_rho"], child_grid_ds["mask_rho"]
+    ).isnull()
+    wet_outside = outside & (child_grid_ds["mask_rho"] > 0)
 
-    # Build the parent (lon, lat) -> index interpolator once. The Delaunay
-    # triangulation of the parent grid is identical for every boundary and grid
-    # location, so there is no need to rebuild it inside the loop.
-    interp_i_eta, _ = _build_parent_index_interpolators(parent_grid_ds)
-
-    # Check if child wet points lie outside parent boundaries
+    # Name the boundary when wet points on an open boundary lie outside the parent
+    rho_bdry_coords = get_boundary_coords()["rho"]
     for direction in ["south", "east", "north", "west"]:
-        if boundaries[direction]:
-            for grid_location in ["rho", "u", "v"]:
-                names = {
-                    "latitude": f"lat_{grid_location}",
-                    "longitude": f"lon_{grid_location}",
-                    "mask": f"mask_{grid_location}",
-                    "angle": f"angle_{grid_location}",
-                }
-                bdry_coords = bdry_coords_dict[grid_location]
+        if (
+            boundaries[direction]
+            and wet_outside.isel(**rho_bdry_coords[direction]).any()
+        ):
+            raise ValueError(
+                f"Some wet points on the {direction}ern boundary of the child grid lie "
+                "outside the parent grid. Please use a larger parent grid or a smaller child grid."
+            )
 
-                lon_child = child_grid_ds[names["longitude"]].isel(
-                    **bdry_coords[direction]
-                )
-                lat_child = child_grid_ds[names["latitude"]].isel(
-                    **bdry_coords[direction]
-                )
+    # Wet points elsewhere, e.g. behind a closed boundary
+    if wet_outside.any():
+        eta, xi = np.nonzero(wet_outside.values)
+        raise ValueError(
+            f"{eta.size} wet points of the child grid lie outside the parent grid, at "
+            f"eta_rho {eta.min()}-{eta.max()} and xi_rho {xi.min()}-{xi.max()}. "
+            "Child grid points may extend beyond the parent grid only over land. "
+            "Please use a larger parent grid or a smaller child grid."
+        )
 
-                mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
-
-                # Interpolate the i indices (both i,j should return the same)
-                i = interp_i_eta(lon_child.values, lat_child.values)
-
-                i = xr.DataArray(i, dims=lon_child.dims)
-
-                # Check whether ocean child points fall outside the parent grid
-                if i.where(mask_child, other=0.0).isnull().any():
-                    raise ValueError(
-                        f"Some wet points on the {direction}ern boundary of the child grid lie "
-                        "outside the parent grid. Please use a larger parent grid or a smaller child grid."
-                    )
+    n_land_outside = int(outside.sum())
+    if n_land_outside > 0:
+        logging.warning(
+            f"{n_land_outside} land points of the child grid lie outside the parent grid "
+            "and keep the child grid's own topography and mask."
+        )
 
 
 def _finalize_grid_datasets(
@@ -607,17 +659,12 @@ def modify_child_mask(
     xarray.Dataset
         The updated child grid dataset with modified mask (`mask_rho`).
     """
-    # regrid parent mask onto child grid
-    mask_parent_interpolated = _interpolate_parent(
-        parent_grid_ds["mask_rho"], child_grid_ds["mask_rho"]
-    )
-
     # compute weight based on distance
     alpha = compute_boundary_distance(child_grid_ds["mask_rho"], boundaries)
 
     # update child mask to be weighted sum between original child and interpolated parent
-    child_mask = (
-        alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated
+    child_mask = _blend_parent_into_child(
+        parent_grid_ds["mask_rho"], child_grid_ds["mask_rho"], alpha
     )
     attrs = child_grid_ds["mask_rho"].attrs
 
@@ -664,16 +711,13 @@ def modify_child_topography(
     xarray.Dataset
         The updated child grid dataset with modified topography (`h`).
     """
-    # regrid parent mask onto child grid
-    h_parent_interpolated = _interpolate_parent(parent_grid_ds["h"], child_grid_ds["h"])
-
     # compute weight based on distance
     alpha = compute_boundary_distance(child_grid_ds["mask_rho"], boundaries)
 
     # update child topography to be weighted sum between original child and interpolated parent
     attrs = child_grid_ds["h"].attrs
-    child_grid_ds["h"] = (
-        alpha * child_grid_ds["h"] + (1 - alpha) * h_parent_interpolated
+    child_grid_ds["h"] = _blend_parent_into_child(
+        parent_grid_ds["h"], child_grid_ds["h"], alpha
     )
 
     # Clip depth on modified child topography

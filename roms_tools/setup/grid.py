@@ -27,6 +27,7 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import (
     DEFAULT_NETCDF_FORMAT,
     NetCDFFormat,
+    average_angle,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     save_datasets,
@@ -502,7 +503,10 @@ class Grid:
             if self.straddle and fine_var == "lon_rho":
                 fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
 
-            coarse_field = _f2c(fine_field)
+            if fine_var == "angle":
+                coarse_field = average_angle(fine_field, _f2c)
+            else:
+                coarse_field = _f2c(fine_field)
             if fine_var == "lon_rho":
                 coarse_field = xr.where(
                     coarse_field < 0, coarse_field + 360, coarse_field
@@ -727,6 +731,8 @@ class Grid:
         # leak there.
         with xr.open_dataset(filename) as f:
             ds = f.load()
+
+        _warn_if_angle_reversed(ds, filename)
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
             ds = add_velocity_masks(ds)
@@ -1595,39 +1601,110 @@ def _compute_coordinate_metrics(coords):
     return pn, pm
 
 
+def _xi_direction(lat_low, lon_low, lat_high, lon_high):
+    """Direction of the positive xi axis between neighboring points.
+
+    For each target point, ``*_low`` holds its neighbor on the low-xi side and
+    ``*_high`` its neighbor on the high-xi side. All inputs are in radians.
+
+    Parameters
+    ----------
+    lat_low, lon_low : ndarray
+        Latitudes and longitudes of the points on the low-xi side.
+    lat_high, lon_high : ndarray
+        Latitudes and longitudes of the points on the high-xi side.
+
+    Returns
+    -------
+    ndarray
+        Angle (in radians, in [-π, π]) of the positive xi direction,
+        counterclockwise from east.
+    """
+    dellat = lat_high - lat_low
+    # Normalize longitude differences to the range [-π, π]
+    dellon = (lon_high - lon_low + np.pi) % (2 * np.pi) - np.pi
+    dellon *= np.cos(0.5 * (lat_high + lat_low))
+
+    # arctan2 already returns the full-quadrant angle; no sign correction is needed.
+    return np.arctan2(dellat, dellon)
+
+
+def _warn_if_angle_reversed(ds: xr.Dataset, filename: str | Path) -> None:
+    """Warn if a grid file's stored angle points against the grid's own xi axis.
+
+    The xi direction is computed from ``lon_rho`` and ``lat_rho`` at interior
+    rho-points and compared with ``angle``. roms-tools 2.1.0 through 5.4.0
+    stored an angle off by π wherever the xi axis points westward, which
+    reverses winds and currents in forcing made from the grid. The warning tells
+    users to regenerate the grid only when the file carries a
+    ``roms_tools_version`` attribute; grids from other tools are told to correct
+    the stored angle instead.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The grid dataset as read from the file, with ``lon_rho`` and ``lat_rho``
+        in degrees and ``angle`` in radians.
+    filename : str or Path
+        The file the dataset came from, named in the warning.
+    """
+    if not all(var in ds for var in ["angle", "lon_rho", "lat_rho"]):
+        return
+
+    lon = np.deg2rad(ds["lon_rho"].values)
+    lat = np.deg2rad(ds["lat_rho"].values)
+    xi_direction = _xi_direction(lat[:, :-2], lon[:, :-2], lat[:, 2:], lon[:, 2:])
+    reversed_cells = np.cos(ds["angle"].values[:, 1:-1] - xi_direction) < 0
+
+    if not reversed_cells.any():
+        return
+
+    message = (
+        f"The grid angle stored in {filename} points against the grid's own xi "
+        f"axis in {reversed_cells.sum()} of {reversed_cells.size} interior "
+        "rho-points. Forcing made with it has winds and currents reversed in those "
+        "cells, and ROMSOutput rotates velocities with it."
+    )
+    version = ds.attrs.get("roms_tools_version")
+    if version is not None:
+        message += (
+            f" The file was written by roms-tools {version}; roms-tools 2.1.0 "
+            "through 5.4.0 stored this wrong angle wherever a grid's xi axis points "
+            "westward. Regenerate the grid from its parameters (Grid(nx=..., ...) or "
+            "Grid.from_yaml), then regenerate its forcing."
+        )
+    else:
+        message += " Correct the angle in the grid file before making forcing from it."
+    logging.warning(message)
+
+
 def _compute_angle(coords):
     """Compute angles of the local grid's positive x-axis relative to east.
 
-    The angle is computed for each grid cell using the latitude and longitude
-    differences between neighboring grid points. The result is wrapped to
-    the range [-π, π] and adjusted based on longitude and latitude conditions.
+    The angle at each interior rho-point is the direction from the u-point on
+    its low-xi side to the u-point on its high-xi side.
 
     Parameters
     ----------
     coords : dict
-        A dictionary containing 'latu' (latitudes) and 'lonu' (longitudes) arrays.
+        A dictionary containing 'latu' (latitudes) and 'lonu' (longitudes) arrays,
+        in radians.
 
     Returns
     -------
     ang : ndarray
-        An array of angles (in radians) of the local grid's positive x-axis
-        relative to east for each grid point.
+        An array of angles (in radians, in [-π, π]) of the local grid's positive
+        x-axis relative to east for each grid point.
     """
-    # Compute differences in latitudes and longitudes
-    dellat = coords["latu"][:, 1:] - coords["latu"][:, :-1]
-    dellon = coords["lonu"][:, 1:] - coords["lonu"][:, :-1]
-
-    # Normalize longitude differences to the range [-π, π]
-    dellon = (dellon + np.pi) % (2 * np.pi) - np.pi
-    dellon *= np.cos(0.5 * (coords["latu"][:, 1:] + coords["latu"][:, :-1]))
-
-    # Compute the angle in radians
-    ang_s = np.arctan2(dellat, dellon)
-
-    # Adjust angles based on longitude and latitude conditions
-    ang_s[(dellon < 0) & (dellat < 0)] -= np.pi
-    ang_s[(dellon < 0) & (dellat >= 0)] += np.pi
-    ang_s = np.mod(ang_s + np.pi, 2 * np.pi) - np.pi  # Ensure angles are in [-π, π]
+    ang_s = _xi_direction(
+        coords["latu"][:, :-1],
+        coords["lonu"][:, :-1],
+        coords["latu"][:, 1:],
+        coords["lonu"][:, 1:],
+    )
+    # arctan2 already returns [-π, π]; this wrap also keeps the stored angles of
+    # grids that never point westward bit-identical, so keep it.
+    ang_s = np.mod(ang_s + np.pi, 2 * np.pi) - np.pi
 
     # Create output array and set angles
     ang = np.zeros_like(coords["lon"])

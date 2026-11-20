@@ -1054,6 +1054,34 @@ def interpolate_from_v_to_rho(
     )
 
 
+def average_angle(
+    angle: xr.DataArray, average: Callable[[xr.DataArray], xr.DataArray]
+) -> xr.DataArray:
+    """Apply a linear averaging operator to an angle field without breaking at ±π.
+
+    On a grid whose xi axis points close to west, the angle field holds values on
+    both sides of ±π, and a plain average of 179° and -179° gives 0° instead of
+    180°. When the field spans more than π, this averages the unit vector
+    (cos, sin) and returns its direction. Otherwise it averages the angles
+    directly, giving exactly the values a plain average gives.
+
+    Parameters
+    ----------
+    angle : xr.DataArray
+        Angle field in radians.
+    average : Callable[[xr.DataArray], xr.DataArray]
+        A linear averaging operator, such as ``interpolate_from_rho_to_u``.
+
+    Returns
+    -------
+    xr.DataArray
+        The averaged angle field in radians.
+    """
+    if float(angle.max() - angle.min()) <= np.pi:
+        return average(angle)
+    return np.arctan2(average(np.sin(angle)), average(np.cos(angle)))
+
+
 def rotate_velocities(
     u: xr.DataArray,
     v: xr.DataArray,

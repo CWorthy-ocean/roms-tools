@@ -215,6 +215,134 @@ def test_coords_relation(grid_fixture, request):
     assert_smaller_equal_than_with_tolerance(grid.ds.lon_v.max(), grid.ds.lon_rho.max())
 
 
+def _bearing(lat1, lon1, lat2, lon2):
+    """Initial great-circle bearing from point 1 to point 2, counterclockwise from
+    east, in radians. Inputs are in radians.
+    """
+    dlon = lon2 - lon1
+    y = np.sin(dlon) * np.cos(lat2)
+    x = np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(dlon)
+    return np.pi / 2 - np.arctan2(y, x)
+
+
+def _xi_bearing(ds: xr.Dataset) -> np.ndarray:
+    """Direction of +xi at interior rho-points, in radians counterclockwise from east.
+
+    Averages the spherical bearing from each rho-point toward its high-xi neighbor
+    with the reversed bearing toward its low-xi neighbor, independently of the
+    planar formula the grid uses.
+    """
+    lon = np.deg2rad(ds.lon_rho.values)
+    lat = np.deg2rad(ds.lat_rho.values)
+    here = (lat[:, 1:-1], lon[:, 1:-1])
+    forward = _bearing(*here, lat[:, 2:], lon[:, 2:])
+    backward = _bearing(*here, lat[:, :-2], lon[:, :-2]) + np.pi
+    return np.arctan2(
+        np.sin(forward) + np.sin(backward), np.cos(forward) + np.cos(backward)
+    )
+
+
+def _rotated_grid(rot: float) -> Grid:
+    return Grid(
+        nx=8, ny=8, size_x=400, size_y=400, center_lon=0, center_lat=40, rot=rot
+    )
+
+
+@pytest.mark.parametrize("rot", [-170, -105, -90, 0, 90, 135, 170, 180])
+def test_angle_matches_grid_geometry(rot):
+    """The stored angle points along the grid's own xi axis at any rotation."""
+    grid = _rotated_grid(rot)
+
+    error = grid.ds.angle.values[:, 1:-1] - _xi_bearing(grid.ds)
+
+    assert np.cos(error).min() > np.cos(np.deg2rad(1))
+
+
+def test_angle_points_west_on_grid_rotated_170_degrees():
+    grid = _rotated_grid(170)
+
+    assert (np.cos(grid.ds.angle) < 0).all()
+
+
+def test_angle_matches_geometry_on_large_high_latitude_grid():
+    """A large high-latitude grid rotated well below 90° has cells whose xi axis
+    points westward, and the stored angle follows the grid there too.
+    """
+    grid = Grid(
+        nx=20, ny=20, size_x=3000, size_y=3000, center_lon=0, center_lat=65, rot=60
+    )
+    assert (np.cos(grid.ds.angle) < 0).any()
+
+    error = grid.ds.angle.values[:, 1:-1] - _xi_bearing(grid.ds)
+
+    assert np.cos(error).min() > np.cos(np.deg2rad(1))
+
+
+def test_coarse_angle_where_angle_wraps_at_180_degrees():
+    """Coarsening an angle field that crosses ±180° keeps it near 180°."""
+    grid = _rotated_grid(179)
+    assert grid.ds.angle.max() - grid.ds.angle.min() > np.pi  # the field wraps
+
+    error = grid.ds.angle_coarse - np.deg2rad(179)
+
+    assert np.cos(error).min() > np.cos(np.deg2rad(5))
+
+
+def _reverse_stored_angle(path: Path, *, written_by_roms_tools: bool = True) -> int:
+    """Shift the angle stored in a grid file by 180 degrees, as older roms-tools did.
+
+    Returns the number of interior rho-points, all of which are now reversed.
+    """
+    with xr.open_dataset(path) as f:
+        ds = f.load()
+    ds["angle"] = ds["angle"] - np.pi
+    if not written_by_roms_tools:
+        del ds.attrs["roms_tools_version"]
+    ds.to_netcdf(path)
+    return ds["angle"].isel(xi_rho=slice(1, -1)).size
+
+
+def test_from_file_warns_on_reversed_angle(tmp_path, caplog):
+    """A grid file whose angle points against its own xi axis is flagged on load."""
+    path = tmp_path / "grid.nc"
+    _rotated_grid(135).save(path)
+
+    with caplog.at_level(logging.WARNING):
+        Grid(filename=path)
+    assert "points against the grid's own xi axis" not in caplog.text
+
+    n_interior = _reverse_stored_angle(path)
+
+    with caplog.at_level(logging.WARNING):
+        Grid(filename=path)
+    assert (
+        f"points against the grid's own xi axis in {n_interior} of {n_interior} "
+        in caplog.text
+    )
+    assert "roms-tools 2.1.0 through 5.4.0" in caplog.text
+    assert "Regenerate the grid from its parameters" in caplog.text
+
+
+def test_from_file_reversed_angle_warning_for_grid_from_another_tool(tmp_path, caplog):
+    """A reversed angle in a file roms-tools did not write is flagged without
+    telling the user to regenerate it with roms-tools.
+    """
+    path = tmp_path / "grid.nc"
+    _rotated_grid(135).save(path)
+    n_interior = _reverse_stored_angle(path, written_by_roms_tools=False)
+
+    with caplog.at_level(logging.WARNING):
+        Grid(filename=path)
+
+    assert (
+        f"points against the grid's own xi axis in {n_interior} of {n_interior} "
+        in caplog.text
+    )
+    assert "Correct the angle in the grid file" in caplog.text
+    assert "roms-tools 2.1.0" not in caplog.text
+    assert "Regenerate the grid" not in caplog.text
+
+
 @pytest.mark.parametrize(
     "grid_fixture",
     [

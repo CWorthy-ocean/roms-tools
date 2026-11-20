@@ -1635,7 +1635,10 @@ def _warn_if_angle_reversed(ds: xr.Dataset, filename: str | Path) -> None:
     The xi direction is computed from ``lon_rho`` and ``lat_rho`` at interior
     rho-points and compared with ``angle``. roms-tools 2.1.0 through 5.4.0
     stored an angle off by π wherever the xi axis points westward, which
-    reverses winds and currents in forcing made from the grid.
+    reverses winds and currents in forcing made from the grid. The warning tells
+    users to regenerate the grid only when the file carries a
+    ``roms_tools_version`` attribute; grids from other tools are told to correct
+    the stored angle instead.
 
     Parameters
     ----------
@@ -1653,16 +1656,26 @@ def _warn_if_angle_reversed(ds: xr.Dataset, filename: str | Path) -> None:
     xi_direction = _xi_direction(lat[:, :-2], lon[:, :-2], lat[:, 2:], lon[:, 2:])
     reversed_cells = np.cos(ds["angle"].values[:, 1:-1] - xi_direction) < 0
 
-    if reversed_cells.any():
-        logging.warning(
-            f"The grid angle stored in {filename} points against the grid's own "
-            f"xi axis in {reversed_cells.sum()} of {reversed_cells.size} interior "
-            "rho-points. roms-tools 2.1.0 through 5.4.0 stored this wrong angle "
-            "wherever a grid's xi axis points westward. Forcing made with it "
-            "has winds and currents reversed in those cells, and ROMSOutput rotates "
-            "velocities with it. Regenerate the grid from its parameters "
-            "(Grid(nx=..., ...) or Grid.from_yaml), then regenerate its forcing."
+    if not reversed_cells.any():
+        return
+
+    message = (
+        f"The grid angle stored in {filename} points against the grid's own xi "
+        f"axis in {reversed_cells.sum()} of {reversed_cells.size} interior "
+        "rho-points. Forcing made with it has winds and currents reversed in those "
+        "cells, and ROMSOutput rotates velocities with it."
+    )
+    version = ds.attrs.get("roms_tools_version")
+    if version is not None:
+        message += (
+            f" The file was written by roms-tools {version}; roms-tools 2.1.0 "
+            "through 5.4.0 stored this wrong angle wherever a grid's xi axis points "
+            "westward. Regenerate the grid from its parameters (Grid(nx=..., ...) or "
+            "Grid.from_yaml), then regenerate its forcing."
         )
+    else:
+        message += " Correct the angle in the grid file before making forcing from it."
+    logging.warning(message)
 
 
 def _compute_angle(coords):

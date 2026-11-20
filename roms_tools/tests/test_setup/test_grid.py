@@ -262,6 +262,20 @@ def test_coarse_angle_where_angle_wraps_at_180_degrees():
     assert np.cos(error).min() > np.cos(np.deg2rad(5))
 
 
+def _reverse_stored_angle(path: Path, *, written_by_roms_tools: bool = True) -> int:
+    """Shift the angle stored in a grid file by 180 degrees, as older roms-tools did.
+
+    Returns the number of interior rho-points, all of which are now reversed.
+    """
+    with xr.open_dataset(path) as f:
+        ds = f.load()
+    ds["angle"] = ds["angle"] - np.pi
+    if not written_by_roms_tools:
+        del ds.attrs["roms_tools_version"]
+    ds.to_netcdf(path)
+    return ds["angle"].isel(xi_rho=slice(1, -1)).size
+
+
 def test_from_file_warns_on_reversed_angle(tmp_path, caplog):
     """A grid file whose angle points against its own xi axis is flagged on load."""
     path = tmp_path / "grid.nc"
@@ -271,12 +285,7 @@ def test_from_file_warns_on_reversed_angle(tmp_path, caplog):
         Grid(filename=path)
     assert "points against the grid's own xi axis" not in caplog.text
 
-    # Store the angle older roms-tools wrote for this grid: off by 180 degrees.
-    with xr.open_dataset(path) as f:
-        ds = f.load()
-    ds["angle"] = ds["angle"] - np.pi
-    ds.to_netcdf(path)
-    n_interior = ds["angle"].isel(xi_rho=slice(1, -1)).size
+    n_interior = _reverse_stored_angle(path)
 
     with caplog.at_level(logging.WARNING):
         Grid(filename=path)
@@ -284,6 +293,28 @@ def test_from_file_warns_on_reversed_angle(tmp_path, caplog):
         f"points against the grid's own xi axis in {n_interior} of {n_interior} "
         in caplog.text
     )
+    assert "roms-tools 2.1.0 through 5.4.0" in caplog.text
+    assert "Regenerate the grid from its parameters" in caplog.text
+
+
+def test_from_file_reversed_angle_warning_for_grid_from_another_tool(tmp_path, caplog):
+    """A reversed angle in a file roms-tools did not write is flagged without
+    telling the user to regenerate it with roms-tools.
+    """
+    path = tmp_path / "grid.nc"
+    _rotated_grid(135).save(path)
+    n_interior = _reverse_stored_angle(path, written_by_roms_tools=False)
+
+    with caplog.at_level(logging.WARNING):
+        Grid(filename=path)
+
+    assert (
+        f"points against the grid's own xi axis in {n_interior} of {n_interior} "
+        in caplog.text
+    )
+    assert "Correct the angle in the grid file" in caplog.text
+    assert "roms-tools 2.1.0" not in caplog.text
+    assert "Regenerate the grid" not in caplog.text
 
 
 @pytest.mark.parametrize(

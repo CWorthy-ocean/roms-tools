@@ -1,0 +1,651 @@
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import numpy as np
+import PyCO2SYS as pyco2
+import xarray as xr
+
+from roms_tools import Grid
+from roms_tools.setup.utils import group_by_month
+from roms_tools.utils import load_data, save_datasets
+
+# MARBL's floors: cells below them are left at 0, as in ucla-roms
+SALT_MIN = 0.1
+ALK_MIN = SALT_MIN / 35.0 * 2225.0
+DIC_MIN = SALT_MIN / 35.0 * 1944.0
+RHO_FACTOR = 1000.0 / 1025.0  # mmol/m3 -> µmol/kg
+MAX_CELLS_PER_CALL = 150000
+
+
+def _pyco2_beta_eta(
+    alk: np.ndarray,
+    dic: np.ndarray,
+    salt: np.ndarray,
+    temp: np.ndarray,
+    po4: np.ndarray,
+    sio3: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Beta and eta from PyCO2SYS for 1-D arrays of cells, 0 where the solve fails."""
+    csys = pyco2.sys(
+        par1=alk * RHO_FACTOR,
+        par2=dic * RHO_FACTOR,
+        par1_type=1,
+        par2_type=2,
+        salinity=salt,
+        temperature=temp,
+        total_silicate=np.clip(sio3, 0, None) * RHO_FACTOR,
+        total_phosphate=np.clip(po4, 0, None) * RHO_FACTOR,
+        opt_buffers_mode=2,
+    )
+    iso_q = csys["isocapnic_quotient"]
+    beta = (csys["dic"] - (csys["HCO3"] + 2.0 * csys["CO3"]) / iso_q) / csys["CO2"]
+    eta = 1.0 / iso_q
+
+    valid = np.isfinite(beta) & np.isfinite(eta)
+    return np.where(valid, beta, 0.0), np.where(valid, eta, 0.0)
+
+
+def _beta_eta(
+    alk: np.ndarray,
+    dic: np.ndarray,
+    salt: np.ndarray,
+    temp: np.ndarray,
+    po4: np.ndarray,
+    sio3: np.ndarray,
+    mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Beta and eta for each record, 0 on land, below the floors, or where the solve fails.
+
+    PyCO2SYS computes many large arrays for every cell it is given, so it gets
+    one record at a time, only the ocean cells above the floors, in blocks of at
+    most `MAX_CELLS_PER_CALL` cells.
+
+    Parameters
+    ----------
+    alk, dic, salt, temp, po4, sio3 : np.ndarray
+        Surface fields with shape (time, eta_rho, xi_rho).
+    mask : np.ndarray
+        Boolean ocean mask with shape (eta_rho, xi_rho).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Beta and eta, with the shape of the inputs.
+    """
+    shape = alk.shape
+    alk, dic, salt, temp, po4, sio3 = (
+        a.reshape(shape[0], -1) for a in (alk, dic, salt, temp, po4, sio3)
+    )
+    mask = mask.reshape(-1)
+
+    beta = np.zeros(alk.shape)
+    eta = np.zeros(alk.shape)
+    for t in range(shape[0]):
+        ok = mask & (salt[t] >= SALT_MIN) & (alk[t] >= ALK_MIN) & (dic[t] >= DIC_MIN)
+        cells = np.flatnonzero(ok)
+        for start in range(0, cells.size, MAX_CELLS_PER_CALL):
+            c = cells[start : start + MAX_CELLS_PER_CALL]
+            beta[t, c], eta[t, c] = _pyco2_beta_eta(
+                alk[t, c], dic[t, c], salt[t, c], temp[t, c], po4[t, c], sio3[t, c]
+            )
+
+    return beta.reshape(shape), eta.reshape(shape)
+
+
+@dataclass(kw_only=True)
+class CarbonateSensitivity:
+    """Computes the eta and beta carbonate sensitivities from ROMS-MARBL control-run output.
+
+    On initialization, the class:
+
+    1. Loads the surface fields from the history and BGC files
+       (`_get_surface_vals_control`), stored in ``ds_surface_control``. If the
+       output is averaged, the initial conditions from ``ic_path`` are added as
+       the first record.
+    2. Computes eta and beta from those fields with PyCO2SYS
+       (`_compute_eta_beta`), stored in ``ds``.
+
+    where
+
+    - ``beta = dDIC / dCO2``, stored as ``ddic_dco2``
+    - ``eta  = dDIC / dALK``, stored as ``ddic_dalk``
+
+    Call `save` to write ``ds`` to monthly files.
+
+    For long runs, pass ``use_dask=True``. ``ds`` is then lazy, and `save`
+    computes eta and beta one record at a time as it writes each month, so
+    memory use does not grow with the length of the run. PyCO2SYS is not safe
+    under dask's default threaded scheduler, so to compute part of ``ds``
+    yourself, for example to plot it, do it inside
+    ``dask.config.set(scheduler="synchronous")``.
+
+    With averaged output, eta and beta are computed from the window-mean state.
+    The result approximates the averaged ``_cdrgas`` records that ucla-roms
+    writes (``do_cdr_gas_exch_output``), which it builds from per-step averages
+    of ``1/beta`` and ``eta/beta`` over the window, rather than reproducing them.
+
+    Parameters
+    ----------
+    his_path : str | Path | list[str | Path]
+        Filename, wildcard pattern, or list of filenames with ROMS history output
+    bgc_path : str | Path | list[str | Path]
+        Filename, wildcard pattern, or list of filenames with MARBL BGC output
+    grid : Grid
+        Object representing the grid information. Land points are masked with
+        ``mask_rho`` before eta and beta are computed.
+    ic_path : str | Path, optional
+        Initial conditions file of the run, with the physical and BGC variables.
+        Required when the history and BGC files hold averaged output, which
+        has no record at the start time. Not used with instantaneous output.
+        If the file is an exact restart (has two records), the second record
+        is used.
+    model_reference_date : datetime, optional
+        Reference date of ROMS simulation.
+    dim_names : dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+    use_dask : bool, optional
+        Indicates whether to use dask for processing. If True, ``ds`` is lazy
+        and is computed one record at a time when it is saved. Defaults to
+        False, which computes ``ds`` in memory on initialization. It is
+        recommended to use dask for long data files.
+    """
+
+    his_path: str | Path | list[str | Path]
+    """Filename, wildcard pattern, or list of filenames with ROMS history output."""
+    bgc_path: str | Path | list[str | Path]
+    """Filename, wildcard pattern, or list of filenames with MARBL BGC output."""
+    grid: Grid
+    """Object representing the grid information, used for land masking."""
+    ic_path: str | Path | None = None
+    """Initial conditions file, used only when the his and BGC output is averaged."""
+    model_reference_date: datetime | None = None
+    """Reference date of ROMS simulation."""
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "eta_rho": "eta_rho",
+            "xi_rho": "xi_rho",
+            "s_rho": "s_rho",
+            "time": "time",
+        }
+    )
+    """Dictionary specifying the names of dimensions in the dataset."""
+    use_dask: bool = False
+    """Whether to use dask for processing, which keeps ``ds`` lazy until it is saved."""
+
+    ds_surface_control: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing the control-run surface fields."""
+    ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing ``ddic_dco2`` (beta), ``ddic_dalk`` (eta) and their record times."""
+
+    def __post_init__(self):
+        self.ds_surface_control = self._get_surface_vals_control()
+        self._infer_model_reference_date_from_metadata(self.ds_surface_control)
+        ds = self._compute_eta_beta(self.ds_surface_control)
+        self.ds = self._add_absolute_time(ds)
+
+    def save(self, filepath: str | Path) -> list[Path]:
+        """Save the eta and beta fields to monthly netCDF4 files.
+
+        The dataset is split by calendar month of ``abs_time`` and each month is
+        written to its own file, named ``<filepath>_YYYYMM.nc``.
+
+        Parameters
+        ----------
+        filepath : str | Path
+            The base path and filename for the output files, e.g.
+            ``".../BETA/carbonate_sensitivity"``. A ``.nc`` suffix, if given,
+            is removed before the ``_YYYYMM`` label is added.
+
+        Returns
+        -------
+        list[Path]
+            A list of ``Path`` objects for the files that were saved.
+        """
+        filepath = Path(filepath)
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        dataset_list, output_filenames = group_by_month(self.ds, str(filepath))
+
+        # One month per call. Each file is written before the next month is computed.
+        saved = []
+        for ds_month, filename in zip(dataset_list, output_filenames, strict=True):
+            saved += save_datasets(
+                [ds_month], [filename], use_dask=self.use_dask, serialize_dask=True
+            )
+        return saved
+
+    def _get_surface_vals_control(self) -> xr.Dataset:
+        """Load control-run surface fields from the history and BGC files.
+
+        Load his and bgc variables, only retain the variables needed for eta beta
+        calculations, and reduce to the surface layer. ``ocean_time`` values are
+        checked to be matching between his and bgc variables, and all variables are
+        merged into a single dataset. If the output is averaged, the initial
+        conditions from ``ic_path`` are added as the first record.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset containing the needed variables to perform eta beta calculations,
+            at the surface layer.
+
+        Raises
+        ------
+        ValueError
+            If the history and BGC times do not match, if the output is averaged
+            and ``ic_path`` is not given, or if the initial conditions file has
+            more than two time records.
+        KeyError
+            If any needed variable is not found in a file group.
+        """
+        ds_his = self._load_surface(self.his_path, source="his")
+        ds_bgc = self._load_surface(self.bgc_path, source="bgc")
+
+        self._check_time_consistency(ds_his, ds_bgc)
+        ds = self._merge(ds_his, ds_bgc)
+
+        if self._is_averaged(ds):
+            if self.ic_path is None:
+                raise ValueError(
+                    "The history and BGC files hold averaged output, which have no "
+                    "records at the start time. The initial conditions file is "
+                    "needed to complete the timeseries. Please pass in `ic_path`."
+                )
+            ds_ic = self._load_surface(self.ic_path, source="ic")
+            n_ic = ds_ic.sizes[self.dim_names["time"]]
+            if n_ic > 2:
+                raise ValueError(
+                    f"The initial conditions file must have one time record, or "
+                    f"two for an exact restart file, but it has {n_ic}."
+                )
+            # An exact restart file has two records; the second is the start time
+            ds_ic = ds_ic.isel({self.dim_names["time"]: [-1]})
+            self._check_ic_time_step(ds_ic, ds)
+            # Keep the his `ocean_time` attributes, which hold the model reference date
+            ds_ic["ocean_time"].attrs = ds["ocean_time"].attrs
+            ds = xr.concat([ds_ic, ds], dim=self.dim_names["time"])
+        elif self.ic_path is not None:
+            logging.warning(
+                "`ic_path` was not used: the history and BGC output is "
+                "instantaneous, so it already has a record at the start time."
+            )
+
+        return ds
+
+    def _compute_eta_beta(self, ds_surface: xr.Dataset) -> xr.Dataset:
+        """Compute the eta and beta carbonate sensitivities with PyCO2SYS.
+
+        ``beta = dDIC / dCO2`` and ``eta = dDIC / dALK``, computed from the
+        surface ALK, DIC, salinity, temperature, silicate, and phosphate in
+        `_beta_eta`, one record at a time and only at the ocean cells, using
+        ``mask_rho``. With ``use_dask=True`` the inputs are chunked one
+        record per chunk and the result stays lazy until it is computed.
+
+        Parameters
+        ----------
+        ds_surface : xr.Dataset
+            Surface dataset containing ALK, DIC, ``salt``, ``temp``, ``PO4``,
+            and ``SiO3``.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset with ``ddic_dco2`` (beta) and ``ddic_dalk`` (eta) on the same dimensions as the inputs,
+            with ``ocean_time`` as a coordinate.
+
+        Raises
+        ------
+        KeyError
+            If any required variable is missing from ``ds_surface``.
+        """
+        required_vars = (
+            "ALK_ALT_CO2",
+            "DIC_ALT_CO2",
+            "salt",
+            "temp",
+            "PO4",
+            "SiO3",
+        )
+        missing = [v for v in required_vars if v not in ds_surface]
+        if missing:
+            raise KeyError(f"`ds_surface` is missing required variables {missing}")
+
+        time = ds_surface["ocean_time"] if "ocean_time" in ds_surface else None
+        inputs = [ds_surface[v] for v in required_vars]
+
+        core_dims = [self.dim_names["eta_rho"], self.dim_names["xi_rho"]]
+        if self.use_dask:
+            # One record per chunk, so PyCO2SYS gets one record at a time
+            chunks = {self.dim_names["time"]: 1, **dict.fromkeys(core_dims, -1)}
+            inputs = [da.chunk(chunks) for da in inputs]
+
+        beta, eta = xr.apply_ufunc(
+            _beta_eta,
+            *inputs,
+            self.grid.ds.mask_rho.astype(bool),
+            input_core_dims=[core_dims] * (len(inputs) + 1),
+            output_core_dims=[core_dims, core_dims],
+            dask="parallelized",
+            output_dtypes=[float, float],
+        )
+
+        # Variable names and attributes match what ROMS reads (surf_flux.F90)
+        # and writes (cdr_gas_exch_output.F90).
+        ds = xr.Dataset({"ddic_dco2": beta, "ddic_dalk": eta})
+        ds["ddic_dco2"].attrs = {
+            "long_name": "surface carbonate sensitivity beta = dDIC/dCO2",
+            "units": "nondimensional",
+        }
+        ds["ddic_dalk"].attrs = {
+            "long_name": "surface carbonate sensitivity eta = dDIC/dALK",
+            "units": "nondimensional",
+        }
+
+        if time is not None:
+            ds = ds.assign_coords({"ocean_time": time.load()})
+
+        return ds
+
+    def _infer_model_reference_date_from_metadata(self, ds: xr.Dataset) -> None:
+        """Infer and validate the model reference date from ``ocean_time`` metadata.
+
+        Similar to `roms_tools.datasets.roms_dataset.ROMSDataset`: the
+        reference date is read from the ``long_name`` attribute of
+        ``ocean_time``.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset with an `ocean_time` variable and a `long_name` attribute
+            in the format `Time since YYYY/MM/DD`.
+        Raises
+        ------
+        ValueError
+            If the reference date cannot be inferred and ``model_reference_date``
+            is not set, or if the inferred date does not match
+            ``model_reference_date``.
+        """
+        if "long_name" not in ds["ocean_time"].attrs:
+            if self.model_reference_date is None:
+                raise ValueError(
+                    "`long_name` attribute not found in `ocean_time`, so the model "
+                    "reference date could not be inferred. Pass "
+                    "`model_reference_date` explicitly."
+                )
+            logging.warning(
+                "`long_name` attribute not found in `ocean_time`; using "
+                "`model_reference_date`."
+            )
+            return
+
+        long_name = ds["ocean_time"].attrs.get("long_name", "")
+        match = re.search(r"(\d{4})/(\d{2})/(\d{2})", long_name)
+
+        if match:
+            year, month, day = (int(g) for g in match.groups())
+            inferred_date = datetime(year, month, day)
+            if self.model_reference_date is None:
+                self.model_reference_date = inferred_date
+            elif self.model_reference_date != inferred_date:
+                raise ValueError(
+                    f"Mismatch between `model_reference_date` "
+                    f"({self.model_reference_date}) and the reference date in the "
+                    f"output metadata ({inferred_date})."
+                )
+        elif self.model_reference_date is None:
+            raise ValueError(
+                f"Model reference date could not be inferred from the `ocean_time` "
+                f"`long_name` ({long_name!r}). Pass `model_reference_date` explicitly."
+            )
+        else:
+            logging.warning(
+                f"Could not infer the model reference date from the `ocean_time` "
+                f"`long_name` ({long_name!r}); using `model_reference_date`."
+            )
+
+    def _add_absolute_time(self, ds: xr.Dataset) -> xr.Dataset:
+        """Add absolute time as a coordinate, used to group the output by month.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing ``ocean_time`` in seconds since the model reference date.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset with an ``abs_time`` coordinate along the time dimension.
+        """
+        model_reference_date = self.model_reference_date
+        if model_reference_date is None:
+            raise ValueError(
+                "`model_reference_date` must be set before adding absolute time."
+            )
+
+        abs_time = np.array(
+            [
+                model_reference_date + timedelta(seconds=float(seconds))
+                for seconds in ds["ocean_time"].values
+            ],
+            dtype="datetime64[ns]",
+        )
+        abs_time = xr.DataArray(
+            abs_time,
+            dims=[self.dim_names["time"]],
+            attrs={"long_name": "absolute time"},
+        )
+        ds = ds.assign_coords(abs_time=abs_time)
+
+        # ROMS finds each forcing record by these variables, in days since the
+        # model reference date (surf_flux.F90, roms_read_write.F90).
+        days = ds["ocean_time"].values / 86400.0
+        for var in ("ddic_dco2", "ddic_dalk"):
+            ds[f"{var}_time"] = xr.DataArray(
+                days,
+                dims=[self.dim_names["time"]],
+                attrs={
+                    "long_name": f"time of {var} record, days since reference date",
+                    "units": "days",
+                },
+            )
+
+        return ds
+
+    def _load_surface(
+        self, path: str | Path | list[str | Path], source: str
+    ) -> xr.Dataset:
+        """Load one group of ROMS files and reduce it to the surface layer.
+
+        Parameters
+        ----------
+        path : str | Path | list[str | Path]
+            Filename, wildcard pattern, or list of filenames.
+        source : str
+            Label for the file group (``"his"``, ``"bgc"``, or ``"ic"``), used in
+            log messages.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset reduced to the variables in ds_vars and only at the surface layer.
+        """
+        time = self.dim_names["time"]
+
+        if source == "ic":
+            # A roms-tools initial conditions file uses `ocean_time` as its time
+            # dimension, so don't let load_data add a `time` dimension.
+            ds = load_data(
+                filename=path,
+                dim_names={k: v for k, v in self.dim_names.items() if k != "time"},
+                use_dask=self.use_dask,
+                decode_times=False,
+                decode_timedelta=False,
+            )
+            if "ocean_time" in ds.dims:
+                ds = (
+                    ds.drop_indexes("ocean_time")
+                    .rename_dims({"ocean_time": time})
+                    .reset_coords()
+                )
+        else:
+            ds = load_data(
+                filename=path,
+                dim_names=self.dim_names,
+                use_dask=self.use_dask,
+                decode_times=False,
+                decode_timedelta=False,
+                force_combine_nested=True,
+            )
+
+        # Define required variables
+        his_vars = ["temp", "salt"]
+        bgc_vars = ["ALK_ALT_CO2", "DIC_ALT_CO2", "PO4", "SiO3"]
+        if source == "bgc":
+            ds_vars = [*bgc_vars, "ocean_time"]
+        elif source == "his":
+            ds_vars = [*his_vars, "ocean_time"]
+        elif source == "ic":
+            ds_vars = [*his_vars, *bgc_vars, "ocean_time"]
+
+        missing_ds = [var for var in ds_vars if var not in ds]
+        if missing_ds:
+            raise KeyError(
+                f"Missing required variables in {source} files: {missing_ds}"
+            )
+
+        keep_vars = [v for v in ds_vars if v in ds.variables]
+        logging.info(f"Variables taken from {source} files: {keep_vars}")
+        ds = ds[keep_vars]
+
+        s_rho = self.dim_names["s_rho"]
+        if s_rho in ds.dims:
+            # In ROMS the last s_rho index is the layer closest to the surface.
+            ds = ds.isel({s_rho: -1})
+
+        return ds
+
+    def _check_time_consistency(self, ds_his: xr.Dataset, ds_bgc: xr.Dataset) -> None:
+        """Ensure the history and BGC files cover the same output times.
+
+        Parameters
+        ----------
+        ds_his : xr.Dataset
+            Surface dataset from the history files.
+        ds_bgc : xr.Dataset
+            Surface dataset from the BGC files.
+
+        Raises
+        ------
+        ValueError
+            If ``ocean_time`` is missing from either group, or if the two groups
+            have a different number of time records or different time values.
+        """
+        time_var = "ocean_time"
+
+        for source, ds in (("his", ds_his), ("bgc", ds_bgc)):
+            if time_var not in ds:
+                raise ValueError(
+                    f"`{time_var}` not found in the {source} files; it is needed "
+                    f"to align history and BGC output."
+                )
+
+        t_his = ds_his[time_var].values
+        t_bgc = ds_bgc[time_var].values
+
+        if t_his.shape != t_bgc.shape:
+            raise ValueError(
+                f"History and BGC files have a different number of time records: "
+                f"his={t_his.size}, bgc={t_bgc.size}. Check that both wildcards "
+                f"match the same set of output periods."
+            )
+        if not (t_his == t_bgc).all():
+            raise ValueError(
+                f"History and BGC `{time_var}` values do not match. Check that both "
+                f"groups were written at the same output frequency."
+            )
+
+    def _is_averaged(self, ds: xr.Dataset) -> bool:
+        """Whether the history and BGC files hold averaged output.
+
+        ROMS marks averaged output in the ``long_name`` of each variable, for
+        example ``"averaged potential temperature"`` or
+        ``"avg_Alkalinity, Alternative CO2"``. Averaged files have no record at
+        the start time, which ROMS needs in the eta and beta forcing file.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Merged surface dataset from the history and BGC files.
+
+        Returns
+        -------
+        bool
+            True if any variable's ``long_name`` contains ``avg`` or ``averaged``.
+        """
+        return any(
+            re.search(r"avg|averaged", ds[var].attrs.get("long_name", ""), re.I)
+            for var in ds.data_vars
+        )
+
+    def _check_ic_time_step(self, ds_ic: xr.Dataset, ds: xr.Dataset) -> None:
+        """Check the time step from the initial conditions to the first record.
+
+        Logs a warning if the time from the initial conditions to the first
+        history and BGC record is longer than the time between the first two
+        records.
+
+        Parameters
+        ----------
+        ds_ic : xr.Dataset
+            Surface dataset from the initial conditions file.
+        ds : xr.Dataset
+            Merged surface dataset from the history and BGC files.
+        """
+        t_ic = ds_ic["ocean_time"].values
+        t = ds["ocean_time"].values
+
+        if t.size < 2:
+            return
+
+        ic_step = t[0] - t_ic[0]
+        record_step = t[1] - t[0]
+        if ic_step > record_step and not np.isclose(ic_step, record_step):
+            logging.warning(
+                f"The time from the initial conditions to the first history and "
+                f"BGC record ({ic_step / 86400:g} days) is longer than the time "
+                f"between records ({record_step / 86400:g} days)."
+            )
+
+    def _merge(self, ds_his: xr.Dataset, ds_bgc: xr.Dataset) -> xr.Dataset:
+        """Merge the history and BGC surface datasets into one.
+
+        Variables found in both groups (including ``ocean_time``) are taken from
+        the history files.
+
+        Parameters
+        ----------
+        ds_his : xr.Dataset
+            Surface dataset from the history files.
+        ds_bgc : xr.Dataset
+            Surface dataset from the BGC files.
+
+        Returns
+        -------
+        xr.Dataset
+            Merged dataset.
+        """
+        shared = [v for v in ds_bgc.data_vars if v in ds_his.data_vars]
+        extra_shared = [v for v in shared if v != "ocean_time"]
+        if extra_shared:
+            logging.warning(
+                f"Variables {extra_shared} found in both history and BGC files; "
+                f"using the history values."
+            )
+        ds_bgc = ds_bgc.drop_vars(shared)
+
+        return xr.merge([ds_his, ds_bgc], join="exact", combine_attrs="override")

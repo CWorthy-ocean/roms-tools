@@ -92,6 +92,8 @@ Analyzing ROMS output
    roms_tools.ROMSOutput.cdr_metrics
    roms_tools.Ensemble
    roms_tools.UpscaledCDR
+   roms_tools.CarbonateSensitivity
+   roms_tools.CarbonateSensitivity.save
 
 =======
 

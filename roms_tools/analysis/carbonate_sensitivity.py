@@ -12,6 +12,88 @@ from roms_tools import Grid
 from roms_tools.setup.utils import group_by_month
 from roms_tools.utils import load_data, save_datasets
 
+# MARBL's floors: cells below them are left at 0, as in ucla-roms
+SALT_MIN = 0.1
+ALK_MIN = SALT_MIN / 35.0 * 2225.0
+DIC_MIN = SALT_MIN / 35.0 * 1944.0
+RHO_FACTOR = 1000.0 / 1025.0  # mmol/m3 -> µmol/kg
+MAX_CELLS_PER_CALL = 150000
+
+
+def _pyco2_beta_eta(
+    alk: np.ndarray,
+    dic: np.ndarray,
+    salt: np.ndarray,
+    temp: np.ndarray,
+    po4: np.ndarray,
+    sio3: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Beta and eta from PyCO2SYS for 1-D arrays of cells, 0 where the solve fails."""
+    csys = pyco2.sys(
+        par1=alk * RHO_FACTOR,
+        par2=dic * RHO_FACTOR,
+        par1_type=1,
+        par2_type=2,
+        salinity=salt,
+        temperature=temp,
+        total_silicate=np.clip(sio3, 0, None) * RHO_FACTOR,
+        total_phosphate=np.clip(po4, 0, None) * RHO_FACTOR,
+        opt_buffers_mode=2,
+    )
+    iso_q = csys["isocapnic_quotient"]
+    beta = (csys["dic"] - (csys["HCO3"] + 2.0 * csys["CO3"]) / iso_q) / csys["CO2"]
+    eta = 1.0 / iso_q
+
+    valid = np.isfinite(beta) & np.isfinite(eta)
+    return np.where(valid, beta, 0.0), np.where(valid, eta, 0.0)
+
+
+def _beta_eta(
+    alk: np.ndarray,
+    dic: np.ndarray,
+    salt: np.ndarray,
+    temp: np.ndarray,
+    po4: np.ndarray,
+    sio3: np.ndarray,
+    mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Beta and eta for each record, 0 on land, below the floors, or where the solve fails.
+
+    PyCO2SYS computes many large arrays for every cell it is given, so it gets
+    one record at a time, only the ocean cells above the floors, in blocks of at
+    most `MAX_CELLS_PER_CALL` cells.
+
+    Parameters
+    ----------
+    alk, dic, salt, temp, po4, sio3 : np.ndarray
+        Surface fields with shape (time, eta_rho, xi_rho).
+    mask : np.ndarray
+        Boolean ocean mask with shape (eta_rho, xi_rho).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Beta and eta, with the shape of the inputs.
+    """
+    shape = alk.shape
+    alk, dic, salt, temp, po4, sio3 = (
+        a.reshape(shape[0], -1) for a in (alk, dic, salt, temp, po4, sio3)
+    )
+    mask = mask.reshape(-1)
+
+    beta = np.zeros(alk.shape)
+    eta = np.zeros(alk.shape)
+    for t in range(shape[0]):
+        ok = mask & (salt[t] >= SALT_MIN) & (alk[t] >= ALK_MIN) & (dic[t] >= DIC_MIN)
+        cells = np.flatnonzero(ok)
+        for start in range(0, cells.size, MAX_CELLS_PER_CALL):
+            c = cells[start : start + MAX_CELLS_PER_CALL]
+            beta[t, c], eta[t, c] = _pyco2_beta_eta(
+                alk[t, c], dic[t, c], salt[t, c], temp[t, c], po4[t, c], sio3[t, c]
+            )
+
+    return beta.reshape(shape), eta.reshape(shape)
+
 
 @dataclass(kw_only=True)
 class CarbonateSensitivity:
@@ -32,6 +114,13 @@ class CarbonateSensitivity:
     - ``eta  = dDIC / dALK``, stored as ``ddic_dalk``
 
     Call `save` to write ``ds`` to monthly files.
+
+    For long runs, pass ``use_dask=True``. ``ds`` is then lazy, and `save`
+    computes eta and beta one record at a time as it writes each month, so
+    memory use does not grow with the length of the run. PyCO2SYS is not safe
+    under dask's default threaded scheduler, so to compute part of ``ds``
+    yourself, for example to plot it, do it inside
+    ``dask.config.set(scheduler="synchronous")``.
 
     With averaged output, eta and beta are computed from the window-mean state.
     The result approximates the averaged ``_cdrgas`` records that ucla-roms
@@ -58,7 +147,10 @@ class CarbonateSensitivity:
     dim_names : dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
     use_dask : bool, optional
-        Indicates whether to use dask for processing. Defaults to False.
+        Indicates whether to use dask for processing. If True, ``ds`` is lazy
+        and is computed one record at a time when it is saved. Defaults to
+        False, which computes ``ds`` in memory on initialization. It is 
+        recommended to use dask for long data files. 
     """
 
     his_path: str | Path | list[str | Path]
@@ -81,7 +173,7 @@ class CarbonateSensitivity:
     )
     """Dictionary specifying the names of dimensions in the dataset."""
     use_dask: bool = False
-    """Whether to use dask for processing."""
+    """Whether to use dask for processing, which keeps ``ds`` lazy until it is saved."""
 
     ds_surface_control: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing the control-run surface fields."""
@@ -119,7 +211,13 @@ class CarbonateSensitivity:
 
         dataset_list, output_filenames = group_by_month(self.ds, str(filepath))
 
-        return save_datasets(dataset_list, output_filenames, use_dask=self.use_dask)
+        # One month per call. Each file is written before the next month is computed. 
+        saved = []
+        for ds_month, filename in zip(dataset_list, output_filenames, strict=True):
+            saved += save_datasets(
+                [ds_month], [filename], use_dask=self.use_dask, serialize_dask=True
+            )
+        return saved
 
     def _get_surface_vals_control(self) -> xr.Dataset:
         """Load control-run surface fields from the history and BGC files.
@@ -182,10 +280,11 @@ class CarbonateSensitivity:
     def _compute_eta_beta(self, ds_surface: xr.Dataset) -> xr.Dataset:
         """Compute the eta and beta carbonate sensitivities with PyCO2SYS.
 
-        Land points are masked with the grid's ``mask_rho``, the inputs are
-        loaded into memory, and ``pyco2.sys`` computes the sensitivities.
         ``beta = dDIC / dCO2`` and ``eta = dDIC / dALK``, computed from the
-        surface ALK, DIC, salinity, temperature, silicate, and phosphate.
+        surface ALK, DIC, salinity, temperature, silicate, and phosphate in
+        `_beta_eta`, one record at a time and only at the ocean cells, using
+        ``mask_rho``. With ``use_dask=True`` the inputs are chunked one
+        record per chunk and the result stays lazy until it is computed.
 
         Parameters
         ----------
@@ -217,56 +316,27 @@ class CarbonateSensitivity:
             raise KeyError(f"`ds_surface` is missing required variables {missing}")
 
         time = ds_surface["ocean_time"] if "ocean_time" in ds_surface else None
-        ds_surface = ds_surface[list(required_vars)]
+        inputs = [ds_surface[v] for v in required_vars]
 
-        ds_surface = ds_surface.where(self.grid.ds.mask_rho)
+        core_dims = [self.dim_names["eta_rho"], self.dim_names["xi_rho"]]
+        if self.use_dask:
+            # One record per chunk, so PyCO2SYS gets one record at a time
+            chunks = {self.dim_names["time"]: 1, **dict.fromkeys(core_dims, -1)}
+            inputs = [da.chunk(chunks) for da in inputs]
 
-        # PyCO2SYS works on in-memory numpy arrays
-        ds_surface = ds_surface.load()
-
-        # Skip near-empty cells, using MARBL's floors
-        salt_min = 0.1
-        ds_surface = ds_surface.where(
-            (ds_surface.salt >= salt_min)
-            & (ds_surface.ALK_ALT_CO2 >= salt_min / 35.0 * 2225.0)
-            & (ds_surface.DIC_ALT_CO2 >= salt_min / 35.0 * 1944.0)
+        beta, eta = xr.apply_ufunc(
+            _beta_eta,
+            *inputs,
+            self.grid.ds.mask_rho.astype(bool),
+            input_core_dims=[core_dims] * (len(inputs) + 1),
+            output_core_dims=[core_dims, core_dims],
+            dask="parallelized",
+            output_dtypes=[float, float],
         )
-
-        rho_factor = 1000.0 / 1025.0  # mmol/m3 → µmol/kg
-
-        ALK = ds_surface["ALK_ALT_CO2"] * rho_factor
-        DIC = ds_surface["DIC_ALT_CO2"] * rho_factor
-
-        csys = pyco2.sys(
-            par1=ALK.values,
-            par2=DIC.values,
-            par1_type=1,
-            par2_type=2,
-            salinity=ds_surface.salt.values,
-            temperature=ds_surface.temp.values,
-            total_silicate=ds_surface.SiO3.clip(min=0).values * rho_factor,
-            total_phosphate=ds_surface.PO4.clip(min=0).values * rho_factor,
-            opt_buffers_mode=2,
-        )
-
-        iso_q = csys["isocapnic_quotient"]
-
-        beta = (csys["dic"] - (csys["HCO3"] + 2.0 * csys["CO3"]) / iso_q) / csys["CO2"]
-        eta = 1.0 / iso_q
-
-        valid = np.isfinite(beta) & np.isfinite(eta)
-        beta = np.where(valid, beta, 0.0)
-        eta = np.where(valid, eta, 0.0)
 
         # Variable names and attributes match what ROMS reads (surf_flux.F90)
         # and writes (cdr_gas_exch_output.F90).
-        ds = xr.Dataset(
-            {
-                "ddic_dco2": (ALK.dims, np.asarray(beta)),
-                "ddic_dalk": (ALK.dims, np.asarray(eta)),
-            },
-            coords=ALK.coords,
-        )
+        ds = xr.Dataset({"ddic_dco2": beta, "ddic_dalk": eta})
         ds["ddic_dco2"].attrs = {
             "long_name": "surface carbonate sensitivity beta = dDIC/dCO2",
             "units": "nondimensional",

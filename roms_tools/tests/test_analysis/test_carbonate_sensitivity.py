@@ -8,6 +8,7 @@ import pytest
 import xarray as xr
 
 from roms_tools import Grid
+from roms_tools.analysis import carbonate_sensitivity
 from roms_tools.analysis.carbonate_sensitivity import CarbonateSensitivity
 from roms_tools.datasets.download import download_test_data
 
@@ -260,6 +261,61 @@ def test_initial_conditions_unused_for_instantaneous_output(
 
     assert "`ic_path` was not used" in caplog.text
     np.testing.assert_allclose(eta_beta.ds["ocean_time"].values, [0.0, 86400.0])
+
+
+@pytest.mark.parametrize(
+    "source, var, value",
+    [("his", "salt", 0.05), ("bgc", "ALK_ALT_CO2", 5.0), ("bgc", "DIC_ALT_CO2", 5.0)],
+)
+def test_below_floors_are_zero(his_ds, bgc_ds, grid, tmp_path, source, var, value):
+    """Cells below MARBL's salinity, ALK, or DIC floor are skipped and left at 0."""
+    ds = his_ds if source == "his" else bgc_ds
+    ds[var] = xr.full_like(ds[var], value)
+    his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+
+    cs = CarbonateSensitivity(
+        his_path=tmp_path / "his.nc", bgc_path=tmp_path / "bgc.nc", grid=grid
+    )
+
+    for name in ("ddic_dco2", "ddic_dalk"):
+        assert (cs.ds[name] == 0).all(), name
+
+
+def test_dask_ds_is_lazy_and_saves_same_files(his_ds, bgc_ds, grid, tmp_path):
+    """With use_dask=True, ds stays lazy, one record per chunk, until save."""
+    his_ds.to_netcdf(tmp_path / "his.nc")
+    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    paths = {"his_path": tmp_path / "his.nc", "bgc_path": tmp_path / "bgc.nc"}
+
+    eager = CarbonateSensitivity(**paths, grid=grid)
+    lazy = CarbonateSensitivity(**paths, grid=grid, use_dask=True)
+
+    assert lazy.ds["ddic_dco2"].chunks[0] == (1, 1)
+
+    (eager_file,) = eager.save(tmp_path / "eager" / "carbonate_sensitivity")
+    (lazy_file,) = lazy.save(tmp_path / "lazy" / "carbonate_sensitivity")
+    with (
+        xr.open_dataset(eager_file, decode_timedelta=False) as expected,
+        xr.open_dataset(lazy_file, decode_timedelta=False) as actual,
+    ):
+        xr.testing.assert_identical(actual, expected)
+
+
+def test_cells_split_into_blocks(monkeypatch, get_test_data_path):
+    """Splitting a record's cells over several PyCO2SYS calls gives the same result."""
+    monkeypatch.setattr(carbonate_sensitivity, "MAX_CELLS_PER_CALL", 1000)
+
+    cs = CarbonateSensitivity(
+        his_path=Path(download_test_data("Iceland_his.20240710120000.nc")),
+        bgc_path=Path(download_test_data("Iceland_bgc.20240710120000.nc")),
+        grid=Grid(filename=Path(download_test_data("Iceland_grid.nc"))),
+    )
+
+    expected_ds = xr.open_zarr(
+        get_test_data_path("eta_beta_iceland"), decode_timedelta=False
+    )
+    xr.testing.assert_allclose(cs.ds, expected_ds, rtol=1.0e-12)
 
 
 def test_zero_on_land_positive_on_water(eta_beta_iceland):

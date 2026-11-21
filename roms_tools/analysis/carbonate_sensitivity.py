@@ -149,8 +149,8 @@ class CarbonateSensitivity:
     use_dask : bool, optional
         Indicates whether to use dask for processing. If True, ``ds`` is lazy
         and is computed one record at a time when it is saved. Defaults to
-        False, which computes ``ds`` in memory on initialization. It is 
-        recommended to use dask for long data files. 
+        False, which computes ``ds`` in memory on initialization. It is
+        recommended to use dask for long data files.
     """
 
     his_path: str | Path | list[str | Path]
@@ -211,7 +211,7 @@ class CarbonateSensitivity:
 
         dataset_list, output_filenames = group_by_month(self.ds, str(filepath))
 
-        # One month per call. Each file is written before the next month is computed. 
+        # One month per call. Each file is written before the next month is computed.
         saved = []
         for ds_month, filename in zip(dataset_list, output_filenames, strict=True):
             saved += save_datasets(

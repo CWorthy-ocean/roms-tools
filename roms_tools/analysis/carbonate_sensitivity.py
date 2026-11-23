@@ -18,6 +18,8 @@ ALK_MIN = SALT_MIN / 35.0 * 2225.0
 DIC_MIN = SALT_MIN / 35.0 * 1944.0
 RHO_FACTOR = 1000.0 / 1025.0  # mmol/m3 -> µmol/kg
 MAX_CELLS_PER_CALL = 150000
+# Bounds of each averaging window, in averaged ROMS output (ucla-roms >= 0.16.0)
+AVG_WINDOW_VARS = ("avg_begin_time", "avg_end_time")
 
 
 def _pyco2_beta_eta(
@@ -126,6 +128,11 @@ class CarbonateSensitivity:
     The result approximates the averaged ``_cdrgas`` records that ucla-roms
     writes (``do_cdr_gas_exch_output``), which it builds from per-step averages
     of ``1/beta`` and ``eta/beta`` over the window, rather than reproducing them.
+    Averaged output must come from ucla-roms 0.16.0 or later, which writes the
+    window bounds ``avg_begin_time`` and ``avg_end_time``. Each eta and beta
+    record is stamped at the end of its averaging window
+    (``avg_end_time``), as the BGC records are, not at the history stamp near
+    the window's middle.
 
     Parameters
     ----------
@@ -223,8 +230,8 @@ class CarbonateSensitivity:
         """Load control-run surface fields from the history and BGC files.
 
         Load his and bgc variables, only retain the variables needed for eta beta
-        calculations, and reduce to the surface layer. ``ocean_time`` values are
-        checked to be matching between his and bgc variables, and all variables are
+        calculations, and reduce to the surface layer. The his and bgc records
+        are checked to match (`_check_time_consistency`), and all variables are
         merged into a single dataset. If the output is averaged, the initial
         conditions from ``ic_path`` are added as the first record.
 
@@ -237,19 +244,31 @@ class CarbonateSensitivity:
         Raises
         ------
         ValueError
-            If the history and BGC times do not match, if the output is averaged
-            and ``ic_path`` is not given, or if the initial conditions file has
-            more than two time records.
+            If the history and BGC records do not match, if the output is
+            averaged and ``ic_path`` is not given, or if the initial conditions
+            file has more than two time records.
         KeyError
             If any needed variable is not found in a file group.
         """
         ds_his = self._load_surface(self.his_path, source="his")
         ds_bgc = self._load_surface(self.bgc_path, source="bgc")
 
-        self._check_time_consistency(ds_his, ds_bgc)
-        ds = self._merge(ds_his, ds_bgc)
+        averaged = self._is_averaged(ds_his) or self._is_averaged(ds_bgc)
+        self._check_time_consistency(ds_his, ds_bgc, averaged=averaged)
+        if averaged:
+            # Stamp each record at its window end, as the BGC records are, not
+            # at the his stamp near the middle. Keep the his attributes, which
+            # hold the model reference date.
+            ds_his["ocean_time"] = ds_his["ocean_time"].copy(
+                data=ds_his["avg_end_time"].values
+            )
+        # The window bounds are only needed for the check and stamp above
+        ds = self._merge(
+            ds_his.drop_vars(AVG_WINDOW_VARS, errors="ignore"),
+            ds_bgc.drop_vars(AVG_WINDOW_VARS, errors="ignore"),
+        )
 
-        if self._is_averaged(ds):
+        if averaged:
             if self.ic_path is None:
                 raise ValueError(
                     "The history and BGC files hold averaged output, which have no "
@@ -519,6 +538,9 @@ class CarbonateSensitivity:
             )
 
         keep_vars = [v for v in ds_vars if v in ds.variables]
+        if source != "ic":
+            # Kept for `_check_time_consistency`, which needs them for averaged output
+            keep_vars += [v for v in AVG_WINDOW_VARS if v in ds.variables]
         logging.info(f"Variables taken from {source} files: {keep_vars}")
         ds = ds[keep_vars]
 
@@ -529,8 +551,15 @@ class CarbonateSensitivity:
 
         return ds
 
-    def _check_time_consistency(self, ds_his: xr.Dataset, ds_bgc: xr.Dataset) -> None:
-        """Ensure the history and BGC files cover the same output times.
+    def _check_time_consistency(
+        self, ds_his: xr.Dataset, ds_bgc: xr.Dataset, averaged: bool
+    ) -> None:
+        """Ensure the history and BGC files hold the same output records.
+
+        Instantaneous records must have the same ``ocean_time`` values.
+        Averaged records are checked with `_check_averaging_windows`, since
+        ucla-roms stamps the history and BGC averages of one window at
+        different times.
 
         Parameters
         ----------
@@ -538,12 +567,15 @@ class CarbonateSensitivity:
             Surface dataset from the history files.
         ds_bgc : xr.Dataset
             Surface dataset from the BGC files.
+        averaged : bool
+            Whether the files hold averaged output.
 
         Raises
         ------
         ValueError
-            If ``ocean_time`` is missing from either group, or if the two groups
-            have a different number of time records or different time values.
+            If ``ocean_time`` is missing from either group, if the two groups
+            have a different number of time records, or if their records do
+            not match.
         """
         time_var = "ocean_time"
 
@@ -563,11 +595,77 @@ class CarbonateSensitivity:
                 f"his={t_his.size}, bgc={t_bgc.size}. Check that both wildcards "
                 f"match the same set of output periods."
             )
-        if not (t_his == t_bgc).all():
+        if averaged:
+            self._check_averaging_windows(ds_his, ds_bgc)
+        elif not (t_his == t_bgc).all():
             raise ValueError(
                 f"History and BGC `{time_var}` values do not match. Check that both "
                 f"groups were written at the same output frequency."
             )
+
+    def _check_averaging_windows(self, ds_his: xr.Dataset, ds_bgc: xr.Dataset) -> None:
+        """Ensure averaged history and BGC records cover the same windows.
+
+        ucla-roms (0.16.0 and later) writes the bounds of each record's window
+        as ``avg_begin_time`` and ``avg_end_time`` in both groups, but stamps
+        the records differently: a history record's ``ocean_time`` is the mean
+        of the window's step times, the window midpoint plus half a time step,
+        and a BGC record's is the window end. This checks that the two groups
+        have the same windows, and that each record's stamp falls within its
+        window.
+
+        Parameters
+        ----------
+        ds_his : xr.Dataset
+            Surface dataset from the history files, with the window bounds.
+        ds_bgc : xr.Dataset
+            Surface dataset from the BGC files, with the window bounds.
+
+        Raises
+        ------
+        ValueError
+            If either group has no window bounds, or the two groups have
+            different windows, or a record is stamped outside its window.
+        """
+        for source, ds in (("his", ds_his), ("bgc", ds_bgc)):
+            missing = [v for v in AVG_WINDOW_VARS if v not in ds]
+            if missing:
+                raise ValueError(
+                    f"{missing} not found in the {source} files. Averaged history "
+                    f"and BGC output needs the window bounds {list(AVG_WINDOW_VARS)}, "
+                    f"which ucla-roms writes from version 0.16.0."
+                )
+
+        begin = ds_his["avg_begin_time"].values
+        end = ds_his["avg_end_time"].values
+
+        # Both groups write the bounds from the same model times, so they match exactly
+        bad = (begin != ds_bgc["avg_begin_time"].values) | (
+            end != ds_bgc["avg_end_time"].values
+        )
+        if bad.any():
+            i = np.flatnonzero(bad)[0]
+            raise ValueError(
+                f"History and BGC averaging windows do not match, first at record "
+                f"{i}: his ({begin[i]}, {end[i]}] s, bgc "
+                f"({ds_bgc['avg_begin_time'].values[i]}, "
+                f"{ds_bgc['avg_end_time'].values[i]}] s. Check that both groups "
+                f"were written at the same averaging period and cover the same "
+                f"times."
+            )
+
+        # Each record's stamp must fall in its window (begin, end]: ucla-roms
+        # stamps his records just after the window middle, bgc records at the end
+        for source, ds in (("his", ds_his), ("bgc", ds_bgc)):
+            t = ds["ocean_time"].values
+            bad = (t <= begin) | (t > end)
+            if bad.any():
+                i = np.flatnonzero(bad)[0]
+                raise ValueError(
+                    f"The {source} `ocean_time` at record {i} is {t[i]} s, outside "
+                    f"its averaging window ({begin[i]}, {end[i]}] s. Each record "
+                    f"must be stamped within the window it averages."
+                )
 
     def _is_averaged(self, ds: xr.Dataset) -> bool:
         """Whether the history and BGC files hold averaged output.
@@ -580,7 +678,7 @@ class CarbonateSensitivity:
         Parameters
         ----------
         ds : xr.Dataset
-            Merged surface dataset from the history and BGC files.
+            Surface dataset from the history or BGC files.
 
         Returns
         -------

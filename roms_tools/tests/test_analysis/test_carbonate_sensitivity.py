@@ -49,18 +49,42 @@ def bgc_ds(grid):
     )
 
 
+# Averaged fixtures: daily windows from the start of the run at 0, model step DT
+DT = 3600.0
+AVG_BEGIN = np.array([0.0, 86400.0])
+AVG_END = AVG_BEGIN + 86400.0
+AVG_HIS_TIME = 0.5 * (AVG_BEGIN + AVG_END + DT)  # mean of the window's step times
+
+
+def _as_averaged(ds, var, long_name, ocean_time):
+    """Label ``ds`` as averaged output, with window bounds as ucla-roms 0.16.0 writes."""
+    ds = ds.copy()
+    ds[var].attrs["long_name"] = long_name
+    ds["ocean_time"] = ("time", ocean_time, ds.ocean_time.attrs)
+    ds["avg_begin_time"] = ("time", AVG_BEGIN)
+    ds["avg_end_time"] = ("time", AVG_END)
+    return ds
+
+
 @pytest.fixture
 def avg_his_ds(his_ds):
-    """History output labelled as averaged, as ROMS writes it."""
-    his_ds["temp"].attrs["long_name"] = "averaged potential temperature"
-    return his_ds
+    """History averages, stamped at the mean of the window's step times."""
+    return _as_averaged(his_ds, "temp", "averaged potential temperature", AVG_HIS_TIME)
+
+
+@pytest.fixture
+def avg_bgc_ds(bgc_ds):
+    """BGC averages, stamped at the window end."""
+    return _as_averaged(
+        bgc_ds, "ALK_ALT_CO2", "avg_Alkalinity, Alternative CO2", AVG_END
+    )
 
 
 @pytest.fixture
 def ic_ds(his_ds, bgc_ds):
-    """Initial conditions one day before the first his and bgc record."""
+    """Initial conditions at the start of the run, where the first window begins."""
     ds = xr.merge([his_ds, bgc_ds]).isel(time=[0])
-    ds["ocean_time"] = ds.ocean_time - 86400.0
+    ds["ocean_time"] = xr.full_like(ds.ocean_time, AVG_BEGIN[0])
     return ds
 
 
@@ -129,20 +153,11 @@ def test_missing_variables(his_ds, bgc_ds, grid, tmp_path, var, source):
         )
 
 
-@pytest.mark.parametrize(
-    "source, var, long_name",
-    [
-        ("his", "temp", "averaged potential temperature"),
-        ("bgc", "ALK_ALT_CO2", "avg_Alkalinity, Alternative CO2"),
-    ],
-)
 def test_averaged_output_requires_initial_conditions(
-    his_ds, bgc_ds, ic_ds, grid, tmp_path, source, var, long_name
+    avg_his_ds, avg_bgc_ds, ic_ds, grid, tmp_path
 ):
-    ds = his_ds if source == "his" else bgc_ds
-    ds[var].attrs["long_name"] = long_name
-    his_ds.to_netcdf(tmp_path / "his.nc")
-    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    avg_his_ds.to_netcdf(tmp_path / "his.nc")
+    avg_bgc_ds.to_netcdf(tmp_path / "bgc.nc")
     ic_ds.to_netcdf(tmp_path / "ic.nc")
 
     with pytest.raises(ValueError, match="averaged output"):
@@ -158,18 +173,77 @@ def test_averaged_output_requires_initial_conditions(
     )
 
 
+@pytest.mark.parametrize(
+    "source, change, match",
+    [
+        # Both bounds shifted by a day: same window length, different windows
+        ("bgc", {"avg_begin_time": 86400.0, "avg_end_time": 86400.0}, "windows"),
+        # A two-day window ending where the his window ends
+        ("bgc", {"avg_begin_time": -86400.0}, "windows"),
+        # Stamps in the next window, or at the start of their own (excluded)
+        ("his", {"ocean_time": 86400.0}, "his `ocean_time` at record 0"),
+        ("bgc", {"ocean_time": 86400.0}, "bgc `ocean_time` at record 0"),
+        ("bgc", {"ocean_time": -86400.0}, "bgc `ocean_time` at record 0"),
+    ],
+)
+def test_averaged_records_must_match(
+    avg_his_ds, avg_bgc_ds, ic_ds, grid, tmp_path, source, change, match
+):
+    """Averaged his and bgc records must cover the same windows (the same
+    ``avg_begin_time`` and ``avg_end_time``), and each record's stamp must fall
+    within its window.
+    """
+    ds = avg_his_ds if source == "his" else avg_bgc_ds
+    for var, shift in change.items():
+        ds[var] = ds[var] + shift
+    avg_his_ds.to_netcdf(tmp_path / "his.nc")
+    avg_bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    ic_ds.to_netcdf(tmp_path / "ic.nc")
+
+    with pytest.raises(ValueError, match=match):
+        CarbonateSensitivity(
+            his_path=tmp_path / "his.nc",
+            bgc_path=tmp_path / "bgc.nc",
+            ic_path=tmp_path / "ic.nc",
+            grid=grid,
+        )
+
+
+def test_averaged_records_from_several_files(
+    avg_his_ds, avg_bgc_ds, ic_ds, grid, tmp_path, use_dask
+):
+    """The window bounds survive loading one record per file by wildcard."""
+    for k in range(avg_his_ds.sizes["time"]):
+        avg_his_ds.isel(time=[k]).to_netcdf(tmp_path / f"run_avg.{k}.nc")
+        avg_bgc_ds.isel(time=[k]).to_netcdf(tmp_path / f"run_bgc_avg.{k}.nc")
+    ic_ds.to_netcdf(tmp_path / "ic.nc")
+
+    eta_beta = CarbonateSensitivity(
+        his_path=str(tmp_path / "run_avg.*.nc"),
+        bgc_path=str(tmp_path / "run_bgc_avg.*.nc"),
+        ic_path=tmp_path / "ic.nc",
+        grid=grid,
+        use_dask=use_dask,
+    )
+
+    np.testing.assert_allclose(
+        eta_beta.ds["ocean_time"].values, [AVG_BEGIN[0], *AVG_END]
+    )
+
+
 @pytest.mark.parametrize("roms_tools_layout", [True, False])
 def test_initial_conditions_are_first_record(
-    avg_his_ds, bgc_ds, ic_ds, grid, tmp_path, roms_tools_layout
+    avg_his_ds, avg_bgc_ds, ic_ds, grid, tmp_path, roms_tools_layout
 ):
     """The initial conditions record comes first, from a roms-tools initial
     conditions file (``ocean_time`` dimension) or a ROMS restart file (``time``
-    dimension).
+    dimension). The averaged records are stamped at the window end, like the
+    bgc records, not at the his stamps near the window middle.
     """
     if roms_tools_layout:
         ic_ds = ic_ds.set_coords("ocean_time").swap_dims({"time": "ocean_time"})
     avg_his_ds.to_netcdf(tmp_path / "his.nc")
-    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    avg_bgc_ds.to_netcdf(tmp_path / "bgc.nc")
     ic_ds.to_netcdf(tmp_path / "ic.nc")
 
     eta_beta = CarbonateSensitivity(
@@ -179,22 +253,21 @@ def test_initial_conditions_are_first_record(
         grid=grid,
     )
 
-    np.testing.assert_allclose(
-        eta_beta.ds["ocean_time"].values, [-86400.0, 0.0, 86400.0]
-    )
-    np.testing.assert_allclose(eta_beta.ds["ddic_dco2_time"].values, [-1.0, 0.0, 1.0])
+    expected = np.concatenate([AVG_BEGIN[:1], AVG_END])
+    np.testing.assert_allclose(eta_beta.ds["ocean_time"].values, expected)
+    np.testing.assert_allclose(eta_beta.ds["ddic_dco2_time"].values, expected / 86400.0)
 
 
 @pytest.mark.parametrize(
     "ic_time, warns",
-    [(-86400.0, False), (-43200.0, False), (-172800.0, True)],
+    [(0.0, False), (43200.0, False), (-86400.0, True)],
 )
 def test_initial_conditions_time_step_warning(
-    avg_his_ds, bgc_ds, ic_ds, grid, tmp_path, caplog, ic_time, warns
+    avg_his_ds, avg_bgc_ds, ic_ds, grid, tmp_path, caplog, ic_time, warns
 ):
     ic_ds["ocean_time"] = xr.full_like(ic_ds.ocean_time, ic_time)
     avg_his_ds.to_netcdf(tmp_path / "his.nc")
-    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    avg_bgc_ds.to_netcdf(tmp_path / "bgc.nc")
     ic_ds.to_netcdf(tmp_path / "ic.nc")
 
     with caplog.at_level(logging.WARNING):
@@ -208,10 +281,12 @@ def test_initial_conditions_time_step_warning(
     assert ("is longer than the time between records" in caplog.text) == warns
 
 
-def test_exact_restart_uses_second_record(avg_his_ds, bgc_ds, ic_ds, grid, tmp_path):
+def test_exact_restart_uses_second_record(
+    avg_his_ds, avg_bgc_ds, ic_ds, grid, tmp_path
+):
     earlier = ic_ds.assign(ocean_time=ic_ds.ocean_time - 86400.0, temp=ic_ds.temp + 5)
     avg_his_ds.to_netcdf(tmp_path / "his.nc")
-    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    avg_bgc_ds.to_netcdf(tmp_path / "bgc.nc")
     xr.concat([earlier, ic_ds], dim="time").to_netcdf(tmp_path / "ic.nc")
 
     eta_beta = CarbonateSensitivity(
@@ -222,17 +297,17 @@ def test_exact_restart_uses_second_record(avg_his_ds, bgc_ds, ic_ds, grid, tmp_p
     )
 
     np.testing.assert_allclose(
-        eta_beta.ds["ocean_time"].values, [-86400.0, 0.0, 86400.0]
+        eta_beta.ds["ocean_time"].values, [AVG_BEGIN[0], *AVG_END]
     )
     surface = eta_beta.ds_surface_control.isel(time=0)
     assert (surface.temp == ic_ds.temp.isel(time=0, s_rho=-1)).all()
 
 
 def test_initial_conditions_more_than_two_records(
-    avg_his_ds, bgc_ds, ic_ds, grid, tmp_path
+    avg_his_ds, avg_bgc_ds, ic_ds, grid, tmp_path
 ):
     avg_his_ds.to_netcdf(tmp_path / "his.nc")
-    bgc_ds.to_netcdf(tmp_path / "bgc.nc")
+    avg_bgc_ds.to_netcdf(tmp_path / "bgc.nc")
     xr.concat([ic_ds, ic_ds, ic_ds], dim="time").to_netcdf(tmp_path / "ic.nc")
 
     with pytest.raises(ValueError, match="exact restart file, but it has 3"):

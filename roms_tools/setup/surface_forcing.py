@@ -17,6 +17,7 @@ from roms_tools.datasets.curvilinear_datasets import (
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCSurfaceForcingDataset,
     ERA5Correction,
+    GLORYSRestoringSurfaceDataset,
     LatLonDataset,
     MBLco2Dataset,
     SODARestoringSurfaceDataset,
@@ -103,8 +104,8 @@ class SurfaceForcing:
             - ``"physics"``: "ERA5" (global, ~28 km) or "CONUS404" (North America
               only, 4 km; see Notes).
             - ``"bgc"``: "CESM_REGRIDDED", "UNIFIED" or "MBL_co2".
-            - ``"restoring"``: "WOA" or "UNIFIED" for ``restoring_forces=["sss"]``,
-              and "SODA" for ``restoring_forces=["sDIC", "sALK"]``.
+            - ``"restoring"``: "WOA", "UNIFIED" or "GLORYS" for
+              ``restoring_forces=["sss"]``, and "SODA" for ``restoring_forces=["sDIC", "sALK"]``.
 
           - "path" (optional; Union[str, Path, List[Union[str, Path]]]): Path(s) to the raw data file(s). Accepted formats:
 
@@ -123,6 +124,12 @@ class SurfaceForcing:
             - "SODA": the OceanSODA-ETHZ v2025 file, read from NCEI.
 
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+            Must be False for "GLORYS".
+          - "time_resolution" (str, optional): Only for ``"GLORYS"`` restoring, whose
+            ``path`` must point to daily GLORYS files. ``"monthly"`` (default) uses
+            calendar-month means of the daily records, stamped at the midpoint of
+            each month; every month used must be complete (one record per day).
+            ``"daily"`` uses the daily records as they are.
 
     type : str
         Specifies the type of forcing data. Options are:
@@ -545,6 +552,23 @@ class SurfaceForcing:
                     "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
                 )
 
+        if "time_resolution" in self.source and self.source["name"] != "GLORYS":
+            raise ValueError(
+                '`source["time_resolution"]` is only valid for the "GLORYS" source, '
+                f'but the source is "{self.source["name"]}".'
+            )
+        # `climatology` and the `time_resolution` value are validated by
+        # `GLORYSRestoringSurfaceDataset` itself, before any data is read.
+        if (
+            self.type == "restoring"
+            and self.source["name"] == "GLORYS"
+            and self.restoring_forces != ["sss"]
+        ):
+            raise ValueError(
+                "When 'name' is \"GLORYS\", `restoring_forces` must be "
+                f'["sss"], but got {self.restoring_forces}.'
+            )
+
         # Check that climatology is false for restoring of 'sDIC' and 'sALK'
         if self.type == "restoring" and self.source["name"] == "SODA":
             if self.source["climatology"]:
@@ -877,9 +901,14 @@ class SurfaceForcing:
                     data = WOARestoringSurfaceDataset(**data_dict)
                 elif source["name"] == "UNIFIED":
                     data = UnifiedRestoringSurfaceDataset(**data_dict)
+                elif source["name"] == "GLORYS":
+                    # Only pass what the caller gave, so the dataclass owns the default.
+                    if "time_resolution" in source:
+                        data_dict["time_resolution"] = source["time_resolution"]
+                    data = GLORYSRestoringSurfaceDataset(**data_dict)
                 else:
                     raise ValueError(
-                        'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring", and restoring_forces is ["sss"].'
+                        'Only "WOA", "UNIFIED" and "GLORYS" are valid options for source["name"] when type is "restoring", and restoring_forces is ["sss"].'
                     )
             if "sDIC" in restoring_forces:
                 if source["name"] == "SODA":

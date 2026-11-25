@@ -40,7 +40,7 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - Yes
      - `OSU <https://www.tpxo.net/global>`_
    * - GLORYS
-     - Initial & Boundary Conditions
+     - Initial & Boundary Conditions; Surface Salinity Restoring
      - Yes
      - `Copernicus Marine <https://data.marine.copernicus.eu/product/GLOBAL_MULTIYEAR_PHY_001_030/description>`_
    * - Unified BGC Dataset
@@ -233,7 +233,7 @@ GLORYS
 
 1/12° global ocean physics reanalysis providing physical ocean initial and boundary conditions.
 
-:Required for: Initial Conditions, Boundary Forcing
+:Required for: Initial Conditions, Boundary Forcing, Surface Salinity Restoring (``sss``, from daily files)
 :Available at: `Copernicus Marine Data Store <https://data.marine.copernicus.eu/product/GLOBAL_MULTIYEAR_PHY_001_030/description>`_
 
 For download instructions see :doc:`datasets`.

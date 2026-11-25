@@ -1,0 +1,1 @@
+`SurfaceForcing` accepts `"GLORYS"` as a source for surface-salinity restoring (`type="restoring"`, `restoring_forces=["sss"]`), giving a time-varying target from daily GLORYS files as monthly means (default) or daily records (`source["time_resolution"]`).

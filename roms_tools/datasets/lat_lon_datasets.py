@@ -16,6 +16,7 @@ if typing.TYPE_CHECKING:
 import dask
 import fsspec
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
@@ -1444,6 +1445,266 @@ class GLORYSDefaultDataset(GLORYSDataset):
         )
 
         return ds
+
+
+# Valid ``time_resolution`` values of `GLORYSRestoringSurfaceDataset`; the first is
+# the default.
+GLORYS_RESTORING_TIME_RESOLUTIONS: tuple[str, ...] = ("monthly", "daily")
+
+
+def _month_midpoints(month_starts: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """Return the midpoint of each calendar month, given the months' first instants."""
+    next_starts = month_starts + pd.offsets.MonthBegin(1)
+    return month_starts + (next_starts - month_starts) / 2
+
+
+@dataclass(kw_only=True)
+class GLORYSRestoringSurfaceDataset(GLORYSDataset):
+    """Surface salinity from daily GLORYS files, as a time-varying restoring target.
+
+    Only the ``so`` variable is read, and only its top level (GLORYS' first level,
+    0.494 m) is kept. ``path`` is required: nothing is downloaded or streamed.
+
+    Parameters
+    ----------
+    time_resolution : str, optional
+        ``"monthly"`` (default) or ``"daily"``.
+
+        - ``"monthly"``: calendar-month means of the daily records, stamped at
+          the midpoint of each month. The records read cover whole months
+          where the files allow: with ``start_time_pad=True`` the first month
+          is the last month whose midpoint is at or before ``start_time``
+          (otherwise the first month whose midpoint is at or after it); with
+          ``end_time_pad=True`` the last month is the first month whose midpoint
+          is at or after ``end_time`` (otherwise the last month whose midpoint
+          is at or before it). A first or last month the files do not cover
+          completely (e.g. files staged only for the run window plus a day, or
+          the end of the GLORYS record) keeps its days as daily records, so
+          the time axis can mix daily and monthly records; ROMS interpolates
+          linearly between records at any spacing. The records read must be
+          consecutive days with no gaps or repeated dates, and must reach
+          ``start_time`` and ``end_time`` when they are padded. Only the time
+          coordinate is inspected for these checks, never the data.
+        - ``"daily"``: the daily records are used as they are, selected like
+          any other time-varying source.
+
+    Raises
+    ------
+    ValueError
+        If ``time_resolution`` is not valid, if ``climatology`` is True (a GLORYS
+        climatology is not supported), or, in monthly mode, if the records read
+        are empty, have a gap or a repeated date, or do not reach the padded
+        ``start_time`` or ``end_time``.
+    """
+
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "so"})
+    opt_var_names: dict[str, str] = field(default_factory=dict)
+
+    time_resolution: str = "monthly"
+
+    def __post_init__(self) -> None:
+        """Validate the options before any data is loaded."""
+        if self.time_resolution not in GLORYS_RESTORING_TIME_RESOLUTIONS:
+            raise ValueError(
+                f"`time_resolution` must be one of "
+                f"{list(GLORYS_RESTORING_TIME_RESOLUTIONS)}, "
+                f"but got '{self.time_resolution}'."
+            )
+        if self.climatology:
+            raise ValueError(
+                "GLORYS restoring provides a time-varying target; "
+                "a GLORYS climatology is not supported."
+            )
+        super().__post_init__()
+
+    @property
+    def _is_monthly(self) -> bool:
+        return self.time_resolution == GLORYS_RESTORING_TIME_RESOLUTIONS[0]
+
+    def select_relevant_times(self, ds: xr.Dataset) -> xr.Dataset:
+        """Select the daily records of the months the restoring window needs.
+
+        In daily mode this is the parent's selection. In monthly mode the window
+        is widened to whole calendar months (see the class docstring), and the
+        records found are checked for gaps and for reaching the run window.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset, with a daily time dimension.
+
+        Returns
+        -------
+        xr.Dataset
+            The selected daily records.
+
+        Raises
+        ------
+        ValueError
+            In monthly mode, if ``end_time`` is missing, the selection is empty
+            or has a gap or repeated date, or it does not reach the padded window.
+        """
+        if not self._is_monthly:
+            return super().select_relevant_times(ds)
+        if self.start_time is None or self.end_time is None:
+            raise ValueError(
+                "Monthly GLORYS restoring requires both `start_time` and `end_time`."
+            )
+
+        first, last = self._month_window(self.start_time, self.end_time)
+        if first > last:
+            raise ValueError(
+                "No month midpoint lies between `start_time` and `end_time`, so "
+                "an unpadded monthly window is empty. Pad the window "
+                '(`start_time_pad`/`end_time_pad`) or use `time_resolution="daily"`.'
+            )
+        # The utility's upper bound is inclusive; stop just short of the next month.
+        upper = last + pd.offsets.MonthBegin(1) - pd.Timedelta(microseconds=1)
+        time_dim = self.dim_names["time"]
+        ds = select_relevant_times(
+            ds=ds,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            start_time=first.to_pydatetime(),
+            end_time=upper.to_pydatetime(),
+            start_time_pad=False,
+            end_time_pad=False,
+        )
+        self._check_consecutive_days(ds[time_dim].values)
+        return ds
+
+    def _month_window(
+        self, start_time: datetime, end_time: datetime
+    ) -> tuple[pd.Timestamp, pd.Timestamp]:
+        """Return the first instants of the first and last month the window needs."""
+        start = pd.Timestamp(start_time)
+        end = pd.Timestamp(end_time)
+        month = pd.offsets.MonthBegin(1)
+
+        first = start.normalize().replace(day=1)
+        mid_first = _month_midpoints(pd.DatetimeIndex([first]))[0]
+        if self.start_time_pad and mid_first > start:
+            first = first - month
+        elif not self.start_time_pad and mid_first < start:
+            first = first + month
+
+        last = end.normalize().replace(day=1)
+        mid_last = _month_midpoints(pd.DatetimeIndex([last]))[0]
+        if self.end_time_pad and mid_last < end:
+            last = last + month
+        elif not self.end_time_pad and mid_last > end:
+            last = last - month
+        return first, last
+
+    @staticmethod
+    def _check_consecutive_days(times: np.ndarray) -> pd.DatetimeIndex:
+        """Return the records' dates, raising unless they are consecutive days."""
+        if len(times) == 0:
+            raise ValueError("No GLORYS records were found in the requested window.")
+        days = pd.DatetimeIndex(times).normalize()
+        steps = np.diff(days.values) // np.timedelta64(1, "D")
+        repeated = sorted({f"{d:%Y-%m-%d}" for d in days[1:][steps == 0]})
+        if repeated:
+            raise ValueError(
+                "Monthly GLORYS restoring needs one record per day, but these "
+                f"dates appear more than once: {repeated}."
+            )
+        gaps = [
+            f"{a:%Y-%m-%d} to {b:%Y-%m-%d}"
+            for a, b, n in zip(days[:-1], days[1:], steps, strict=True)
+            if n != 1
+        ]
+        if gaps:
+            raise ValueError(
+                "Monthly GLORYS restoring needs consecutive daily records, but "
+                f"days are missing between: {'; '.join(gaps)}. Supply the missing "
+                'files, or use `time_resolution="daily"`.'
+            )
+        return days
+
+    def _check_reaches_window(self, times: pd.DatetimeIndex) -> None:
+        """Raise unless the records bracket the padded ``start_time``/``end_time``."""
+        if self.start_time_pad and self.start_time is not None:
+            if times[0] > pd.Timestamp(self.start_time):
+                raise ValueError(
+                    f"The first GLORYS record ({times[0]:%Y-%m-%d %H:%M}) is after "
+                    f"`start_time` ({self.start_time:%Y-%m-%d %H:%M}); supply the "
+                    "file for the day before `start_time`."
+                )
+        if self.end_time_pad and self.end_time is not None:
+            if times[-1] < pd.Timestamp(self.end_time):
+                raise ValueError(
+                    f"The last GLORYS record ({times[-1]:%Y-%m-%d %H:%M}) is before "
+                    f"`end_time` ({self.end_time:%Y-%m-%d %H:%M}); supply the "
+                    "file for the day after `end_time`."
+                )
+
+    def post_process(self) -> None:
+        """Reduce to the surface level, average to months if requested, and mask.
+
+        The mask is 1 where the first daily record of salinity is valid and 0
+        elsewhere, and stays lazy.
+        """
+        depth_dim = self.dim_names["depth"]
+        self.ds = self.ds.isel({depth_dim: 0}).drop_vars(depth_dim)
+        del self.dim_names["depth"]
+
+        time_dim = self.dim_names["time"]
+        # Mask from the first daily record: one file, rather than a month of them.
+        sss = self.ds[self.var_names["sss"]]
+        first = sss.isel({time_dim: 0}) if time_dim in sss.dims else sss
+        mask = xr.where(first.isnull(), 0, 1)
+
+        if self._is_monthly:
+            if self.start_time is None:
+                days = self._check_consecutive_days(self.ds[time_dim].values)
+            else:
+                days = pd.DatetimeIndex(self.ds[time_dim].values).normalize()
+            self.ds = self._monthly_means_with_daily_edges(self.ds, days, time_dim)
+            self._check_reaches_window(pd.DatetimeIndex(self.ds[time_dim].values))
+
+        self.ds["mask"] = mask
+
+    def _monthly_means_with_daily_edges(
+        self, ds: xr.Dataset, days: pd.DatetimeIndex, time_dim: str
+    ) -> xr.Dataset:
+        """Average the complete months; keep the days of the others as they are.
+
+        ``days`` are consecutive, so only the first and last month can be
+        incomplete. An edge month is also kept daily when its mid-month record
+        would not reach a padded ``start_time`` or ``end_time`` (the month the
+        window wanted beyond it is missing from the files).
+        """
+        months = days.to_period("M")
+        counts = months.value_counts()
+        full = np.array([counts[m] == m.days_in_month for m in months], dtype=bool)
+        mids = _month_midpoints(
+            pd.DatetimeIndex([months[0].to_timestamp(), months[-1].to_timestamp()])
+        )
+        if self.start_time_pad and self.start_time is not None:
+            if mids[0] > pd.Timestamp(self.start_time):
+                full &= months != months[0]
+        if self.end_time_pad and self.end_time is not None:
+            if mids[1] < pd.Timestamp(self.end_time):
+                full &= months != months[-1]
+        pieces = []
+        if full.any():
+            means = (
+                ds.isel({time_dim: np.flatnonzero(full)})
+                .resample({time_dim: "1MS"})
+                .mean(keep_attrs=True)
+            )
+            month_starts = pd.DatetimeIndex(means[time_dim].values)
+            pieces.append(
+                means.assign_coords(
+                    {time_dim: _month_midpoints(month_starts).astype("datetime64[ns]")}
+                )
+            )
+        if not full.all():
+            pieces.append(ds.isel({time_dim: np.flatnonzero(~full)}))
+        if len(pieces) == 1:
+            return pieces[0]
+        return xr.concat(pieces, dim=time_dim).sortby(time_dim)
 
 
 def _umol_kg_to_mmol_m3_factor(

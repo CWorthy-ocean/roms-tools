@@ -328,6 +328,9 @@ def test_monthly_stays_lazy(tmp_path):
     )
     assert data.ds["so"].chunks is not None
     assert data.ds["mask"].chunks is not None
+    # Default chunks hold one depth level, so the surface read skips the rest.
+    assert data.chunks is not None
+    assert data.chunks["depth"] == 1
 
 
 def test_rejections(grid, tmp_path):

@@ -1502,8 +1502,15 @@ class GLORYSRestoringSurfaceDataset(GLORYSDataset):
 
     time_resolution: str = "monthly"
 
+    #: Lateral dask chunk when the caller gives none. Only the top level is kept,
+    #: so chunks are one level deep: the parent's all-depth 50x50 chunks read all
+    #: 50 levels of a global day in ~3,500 tasks (a 2-month CCS build: 1021 s vs
+    #: 45 s with these, at similar peak memory). 512 still lets the subdomain
+    #: selection skip tiles outside the domain.
+    _restoring_lateral_dask_chunk: ClassVar[int] = 512
+
     def __post_init__(self) -> None:
-        """Validate the options before any data is loaded."""
+        """Validate the options and set surface-only chunks before loading."""
         if self.time_resolution not in GLORYS_RESTORING_TIME_RESOLUTIONS:
             raise ValueError(
                 f"`time_resolution` must be one of "
@@ -1515,6 +1522,11 @@ class GLORYSRestoringSurfaceDataset(GLORYSDataset):
                 "GLORYS restoring provides a time-varying target; "
                 "a GLORYS climatology is not supported."
             )
+        if self.chunks is None:
+            self.chunks = get_dask_chunks(
+                self.dim_names, lateral_chunk=self._restoring_lateral_dask_chunk
+            )
+            self.chunks[self.dim_names["depth"]] = 1
         super().__post_init__()
 
     @property
